@@ -19,10 +19,10 @@
  */
 
 import {
-    initAuth,
-    getAuthProvider,
-    authenticatedFetch,
-    AuthError,
+  initAuth,
+  getAuthProvider,
+  authenticatedFetch,
+  AuthError,
 } from "@spaarke/auth";
 import type { SpaarkeAuthProvider } from "@spaarke/auth";
 
@@ -40,8 +40,8 @@ export type { SpaarkeAuthProvider };
  * @returns The initial access token string
  */
 export async function initializeAuth(): Promise<string> {
-    const provider = await initAuth({ proactiveRefresh: true });
-    return provider.getAccessToken();
+  const provider = await initAuth({ proactiveRefresh: true });
+  return provider.getAccessToken();
 }
 
 /**
@@ -49,7 +49,7 @@ export async function initializeAuth(): Promise<string> {
  * Delegates to the shared auth provider.
  */
 export async function getAccessToken(): Promise<string> {
-    return getAuthProvider().getAccessToken();
+  return getAuthProvider().getAccessToken();
 }
 
 /**
@@ -57,7 +57,7 @@ export async function getAccessToken(): Promise<string> {
  * Call on 401 responses to force re-acquisition.
  */
 export function clearTokenCache(): void {
-    getAuthProvider().clearCache();
+  getAuthProvider().clearCache();
 }
 
 /**
@@ -65,7 +65,7 @@ export function clearTokenCache(): void {
  * Call on component unmount to prevent leaks.
  */
 export function stopTokenRefresh(): void {
-    getAuthProvider().dispose();
+  getAuthProvider().dispose();
 }
 
 /**
@@ -74,23 +74,34 @@ export function stopTokenRefresh(): void {
  * @returns The org URL (e.g., "https://orgname.crm.dynamics.com"), or null if Xrm unavailable
  */
 export function getClientUrl(): string | null {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const frames: Window[] = [window];
-    try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const frames: Window[] = [window];
+  try {
+    if (window.parent && window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent)
+      frames.push(window.top!);
+  } catch {
+    /* cross-origin */
+  }
 
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm;
-            if (xrm?.Utility?.getGlobalContext) {
-                const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
-                if (clientUrl) return clientUrl;
-            }
-        } catch { /* cross-origin */ }
+  for (const frame of frames) {
+    try {
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getGlobalContext) {
+        const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
+        if (clientUrl) return clientUrl;
+      }
+    } catch {
+      /* cross-origin */
     }
-    /* eslint-enable @typescript-eslint/no-explicit-any */
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
-    return null;
+  return null;
 }
 
 /**
@@ -98,15 +109,15 @@ export function getClientUrl(): string | null {
  * When true, session cookies authenticate API calls automatically.
  */
 export function isSameOriginDataverse(): boolean {
-    const clientUrl = getClientUrl();
-    if (clientUrl) {
-        try {
-            const dvOrigin = new URL(clientUrl).origin.toLowerCase();
-            return dvOrigin === window.location.origin.toLowerCase();
-        } catch {
-            // fall through
-        }
+  const clientUrl = getClientUrl();
+  if (clientUrl) {
+    try {
+      const dvOrigin = new URL(clientUrl).origin.toLowerCase();
+      return dvOrigin === window.location.origin.toLowerCase();
+    } catch {
+      // fall through
     }
-    const hostname = window.location.hostname.toLowerCase();
-    return hostname.endsWith(".dynamics.com");
+  }
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname.endsWith(".dynamics.com");
 }

@@ -22,7 +22,7 @@ export interface IAggregationWebApi {
   retrieveMultipleRecords(
     entityType: string,
     options?: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ): Promise<{
     entities: Array<Record<string, unknown>>;
     nextLink?: string;
@@ -53,7 +53,10 @@ export interface IAggregationOptions {
  * Aggregation error types
  */
 export class AggregationError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = "AggregationError";
   }
@@ -102,7 +105,7 @@ function getCacheKey(
   viewId: string | undefined,
   aggregationType: AggregationType,
   aggregationField: string | undefined,
-  groupByField: string | undefined
+  groupByField: string | undefined,
 ): string {
   return `${entityName}:${viewId || "all"}:${aggregationType}:${aggregationField || ""}:${groupByField || ""}`;
 }
@@ -132,7 +135,7 @@ export async function fetchRecords(
     filter?: string;
     maxRecords?: number;
     pageSize?: number;
-  }
+  },
 ): Promise<Array<Record<string, unknown>>> {
   const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
   const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
@@ -154,16 +157,20 @@ export async function fetchRecords(
   queryOptions += queryOptions ? "&" : "?";
   queryOptions += `$top=${Math.min(pageSize, maxRecords)}`;
 
-  logger.debug("DataAggregationService", `Fetching records from ${entityName}`, {
-    queryOptions,
-    maxRecords,
-  });
+  logger.debug(
+    "DataAggregationService",
+    `Fetching records from ${entityName}`,
+    {
+      queryOptions,
+      maxRecords,
+    },
+  );
 
   try {
     let result = await context.webAPI.retrieveMultipleRecords(
       entityName,
       queryOptions,
-      pageSize
+      pageSize,
     );
 
     allRecords.push(...result.entities);
@@ -176,25 +183,32 @@ export async function fetchRecords(
       result = await context.webAPI.retrieveMultipleRecords(
         entityName,
         nextPageOptions,
-        pageSize
+        pageSize,
       );
 
       allRecords.push(...result.entities);
       logger.debug(
         "DataAggregationService",
-        `Fetched page, total records: ${allRecords.length}`
+        `Fetched page, total records: ${allRecords.length}`,
       );
     }
 
     logger.info(
       "DataAggregationService",
-      `Fetched ${allRecords.length} records from ${entityName}`
+      `Fetched ${allRecords.length} records from ${entityName}`,
     );
     return allRecords;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error("DataAggregationService", `Failed to fetch records: ${errorMessage}`, error);
-    throw new AggregationError(`Failed to fetch records: ${errorMessage}`, error);
+    logger.error(
+      "DataAggregationService",
+      `Failed to fetch records: ${errorMessage}`,
+      error,
+    );
+    throw new AggregationError(
+      `Failed to fetch records: ${errorMessage}`,
+      error,
+    );
   }
 }
 
@@ -205,11 +219,15 @@ export function aggregateRecords(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
   aggregationField?: string,
-  groupByField?: string
+  groupByField?: string,
 ): IAggregatedDataPoint[] {
   // If no group by field, return single aggregated value
   if (!groupByField) {
-    const value = calculateAggregation(records, aggregationType, aggregationField);
+    const value = calculateAggregation(
+      records,
+      aggregationType,
+      aggregationField,
+    );
     return [
       {
         label: "Total",
@@ -236,7 +254,11 @@ export function aggregateRecords(
   const dataPoints: IAggregatedDataPoint[] = [];
 
   for (const [groupKey, groupRecords] of groups) {
-    const value = calculateAggregation(groupRecords, aggregationType, aggregationField);
+    const value = calculateAggregation(
+      groupRecords,
+      aggregationType,
+      aggregationField,
+    );
     const firstRecord = groupRecords[0];
     const fieldValue = firstRecord?.[groupByField];
 
@@ -252,7 +274,7 @@ export function aggregateRecords(
 
   logger.debug(
     "DataAggregationService",
-    `Aggregated ${records.length} records into ${dataPoints.length} groups`
+    `Aggregated ${records.length} records into ${dataPoints.length} groups`,
   );
 
   return dataPoints;
@@ -272,7 +294,10 @@ function formatGroupKey(value: unknown): string {
 
   if (typeof value === "object") {
     // Handle Dataverse lookup/optionset formatted values
-    if ("name" in value && typeof (value as Record<string, unknown>).name === "string") {
+    if (
+      "name" in value &&
+      typeof (value as Record<string, unknown>).name === "string"
+    ) {
       return (value as Record<string, unknown>).name as string;
     }
     return String(value);
@@ -287,7 +312,7 @@ function formatGroupKey(value: unknown): string {
 function calculateAggregation(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
-  aggregationField?: string
+  aggregationField?: string,
 ): number {
   if (records.length === 0) {
     return 0;
@@ -310,7 +335,10 @@ function calculateAggregation(
       return calculateMax(records, aggregationField);
 
     default:
-      logger.warn("DataAggregationService", `Unknown aggregation type: ${aggregationType}`);
+      logger.warn(
+        "DataAggregationService",
+        `Unknown aggregation type: ${aggregationType}`,
+      );
       return records.length;
   }
 }
@@ -320,10 +348,13 @@ function calculateAggregation(
  */
 function extractNumericValues(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number[] {
   if (!field) {
-    logger.warn("DataAggregationService", "No aggregation field specified for numeric aggregation");
+    logger.warn(
+      "DataAggregationService",
+      "No aggregation field specified for numeric aggregation",
+    );
     return [];
   }
 
@@ -336,7 +367,8 @@ function extractNumericValues(
       continue;
     }
 
-    const numValue = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
+    const numValue =
+      typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
 
     if (!isNaN(numValue)) {
       values.push(numValue);
@@ -351,7 +383,7 @@ function extractNumericValues(
  */
 function calculateSum(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   return values.reduce((sum, val) => sum + val, 0);
@@ -362,7 +394,7 @@ function calculateSum(
  */
 function calculateAverage(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -374,7 +406,7 @@ function calculateAverage(
  */
 function calculateMin(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -386,7 +418,7 @@ function calculateMin(
  */
 function calculateMax(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -404,11 +436,12 @@ function calculateMax(
 export async function fetchAndAggregate(
   context: IAggregationContext,
   definition: IChartDefinition,
-  options?: IAggregationOptions
+  options?: IAggregationOptions,
 ): Promise<IChartData> {
   const entityName = definition.sprk_entitylogicalname;
   const viewId = definition.sprk_baseviewid;
-  const aggregationType = definition.sprk_aggregationtype ?? AggregationType.Count;
+  const aggregationType =
+    definition.sprk_aggregationtype ?? AggregationType.Count;
   const aggregationField = definition.sprk_aggregationfield;
   const groupByField = definition.sprk_groupbyfield;
 
@@ -422,7 +455,7 @@ export async function fetchAndAggregate(
     viewId,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
   );
 
   if (!options?.skipCache) {
@@ -433,12 +466,16 @@ export async function fetchAndAggregate(
     }
   }
 
-  logger.info("DataAggregationService", `Aggregating data for ${definition.sprk_name}`, {
-    entityName,
-    aggregationType,
-    aggregationField,
-    groupByField,
-  });
+  logger.info(
+    "DataAggregationService",
+    `Aggregating data for ${definition.sprk_name}`,
+    {
+      entityName,
+      aggregationType,
+      aggregationField,
+      groupByField,
+    },
+  );
 
   // Determine which columns to fetch
   const selectColumns: string[] = [];
@@ -462,7 +499,7 @@ export async function fetchAndAggregate(
     records,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
   );
 
   const chartData: IChartData = {
@@ -481,7 +518,7 @@ export async function fetchAndAggregate(
 
   logger.info(
     "DataAggregationService",
-    `Aggregation complete: ${dataPoints.length} data points from ${records.length} records`
+    `Aggregation complete: ${dataPoints.length} data points from ${records.length} records`,
   );
 
   return chartData;
@@ -494,13 +531,13 @@ export function aggregateData(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
   aggregationField?: string,
-  groupByField?: string
+  groupByField?: string,
 ): IChartData {
   const dataPoints = aggregateRecords(
     records,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
   );
 
   return {

@@ -3,24 +3,21 @@
  */
 
 import * as React from "react";
-import {
-  Badge,
-  Link,
-  tokens,
-  Text
-} from "@fluentui/react-components";
+import { Badge, Link, tokens, Text } from "@fluentui/react-components";
 import {
   CheckmarkCircle20Regular,
-  DismissCircle20Regular
+  DismissCircle20Regular,
 } from "@fluentui/react-icons";
 import { IDatasetColumn, IDatasetRecord } from "../types/DatasetTypes";
-import { ColumnRenderer, DataverseAttributeType } from "../types/ColumnRendererTypes";
+import {
+  ColumnRenderer,
+  DataverseAttributeType,
+} from "../types/ColumnRendererTypes";
 
 /**
  * Column renderer registry
  */
 export class ColumnRendererService {
-
   /**
    * Get appropriate renderer for a column based on its dataType
    */
@@ -123,11 +120,7 @@ export class ColumnRendererService {
   private static renderPhone(value: any): React.ReactElement | string {
     if (!value) return "";
 
-    return (
-      <Link href={`tel:${value}`}>
-        {String(value)}
-      </Link>
-    );
+    return <Link href={`tel:${value}`}>{String(value)}</Link>;
   }
 
   /**
@@ -161,7 +154,11 @@ export class ColumnRendererService {
   /**
    * Render money with currency symbol
    */
-  private static renderMoney(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderMoney(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn,
+  ): React.ReactElement | string {
     if (value == null) return "";
 
     const num = Number(value);
@@ -173,7 +170,7 @@ export class ColumnRendererService {
 
     const formatted = num.toLocaleString(undefined, {
       style: "currency",
-      currency: currencyCode
+      currency: currencyCode,
     });
 
     return <Text>{formatted}</Text>;
@@ -193,7 +190,7 @@ export class ColumnRendererService {
       month: "short",
       day: "numeric",
       hour: "2-digit",
-      minute: "2-digit"
+      minute: "2-digit",
     });
 
     return <Text>{formatted}</Text>;
@@ -211,7 +208,7 @@ export class ColumnRendererService {
     const formatted = date.toLocaleDateString(undefined, {
       year: "numeric",
       month: "short",
-      day: "numeric"
+      day: "numeric",
     });
 
     return <Text>{formatted}</Text>;
@@ -223,23 +220,34 @@ export class ColumnRendererService {
   private static renderTwoOptions(value: any): React.ReactElement | string {
     if (value == null) return "";
 
-    const isTrue = value === true || value === 1 || value === "1" || value === "true";
+    const isTrue =
+      value === true || value === 1 || value === "1" || value === "true";
 
     return isTrue ? (
-      <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
+      <CheckmarkCircle20Regular
+        style={{ color: tokens.colorPaletteGreenForeground1 }}
+      />
     ) : (
-      <DismissCircle20Regular style={{ color: tokens.colorNeutralForeground3 }} />
+      <DismissCircle20Regular
+        style={{ color: tokens.colorNeutralForeground3 }}
+      />
     );
   }
 
   /**
    * Render option set (choice) with badge
    */
-  private static renderOptionSet(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderOptionSet(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn,
+  ): React.ReactElement | string {
     if (value == null) return "";
 
     // Use formatted value if available (e.g., "columnname@OData.Community.Display.V1.FormattedValue")
-    const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
+    const formattedValue =
+      record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
+      String(value);
 
     return (
       <Badge appearance="outline" color="informative">
@@ -251,17 +259,34 @@ export class ColumnRendererService {
   /**
    * Render multi-select option set with multiple badges
    */
-  private static renderMultiSelectOptionSet(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderMultiSelectOptionSet(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn,
+  ): React.ReactElement | string {
     if (value == null) return "";
 
     // Multi-select values come as comma-separated string or array
-    const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
+    const formattedValue =
+      record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
+      String(value);
     const options = formattedValue.split(";").map((s: string) => s.trim());
 
     return (
-      <div style={{ display: "flex", gap: tokens.spacingHorizontalXS, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: tokens.spacingHorizontalXS,
+          flexWrap: "wrap",
+        }}
+      >
         {options.map((opt: string, idx: number) => (
-          <Badge key={idx} appearance="outline" color="informative" size="small">
+          <Badge
+            key={idx}
+            appearance="outline"
+            color="informative"
+            size="small"
+          >
             {opt}
           </Badge>
         ))}
@@ -272,21 +297,24 @@ export class ColumnRendererService {
   /**
    * Render lookup with entity reference
    */
-  private static renderLookup(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
+  private static renderLookup(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn,
+  ): React.ReactElement | string {
     if (value == null) return "";
 
     // Lookup formatted value is in columnname_formatted or @OData annotation
-    const lookupName = record[`${column.name}_formatted`] ||
-                       record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
-                       record[`_${column.name}_value@OData.Community.Display.V1.FormattedValue`] ||
-                       String(value);
+    const lookupName =
+      record[`${column.name}_formatted`] ||
+      record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
+      record[
+        `_${column.name}_value@OData.Community.Display.V1.FormattedValue`
+      ] ||
+      String(value);
 
     // Could add click handler to open related record (future enhancement)
-    return (
-      <Link>
-        {lookupName}
-      </Link>
-    );
+    return <Link>{lookupName}</Link>;
   }
 
   /**

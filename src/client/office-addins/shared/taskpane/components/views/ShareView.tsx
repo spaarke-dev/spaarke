@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   makeStyles,
   tokens,
@@ -14,49 +14,49 @@ import {
   MessageBarBody,
   Spinner,
   Field,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   ShareRegular,
   CopyRegular,
   SearchRegular,
   DocumentRegular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   searchSection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   searchRow: {
-    display: 'flex',
-    flexDirection: 'row',
+    display: "flex",
+    flexDirection: "row",
     gap: tokens.spacingHorizontalS,
   },
   searchInput: {
     flex: 1,
   },
   documentList: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
-    maxHeight: '200px',
-    overflow: 'auto',
+    maxHeight: "200px",
+    overflow: "auto",
   },
   documentItem: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalXS,
     borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    ':hover': {
+    cursor: "pointer",
+    ":hover": {
       backgroundColor: tokens.colorNeutralBackground3,
     },
   },
@@ -64,22 +64,22 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorBrandBackground2,
   },
   linkSection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   linkRow: {
-    display: 'flex',
-    flexDirection: 'row',
+    display: "flex",
+    flexDirection: "row",
     gap: tokens.spacingHorizontalS,
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
   },
   linkInput: {
     flex: 1,
   },
   actions: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
   },
@@ -89,7 +89,10 @@ export interface ShareViewProps {
   /** Callback to search for documents */
   onSearch?: (query: string) => Promise<DocumentSearchResult[]>;
   /** Callback to generate sharing link */
-  onGenerateLink?: (documentId: string, permissions: SharePermissions) => Promise<string>;
+  onGenerateLink?: (
+    documentId: string,
+    permissions: SharePermissions,
+  ) => Promise<string>;
   /** Callback to insert link into email/document */
   onInsertLink?: (link: string) => Promise<void>;
   /** Whether an operation is in progress */
@@ -106,7 +109,7 @@ export interface DocumentSearchResult {
 }
 
 export interface SharePermissions {
-  type: 'view' | 'edit';
+  type: "view" | "edit";
   expiration?: Date;
 }
 
@@ -118,10 +121,13 @@ export const ShareView: React.FC<ShareViewProps> = ({
   error,
 }) => {
   const styles = useStyles();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<DocumentSearchResult[]>([]);
-  const [selectedDocument, setSelectedDocument] = useState<DocumentSearchResult | null>(null);
-  const [permissionType, setPermissionType] = useState<'view' | 'edit'>('view');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<DocumentSearchResult[]>(
+    [],
+  );
+  const [selectedDocument, setSelectedDocument] =
+    useState<DocumentSearchResult | null>(null);
+  const [permissionType, setPermissionType] = useState<"view" | "edit">("view");
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -141,7 +147,9 @@ export const ShareView: React.FC<ShareViewProps> = ({
 
   const handleGenerateLink = async () => {
     if (onGenerateLink && selectedDocument) {
-      const link = await onGenerateLink(selectedDocument.id, { type: permissionType });
+      const link = await onGenerateLink(selectedDocument.id, {
+        type: permissionType,
+      });
       setGeneratedLink(link);
     }
   };
@@ -175,7 +183,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
               placeholder="Search by name or path..."
               value={searchQuery}
               onChange={(_, data) => setSearchQuery(data.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
             />
             <Button
               icon={isLoading ? <Spinner size="tiny" /> : <SearchRegular />}
@@ -192,7 +200,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
               {searchResults.map((doc) => (
                 <div
                   key={doc.id}
-                  className={`${styles.documentItem} ${selectedDocument?.id === doc.id ? styles.documentItemSelected : ''}`}
+                  className={`${styles.documentItem} ${selectedDocument?.id === doc.id ? styles.documentItemSelected : ""}`}
                   onClick={() => handleSelectDocument(doc)}
                 >
                   <DocumentRegular />
@@ -219,8 +227,10 @@ export const ShareView: React.FC<ShareViewProps> = ({
 
             <Field label="Permission">
               <Dropdown
-                value={permissionType === 'view' ? 'View only' : 'Can edit'}
-                onOptionSelect={(_, data) => setPermissionType(data.optionValue as 'view' | 'edit')}
+                value={permissionType === "view" ? "View only" : "Can edit"}
+                onOptionSelect={(_, data) =>
+                  setPermissionType(data.optionValue as "view" | "edit")
+                }
               >
                 <Option value="view">View only</Option>
                 <Option value="edit">Can edit</Option>
@@ -244,11 +254,8 @@ export const ShareView: React.FC<ShareViewProps> = ({
                   value={generatedLink}
                   readOnly
                 />
-                <Button
-                  icon={<CopyRegular />}
-                  onClick={handleCopyLink}
-                >
-                  {linkCopied ? 'Copied!' : 'Copy'}
+                <Button icon={<CopyRegular />} onClick={handleCopyLink}>
+                  {linkCopied ? "Copied!" : "Copy"}
                 </Button>
               </div>
             )}

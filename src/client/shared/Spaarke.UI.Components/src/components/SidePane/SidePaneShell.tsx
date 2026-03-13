@@ -28,11 +28,7 @@
  */
 
 import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-} from "@fluentui/react-components";
+import { makeStyles, shorthands, tokens } from "@fluentui/react-components";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

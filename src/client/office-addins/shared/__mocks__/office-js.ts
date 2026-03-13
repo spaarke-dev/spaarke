@@ -7,7 +7,7 @@
  * @see https://learn.microsoft.com/en-us/office/dev/add-ins/testing/testing-office-add-ins
  */
 
-import type { AccountInfo, AuthenticationResult } from '@azure/msal-browser';
+import type { AccountInfo, AuthenticationResult } from "@azure/msal-browser";
 
 // ============================================
 // Mock Types
@@ -56,21 +56,25 @@ export interface MockDialog {
 /**
  * Create a mock Outlook read item (email).
  */
-export function createMockReadItem(overrides: Partial<MockOfficeItem> = {}): MockOfficeItem {
+export function createMockReadItem(
+  overrides: Partial<MockOfficeItem> = {},
+): MockOfficeItem {
   return {
-    itemId: 'test-item-id-123',
-    subject: 'Test Email Subject',
-    body: createMockBody('html'),
-    from: { emailAddress: 'sender@example.com', displayName: 'Test Sender' },
-    to: [{ emailAddress: 'recipient@example.com', displayName: 'Test Recipient' }],
+    itemId: "test-item-id-123",
+    subject: "Test Email Subject",
+    body: createMockBody("html"),
+    from: { emailAddress: "sender@example.com", displayName: "Test Sender" },
+    to: [
+      { emailAddress: "recipient@example.com", displayName: "Test Recipient" },
+    ],
     cc: [],
     bcc: [],
     attachments: [],
-    internetMessageId: '<test-message-id@example.com>',
-    conversationId: 'conversation-123',
+    internetMessageId: "<test-message-id@example.com>",
+    conversationId: "conversation-123",
     importance: Office.MailboxEnums.Importance.Normal,
-    dateTimeCreated: new Date('2026-01-15T10:00:00Z'),
-    dateTimeModified: new Date('2026-01-15T10:00:00Z'),
+    dateTimeCreated: new Date("2026-01-15T10:00:00Z"),
+    dateTimeModified: new Date("2026-01-15T10:00:00Z"),
     ...overrides,
   };
 }
@@ -78,22 +82,26 @@ export function createMockReadItem(overrides: Partial<MockOfficeItem> = {}): Moc
 /**
  * Create a mock Outlook compose item.
  */
-export function createMockComposeItem(overrides: Partial<MockOfficeItem> = {}): MockOfficeItem {
+export function createMockComposeItem(
+  overrides: Partial<MockOfficeItem> = {},
+): MockOfficeItem {
   const subject = {
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<string>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: overrides.subject ?? 'Draft Subject',
-        error: null,
-      } as Office.AsyncResult<string>);
-    }),
+    getAsync: jest.fn(
+      (callback: (result: Office.AsyncResult<string>) => void) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: overrides.subject ?? "Draft Subject",
+          error: null,
+        } as Office.AsyncResult<string>);
+      },
+    ),
     setAsync: jest.fn(),
   };
 
   const composeItem: MockOfficeItem = {
-    itemId: '',
+    itemId: "",
     subject: subject as unknown as string,
-    body: createMockBody('html', true),
+    body: createMockBody("html", true),
     to: [],
     cc: [],
     bcc: [],
@@ -106,10 +114,10 @@ export function createMockComposeItem(overrides: Partial<MockOfficeItem> = {}): 
     (callback: (result: Office.AsyncResult<string>) => void) => {
       callback({
         status: Office.AsyncResultStatus.Succeeded,
-        value: 'draft-item-id',
+        value: "draft-item-id",
         error: null,
       } as Office.AsyncResult<string>);
-    }
+    },
   );
 
   return composeItem;
@@ -119,32 +127,42 @@ export function createMockComposeItem(overrides: Partial<MockOfficeItem> = {}): 
  * Create a mock body object.
  */
 export function createMockBody(
-  contentType: 'html' | 'text' = 'html',
-  isCompose = false
+  contentType: "html" | "text" = "html",
+  isCompose = false,
 ): MockBody {
-  const content = contentType === 'html'
-    ? '<p>Test email body content</p>'
-    : 'Test email body content';
+  const content =
+    contentType === "html"
+      ? "<p>Test email body content</p>"
+      : "Test email body content";
 
   const body: MockBody = {
-    getAsync: jest.fn((coercionType: Office.CoercionType, callback: (result: Office.AsyncResult<string>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: content,
-        error: null,
-      } as Office.AsyncResult<string>);
-    }),
+    getAsync: jest.fn(
+      (
+        coercionType: Office.CoercionType,
+        callback: (result: Office.AsyncResult<string>) => void,
+      ) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: content,
+          error: null,
+        } as Office.AsyncResult<string>);
+      },
+    ),
   };
 
   if (isCompose) {
     body.setSelectedDataAsync = jest.fn(
-      (data: string, options: unknown, callback: (result: Office.AsyncResult<void>) => void) => {
+      (
+        data: string,
+        options: unknown,
+        callback: (result: Office.AsyncResult<void>) => void,
+      ) => {
         callback({
           status: Office.AsyncResultStatus.Succeeded,
           value: undefined,
           error: null,
         } as Office.AsyncResult<void>);
-      }
+      },
     );
   }
 
@@ -154,11 +172,13 @@ export function createMockBody(
 /**
  * Create a mock attachment.
  */
-export function createMockAttachment(overrides: Partial<MockAttachment> = {}): MockAttachment {
+export function createMockAttachment(
+  overrides: Partial<MockAttachment> = {},
+): MockAttachment {
   return {
     id: `attachment-${Date.now()}`,
-    name: 'test-document.pdf',
-    contentType: 'application/pdf',
+    name: "test-document.pdf",
+    contentType: "application/pdf",
     size: 1024 * 100, // 100KB
     isInline: false,
     ...overrides,
@@ -168,7 +188,9 @@ export function createMockAttachment(overrides: Partial<MockAttachment> = {}): M
 /**
  * Create mock attachment content result.
  */
-export function createMockAttachmentContent(base64Content = 'dGVzdCBjb250ZW50'): Office.AttachmentContentAsync {
+export function createMockAttachmentContent(
+  base64Content = "dGVzdCBjb250ZW50",
+): Office.AttachmentContentAsync {
   return {
     content: base64Content,
     format: Office.MailboxEnums.AttachmentContentFormat.Base64,
@@ -197,33 +219,41 @@ export function setupOutlookReadContext(item?: MockOfficeItem): void {
   const mockItem = item ?? createMockReadItem();
 
   // Add getAttachmentContentAsync method
-  (mockItem as unknown as Record<string, unknown>).getAttachmentContentAsync = jest.fn(
-    (attachmentId: string, callback: (result: Office.AsyncResult<Office.AttachmentContentAsync>) => void) => {
-      const attachment = mockItem.attachments?.find(a => a.id === attachmentId);
-      if (attachment?.content) {
-        callback({
-          status: Office.AsyncResultStatus.Succeeded,
-          value: createMockAttachmentContent(attachment.content),
-          error: null,
-        } as Office.AsyncResult<Office.AttachmentContentAsync>);
-      } else {
-        callback({
-          status: Office.AsyncResultStatus.Succeeded,
-          value: createMockAttachmentContent(),
-          error: null,
-        } as Office.AsyncResult<Office.AttachmentContentAsync>);
-      }
-    }
-  );
+  (mockItem as unknown as Record<string, unknown>).getAttachmentContentAsync =
+    jest.fn(
+      (
+        attachmentId: string,
+        callback: (
+          result: Office.AsyncResult<Office.AttachmentContentAsync>,
+        ) => void,
+      ) => {
+        const attachment = mockItem.attachments?.find(
+          (a) => a.id === attachmentId,
+        );
+        if (attachment?.content) {
+          callback({
+            status: Office.AsyncResultStatus.Succeeded,
+            value: createMockAttachmentContent(attachment.content),
+            error: null,
+          } as Office.AsyncResult<Office.AttachmentContentAsync>);
+        } else {
+          callback({
+            status: Office.AsyncResultStatus.Succeeded,
+            value: createMockAttachmentContent(),
+            error: null,
+          } as Office.AsyncResult<Office.AttachmentContentAsync>);
+        }
+      },
+    );
 
   (global.Office as unknown as Record<string, unknown>).context = {
     ...global.Office.context,
     mailbox: {
       item: mockItem,
       userProfile: {
-        displayName: 'Test User',
-        emailAddress: 'testuser@example.com',
-        timeZone: 'UTC',
+        displayName: "Test User",
+        emailAddress: "testuser@example.com",
+        timeZone: "UTC",
       },
     },
   };
@@ -236,47 +266,76 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
   const mockItem = item ?? createMockComposeItem();
 
   // Add Recipients objects with getAsync/setAsync methods
-  const createRecipients = (existing: Array<{ emailAddress: string; displayName: string }> = []) => ({
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: existing,
-        error: null,
-      } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
-    }),
+  const createRecipients = (
+    existing: Array<{ emailAddress: string; displayName: string }> = [],
+  ) => ({
+    getAsync: jest.fn(
+      (
+        callback: (
+          result: Office.AsyncResult<
+            Array<{ emailAddress: string; displayName: string }>
+          >,
+        ) => void,
+      ) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: existing,
+          error: null,
+        } as Office.AsyncResult<
+          Array<{ emailAddress: string; displayName: string }>
+        >);
+      },
+    ),
     setAsync: jest.fn(),
     addAsync: jest.fn(),
   });
 
-  (mockItem as unknown as Record<string, unknown>).to = createRecipients(mockItem.to);
-  (mockItem as unknown as Record<string, unknown>).cc = createRecipients(mockItem.cc);
-  (mockItem as unknown as Record<string, unknown>).bcc = createRecipients(mockItem.bcc);
+  (mockItem as unknown as Record<string, unknown>).to = createRecipients(
+    mockItem.to,
+  );
+  (mockItem as unknown as Record<string, unknown>).cc = createRecipients(
+    mockItem.cc,
+  );
+  (mockItem as unknown as Record<string, unknown>).bcc = createRecipients(
+    mockItem.bcc,
+  );
 
   // Add from as Office.From object
   (mockItem as unknown as Record<string, unknown>).from = {
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Office.EmailAddressDetails>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: { emailAddress: 'testuser@example.com', displayName: 'Test User' },
-        error: null,
-      } as Office.AsyncResult<Office.EmailAddressDetails>);
-    }),
+    getAsync: jest.fn(
+      (
+        callback: (
+          result: Office.AsyncResult<Office.EmailAddressDetails>,
+        ) => void,
+      ) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: {
+            emailAddress: "testuser@example.com",
+            displayName: "Test User",
+          },
+          error: null,
+        } as Office.AsyncResult<Office.EmailAddressDetails>);
+      },
+    ),
   };
 
   // Add addFileAttachmentFromBase64Async for compose mode
-  (mockItem as unknown as Record<string, unknown>).addFileAttachmentFromBase64Async = jest.fn(
+  (
+    mockItem as unknown as Record<string, unknown>
+  ).addFileAttachmentFromBase64Async = jest.fn(
     (
       base64Content: string,
       fileName: string,
       options: { isInline: boolean; contentType: string },
-      callback: (result: Office.AsyncResult<string>) => void
+      callback: (result: Office.AsyncResult<string>) => void,
     ) => {
       callback({
         status: Office.AsyncResultStatus.Succeeded,
         value: `attachment-${Date.now()}`,
         error: null,
       } as Office.AsyncResult<string>);
-    }
+    },
   );
 
   (global.Office as unknown as Record<string, unknown>).context = {
@@ -284,9 +343,9 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
     mailbox: {
       item: mockItem,
       userProfile: {
-        displayName: 'Test User',
-        emailAddress: 'testuser@example.com',
-        timeZone: 'UTC',
+        displayName: "Test User",
+        emailAddress: "testuser@example.com",
+        timeZone: "UTC",
       },
     },
   };
@@ -298,16 +357,18 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
 export function setupWordContext(): void {
   // Mock Word.run for Word API calls
   (global as unknown as Record<string, unknown>).Word = {
-    run: jest.fn(async (callback: (context: MockWordContext) => Promise<void>) => {
-      const mockContext = createMockWordContext();
-      await callback(mockContext);
-    }),
+    run: jest.fn(
+      async (callback: (context: MockWordContext) => Promise<void>) => {
+        const mockContext = createMockWordContext();
+        await callback(mockContext);
+      },
+    ),
     InsertLocation: {
-      replace: 'Replace',
-      start: 'Start',
-      end: 'End',
-      before: 'Before',
-      after: 'After',
+      replace: "Replace",
+      start: "Start",
+      end: "End",
+      before: "Before",
+      after: "After",
     },
   };
 
@@ -346,16 +407,20 @@ interface MockWordProperties {
  */
 export function createMockWordContext(): MockWordContext {
   const mockBody: MockWordBody = {
-    text: 'Test document content',
-    getHtml: jest.fn().mockReturnValue({ value: '<p>Test document content</p>' }),
-    getOoxml: jest.fn().mockReturnValue({ value: '<w:document>...</w:document>' }),
+    text: "Test document content",
+    getHtml: jest
+      .fn()
+      .mockReturnValue({ value: "<p>Test document content</p>" }),
+    getOoxml: jest
+      .fn()
+      .mockReturnValue({ value: "<w:document>...</w:document>" }),
     load: jest.fn(),
   };
 
   const mockProperties: MockWordProperties = {
-    title: 'Test Document',
-    author: 'Test Author',
-    creationDate: new Date('2026-01-15T10:00:00Z'),
+    title: "Test Document",
+    author: "Test Author",
+    creationDate: new Date("2026-01-15T10:00:00Z"),
     load: jest.fn(),
   };
 
@@ -378,12 +443,16 @@ export function createMockWordContext(): MockWordContext {
  * Setup mock dialog display.
  */
 export function setupMockDialog(
-  onDisplayDialog?: (result: { value: MockDialog }) => void
+  onDisplayDialog?: (result: { value: MockDialog }) => void,
 ): MockDialog {
   const mockDialog = createMockDialog();
 
   global.Office.context.ui.displayDialogAsync = jest.fn(
-    (url: string, options: unknown, callback: (result: Office.AsyncResult<Office.Dialog>) => void) => {
+    (
+      url: string,
+      options: unknown,
+      callback: (result: Office.AsyncResult<Office.Dialog>) => void,
+    ) => {
       const result = {
         status: Office.AsyncResultStatus.Succeeded,
         value: mockDialog as unknown as Office.Dialog,
@@ -392,7 +461,7 @@ export function setupMockDialog(
 
       callback(result);
       onDisplayDialog?.({ value: mockDialog });
-    }
+    },
   );
 
   return mockDialog;
@@ -405,14 +474,16 @@ export function setupMockDialog(
 /**
  * Create a mock MSAL account.
  */
-export function createMockAccount(overrides: Partial<AccountInfo> = {}): AccountInfo {
+export function createMockAccount(
+  overrides: Partial<AccountInfo> = {},
+): AccountInfo {
   return {
-    homeAccountId: 'test-home-id',
-    environment: 'login.microsoftonline.com',
-    tenantId: 'test-tenant-id',
-    username: 'test@example.com',
-    localAccountId: 'test-local-id',
-    name: 'Test User',
+    homeAccountId: "test-home-id",
+    environment: "login.microsoftonline.com",
+    tenantId: "test-tenant-id",
+    username: "test@example.com",
+    localAccountId: "test-local-id",
+    name: "Test User",
     ...overrides,
   };
 }
@@ -420,20 +491,22 @@ export function createMockAccount(overrides: Partial<AccountInfo> = {}): Account
 /**
  * Create a mock authentication result.
  */
-export function createMockAuthResult(overrides: Partial<AuthenticationResult> = {}): AuthenticationResult {
+export function createMockAuthResult(
+  overrides: Partial<AuthenticationResult> = {},
+): AuthenticationResult {
   const account = createMockAccount();
   return {
-    accessToken: 'mock-access-token-12345',
+    accessToken: "mock-access-token-12345",
     account,
     expiresOn: new Date(Date.now() + 3600 * 1000), // 1 hour from now
-    scopes: ['api://test-api-id/user_impersonation'],
-    idToken: 'mock-id-token',
+    scopes: ["api://test-api-id/user_impersonation"],
+    idToken: "mock-id-token",
     idTokenClaims: {},
     tenantId: account.tenantId,
-    uniqueId: 'test-unique-id',
-    authority: 'https://login.microsoftonline.com/test-tenant-id',
-    tokenType: 'Bearer',
-    correlationId: 'test-correlation-id',
+    uniqueId: "test-unique-id",
+    authority: "https://login.microsoftonline.com/test-tenant-id",
+    tokenType: "Bearer",
+    correlationId: "test-correlation-id",
     fromCache: false,
     ...overrides,
   };
@@ -449,9 +522,9 @@ export function createMockAuthResult(overrides: Partial<AuthenticationResult> = 
 export function resetOfficeContext(): void {
   (global.Office as unknown as Record<string, unknown>).context = {
     diagnostics: {
-      platform: 'OfficeOnline',
-      version: '16.0.0.0',
-      host: 'Outlook',
+      platform: "OfficeOnline",
+      version: "16.0.0.0",
+      host: "Outlook",
     },
     requirements: {
       isSetSupported: jest.fn().mockReturnValue(true),
@@ -478,23 +551,23 @@ export function resetAllMocks(): void {
 // Export Office enums for convenience
 export const OfficeEnums = {
   AsyncResultStatus: {
-    Succeeded: 'succeeded' as const,
-    Failed: 'failed' as const,
+    Succeeded: "succeeded" as const,
+    Failed: "failed" as const,
   },
   CoercionType: {
-    Html: 'html' as const,
-    Text: 'text' as const,
-    Ooxml: 'ooxml' as const,
+    Html: "html" as const,
+    Text: "text" as const,
+    Ooxml: "ooxml" as const,
   },
   MailboxEnums: {
     Importance: {
-      Low: 'Low' as const,
-      Normal: 'Normal' as const,
-      High: 'High' as const,
+      Low: "Low" as const,
+      Normal: "Normal" as const,
+      High: "High" as const,
     },
     AttachmentContentFormat: {
-      Base64: 'base64' as const,
-      Url: 'url' as const,
+      Base64: "base64" as const,
+      Url: "url" as const,
     },
   },
 };

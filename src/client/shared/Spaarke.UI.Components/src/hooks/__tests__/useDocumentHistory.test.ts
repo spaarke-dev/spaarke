@@ -127,7 +127,9 @@ describe("useDocumentHistory", () => {
     });
 
     it("should not push if editorRef.current is null", () => {
-      const ref = { current: null } as React.RefObject<RichTextEditorRef | null>;
+      const ref = {
+        current: null,
+      } as React.RefObject<RichTextEditorRef | null>;
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       act(() => {

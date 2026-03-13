@@ -7,7 +7,13 @@
  */
 
 import type { IChartDefinition } from "../types";
-import { VisualType, AggregationType, OnClickAction, ValueFormat, ColorSource } from "../types";
+import {
+  VisualType,
+  AggregationType,
+  OnClickAction,
+  ValueFormat,
+  ColorSource,
+} from "../types";
 import { logger } from "../utils/logger";
 
 /**
@@ -18,11 +24,11 @@ export interface IConfigWebApi {
   retrieveRecord(
     entityType: string,
     id: string,
-    options?: string
+    options?: string,
   ): Promise<Record<string, unknown>>;
   retrieveMultipleRecords(
     entityType: string,
-    options?: string
+    options?: string,
   ): Promise<{ entities: Array<Record<string, unknown>> }>;
 }
 
@@ -45,7 +51,10 @@ export class ConfigurationNotFoundError extends Error {
 }
 
 export class ConfigurationLoadError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = "ConfigurationLoadError";
   }
@@ -183,12 +192,17 @@ function parseOptionsJson(jsonString?: string): Record<string, unknown> {
  * Validate and convert visual type value
  */
 function parseVisualType(value: unknown): VisualType {
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue =
+    typeof value === "number" ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
-    logger.warn("ConfigurationLoader", "Invalid visual type, defaulting to MetricCard", {
-      value,
-    });
+    logger.warn(
+      "ConfigurationLoader",
+      "Invalid visual type, defaulting to MetricCard",
+      {
+        value,
+      },
+    );
     return VisualType.MetricCard;
   }
 
@@ -197,9 +211,13 @@ function parseVisualType(value: unknown): VisualType {
     return numValue as VisualType;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown visual type, defaulting to MetricCard", {
-    value: numValue,
-  });
+  logger.warn(
+    "ConfigurationLoader",
+    "Unknown visual type, defaulting to MetricCard",
+    {
+      value: numValue,
+    },
+  );
   return VisualType.MetricCard;
 }
 
@@ -211,7 +229,8 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return undefined;
   }
 
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue =
+    typeof value === "number" ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
     return undefined;
@@ -222,7 +241,9 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return numValue as AggregationType;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown aggregation type", { value: numValue });
+  logger.warn("ConfigurationLoader", "Unknown aggregation type", {
+    value: numValue,
+  });
   return undefined;
 }
 
@@ -234,7 +255,8 @@ function parseOnClickAction(value: unknown): OnClickAction | undefined {
     return undefined;
   }
 
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue =
+    typeof value === "number" ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
     return undefined;
@@ -244,7 +266,9 @@ function parseOnClickAction(value: unknown): OnClickAction | undefined {
     return numValue as OnClickAction;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown click action type", { value: numValue });
+  logger.warn("ConfigurationLoader", "Unknown click action type", {
+    value: numValue,
+  });
   return undefined;
 }
 
@@ -255,14 +279,17 @@ function parseValueFormat(value: unknown): ValueFormat | undefined {
   if (value === null || value === undefined) {
     return undefined;
   }
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue =
+    typeof value === "number" ? value : parseInt(String(value), 10);
   if (isNaN(numValue)) {
     return undefined;
   }
   if (Object.values(ValueFormat).includes(numValue)) {
     return numValue as ValueFormat;
   }
-  logger.warn("ConfigurationLoader", "Unknown value format", { value: numValue });
+  logger.warn("ConfigurationLoader", "Unknown value format", {
+    value: numValue,
+  });
   return undefined;
 }
 
@@ -273,14 +300,17 @@ function parseColorSource(value: unknown): ColorSource | undefined {
   if (value === null || value === undefined) {
     return undefined;
   }
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue =
+    typeof value === "number" ? value : parseInt(String(value), 10);
   if (isNaN(numValue)) {
     return undefined;
   }
   if (Object.values(ColorSource).includes(numValue)) {
     return numValue as ColorSource;
   }
-  logger.warn("ConfigurationLoader", "Unknown color source", { value: numValue });
+  logger.warn("ConfigurationLoader", "Unknown color source", {
+    value: numValue,
+  });
   return undefined;
 }
 
@@ -288,15 +318,22 @@ function parseColorSource(value: unknown): ColorSource | undefined {
  * Map Dataverse record to IChartDefinition
  */
 function mapToChartDefinition(
-  record: Record<string, unknown>
+  record: Record<string, unknown>,
 ): IChartDefinition {
   const definition: IChartDefinition = {
     sprk_chartdefinitionid: record[FIELDS.id] as string,
     sprk_name: (record[FIELDS.name] as string) || "Untitled Chart",
     sprk_visualtype: parseVisualType(record[FIELDS.visualType]),
-    sprk_entitylogicalname: record[FIELDS.entityLogicalName] as string | undefined,
-    sprk_baseviewid: (record["_sprk_baseviewid_value"] as string) || (record[FIELDS.baseViewId] as string) || undefined,
-    sprk_aggregationfield: record[FIELDS.aggregationField] as string | undefined,
+    sprk_entitylogicalname: record[FIELDS.entityLogicalName] as
+      | string
+      | undefined,
+    sprk_baseviewid:
+      (record["_sprk_baseviewid_value"] as string) ||
+      (record[FIELDS.baseViewId] as string) ||
+      undefined,
+    sprk_aggregationfield: record[FIELDS.aggregationField] as
+      | string
+      | undefined,
     sprk_aggregationtype: parseAggregationType(record[FIELDS.aggregationType]),
     sprk_groupbyfield: record[FIELDS.groupByField] as string | undefined,
     sprk_optionsjson: record[FIELDS.optionsJson] as string | undefined,
@@ -306,13 +343,19 @@ function mapToChartDefinition(
     // Click action fields
     sprk_onclickaction: parseOnClickAction(record[FIELDS.onClickAction]),
     sprk_onclicktarget: record[FIELDS.onClickTarget] as string | undefined,
-    sprk_onclickrecordfield: record[FIELDS.onClickRecordField] as string | undefined,
+    sprk_onclickrecordfield: record[FIELDS.onClickRecordField] as
+      | string
+      | undefined,
     // Card list configuration fields
-    sprk_contextfieldname: record[FIELDS.contextFieldName] as string | undefined,
+    sprk_contextfieldname: record[FIELDS.contextFieldName] as
+      | string
+      | undefined,
     sprk_viewlisttabname: record[FIELDS.viewListTabName] as string | undefined,
     sprk_maxdisplayitems: record[FIELDS.maxDisplayItems] as number | undefined,
     // Drill-through configuration
-    sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as string | undefined,
+    sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as
+      | string
+      | undefined,
     // FetchXML fields
     sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
     sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,
@@ -329,7 +372,10 @@ function mapToChartDefinition(
   }
 
   // Diagnostic: log view ID resolution
-  logger.info("ConfigurationLoader", `View ID resolution: _sprk_baseviewid_value=${record["_sprk_baseviewid_value"] || "(empty)"}, sprk_baseviewid=${record[FIELDS.baseViewId] || "(empty)"} → resolved=${definition.sprk_baseviewid || "(none)"}`);
+  logger.info(
+    "ConfigurationLoader",
+    `View ID resolution: _sprk_baseviewid_value=${record["_sprk_baseviewid_value"] || "(empty)"}, sprk_baseviewid=${record[FIELDS.baseViewId] || "(empty)"} → resolved=${definition.sprk_baseviewid || "(none)"}`,
+  );
 
   return definition;
 }
@@ -347,7 +393,7 @@ function mapToChartDefinition(
 export async function loadChartDefinition(
   context: IConfigContext,
   id: string,
-  skipCache = false
+  skipCache = false,
 ): Promise<IChartDefinition> {
   // Validate input
   if (!id || id.trim() === "") {
@@ -357,7 +403,10 @@ export async function loadChartDefinition(
   // Normalize GUID format (remove braces if present)
   const normalizedId = id.replace(/[{}]/g, "").toLowerCase();
 
-  logger.debug("ConfigurationLoader", `Loading chart definition: ${normalizedId}`);
+  logger.debug(
+    "ConfigurationLoader",
+    `Loading chart definition: ${normalizedId}`,
+  );
 
   // Check cache first (unless skipCache is true)
   if (!skipCache) {
@@ -373,7 +422,7 @@ export async function loadChartDefinition(
     const record = await context.webAPI.retrieveRecord(
       ENTITY_NAME,
       normalizedId,
-      `?$select=${SELECT_COLUMNS}`
+      `?$select=${SELECT_COLUMNS}`,
     );
 
     // Map to typed interface
@@ -385,17 +434,20 @@ export async function loadChartDefinition(
       timestamp: Date.now(),
     });
 
-    logger.info("ConfigurationLoader", `Loaded chart definition: ${definition.sprk_name}`, {
-      id: normalizedId,
-      visualType: definition.sprk_visualtype,
-      entity: definition.sprk_entitylogicalname,
-    });
+    logger.info(
+      "ConfigurationLoader",
+      `Loaded chart definition: ${definition.sprk_name}`,
+      {
+        id: normalizedId,
+        visualType: definition.sprk_visualtype,
+        entity: definition.sprk_entitylogicalname,
+      },
+    );
 
     return definition;
   } catch (error: unknown) {
     // Handle specific error types
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Check for "not found" type errors
     if (
@@ -403,15 +455,22 @@ export async function loadChartDefinition(
       errorMessage.includes("not found") ||
       errorMessage.includes("0x80040217") // Dataverse object not found
     ) {
-      logger.warn("ConfigurationLoader", `Chart definition not found: ${normalizedId}`);
+      logger.warn(
+        "ConfigurationLoader",
+        `Chart definition not found: ${normalizedId}`,
+      );
       throw new ConfigurationNotFoundError(normalizedId);
     }
 
     // Other errors
-    logger.error("ConfigurationLoader", `Failed to load chart definition: ${normalizedId}`, error);
+    logger.error(
+      "ConfigurationLoader",
+      `Failed to load chart definition: ${normalizedId}`,
+      error,
+    );
     throw new ConfigurationLoadError(
       `Failed to load chart definition: ${errorMessage}`,
-      error
+      error,
     );
   }
 }
@@ -427,9 +486,12 @@ export async function loadChartDefinition(
 export async function loadChartDefinitions(
   context: IConfigContext,
   ids: string[],
-  skipCache = false
+  skipCache = false,
 ): Promise<Array<IChartDefinition | Error>> {
-  logger.debug("ConfigurationLoader", `Loading ${ids.length} chart definitions`);
+  logger.debug(
+    "ConfigurationLoader",
+    `Loading ${ids.length} chart definitions`,
+  );
 
   const results = await Promise.all(
     ids.map(async (id) => {
@@ -438,11 +500,14 @@ export async function loadChartDefinitions(
       } catch (error) {
         return error instanceof Error ? error : new Error(String(error));
       }
-    })
+    }),
   );
 
   const successCount = results.filter((r) => !(r instanceof Error)).length;
-  logger.info("ConfigurationLoader", `Loaded ${successCount}/${ids.length} chart definitions`);
+  logger.info(
+    "ConfigurationLoader",
+    `Loaded ${successCount}/${ids.length} chart definitions`,
+  );
 
   return results;
 }
@@ -456,7 +521,7 @@ export async function loadChartDefinitions(
  */
 export async function queryChartDefinitions(
   context: IConfigContext,
-  filter?: string
+  filter?: string,
 ): Promise<IChartDefinition[]> {
   logger.debug("ConfigurationLoader", "Querying chart definitions", { filter });
 
@@ -468,7 +533,7 @@ export async function queryChartDefinitions(
 
     const result = await context.webAPI.retrieveMultipleRecords(
       ENTITY_NAME,
-      queryOptions
+      queryOptions,
     );
 
     const definitions = result.entities.map(mapToChartDefinition);
@@ -482,15 +547,21 @@ export async function queryChartDefinitions(
       });
     });
 
-    logger.info("ConfigurationLoader", `Query returned ${definitions.length} chart definitions`);
+    logger.info(
+      "ConfigurationLoader",
+      `Query returned ${definitions.length} chart definitions`,
+    );
     return definitions;
   } catch (error: unknown) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-    logger.error("ConfigurationLoader", "Failed to query chart definitions", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(
+      "ConfigurationLoader",
+      "Failed to query chart definitions",
+      error,
+    );
     throw new ConfigurationLoadError(
       `Failed to query chart definitions: ${errorMessage}`,
-      error
+      error,
     );
   }
 }
@@ -500,7 +571,7 @@ export async function queryChartDefinitions(
  * Convenience method to parse optionsJson field
  */
 export function getChartOptions(
-  definition: IChartDefinition
+  definition: IChartDefinition,
 ): Record<string, unknown> {
   return parseOptionsJson(definition.sprk_optionsjson);
 }

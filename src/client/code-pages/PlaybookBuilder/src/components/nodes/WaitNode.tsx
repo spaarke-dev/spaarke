@@ -17,24 +17,21 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Use for: approval gates, human review steps, timed waits.
  */
 export const WaitNode = React.memo(function WaitNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<Clock20Regular />}
-            typeLabel="Wait"
-        >
-            {data.outputVariable && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Output: {data.outputVariable}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<Clock20Regular />}
+      typeLabel="Wait"
+    >
+      {data.outputVariable && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Output: {data.outputVariable}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

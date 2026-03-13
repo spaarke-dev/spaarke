@@ -35,9 +35,15 @@ const createMockXrm = (): XrmContext => ({
   WebApi: {
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     retrieveRecord: jest.fn().mockResolvedValue({}),
-    createRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    updateRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    deleteRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    createRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    updateRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    deleteRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
   },
 });
 
@@ -100,7 +106,7 @@ describe("ViewSelector", () => {
   describe("loading state", () => {
     it("should show loading spinner initially", () => {
       mockGetViews.mockImplementation(
-        () => new Promise(() => {}) // Never resolves
+        () => new Promise(() => {}), // Never resolves
       );
 
       renderWithProvider(<ViewSelector {...defaultProps} />);
@@ -112,7 +118,7 @@ describe("ViewSelector", () => {
       mockGetViews.mockImplementation(() => new Promise(() => {}));
 
       renderWithProvider(
-        <ViewSelector {...defaultProps} defaultViewName="My View" />
+        <ViewSelector {...defaultProps} defaultViewName="My View" />,
       );
 
       expect(screen.getByText("My View")).toBeInTheDocument();
@@ -130,18 +136,19 @@ describe("ViewSelector", () => {
 
     it("should call ViewService.getViews with correct entity", async () => {
       renderWithProvider(
-        <ViewSelector {...defaultProps} entityLogicalName="contact" />
+        <ViewSelector {...defaultProps} entityLogicalName="contact" />,
       );
 
       await waitFor(() => {
-        expect(mockGetViews).toHaveBeenCalledWith("contact", expect.any(Object));
+        expect(mockGetViews).toHaveBeenCalledWith(
+          "contact",
+          expect.any(Object),
+        );
       });
     });
 
     it("should include custom views when requested", async () => {
-      renderWithProvider(
-        <ViewSelector {...defaultProps} includeCustomViews />
-      );
+      renderWithProvider(<ViewSelector {...defaultProps} includeCustomViews />);
 
       await waitFor(() => {
         expect(mockGetViews).toHaveBeenCalledWith("account", {
@@ -153,7 +160,7 @@ describe("ViewSelector", () => {
 
     it("should include personal views when requested", async () => {
       renderWithProvider(
-        <ViewSelector {...defaultProps} includePersonalViews />
+        <ViewSelector {...defaultProps} includePersonalViews />,
       );
 
       await waitFor(() => {
@@ -168,7 +175,7 @@ describe("ViewSelector", () => {
   describe("selection", () => {
     it("should display selected view name", async () => {
       renderWithProvider(
-        <ViewSelector {...defaultProps} selectedViewId="view-2" />
+        <ViewSelector {...defaultProps} selectedViewId="view-2" />,
       );
 
       await waitFor(() => {
@@ -184,7 +191,7 @@ describe("ViewSelector", () => {
           {...defaultProps}
           selectedViewId="view-1"
           onViewChange={onViewChange}
-        />
+        />,
       );
 
       await waitFor(() => {
@@ -201,7 +208,7 @@ describe("ViewSelector", () => {
       });
 
       expect(onViewChange).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "view-2", name: "All Records" })
+        expect.objectContaining({ id: "view-2", name: "All Records" }),
       );
     });
 
@@ -209,12 +216,12 @@ describe("ViewSelector", () => {
       const onViewChange = jest.fn();
 
       renderWithProvider(
-        <ViewSelector {...defaultProps} onViewChange={onViewChange} />
+        <ViewSelector {...defaultProps} onViewChange={onViewChange} />,
       );
 
       await waitFor(() => {
         expect(onViewChange).toHaveBeenCalledWith(
-          expect.objectContaining({ id: "view-1", isDefault: true })
+          expect.objectContaining({ id: "view-1", isDefault: true }),
         );
       });
     });
@@ -268,13 +275,13 @@ describe("ViewSelector", () => {
   describe("accessibility", () => {
     it("should have proper aria-label", async () => {
       renderWithProvider(
-        <ViewSelector {...defaultProps} entityLogicalName="contact" />
+        <ViewSelector {...defaultProps} entityLogicalName="contact" />,
       );
 
       await waitFor(() => {
         expect(screen.getByRole("combobox")).toHaveAttribute(
           "aria-label",
-          "Select view for contact"
+          "Select view for contact",
         );
       });
     });

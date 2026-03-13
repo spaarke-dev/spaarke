@@ -36,9 +36,13 @@ function resolveRecordId(ctx: IClickActionContext): string {
     if (typeof fieldValue === "string" && fieldValue.trim() !== "") {
       return fieldValue.replace(/[{}]/g, "");
     }
-    logger.warn("ClickActionHandler", "Configured record field not found or empty, using default recordId", {
-      field: chartDefinition.sprk_onclickrecordfield,
-    });
+    logger.warn(
+      "ClickActionHandler",
+      "Configured record field not found or empty, using default recordId",
+      {
+        field: chartDefinition.sprk_onclickrecordfield,
+      },
+    );
   }
 
   return recordId;
@@ -82,7 +86,10 @@ async function openSidePane(ctx: IClickActionContext): Promise<void> {
   const pageName = ctx.chartDefinition.sprk_onclicktarget;
 
   if (!pageName) {
-    logger.warn("ClickActionHandler", "No target page configured for opensidepane action");
+    logger.warn(
+      "ClickActionHandler",
+      "No target page configured for opensidepane action",
+    );
     return;
   }
 
@@ -110,7 +117,10 @@ async function openSidePane(ctx: IClickActionContext): Promise<void> {
 async function navigateToPage(ctx: IClickActionContext): Promise<void> {
   const xrm = getXrm();
   if (!xrm?.Navigation?.navigateTo) {
-    logger.warn("ClickActionHandler", "Xrm.Navigation.navigateTo not available");
+    logger.warn(
+      "ClickActionHandler",
+      "Xrm.Navigation.navigateTo not available",
+    );
     return;
   }
 
@@ -118,7 +128,10 @@ async function navigateToPage(ctx: IClickActionContext): Promise<void> {
   const target = ctx.chartDefinition.sprk_onclicktarget;
 
   if (!target) {
-    logger.warn("ClickActionHandler", "No target configured for navigatetopage action");
+    logger.warn(
+      "ClickActionHandler",
+      "No target configured for navigatetopage action",
+    );
     return;
   }
 
@@ -140,11 +153,15 @@ async function navigateToPage(ctx: IClickActionContext): Promise<void> {
  */
 export async function executeClickAction(
   ctx: IClickActionContext,
-  onExpandClick?: () => void
+  onExpandClick?: () => void,
 ): Promise<boolean> {
   const action = ctx.chartDefinition.sprk_onclickaction;
 
-  if (action === undefined || action === null || action === OnClickAction.None) {
+  if (
+    action === undefined ||
+    action === null ||
+    action === OnClickAction.None
+  ) {
     return false;
   }
 
@@ -175,7 +192,9 @@ export async function executeClickAction(
         return true;
 
       default:
-        logger.warn("ClickActionHandler", "Unknown click action type", { action });
+        logger.warn("ClickActionHandler", "Unknown click action type", {
+          action,
+        });
         return false;
     }
   } catch (err) {

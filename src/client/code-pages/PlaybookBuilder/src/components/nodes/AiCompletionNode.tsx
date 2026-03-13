@@ -17,24 +17,21 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Use for: drafting emails, creating summaries, generating content.
  */
 export const AiCompletionNode = React.memo(function AiCompletionNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<BrainCircuit20Regular />}
-            typeLabel="AI Completion"
-        >
-            {data.outputVariable && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Output: {data.outputVariable}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<BrainCircuit20Regular />}
+      typeLabel="AI Completion"
+    >
+      {data.outputVariable && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Output: {data.outputVariable}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

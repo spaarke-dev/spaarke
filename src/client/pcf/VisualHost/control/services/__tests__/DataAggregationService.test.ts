@@ -54,10 +54,13 @@ function createMockContext(overrides?: Partial<IMockWebApi>): IMockContext {
 /**
  * Create mock records for testing
  */
-function createMockRecords(count: number, options?: {
-  statusField?: string;
-  amountField?: string;
-}): Array<Record<string, unknown>> {
+function createMockRecords(
+  count: number,
+  options?: {
+    statusField?: string;
+    amountField?: string;
+  },
+): Array<Record<string, unknown>> {
   const statuses = ["Active", "Pending", "Completed", "Cancelled"];
   const records: Array<Record<string, unknown>> = [];
 
@@ -77,7 +80,7 @@ function createMockRecords(count: number, options?: {
  * Create a mock chart definition
  */
 function createMockDefinition(
-  overrides?: Partial<IChartDefinition>
+  overrides?: Partial<IChartDefinition>,
 ): IChartDefinition {
   return {
     sprk_chartdefinitionid: "test-chart-id",
@@ -109,7 +112,7 @@ describe("DataAggregationService", () => {
       expect(result).toHaveLength(5);
       expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledWith(
         "sprk_project",
-        expect.stringContaining("fetchXml=")
+        expect.stringContaining("fetchXml="),
       );
     });
 
@@ -152,14 +155,14 @@ describe("DataAggregationService", () => {
 
     it("should throw AggregationError on fetch failure", async () => {
       const mockContext = createMockContext({
-        retrieveMultipleRecords: jest.fn().mockRejectedValue(
-          new Error("Network error")
-        ),
+        retrieveMultipleRecords: jest
+          .fn()
+          .mockRejectedValue(new Error("Network error")),
       });
 
-      await expect(
-        fetchRecords(mockContext, "sprk_project")
-      ).rejects.toThrow(AggregationError);
+      await expect(fetchRecords(mockContext, "sprk_project")).rejects.toThrow(
+        AggregationError,
+      );
     });
   });
 
@@ -182,7 +185,7 @@ describe("DataAggregationService", () => {
           records,
           AggregationType.Count,
           undefined,
-          "statuscode"
+          "statuscode",
         );
 
         expect(result).toHaveLength(4);
@@ -197,11 +200,7 @@ describe("DataAggregationService", () => {
       it("should sum field values", () => {
         const records = createMockRecords(5); // amounts: 100, 200, 300, 400, 500
 
-        const result = aggregateRecords(
-          records,
-          AggregationType.Sum,
-          "amount"
-        );
+        const result = aggregateRecords(records, AggregationType.Sum, "amount");
 
         expect(result).toHaveLength(1);
         expect(result[0].value).toBe(1500); // 100 + 200 + 300 + 400 + 500
@@ -214,7 +213,7 @@ describe("DataAggregationService", () => {
           records,
           AggregationType.Sum,
           "amount",
-          "statuscode"
+          "statuscode",
         );
 
         expect(result).toHaveLength(4);
@@ -231,7 +230,7 @@ describe("DataAggregationService", () => {
         const result = aggregateRecords(
           records,
           AggregationType.Average,
-          "amount"
+          "amount",
         );
 
         expect(result).toHaveLength(1);
@@ -243,11 +242,7 @@ describe("DataAggregationService", () => {
       it("should find minimum field value", () => {
         const records = createMockRecords(5); // amounts: 100, 200, 300, 400, 500
 
-        const result = aggregateRecords(
-          records,
-          AggregationType.Min,
-          "amount"
-        );
+        const result = aggregateRecords(records, AggregationType.Min, "amount");
 
         expect(result).toHaveLength(1);
         expect(result[0].value).toBe(100);
@@ -258,11 +253,7 @@ describe("DataAggregationService", () => {
       it("should find maximum field value", () => {
         const records = createMockRecords(5); // amounts: 100, 200, 300, 400, 500
 
-        const result = aggregateRecords(
-          records,
-          AggregationType.Max,
-          "amount"
-        );
+        const result = aggregateRecords(records, AggregationType.Max, "amount");
 
         expect(result).toHaveLength(1);
         expect(result[0].value).toBe(500);
@@ -288,7 +279,7 @@ describe("DataAggregationService", () => {
           records,
           AggregationType.Count,
           undefined,
-          "statuscode"
+          "statuscode",
         );
 
         // Should have 2 groups: (Blank) and Active
@@ -308,7 +299,7 @@ describe("DataAggregationService", () => {
           records,
           AggregationType.Count,
           undefined,
-          "isActive"
+          "isActive",
         );
 
         expect(result.length).toBe(2);
@@ -324,7 +315,7 @@ describe("DataAggregationService", () => {
         const result = aggregateRecords(
           records,
           AggregationType.Sum,
-          "nonexistent_field"
+          "nonexistent_field",
         );
 
         expect(result).toHaveLength(1);
@@ -338,11 +329,7 @@ describe("DataAggregationService", () => {
           { amount: 100 },
         ];
 
-        const result = aggregateRecords(
-          records,
-          AggregationType.Sum,
-          "amount"
-        );
+        const result = aggregateRecords(records, AggregationType.Sum, "amount");
 
         expect(result).toHaveLength(1);
         expect(result[0].value).toBe(100); // Only valid number
@@ -374,9 +361,9 @@ describe("DataAggregationService", () => {
         sprk_entitylogicalname: undefined,
       });
 
-      await expect(
-        fetchAndAggregate(mockContext, definition)
-      ).rejects.toThrow(AggregationError);
+      await expect(fetchAndAggregate(mockContext, definition)).rejects.toThrow(
+        AggregationError,
+      );
     });
 
     it("should use cache on subsequent calls", async () => {
@@ -396,7 +383,9 @@ describe("DataAggregationService", () => {
       await fetchAndAggregate(mockContext, definition);
 
       // Should only fetch once (cached)
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(
+        1,
+      );
     });
 
     it("should bypass cache when skipCache is true", async () => {
@@ -416,7 +405,9 @@ describe("DataAggregationService", () => {
       await fetchAndAggregate(mockContext, definition, { skipCache: true });
 
       // Should fetch twice
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(2);
+      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(
+        2,
+      );
     });
 
     it("should default to Count aggregation when not specified", async () => {
@@ -445,7 +436,7 @@ describe("DataAggregationService", () => {
         records,
         AggregationType.Count,
         undefined,
-        "statuscode"
+        "statuscode",
       );
 
       expect(result.totalRecords).toBe(8);
@@ -459,7 +450,7 @@ describe("DataAggregationService", () => {
         records,
         AggregationType.Sum,
         "amount",
-        "statuscode"
+        "statuscode",
       );
 
       expect(result).toHaveProperty("dataPoints");
@@ -490,7 +481,9 @@ describe("DataAggregationService", () => {
       // Fetch again - should call API
       await fetchAndAggregate(mockContext, definition);
 
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(2);
+      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(
+        2,
+      );
     });
 
     it("should clear entire cache when no key provided", async () => {
@@ -512,7 +505,9 @@ describe("DataAggregationService", () => {
       await fetchAndAggregate(mockContext, definition1);
       await fetchAndAggregate(mockContext, definition2);
 
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(2);
+      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(
+        2,
+      );
 
       // Clear all
       clearAggregationCache();
@@ -521,7 +516,9 @@ describe("DataAggregationService", () => {
       await fetchAndAggregate(mockContext, definition1);
       await fetchAndAggregate(mockContext, definition2);
 
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(4);
+      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledTimes(
+        4,
+      );
     });
   });
 });

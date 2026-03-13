@@ -10,137 +10,137 @@
  * Note: All field names use the 'sprk_' publisher prefix.
  */
 export interface FieldMappings {
-    /** Boolean field indicating if document has an attached file */
-    hasFile: string;
+  /** Boolean field indicating if document has an attached file */
+  hasFile: string;
 
-    /** File name (e.g., "document.pdf") */
-    fileName: string;
+  /** File name (e.g., "document.pdf") */
+  fileName: string;
 
-    /** File size in bytes */
-    fileSize: string;
+  /** File size in bytes */
+  fileSize: string;
 
-    /** MIME type (e.g., "application/pdf") */
-    mimeType: string;
+  /** MIME type (e.g., "application/pdf") */
+  mimeType: string;
 
-    /** SharePoint Graph API item ID */
-    graphItemId: string;
+  /** SharePoint Graph API item ID */
+  graphItemId: string;
 
-    /** SharePoint Graph API drive ID */
-    graphDriveId: string;
+  /** SharePoint Graph API drive ID */
+  graphDriveId: string;
 }
 
 /**
  * Custom command button configuration.
  */
 export interface CustomCommand {
-    /** Unique command identifier */
-    id: string;
+  /** Unique command identifier */
+  id: string;
 
-    /** Display label for the button */
-    label: string;
+  /** Display label for the button */
+  label: string;
 
-    /** Fluent UI icon name (e.g., "Add24Regular") */
-    icon: string;
+  /** Fluent UI icon name (e.g., "Add24Regular") */
+  icon: string;
 
-    /** Enable rule expression (evaluated at runtime) */
-    enableRule: string;
+  /** Enable rule expression (evaluated at runtime) */
+  enableRule: string;
 
-    /** Error message to show when command cannot be executed */
-    errorMessage: string;
+  /** Error message to show when command cannot be executed */
+  errorMessage: string;
 
-    /** Button appearance (primary, secondary, subtle) */
-    appearance?: 'primary' | 'secondary' | 'subtle';
+  /** Button appearance (primary, secondary, subtle) */
+  appearance?: "primary" | "secondary" | "subtle";
 }
 
 /**
  * SDAP client configuration.
  */
 export interface SdapConfig {
-    /** Base URL of SDAP BFF API */
-    baseUrl: string;
+  /** Base URL of SDAP BFF API */
+  baseUrl: string;
 
-    /** Request timeout in milliseconds */
-    timeout: number;
+  /** Request timeout in milliseconds */
+  timeout: number;
 }
 
 /**
  * Overall grid configuration.
  */
 export interface GridConfiguration {
-    /** Field name mappings */
-    fieldMappings: FieldMappings;
+  /** Field name mappings */
+  fieldMappings: FieldMappings;
 
-    /** Custom command buttons */
-    customCommands: CustomCommand[];
+  /** Custom command buttons */
+  customCommands: CustomCommand[];
 
-    /** SDAP client configuration */
-    sdapConfig: SdapConfig;
+  /** SDAP client configuration */
+  sdapConfig: SdapConfig;
 }
 
 /**
  * Default grid configuration with sprk_ field prefix.
  */
 export const DEFAULT_GRID_CONFIG: GridConfiguration = {
-    fieldMappings: {
-        hasFile: 'sprk_hasfile',
-        fileName: 'sprk_filename',
-        fileSize: 'sprk_filesize',
-        mimeType: 'sprk_mimetype',
-        graphItemId: 'sprk_graphitemid',
-        graphDriveId: 'sprk_graphdriveid'
+  fieldMappings: {
+    hasFile: "sprk_hasfile",
+    fileName: "sprk_filename",
+    fileSize: "sprk_filesize",
+    mimeType: "sprk_mimetype",
+    graphItemId: "sprk_graphitemid",
+    graphDriveId: "sprk_graphdriveid",
+  },
+  customCommands: [
+    {
+      id: "addFile",
+      label: "Add File",
+      icon: "Add24Regular",
+      enableRule: "selectedCount === 1 && !hasFile",
+      errorMessage: "Select a single document without a file",
+      appearance: "primary",
     },
-    customCommands: [
-        {
-            id: 'addFile',
-            label: 'Add File',
-            icon: 'Add24Regular',
-            enableRule: 'selectedCount === 1 && !hasFile',
-            errorMessage: 'Select a single document without a file',
-            appearance: 'primary'
-        },
-        {
-            id: 'removeFile',
-            label: 'Remove File',
-            icon: 'Delete24Regular',
-            enableRule: 'selectedCount === 1 && hasFile',
-            errorMessage: 'Select a single document with a file',
-            appearance: 'secondary'
-        },
-        {
-            id: 'updateFile',
-            label: 'Update File',
-            icon: 'ArrowUpload24Regular',
-            enableRule: 'selectedCount === 1 && hasFile',
-            errorMessage: 'Select a single document with a file',
-            appearance: 'secondary'
-        },
-        {
-            id: 'downloadFile',
-            label: 'Download',
-            icon: 'ArrowDownload24Regular',
-            enableRule: 'selectedCount > 0 && (selectedCount > 1 || hasFile)',
-            errorMessage: 'Select at least one document with a file',
-            appearance: 'secondary'
-        }
-    ],
-    sdapConfig: {
-        baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
-        timeout: 300000 // 5 minutes
-    }
+    {
+      id: "removeFile",
+      label: "Remove File",
+      icon: "Delete24Regular",
+      enableRule: "selectedCount === 1 && hasFile",
+      errorMessage: "Select a single document with a file",
+      appearance: "secondary",
+    },
+    {
+      id: "updateFile",
+      label: "Update File",
+      icon: "ArrowUpload24Regular",
+      enableRule: "selectedCount === 1 && hasFile",
+      errorMessage: "Select a single document with a file",
+      appearance: "secondary",
+    },
+    {
+      id: "downloadFile",
+      label: "Download",
+      icon: "ArrowDownload24Regular",
+      enableRule: "selectedCount > 0 && (selectedCount > 1 || hasFile)",
+      errorMessage: "Select at least one document with a file",
+      appearance: "secondary",
+    },
+  ],
+  sdapConfig: {
+    baseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
+    timeout: 300000, // 5 minutes
+  },
 };
 
 /**
  * Command context for evaluating enable rules.
  */
 export interface CommandContext {
-    /** Number of selected records */
-    selectedCount: number;
+  /** Number of selected records */
+  selectedCount: number;
 
-    /** Whether the single selected record has a file */
-    hasFile: boolean;
+  /** Whether the single selected record has a file */
+  hasFile: boolean;
 
-    /** Selected record IDs */
-    selectedRecordIds: string[];
+  /** Selected record IDs */
+  selectedRecordIds: string[];
 }
 
 /**
@@ -161,45 +161,45 @@ export interface CommandContext {
  * - webUrl → sprk_filepath / sprk_sharepointurl (URL field)
  */
 export interface SpeFileMetadata {
-    /** Graph API Item ID */
-    id: string;
+  /** Graph API Item ID */
+  id: string;
 
-    /** File name */
-    name: string;
+  /** File name */
+  name: string;
 
-    /** Parent folder ID (optional) */
-    parentId?: string;
+  /** Parent folder ID (optional) */
+  parentId?: string;
 
-    /** File size in bytes */
-    size: number;
+  /** File size in bytes */
+  size: number;
 
-    /** Created date/time (ISO 8601) */
-    createdDateTime: string;
+  /** Created date/time (ISO 8601) */
+  createdDateTime: string;
 
-    /** Last modified date/time (ISO 8601) */
-    lastModifiedDateTime: string;
+  /** Last modified date/time (ISO 8601) */
+  lastModifiedDateTime: string;
 
-    /** Version identifier (ETag) */
-    eTag?: string;
+  /** Version identifier (ETag) */
+  eTag?: string;
 
-    /** Is this a folder */
-    isFolder: boolean;
+  /** Is this a folder */
+  isFolder: boolean;
 
-    /** SharePoint web URL (may not be available in all responses) */
-    webUrl?: string;
+  /** SharePoint web URL (may not be available in all responses) */
+  webUrl?: string;
 
-    // Convenience aliases for Quick Create (maps API response to our expected fields)
-    /** Alias for id (for Quick Create compatibility) */
-    driveItemId?: string;
+  // Convenience aliases for Quick Create (maps API response to our expected fields)
+  /** Alias for id (for Quick Create compatibility) */
+  driveItemId?: string;
 
-    /** Alias for name (for Quick Create compatibility) */
-    fileName?: string;
+  /** Alias for name (for Quick Create compatibility) */
+  fileName?: string;
 
-    /** Alias for webUrl (for Quick Create compatibility) */
-    sharePointUrl?: string;
+  /** Alias for webUrl (for Quick Create compatibility) */
+  sharePointUrl?: string;
 
-    /** Alias for size (for Quick Create compatibility) */
-    fileSize?: number;
+  /** Alias for size (for Quick Create compatibility) */
+  fileSize?: number;
 }
 
 /**
@@ -207,14 +207,14 @@ export interface SpeFileMetadata {
  * API: PUT /api/drives/{driveId}/upload?fileName={name}
  */
 export interface FileUploadRequest {
-    /** File to upload */
-    file: File;
+  /** File to upload */
+  file: File;
 
-    /** Graph API Drive ID (from sprk_graphdriveid or Container) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid or Container) */
+  driveId: string;
 
-    /** File name */
-    fileName: string;
+  /** File name */
+  fileName: string;
 }
 
 /**
@@ -222,11 +222,11 @@ export interface FileUploadRequest {
  * API: GET /api/drives/{driveId}/items/{itemId}/content
  */
 export interface FileDownloadRequest {
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID (from sprk_graphitemid) */
+  itemId: string;
 }
 
 /**
@@ -234,11 +234,11 @@ export interface FileDownloadRequest {
  * API: DELETE /api/drives/{driveId}/items/{itemId}
  */
 export interface FileDeleteRequest {
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID (from sprk_graphitemid) */
+  itemId: string;
 }
 
 /**
@@ -246,36 +246,36 @@ export interface FileDeleteRequest {
  * Replace = Delete existing + Upload new
  */
 export interface FileReplaceRequest {
-    /** New file to upload */
-    file: File;
+  /** New file to upload */
+  file: File;
 
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID of file to replace (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID of file to replace (from sprk_graphitemid) */
+  itemId: string;
 
-    /** New file name */
-    fileName: string;
+  /** New file name */
+  fileName: string;
 }
 
 /**
  * API Response wrapper
  */
 export interface ApiResponse<T> {
-    success: boolean;
-    data?: T;
-    error?: string;
-    details?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
+  details?: string;
 }
 
 /**
  * Service operation result
  */
 export interface ServiceResult<T = void> {
-    success: boolean;
-    data?: T;
-    error?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
 }
 
 /**
@@ -289,100 +289,113 @@ export interface ServiceResult<T = void> {
  * Passed via Xrm.Navigation.navigateTo() data property
  */
 export interface ParentContext {
-    /** Parent entity logical name (e.g., "sprk_matter") */
-    parentEntityName: string;
+  /** Parent entity logical name (e.g., "sprk_matter") */
+  parentEntityName: string;
 
-    /** Parent record GUID */
-    parentRecordId: string;
+  /** Parent record GUID */
+  parentRecordId: string;
 
-    /** SharePoint Embedded Container ID */
-    containerId: string;
+  /** SharePoint Embedded Container ID */
+  containerId: string;
 
-    /** Parent record display name (e.g., "MAT-2024-001") */
-    parentDisplayName: string;
+  /** Parent record display name (e.g., "MAT-2024-001") */
+  parentDisplayName: string;
 }
 
 /**
  * Form data collected from user input
  */
 export interface FormData {
-    /** Document name/title */
-    documentName: string;
+  /** Document name/title */
+  documentName: string;
 
-    /** Optional document description */
-    description?: string;
+  /** Optional document description */
+  description?: string;
 }
 
 /**
  * Uploaded file metadata (from SPE)
  */
 export interface UploadedFileMetadata {
-    /** Original file name */
-    fileName: string;
+  /** Original file name */
+  fileName: string;
 
-    /** File size in bytes */
-    size: number;
+  /** File size in bytes */
+  size: number;
 
-    /** SharePoint Graph API item ID */
-    itemId: string;
+  /** SharePoint Graph API item ID */
+  itemId: string;
 
-    /** MIME type */
-    mimeType: string;
+  /** MIME type */
+  mimeType: string;
 }
 
 /**
  * Result of creating a single Document record
  */
 export interface CreateResult {
-    /** Success flag */
-    success: boolean;
+  /** Success flag */
+  success: boolean;
 
-    /** File name that was processed */
-    fileName: string;
+  /** File name that was processed */
+  fileName: string;
 
-    /** Created record ID (if successful) */
-    recordId?: string;
+  /** Created record ID (if successful) */
+  recordId?: string;
 
-    /** Document ID (Dataverse GUID, if successful) */
-    documentId?: string;
+  /** Document ID (Dataverse GUID, if successful) */
+  documentId?: string;
 
-    /** SharePoint Embedded drive ID (if successful) */
-    driveId?: string;
+  /** SharePoint Embedded drive ID (if successful) */
+  driveId?: string;
 
-    /** SharePoint Embedded item ID (if successful) */
-    itemId?: string;
+  /** SharePoint Embedded item ID (if successful) */
+  itemId?: string;
 
-    /** Error message (if failed) */
-    error?: string;
+  /** Error message (if failed) */
+  error?: string;
 }
 
 /**
  * File validation error
  */
 export interface FileValidationError {
-    /** File name that failed validation */
-    fileName: string;
+  /** File name that failed validation */
+  fileName: string;
 
-    /** Validation error message */
-    message: string;
+  /** Validation error message */
+  message: string;
 }
 
 /**
  * File upload constraints
  */
 export const FILE_UPLOAD_LIMITS = {
-    /** Maximum number of files */
-    MAX_FILES: 10,
+  /** Maximum number of files */
+  MAX_FILES: 10,
 
-    /** Maximum file size (10MB in bytes) */
-    MAX_FILE_SIZE: 10 * 1024 * 1024,
+  /** Maximum file size (10MB in bytes) */
+  MAX_FILE_SIZE: 10 * 1024 * 1024,
 
-    /** Maximum total size (100MB in bytes) */
-    MAX_TOTAL_SIZE: 100 * 1024 * 1024,
+  /** Maximum total size (100MB in bytes) */
+  MAX_TOTAL_SIZE: 100 * 1024 * 1024,
 
-    /** Dangerous file extensions (blocked for security) */
-    DANGEROUS_EXTENSIONS: [
-        '.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jar',
-        '.app', '.msi', '.scr', '.com', '.pif', '.gadget', '.sh'
-    ]
+  /** Dangerous file extensions (blocked for security) */
+  DANGEROUS_EXTENSIONS: [
+    ".exe",
+    ".dll",
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".vbs",
+    ".js",
+    ".jar",
+    ".app",
+    ".msi",
+    ".scr",
+    ".com",
+    ".pif",
+    ".gadget",
+    ".sh",
+  ],
 } as const;

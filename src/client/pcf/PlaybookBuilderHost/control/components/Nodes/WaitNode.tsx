@@ -2,11 +2,11 @@
  * Wait Node - pauses execution for human approval or time delay.
  */
 
-import * as React from 'react';
-import { Text, tokens } from '@fluentui/react-components';
-import { Clock20Regular } from '@fluentui/react-icons';
-import { BaseNode } from './BaseNode';
-import type { PlaybookNodeData } from '../../stores';
+import * as React from "react";
+import { Text, tokens } from "@fluentui/react-components";
+import { Clock20Regular } from "@fluentui/react-icons";
+import { BaseNode } from "./BaseNode";
+import type { PlaybookNodeData } from "../../stores";
 
 interface WaitNodeProps {
   data: PlaybookNodeData;

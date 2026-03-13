@@ -136,7 +136,10 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
           includePersonal: includePersonalViews,
         };
 
-        const fetchedViews = await viewService.getViews(entityLogicalName, options);
+        const fetchedViews = await viewService.getViews(
+          entityLogicalName,
+          options,
+        );
 
         if (mounted) {
           setViews(fetchedViews);
@@ -144,7 +147,8 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
 
           // Auto-select default view if no selection
           if (!selectedViewId && fetchedViews.length > 0) {
-            const defaultView = fetchedViews.find((v) => v.isDefault) || fetchedViews[0];
+            const defaultView =
+              fetchedViews.find((v) => v.isDefault) || fetchedViews[0];
             if (onViewChange) {
               onViewChange(defaultView);
             }
@@ -163,21 +167,27 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
     return () => {
       mounted = false;
     };
-  }, [entityLogicalName, includeCustomViews, includePersonalViews, viewService]);
+  }, [
+    entityLogicalName,
+    includeCustomViews,
+    includePersonalViews,
+    viewService,
+  ]);
 
   // Handle selection change
-  const handleSelectionChange: DropdownProps["onOptionSelect"] = React.useCallback(
-    (_event, data) => {
-      const viewId = data.optionValue;
-      if (viewId && onViewChange) {
-        const selectedView = views.find((v) => v.id === viewId);
-        if (selectedView) {
-          onViewChange(selectedView);
+  const handleSelectionChange: DropdownProps["onOptionSelect"] =
+    React.useCallback(
+      (_event, data) => {
+        const viewId = data.optionValue;
+        if (viewId && onViewChange) {
+          const selectedView = views.find((v) => v.id === viewId);
+          if (selectedView) {
+            onViewChange(selectedView);
+          }
         }
-      }
-    },
-    [views, onViewChange]
-  );
+      },
+      [views, onViewChange],
+    );
 
   // Get selected view name for display
   const selectedViewName = React.useMemo(() => {
@@ -233,7 +243,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
         className={mergeClasses(
           styles.selector,
           compact && styles.selectorCompact,
-          className
+          className,
         )}
         disabled
         placeholder="No views available"
@@ -279,7 +289,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
       className={mergeClasses(
         styles.selector,
         compact && styles.selectorCompact,
-        className
+        className,
       )}
       value={selectedViewName}
       selectedOptions={selectedViewId ? [selectedViewId] : []}

@@ -38,6 +38,6 @@ export interface IDatasetConfig {
   scrollBehavior: ScrollBehavior;
 
   // Toolbar configuration
-  compactToolbar?: boolean;           // Icon-only mode
-  toolbarShowOverflow?: boolean;      // Enable overflow menu (default: true)
+  compactToolbar?: boolean; // Icon-only mode
+  toolbarShowOverflow?: boolean; // Enable overflow menu (default: true)
 }

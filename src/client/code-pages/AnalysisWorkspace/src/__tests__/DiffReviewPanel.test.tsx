@@ -23,17 +23,15 @@ import { DiffReviewPanel } from "../components/DiffReviewPanel";
 
 /** Render with FluentProvider (required for makeStyles) */
 function renderWithProvider(ui: React.ReactElement) {
-    return render(
-        <FluentProvider theme={webLightTheme}>{ui}</FluentProvider>
-    );
+  return render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 }
 
 const DEFAULT_PROPS = {
-    isOpen: true,
-    originalText: "<p>Original analysis content</p>",
-    proposedText: "<p>Revised analysis content with improvements</p>",
-    onAccept: jest.fn(),
-    onReject: jest.fn(),
+  isOpen: true,
+  originalText: "<p>Original analysis content</p>",
+  proposedText: "<p>Revised analysis content with improvements</p>",
+  onAccept: jest.fn(),
+  onReject: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -41,217 +39,188 @@ const DEFAULT_PROPS = {
 // ---------------------------------------------------------------------------
 
 describe("DiffReviewPanel", () => {
-    afterEach(() => {
-        jest.clearAllMocks();
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // -----------------------------------------------------------------------
+  // 1. Rendering
+  // -----------------------------------------------------------------------
+
+  describe("rendering", () => {
+    it("render_IsOpenTrue_ShowsPanelWithContent", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
+
+      expect(
+        screen.getByTestId("diff-review-panel-backdrop"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("diff-review-panel")).toBeInTheDocument();
+      expect(screen.getByText("Review Proposed Changes")).toBeInTheDocument();
     });
 
-    // -----------------------------------------------------------------------
-    // 1. Rendering
-    // -----------------------------------------------------------------------
+    it("render_IsOpenTrue_ShowsDiffCompareView", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
 
-    describe("rendering", () => {
-        it("render_IsOpenTrue_ShowsPanelWithContent", () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
-
-            expect(
-                screen.getByTestId("diff-review-panel-backdrop")
-            ).toBeInTheDocument();
-            expect(
-                screen.getByTestId("diff-review-panel")
-            ).toBeInTheDocument();
-            expect(
-                screen.getByText("Review Proposed Changes")
-            ).toBeInTheDocument();
-        });
-
-        it("render_IsOpenTrue_ShowsDiffCompareView", () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
-
-            // The mock DiffCompareView renders with data-testid
-            expect(
-                screen.getByTestId("mock-diff-compare-view")
-            ).toBeInTheDocument();
-        });
-
-        it("render_IsOpenFalse_BackdropHiddenPointerEventsNone", () => {
-            renderWithProvider(
-                <DiffReviewPanel {...DEFAULT_PROPS} isOpen={false} />
-            );
-
-            // Panel should still be in DOM but visually hidden
-            const backdrop = screen.getByTestId("diff-review-panel-backdrop");
-            expect(backdrop).toBeInTheDocument();
-
-            // DiffCompareView should NOT render when closed (conditional rendering)
-            expect(
-                screen.queryByTestId("mock-diff-compare-view")
-            ).not.toBeInTheDocument();
-        });
-
-        it("render_HasCorrectAccessibilityAttributes", () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
-
-            const backdrop = screen.getByTestId("diff-review-panel-backdrop");
-            expect(backdrop).toHaveAttribute("role", "dialog");
-            expect(backdrop).toHaveAttribute("aria-modal", "true");
-            expect(backdrop).toHaveAttribute(
-                "aria-label",
-                "Review proposed changes"
-            );
-        });
-
-        it("render_CloseButtonPresent", () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
-
-            const closeButton = screen.getByTestId("diff-review-close");
-            expect(closeButton).toBeInTheDocument();
-            expect(closeButton).toHaveAttribute(
-                "aria-label",
-                "Close review panel"
-            );
-        });
+      // The mock DiffCompareView renders with data-testid
+      expect(screen.getByTestId("mock-diff-compare-view")).toBeInTheDocument();
     });
 
-    // -----------------------------------------------------------------------
-    // 2. Accept action
-    // -----------------------------------------------------------------------
+    it("render_IsOpenFalse_BackdropHiddenPointerEventsNone", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} isOpen={false} />);
 
-    describe("accept action", () => {
-        it("accept_ClickAcceptButton_CallsOnAcceptWithProposedText", () => {
-            const mockOnAccept = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    onAccept={mockOnAccept}
-                />
-            );
+      // Panel should still be in DOM but visually hidden
+      const backdrop = screen.getByTestId("diff-review-panel-backdrop");
+      expect(backdrop).toBeInTheDocument();
 
-            fireEvent.click(screen.getByTestId("diff-accept-button"));
-
-            expect(mockOnAccept).toHaveBeenCalledTimes(1);
-            expect(mockOnAccept).toHaveBeenCalledWith(
-                "<p>Revised analysis content with improvements</p>"
-            );
-        });
+      // DiffCompareView should NOT render when closed (conditional rendering)
+      expect(
+        screen.queryByTestId("mock-diff-compare-view"),
+      ).not.toBeInTheDocument();
     });
 
-    // -----------------------------------------------------------------------
-    // 3. Reject action
-    // -----------------------------------------------------------------------
+    it("render_HasCorrectAccessibilityAttributes", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
 
-    describe("reject action", () => {
-        it("reject_ClickRejectButton_CallsOnReject", () => {
-            const mockOnReject = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    onReject={mockOnReject}
-                />
-            );
-
-            fireEvent.click(screen.getByTestId("diff-reject-button"));
-
-            expect(mockOnReject).toHaveBeenCalledTimes(1);
-        });
-
-        it("reject_ClickCloseButton_CallsOnReject", () => {
-            const mockOnReject = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    onReject={mockOnReject}
-                />
-            );
-
-            fireEvent.click(screen.getByTestId("diff-review-close"));
-
-            expect(mockOnReject).toHaveBeenCalledTimes(1);
-        });
+      const backdrop = screen.getByTestId("diff-review-panel-backdrop");
+      expect(backdrop).toHaveAttribute("role", "dialog");
+      expect(backdrop).toHaveAttribute("aria-modal", "true");
+      expect(backdrop).toHaveAttribute("aria-label", "Review proposed changes");
     });
 
-    // -----------------------------------------------------------------------
-    // 4. Keyboard interactions
-    // -----------------------------------------------------------------------
+    it("render_CloseButtonPresent", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
 
-    describe("keyboard interactions", () => {
-        it("escape_WhenOpen_CallsOnReject", () => {
-            const mockOnReject = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    onReject={mockOnReject}
-                />
-            );
+      const closeButton = screen.getByTestId("diff-review-close");
+      expect(closeButton).toBeInTheDocument();
+      expect(closeButton).toHaveAttribute("aria-label", "Close review panel");
+    });
+  });
 
-            fireEvent.keyDown(document, { key: "Escape" });
+  // -----------------------------------------------------------------------
+  // 2. Accept action
+  // -----------------------------------------------------------------------
 
-            expect(mockOnReject).toHaveBeenCalledTimes(1);
-        });
+  describe("accept action", () => {
+    it("accept_ClickAcceptButton_CallsOnAcceptWithProposedText", () => {
+      const mockOnAccept = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel {...DEFAULT_PROPS} onAccept={mockOnAccept} />,
+      );
 
-        it("escape_WhenClosed_DoesNotCallOnReject", () => {
-            const mockOnReject = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    isOpen={false}
-                    onReject={mockOnReject}
-                />
-            );
+      fireEvent.click(screen.getByTestId("diff-accept-button"));
 
-            fireEvent.keyDown(document, { key: "Escape" });
+      expect(mockOnAccept).toHaveBeenCalledTimes(1);
+      expect(mockOnAccept).toHaveBeenCalledWith(
+        "<p>Revised analysis content with improvements</p>",
+      );
+    });
+  });
 
-            expect(mockOnReject).not.toHaveBeenCalled();
-        });
+  // -----------------------------------------------------------------------
+  // 3. Reject action
+  // -----------------------------------------------------------------------
 
-        it("otherKeys_WhenOpen_DoNotCallOnReject", () => {
-            const mockOnReject = jest.fn();
-            renderWithProvider(
-                <DiffReviewPanel
-                    {...DEFAULT_PROPS}
-                    onReject={mockOnReject}
-                />
-            );
+  describe("reject action", () => {
+    it("reject_ClickRejectButton_CallsOnReject", () => {
+      const mockOnReject = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel {...DEFAULT_PROPS} onReject={mockOnReject} />,
+      );
 
-            fireEvent.keyDown(document, { key: "Enter" });
-            fireEvent.keyDown(document, { key: "Tab" });
-            fireEvent.keyDown(document, { key: "a" });
+      fireEvent.click(screen.getByTestId("diff-reject-button"));
 
-            expect(mockOnReject).not.toHaveBeenCalled();
-        });
+      expect(mockOnReject).toHaveBeenCalledTimes(1);
     });
 
-    // -----------------------------------------------------------------------
-    // 5. Focus management
-    // -----------------------------------------------------------------------
+    it("reject_ClickCloseButton_CallsOnReject", () => {
+      const mockOnReject = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel {...DEFAULT_PROPS} onReject={mockOnReject} />,
+      );
 
-    describe("focus management", () => {
-        it("open_PanelReceivesFocus", async () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
+      fireEvent.click(screen.getByTestId("diff-review-close"));
 
-            const panel = screen.getByTestId("diff-review-panel");
+      expect(mockOnReject).toHaveBeenCalledTimes(1);
+    });
+  });
 
-            // The panel should have tabIndex -1 for programmatic focus
-            expect(panel).toHaveAttribute("tabindex", "-1");
-        });
+  // -----------------------------------------------------------------------
+  // 4. Keyboard interactions
+  // -----------------------------------------------------------------------
+
+  describe("keyboard interactions", () => {
+    it("escape_WhenOpen_CallsOnReject", () => {
+      const mockOnReject = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel {...DEFAULT_PROPS} onReject={mockOnReject} />,
+      );
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(mockOnReject).toHaveBeenCalledTimes(1);
     });
 
-    // -----------------------------------------------------------------------
-    // 6. DiffCompareView props forwarding
-    // -----------------------------------------------------------------------
+    it("escape_WhenClosed_DoesNotCallOnReject", () => {
+      const mockOnReject = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel
+          {...DEFAULT_PROPS}
+          isOpen={false}
+          onReject={mockOnReject}
+        />,
+      );
 
-    describe("DiffCompareView props", () => {
-        it("diffCompareView_ReceivesOriginalAndProposedText", () => {
-            renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
+      fireEvent.keyDown(document, { key: "Escape" });
 
-            const diffView = screen.getByTestId("mock-diff-compare-view");
-            expect(diffView).toHaveAttribute(
-                "data-original",
-                "<p>Original analysis content</p>"
-            );
-            expect(diffView).toHaveAttribute(
-                "data-proposed",
-                "<p>Revised analysis content with improvements</p>"
-            );
-        });
+      expect(mockOnReject).not.toHaveBeenCalled();
     });
+
+    it("otherKeys_WhenOpen_DoNotCallOnReject", () => {
+      const mockOnReject = jest.fn();
+      renderWithProvider(
+        <DiffReviewPanel {...DEFAULT_PROPS} onReject={mockOnReject} />,
+      );
+
+      fireEvent.keyDown(document, { key: "Enter" });
+      fireEvent.keyDown(document, { key: "Tab" });
+      fireEvent.keyDown(document, { key: "a" });
+
+      expect(mockOnReject).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5. Focus management
+  // -----------------------------------------------------------------------
+
+  describe("focus management", () => {
+    it("open_PanelReceivesFocus", async () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
+
+      const panel = screen.getByTestId("diff-review-panel");
+
+      // The panel should have tabIndex -1 for programmatic focus
+      expect(panel).toHaveAttribute("tabindex", "-1");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 6. DiffCompareView props forwarding
+  // -----------------------------------------------------------------------
+
+  describe("DiffCompareView props", () => {
+    it("diffCompareView_ReceivesOriginalAndProposedText", () => {
+      renderWithProvider(<DiffReviewPanel {...DEFAULT_PROPS} />);
+
+      const diffView = screen.getByTestId("mock-diff-compare-view");
+      expect(diffView).toHaveAttribute(
+        "data-original",
+        "<p>Original analysis content</p>",
+      );
+      expect(diffView).toHaveAttribute(
+        "data-proposed",
+        "<p>Revised analysis content with improvements</p>",
+      );
+    });
+  });
 });

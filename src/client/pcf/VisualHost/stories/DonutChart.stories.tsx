@@ -15,7 +15,8 @@ const meta: Meta<typeof DonutChart> = {
     layout: "centered",
     docs: {
       description: {
-        component: "DonutChart displays proportional data with drill-through support.",
+        component:
+          "DonutChart displays proportional data with drill-through support.",
       },
     },
   },

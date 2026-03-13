@@ -13,22 +13,22 @@
  * @see CreateRecordWizard — parent component that syncs card selections
  *      with dynamic wizard steps via WizardShell.addDynamicStep.
  */
-import * as React from 'react';
+import * as React from "react";
 import {
   Card,
   Text,
   makeStyles,
   tokens,
   mergeClasses,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   PersonRegular,
   DocumentTextRegular,
   MailRegular,
   CheckboxCheckedRegular,
   CheckboxUncheckedRegular,
-} from '@fluentui/react-icons';
-import type { FollowOnActionId } from './types';
+} from "@fluentui/react-icons";
+import type { FollowOnActionId } from "./types";
 
 // ---------------------------------------------------------------------------
 // Card definition
@@ -44,24 +44,25 @@ interface IFollowOnCardDef {
 
 const CARD_DEFS: IFollowOnCardDef[] = [
   {
-    id: 'assign-counsel',
-    label: 'Assign Resources',
-    description: 'Search and assign internal and external resources.',
-    stepLabel: 'Assign Resources',
+    id: "assign-counsel",
+    label: "Assign Resources",
+    description: "Search and assign internal and external resources.",
+    stepLabel: "Assign Resources",
     icon: <PersonRegular fontSize={28} />,
   },
   {
-    id: 'draft-summary',
-    label: 'Draft Summary',
-    description: 'Generate an AI-assisted summary and distribute to recipients.',
-    stepLabel: 'Draft Summary',
+    id: "draft-summary",
+    label: "Draft Summary",
+    description:
+      "Generate an AI-assisted summary and distribute to recipients.",
+    stepLabel: "Draft Summary",
     icon: <DocumentTextRegular fontSize={28} />,
   },
   {
-    id: 'send-email',
-    label: 'Send Email to Client',
-    description: 'Compose and queue an introductory email to the client.',
-    stepLabel: 'Send Email',
+    id: "send-email",
+    label: "Send Email to Client",
+    description: "Compose and queue an introductory email to the client.",
+    stepLabel: "Send Email",
     icon: <MailRegular fontSize={28} />,
   },
 ];
@@ -72,23 +73,23 @@ const CARD_DEFS: IFollowOnCardDef[] = [
 
 /** Map FollowOnActionId → sidebar step ID. */
 export const FOLLOW_ON_STEP_ID_MAP: Record<FollowOnActionId, string> = {
-  'assign-counsel': 'followon-assign-counsel',
-  'draft-summary': 'followon-draft-summary',
-  'send-email': 'followon-send-email',
+  "assign-counsel": "followon-assign-counsel",
+  "draft-summary": "followon-draft-summary",
+  "send-email": "followon-send-email",
 };
 
 /** Map FollowOnActionId → sidebar step label. */
 export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
-  'assign-counsel': 'Assign Resources',
-  'draft-summary': 'Draft Summary',
-  'send-email': 'Send Email',
+  "assign-counsel": "Assign Resources",
+  "draft-summary": "Draft Summary",
+  "send-email": "Send Email",
 };
 
 /** Canonical order for dynamic follow-on steps in the sidebar. */
 export const FOLLOW_ON_CANONICAL_ORDER = [
-  'followon-assign-counsel',
-  'followon-draft-summary',
-  'followon-send-email',
+  "followon-assign-counsel",
+  "followon-draft-summary",
+  "followon-send-email",
 ];
 
 // ---------------------------------------------------------------------------
@@ -110,13 +111,13 @@ export interface INextStepsStepProps {
 
 const useStyles = makeStyles({
   root: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalL,
   },
   headerText: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   stepTitle: {
@@ -126,34 +127,34 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   cardRow: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
     gap: tokens.spacingHorizontalM,
   },
   card: {
-    cursor: 'pointer',
-    display: 'flex',
-    flexDirection: 'column',
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingVerticalL,
-    borderTopWidth: '2px',
-    borderRightWidth: '2px',
-    borderBottomWidth: '2px',
-    borderLeftWidth: '2px',
-    borderTopStyle: 'solid',
-    borderRightStyle: 'solid',
-    borderBottomStyle: 'solid',
-    borderLeftStyle: 'solid',
+    borderTopWidth: "2px",
+    borderRightWidth: "2px",
+    borderBottomWidth: "2px",
+    borderLeftWidth: "2px",
+    borderTopStyle: "solid",
+    borderRightStyle: "solid",
+    borderBottomStyle: "solid",
+    borderLeftStyle: "solid",
     borderTopColor: tokens.colorNeutralStroke1,
     borderRightColor: tokens.colorNeutralStroke1,
     borderBottomColor: tokens.colorNeutralStroke1,
     borderLeftColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusMedium,
-    userSelect: 'none',
-    transition: 'border-color 0.1s ease, background-color 0.1s ease',
-    boxShadow: 'none',
-    ':hover': {
+    userSelect: "none",
+    transition: "border-color 0.1s ease, background-color 0.1s ease",
+    boxShadow: "none",
+    ":hover": {
       borderTopColor: tokens.colorBrandStroke1,
       borderRightColor: tokens.colorBrandStroke1,
       borderBottomColor: tokens.colorBrandStroke1,
@@ -167,7 +168,7 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorBrandStroke1,
     borderLeftColor: tokens.colorBrandStroke1,
     backgroundColor: tokens.colorBrandBackground2,
-    ':hover': {
+    ":hover": {
       borderTopColor: tokens.colorBrandStroke1,
       borderRightColor: tokens.colorBrandStroke1,
       borderBottomColor: tokens.colorBrandStroke1,
@@ -176,26 +177,26 @@ const useStyles = makeStyles({
     },
   },
   cardTopRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: tokens.spacingHorizontalS,
   },
   cardIcon: {
     color: tokens.colorBrandForeground1,
     flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
   },
   cardIconNeutral: {
     color: tokens.colorNeutralForeground3,
   },
   checkboxIcon: {
     color: tokens.colorBrandForeground1,
-    fontSize: '20px',
+    fontSize: "20px",
     flexShrink: 0,
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
   },
   checkboxIconNeutral: {
     color: tokens.colorNeutralForeground3,
@@ -209,7 +210,7 @@ const useStyles = makeStyles({
   },
   skipMessage: {
     color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+    textAlign: "center",
     paddingTop: tokens.spacingVerticalS,
   },
 });
@@ -224,7 +225,11 @@ interface ICheckboxCardProps {
   onToggle: (id: FollowOnActionId) => void;
 }
 
-const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle }) => {
+const CheckboxCard: React.FC<ICheckboxCardProps> = ({
+  def,
+  selected,
+  onToggle,
+}) => {
   const styles = useStyles();
 
   const handleClick = React.useCallback(() => {
@@ -233,12 +238,12 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') {
+      if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
         onToggle(def.id);
       }
     },
-    [def.id, onToggle]
+    [def.id, onToggle],
   );
 
   return (
@@ -249,20 +254,30 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
       role="checkbox"
       aria-checked={selected}
       tabIndex={0}
-      aria-label={`${def.label}: ${def.description}${selected ? ' — selected' : ''}`}
+      aria-label={`${def.label}: ${def.description}${selected ? " — selected" : ""}`}
     >
       <div className={styles.cardTopRow}>
         <span
-          className={mergeClasses(styles.cardIcon, !selected && styles.cardIconNeutral)}
+          className={mergeClasses(
+            styles.cardIcon,
+            !selected && styles.cardIconNeutral,
+          )}
           aria-hidden="true"
         >
           {def.icon}
         </span>
         <span
-          className={mergeClasses(styles.checkboxIcon, !selected && styles.checkboxIconNeutral)}
+          className={mergeClasses(
+            styles.checkboxIcon,
+            !selected && styles.checkboxIconNeutral,
+          )}
           aria-hidden="true"
         >
-          {selected ? <CheckboxCheckedRegular fontSize={22} /> : <CheckboxUncheckedRegular fontSize={22} />}
+          {selected ? (
+            <CheckboxCheckedRegular fontSize={22} />
+          ) : (
+            <CheckboxUncheckedRegular fontSize={22} />
+          )}
         </span>
       </div>
       <Text size={300} weight="semibold" className={styles.cardLabel}>
@@ -282,7 +297,7 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 export const NextStepsStep: React.FC<INextStepsStepProps> = ({
   selectedActions,
   onSelectionChange,
-  entityLabel = 'record',
+  entityLabel = "record",
 }) => {
   const styles = useStyles();
 
@@ -293,12 +308,13 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
       } else {
         const orderedIds = CARD_DEFS.map((d) => d.id);
         const next = orderedIds.filter(
-          (orderedId) => selectedActions.includes(orderedId) || orderedId === id
+          (orderedId) =>
+            selectedActions.includes(orderedId) || orderedId === id,
         );
         onSelectionChange(next);
       }
     },
-    [selectedActions, onSelectionChange]
+    [selectedActions, onSelectionChange],
   );
 
   return (
@@ -308,12 +324,17 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
           Next steps
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Optionally select follow-on actions to complete after the {entityLabel} is
-          created. You can skip all and handle these from the {entityLabel} record.
+          Optionally select follow-on actions to complete after the{" "}
+          {entityLabel} is created. You can skip all and handle these from the{" "}
+          {entityLabel} record.
         </Text>
       </div>
 
-      <div className={styles.cardRow} role="group" aria-label="Follow-on actions">
+      <div
+        className={styles.cardRow}
+        role="group"
+        aria-label="Follow-on actions"
+      >
         {CARD_DEFS.map((def) => (
           <CheckboxCard
             key={def.id}
@@ -326,7 +347,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
 
       {selectedActions.length === 0 && (
         <Text size={200} className={styles.skipMessage}>
-          No actions selected — click Finish to create the {entityLabel} without follow-on steps.
+          No actions selected — click Finish to create the {entityLabel} without
+          follow-on steps.
         </Text>
       )}
     </div>

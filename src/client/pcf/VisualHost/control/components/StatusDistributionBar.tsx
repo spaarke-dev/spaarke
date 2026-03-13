@@ -5,7 +5,12 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Text, mergeClasses } from "@fluentui/react-components";
+import {
+  makeStyles,
+  tokens,
+  Text,
+  mergeClasses,
+} from "@fluentui/react-components";
 import type { DrillInteraction } from "../types";
 
 export interface IStatusSegment {
@@ -190,14 +195,18 @@ export const StatusDistributionBar: React.FC<IStatusDistributionBarProps> = ({
               key={`${segment.label}-${index}`}
               className={mergeClasses(
                 styles.segment,
-                isInteractive && styles.segmentInteractive
+                isInteractive && styles.segmentInteractive,
               )}
               style={{
                 width: `${percentage}%`,
                 backgroundColor: segmentColor,
               }}
-              onClick={isInteractive ? () => handleSegmentClick(segment) : undefined}
-              onKeyDown={isInteractive ? (e) => handleKeyDown(e, segment) : undefined}
+              onClick={
+                isInteractive ? () => handleSegmentClick(segment) : undefined
+              }
+              onKeyDown={
+                isInteractive ? (e) => handleKeyDown(e, segment) : undefined
+              }
               tabIndex={isInteractive ? 0 : undefined}
               role={isInteractive ? "button" : undefined}
               aria-label={`${segment.label}: ${segment.value}`}
@@ -212,10 +221,15 @@ export const StatusDistributionBar: React.FC<IStatusDistributionBarProps> = ({
       </div>
       <div className={styles.legend}>
         {segments.map((segment, index) => (
-          <div key={`legend-${segment.label}-${index}`} className={styles.legendItem}>
+          <div
+            key={`legend-${segment.label}-${index}`}
+            className={styles.legendItem}
+          >
             <div
               className={styles.legendColor}
-              style={{ backgroundColor: segment.color || colors[index % colors.length] }}
+              style={{
+                backgroundColor: segment.color || colors[index % colors.length],
+              }}
             />
             <span className={styles.legendText}>
               {segment.label}: {segment.value}

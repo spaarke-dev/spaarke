@@ -22,7 +22,7 @@
  *   - Full keyboard support (arrow keys, Enter, Escape)
  */
 
-import * as React from 'react';
+import * as React from "react";
 import {
   Input,
   Text,
@@ -32,8 +32,8 @@ import {
   makeStyles,
   tokens,
   mergeClasses,
-} from '@fluentui/react-components';
-import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
+} from "@fluentui/react-components";
+import { DismissRegular, SearchRegular } from "@fluentui/react-icons";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,14 +72,14 @@ export interface ILookupFieldProps {
 
 const useStyles = makeStyles({
   wrapper: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXXS,
   },
 
   labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
+    display: "inline-flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXXS,
   },
   requiredMark: {
@@ -87,45 +87,45 @@ const useStyles = makeStyles({
   },
 
   resultsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1px',
-    borderTopWidth: '1px',
-    borderRightWidth: '1px',
-    borderBottomWidth: '1px',
-    borderLeftWidth: '1px',
-    borderTopStyle: 'solid',
-    borderRightStyle: 'solid',
-    borderBottomStyle: 'solid',
-    borderLeftStyle: 'solid',
+    display: "flex",
+    flexDirection: "column",
+    gap: "1px",
+    borderTopWidth: "1px",
+    borderRightWidth: "1px",
+    borderBottomWidth: "1px",
+    borderLeftWidth: "1px",
+    borderTopStyle: "solid",
+    borderRightStyle: "solid",
+    borderBottomStyle: "solid",
+    borderLeftStyle: "solid",
     borderTopColor: tokens.colorNeutralStroke1,
     borderRightColor: tokens.colorNeutralStroke1,
     borderBottomColor: tokens.colorNeutralStroke1,
     borderLeftColor: tokens.colorNeutralStroke1,
     borderRadius: tokens.borderRadiusMedium,
-    overflow: 'hidden',
-    maxHeight: '200px',
-    overflowY: 'auto',
+    overflow: "hidden",
+    maxHeight: "200px",
+    overflowY: "auto",
     marginTop: tokens.spacingVerticalXXS,
   },
   resultItem: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    cursor: 'pointer',
+    cursor: "pointer",
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    ':hover': {
+    ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    ':focus-visible': {
-      outlineStyle: 'solid',
-      outlineWidth: '2px',
+    ":focus-visible": {
+      outlineStyle: "solid",
+      outlineWidth: "2px",
       outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
+      outlineOffset: "-2px",
     },
   },
   resultItemHighlighted: {
@@ -133,8 +133,8 @@ const useStyles = makeStyles({
   },
 
   selectedChip: {
-    display: 'inline-flex',
-    alignItems: 'center',
+    display: "inline-flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXXS,
     paddingBottom: tokens.spacingVerticalXXS,
@@ -142,19 +142,19 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalXXS,
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground2,
-    borderTopWidth: '1px',
-    borderRightWidth: '1px',
-    borderBottomWidth: '1px',
-    borderLeftWidth: '1px',
-    borderTopStyle: 'solid',
-    borderRightStyle: 'solid',
-    borderBottomStyle: 'solid',
-    borderLeftStyle: 'solid',
+    borderTopWidth: "1px",
+    borderRightWidth: "1px",
+    borderBottomWidth: "1px",
+    borderLeftWidth: "1px",
+    borderTopStyle: "solid",
+    borderRightStyle: "solid",
+    borderBottomStyle: "solid",
+    borderLeftStyle: "solid",
     borderTopColor: tokens.colorBrandStroke2,
     borderRightColor: tokens.colorBrandStroke2,
     borderBottomColor: tokens.colorBrandStroke2,
     borderLeftColor: tokens.colorBrandStroke2,
-    alignSelf: 'flex-start',
+    alignSelf: "flex-start",
     marginTop: tokens.spacingVerticalXXS,
   },
   selectedChipName: {
@@ -162,16 +162,16 @@ const useStyles = makeStyles({
   },
 
   spinnerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
   emptyText: {
     color: tokens.colorNeutralForeground3,
     paddingTop: tokens.spacingVerticalS,
-    textAlign: 'center',
+    textAlign: "center",
   },
 });
 
@@ -190,7 +190,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [searchTerm, setSearchTerm] = React.useState('');
+  const [searchTerm, setSearchTerm] = React.useState("");
   const [results, setResults] = React.useState<ILookupItem[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [showResults, setShowResults] = React.useState(false);
@@ -218,7 +218,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         setShowResults(items.length > 0);
         setHighlightedIndex(-1);
       } catch (err) {
-        console.error('[LookupField] Search error:', label, err);
+        console.error("[LookupField] Search error:", label, err);
         setResults([]);
         setShowResults(false);
       } finally {
@@ -236,12 +236,15 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   // -- Close results on outside click --------------------------------------
   React.useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      ) {
         setShowResults(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // -- Handlers ------------------------------------------------------------
@@ -252,7 +255,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         onChange(null);
       }
     },
-    [value, onChange]
+    [value, onChange],
   );
 
   const handleSelect = React.useCallback(
@@ -262,12 +265,12 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
       setResults([]);
       setShowResults(false);
     },
-    [onChange]
+    [onChange],
   );
 
   const handleClear = React.useCallback(() => {
     onChange(null);
-    setSearchTerm('');
+    setSearchTerm("");
     setResults([]);
     setShowResults(false);
   }, [onChange]);
@@ -276,24 +279,24 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (!showResults || results.length === 0) return;
 
-      if (e.key === 'ArrowDown') {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
         setHighlightedIndex((prev) =>
-          prev < results.length - 1 ? prev + 1 : 0
+          prev < results.length - 1 ? prev + 1 : 0,
         );
-      } else if (e.key === 'ArrowUp') {
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : results.length - 1
+          prev > 0 ? prev - 1 : results.length - 1,
         );
-      } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+      } else if (e.key === "Enter" && highlightedIndex >= 0) {
         e.preventDefault();
         handleSelect(results[highlightedIndex]);
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         setShowResults(false);
       }
     },
-    [showResults, results, highlightedIndex, handleSelect]
+    [showResults, results, highlightedIndex, handleSelect],
   );
 
   const handleFocus = React.useCallback(() => {
@@ -308,7 +311,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
       {label}
       {required && (
         <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
+          {" *"}
         </span>
       )}
     </span>
@@ -325,7 +328,11 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
       <Field label={renderLabel()} required={required}>
         {value ? (
           <div className={styles.selectedChip}>
-            <Text size={200} weight="semibold" className={styles.selectedChipName}>
+            <Text
+              size={200}
+              weight="semibold"
+              className={styles.selectedChipName}
+            >
               {value.name}
             </Text>
             <Button
@@ -369,14 +376,16 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
               key={item.id}
               className={mergeClasses(
                 styles.resultItem,
-                index === highlightedIndex ? styles.resultItemHighlighted : undefined
+                index === highlightedIndex
+                  ? styles.resultItemHighlighted
+                  : undefined,
               )}
               role="option"
               aria-selected={index === highlightedIndex}
               tabIndex={0}
               onClick={() => handleSelect(item)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   handleSelect(item);
                 }
@@ -398,4 +407,4 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   );
 };
 
-LookupField.displayName = 'LookupField';
+LookupField.displayName = "LookupField";

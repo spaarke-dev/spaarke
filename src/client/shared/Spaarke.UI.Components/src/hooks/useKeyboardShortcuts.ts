@@ -11,7 +11,9 @@ export interface UseKeyboardShortcutsOptions {
 /**
  * Hook to register keyboard shortcuts for commands
  */
-export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void {
+export function useKeyboardShortcuts(
+  options: UseKeyboardShortcutsOptions,
+): void {
   const { commands, context, enabled = true } = options;
 
   useEffect(() => {
@@ -33,9 +35,7 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
       const shortcut = parts.join("+");
 
       // Find command with matching shortcut
-      const command = commands.find(
-        (cmd) => cmd.keyboardShortcut === shortcut
-      );
+      const command = commands.find((cmd) => cmd.keyboardShortcut === shortcut);
 
       if (!command) return;
 

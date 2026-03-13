@@ -20,7 +20,10 @@ export {
   ALL_SECTION_NAMES,
   getEventTypeFieldConfig,
 } from "./EventTypeService";
-export type { IGetEventTypeFieldConfigResult, SectionName } from "./EventTypeService";
+export type {
+  IGetEventTypeFieldConfigResult,
+  SectionName,
+} from "./EventTypeService";
 export { FetchXmlService } from "./FetchXmlService";
 export type {
   IFetchXmlResult,

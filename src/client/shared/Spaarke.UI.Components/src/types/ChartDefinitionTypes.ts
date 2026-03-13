@@ -65,8 +65,9 @@ export interface IChartDefinition {
 /**
  * Parsed chart definition with typed options
  */
-export interface IChartDefinitionParsed<TOptions = IChartOptionsBase>
-  extends Omit<IChartDefinition, "sprk_optionsjson"> {
+export interface IChartDefinitionParsed<
+  TOptions = IChartOptionsBase,
+> extends Omit<IChartDefinition, "sprk_optionsjson"> {
   /** Parsed options object */
   options: TOptions;
 }
@@ -224,7 +225,9 @@ export interface VisualTypeOptionsMap {
  * Helper to get typed options based on visual type
  */
 export type OptionsForVisualType<T extends VisualType> =
-  T extends keyof VisualTypeOptionsMap ? VisualTypeOptionsMap[T] : IChartOptionsBase;
+  T extends keyof VisualTypeOptionsMap
+    ? VisualTypeOptionsMap[T]
+    : IChartOptionsBase;
 
 /**
  * Aggregated data point for chart rendering
@@ -259,13 +262,17 @@ export interface IChartData {
 /**
  * Props common to all chart visual components
  */
-export interface IChartComponentProps<TOptions extends IChartOptionsBase = IChartOptionsBase> {
+export interface IChartComponentProps<
+  TOptions extends IChartOptionsBase = IChartOptionsBase,
+> {
   /** Chart data to render */
   data: IChartData;
   /** Parsed chart options */
   options: TOptions;
   /** Callback when chart element is clicked (for drill-through) */
-  onDrillInteraction?: (interaction: import("./DrillInteractionTypes").DrillInteraction) => void;
+  onDrillInteraction?: (
+    interaction: import("./DrillInteractionTypes").DrillInteraction,
+  ) => void;
   /** Width of the chart container */
   width?: number;
   /** Height of the chart container */

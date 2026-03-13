@@ -14,12 +14,12 @@
 
 import * as React from "react";
 import {
-    Toast,
-    ToastTitle,
-    ToastBody,
-    ToastIntent,
-    useToastController,
-    useId
+  Toast,
+  ToastTitle,
+  ToastBody,
+  ToastIntent,
+  useToastController,
+  useId,
 } from "@fluentui/react-components";
 import { IFieldMappingApplicationResult } from "../handlers/FieldMappingHandler";
 
@@ -30,25 +30,28 @@ const TOAST_TIMEOUT = 5000;
  * Toast message configuration
  */
 interface IMappingToastMessage {
-    title: string;
-    body: string;
-    intent: ToastIntent;
+  title: string;
+  body: string;
+  intent: ToastIntent;
 }
 
 /**
  * Result from useMappingToast hook
  */
 export interface IUseMappingToastResult {
-    /** Unique toaster ID for the Toaster component */
-    toasterId: string;
-    /** Show toast for a mapping result */
-    showMappingResult: (result: IFieldMappingApplicationResult, entityDisplayName: string) => void;
-    /** Show success toast */
-    showSuccess: (message: string) => void;
-    /** Show warning toast */
-    showWarning: (message: string) => void;
-    /** Show error toast */
-    showError: (message: string) => void;
+  /** Unique toaster ID for the Toaster component */
+  toasterId: string;
+  /** Show toast for a mapping result */
+  showMappingResult: (
+    result: IFieldMappingApplicationResult,
+    entityDisplayName: string,
+  ) => void;
+  /** Show success toast */
+  showSuccess: (message: string) => void;
+  /** Show warning toast */
+  showWarning: (message: string) => void;
+  /** Show error toast */
+  showError: (message: string) => void;
 }
 
 /**
@@ -66,157 +69,169 @@ export interface IUseMappingToastResult {
  * ```
  */
 export function useMappingToast(): IUseMappingToastResult {
-    const toasterId = useId("mapping-toaster");
-    const { dispatchToast } = useToastController(toasterId);
+  const toasterId = useId("mapping-toaster");
+  const { dispatchToast } = useToastController(toasterId);
 
-    /**
-     * Determine the appropriate toast message based on mapping result
-     */
-    const getToastMessage = React.useCallback(
-        (result: IFieldMappingApplicationResult, entityDisplayName: string): IMappingToastMessage | null => {
-            // Case 1: No profile found - no toast needed
-            if (!result.profileFound) {
-                return null;
-            }
+  /**
+   * Determine the appropriate toast message based on mapping result
+   */
+  const getToastMessage = React.useCallback(
+    (
+      result: IFieldMappingApplicationResult,
+      entityDisplayName: string,
+    ): IMappingToastMessage | null => {
+      // Case 1: No profile found - no toast needed
+      if (!result.profileFound) {
+        return null;
+      }
 
-            // Case 2: Complete success - all mappings applied, no errors
-            if (result.errors.length === 0 && result.fieldsMapped > 0) {
-                return {
-                    title: "Fields Updated",
-                    body: `Applied ${result.fieldsMapped} field mapping${result.fieldsMapped > 1 ? "s" : ""} from ${entityDisplayName}`,
-                    intent: "success"
-                };
-            }
+      // Case 2: Complete success - all mappings applied, no errors
+      if (result.errors.length === 0 && result.fieldsMapped > 0) {
+        return {
+          title: "Fields Updated",
+          body: `Applied ${result.fieldsMapped} field mapping${result.fieldsMapped > 1 ? "s" : ""} from ${entityDisplayName}`,
+          intent: "success",
+        };
+      }
 
-            // Case 3: Partial success - some mappings applied but with errors/skipped
-            if (result.fieldsMapped > 0 && (result.errors.length > 0 || result.rulesSkipped > 0)) {
-                const total = result.fieldsMapped + result.rulesSkipped + result.errors.length;
-                return {
-                    title: "Partial Update",
-                    body: `Applied ${result.fieldsMapped} of ${total} mappings. Some fields could not be mapped.`,
-                    intent: "warning"
-                };
-            }
+      // Case 3: Partial success - some mappings applied but with errors/skipped
+      if (
+        result.fieldsMapped > 0 &&
+        (result.errors.length > 0 || result.rulesSkipped > 0)
+      ) {
+        const total =
+          result.fieldsMapped + result.rulesSkipped + result.errors.length;
+        return {
+          title: "Partial Update",
+          body: `Applied ${result.fieldsMapped} of ${total} mappings. Some fields could not be mapped.`,
+          intent: "warning",
+        };
+      }
 
-            // Case 4: Complete failure - no mappings applied despite having a profile
-            if (result.errors.length > 0 && result.fieldsMapped === 0) {
-                const errorMessage = result.errors[0] || "Failed to apply field mappings. Please try again.";
-                return {
-                    title: "Mapping Failed",
-                    body: errorMessage,
-                    intent: "error"
-                };
-            }
+      // Case 4: Complete failure - no mappings applied despite having a profile
+      if (result.errors.length > 0 && result.fieldsMapped === 0) {
+        const errorMessage =
+          result.errors[0] ||
+          "Failed to apply field mappings. Please try again.";
+        return {
+          title: "Mapping Failed",
+          body: errorMessage,
+          intent: "error",
+        };
+      }
 
-            // Case 5: No fields to map (but no errors) - all fields skipped/already current
-            if (result.fieldsMapped === 0 && result.errors.length === 0) {
-                return {
-                    title: "No Updates",
-                    body: "No fields needed updating - all values are current.",
-                    intent: "info" as ToastIntent
-                };
-            }
+      // Case 5: No fields to map (but no errors) - all fields skipped/already current
+      if (result.fieldsMapped === 0 && result.errors.length === 0) {
+        return {
+          title: "No Updates",
+          body: "No fields needed updating - all values are current.",
+          intent: "info" as ToastIntent,
+        };
+      }
 
-            return null;
+      return null;
+    },
+    [],
+  );
+
+  /**
+   * Display a toast for a field mapping result
+   */
+  const showMappingResult = React.useCallback(
+    (
+      result: IFieldMappingApplicationResult,
+      entityDisplayName: string,
+    ): void => {
+      const message = getToastMessage(result, entityDisplayName);
+
+      if (!message) {
+        return;
+      }
+
+      dispatchToast(
+        React.createElement(
+          Toast,
+          null,
+          React.createElement(ToastTitle, null, message.title),
+          React.createElement(ToastBody, null, message.body),
+        ),
+        {
+          intent: message.intent,
+          timeout: TOAST_TIMEOUT,
         },
-        []
-    );
+      );
+    },
+    [dispatchToast, getToastMessage],
+  );
 
-    /**
-     * Display a toast for a field mapping result
-     */
-    const showMappingResult = React.useCallback(
-        (result: IFieldMappingApplicationResult, entityDisplayName: string): void => {
-            const message = getToastMessage(result, entityDisplayName);
-
-            if (!message) {
-                return;
-            }
-
-            dispatchToast(
-                React.createElement(
-                    Toast,
-                    null,
-                    React.createElement(ToastTitle, null, message.title),
-                    React.createElement(ToastBody, null, message.body)
-                ),
-                {
-                    intent: message.intent,
-                    timeout: TOAST_TIMEOUT
-                }
-            );
+  /**
+   * Show a success toast with custom message
+   */
+  const showSuccess = React.useCallback(
+    (message: string): void => {
+      dispatchToast(
+        React.createElement(
+          Toast,
+          null,
+          React.createElement(ToastTitle, null, "Success"),
+          React.createElement(ToastBody, null, message),
+        ),
+        {
+          intent: "success",
+          timeout: TOAST_TIMEOUT,
         },
-        [dispatchToast, getToastMessage]
-    );
+      );
+    },
+    [dispatchToast],
+  );
 
-    /**
-     * Show a success toast with custom message
-     */
-    const showSuccess = React.useCallback(
-        (message: string): void => {
-            dispatchToast(
-                React.createElement(
-                    Toast,
-                    null,
-                    React.createElement(ToastTitle, null, "Success"),
-                    React.createElement(ToastBody, null, message)
-                ),
-                {
-                    intent: "success",
-                    timeout: TOAST_TIMEOUT
-                }
-            );
+  /**
+   * Show a warning toast with custom message
+   */
+  const showWarning = React.useCallback(
+    (message: string): void => {
+      dispatchToast(
+        React.createElement(
+          Toast,
+          null,
+          React.createElement(ToastTitle, null, "Warning"),
+          React.createElement(ToastBody, null, message),
+        ),
+        {
+          intent: "warning",
+          timeout: TOAST_TIMEOUT,
         },
-        [dispatchToast]
-    );
+      );
+    },
+    [dispatchToast],
+  );
 
-    /**
-     * Show a warning toast with custom message
-     */
-    const showWarning = React.useCallback(
-        (message: string): void => {
-            dispatchToast(
-                React.createElement(
-                    Toast,
-                    null,
-                    React.createElement(ToastTitle, null, "Warning"),
-                    React.createElement(ToastBody, null, message)
-                ),
-                {
-                    intent: "warning",
-                    timeout: TOAST_TIMEOUT
-                }
-            );
+  /**
+   * Show an error toast with custom message
+   */
+  const showError = React.useCallback(
+    (message: string): void => {
+      dispatchToast(
+        React.createElement(
+          Toast,
+          null,
+          React.createElement(ToastTitle, null, "Error"),
+          React.createElement(ToastBody, null, message),
+        ),
+        {
+          intent: "error",
+          timeout: TOAST_TIMEOUT,
         },
-        [dispatchToast]
-    );
+      );
+    },
+    [dispatchToast],
+  );
 
-    /**
-     * Show an error toast with custom message
-     */
-    const showError = React.useCallback(
-        (message: string): void => {
-            dispatchToast(
-                React.createElement(
-                    Toast,
-                    null,
-                    React.createElement(ToastTitle, null, "Error"),
-                    React.createElement(ToastBody, null, message)
-                ),
-                {
-                    intent: "error",
-                    timeout: TOAST_TIMEOUT
-                }
-            );
-        },
-        [dispatchToast]
-    );
-
-    return {
-        toasterId,
-        showMappingResult,
-        showSuccess,
-        showWarning,
-        showError
-    };
+  return {
+    toasterId,
+    showMappingResult,
+    showSuccess,
+    showWarning,
+    showError,
+  };
 }

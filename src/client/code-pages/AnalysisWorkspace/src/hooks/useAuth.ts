@@ -34,20 +34,20 @@
 import { useAuthContext } from "../context/AuthContext";
 
 export interface UseAuthResult {
-    /** The Bearer access token (null when not authenticated) */
-    token: string | null;
-    /** Whether the user is fully authenticated with a valid token */
-    isAuthenticated: boolean;
-    /** Whether authentication is in progress (initial or retry) */
-    isAuthenticating: boolean;
-    /** Auth error details, or null if no error */
-    authError: Error | null;
-    /** Whether the error is because Xrm SDK is not available (outside Dataverse) */
-    isXrmUnavailable: boolean;
-    /** Force-refresh the token (e.g., after a 401 from BFF API) */
-    refreshToken: () => Promise<string | null>;
-    /** Retry authentication from scratch after an error */
-    retryAuth: () => void;
+  /** The Bearer access token (null when not authenticated) */
+  token: string | null;
+  /** Whether the user is fully authenticated with a valid token */
+  isAuthenticated: boolean;
+  /** Whether authentication is in progress (initial or retry) */
+  isAuthenticating: boolean;
+  /** Auth error details, or null if no error */
+  authError: Error | null;
+  /** Whether the error is because Xrm SDK is not available (outside Dataverse) */
+  isXrmUnavailable: boolean;
+  /** Force-refresh the token (e.g., after a 401 from BFF API) */
+  refreshToken: () => Promise<string | null>;
+  /** Retry authentication from scratch after an error */
+  retryAuth: () => void;
 }
 
 /**
@@ -58,15 +58,15 @@ export interface UseAuthResult {
  * @returns UseAuthResult with token, status booleans, error, and actions
  */
 export function useAuth(): UseAuthResult {
-    const ctx = useAuthContext();
+  const ctx = useAuthContext();
 
-    return {
-        token: ctx.token,
-        isAuthenticated: ctx.isAuthenticated,
-        isAuthenticating: ctx.isAuthenticating,
-        authError: ctx.error,
-        isXrmUnavailable: ctx.isXrmUnavailable,
-        refreshToken: ctx.refreshToken,
-        retryAuth: ctx.retryAuth,
-    };
+  return {
+    token: ctx.token,
+    isAuthenticated: ctx.isAuthenticated,
+    isAuthenticating: ctx.isAuthenticating,
+    authError: ctx.error,
+    isXrmUnavailable: ctx.isXrmUnavailable,
+    refreshToken: ctx.refreshToken,
+    retryAuth: ctx.retryAuth,
+  };
 }

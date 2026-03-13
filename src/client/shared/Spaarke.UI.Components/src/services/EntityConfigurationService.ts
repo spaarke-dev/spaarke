@@ -5,7 +5,7 @@
 import {
   IConfigurationSchema,
   IResolvedConfiguration,
-  ICustomCommandConfiguration
+  ICustomCommandConfiguration,
 } from "../types/EntityConfigurationTypes";
 
 export class EntityConfigurationService {
@@ -25,7 +25,9 @@ export class EntityConfigurationService {
 
       // Validate schema version
       if (parsed.schemaVersion !== "1.0") {
-        console.warn(`Unsupported schema version: ${parsed.schemaVersion}. Using defaults.`);
+        console.warn(
+          `Unsupported schema version: ${parsed.schemaVersion}. Using defaults.`,
+        );
         this.schema = this.getDefaultSchema();
         return;
       }
@@ -40,31 +42,51 @@ export class EntityConfigurationService {
   /**
    * Get configuration for a specific entity
    */
-  static getEntityConfiguration(entityLogicalName: string): IResolvedConfiguration {
+  static getEntityConfiguration(
+    entityLogicalName: string,
+  ): IResolvedConfiguration {
     const schema = this.schema ?? this.getDefaultSchema();
     const defaultConfig = schema.defaultConfig;
-    const entityConfig = schema.entityConfigs[entityLogicalName.toLowerCase()] ?? {};
+    const entityConfig =
+      schema.entityConfigs[entityLogicalName.toLowerCase()] ?? {};
 
     // Merge entity config with defaults
     return {
       viewMode: entityConfig.viewMode ?? defaultConfig.viewMode ?? "Grid",
-      enabledCommands: entityConfig.enabledCommands ?? defaultConfig.enabledCommands ?? ["open", "create", "delete", "refresh"],
-      compactToolbar: entityConfig.compactToolbar ?? defaultConfig.compactToolbar ?? false,
-      enableVirtualization: entityConfig.enableVirtualization ?? defaultConfig.enableVirtualization ?? true,
+      enabledCommands: entityConfig.enabledCommands ??
+        defaultConfig.enabledCommands ?? [
+          "open",
+          "create",
+          "delete",
+          "refresh",
+        ],
+      compactToolbar:
+        entityConfig.compactToolbar ?? defaultConfig.compactToolbar ?? false,
+      enableVirtualization:
+        entityConfig.enableVirtualization ??
+        defaultConfig.enableVirtualization ??
+        true,
       rowHeight: entityConfig.rowHeight ?? defaultConfig.rowHeight ?? 44,
-      scrollBehavior: entityConfig.scrollBehavior ?? defaultConfig.scrollBehavior ?? "Auto",
-      toolbarShowOverflow: entityConfig.toolbarShowOverflow ?? defaultConfig.toolbarShowOverflow ?? true,
+      scrollBehavior:
+        entityConfig.scrollBehavior ?? defaultConfig.scrollBehavior ?? "Auto",
+      toolbarShowOverflow:
+        entityConfig.toolbarShowOverflow ??
+        defaultConfig.toolbarShowOverflow ??
+        true,
       customCommands: {
         ...(defaultConfig.customCommands ?? {}),
-        ...(entityConfig.customCommands ?? {})
-      }
+        ...(entityConfig.customCommands ?? {}),
+      },
     };
   }
 
   /**
    * Get custom command configuration by key
    */
-  static getCustomCommand(entityLogicalName: string, commandKey: string): ICustomCommandConfiguration | undefined {
+  static getCustomCommand(
+    entityLogicalName: string,
+    commandKey: string,
+  ): ICustomCommandConfiguration | undefined {
     const config = this.getEntityConfiguration(entityLogicalName);
     return config.customCommands[commandKey];
   }
@@ -90,16 +112,19 @@ export class EntityConfigurationService {
         rowHeight: 44,
         scrollBehavior: "Auto",
         toolbarShowOverflow: true,
-        customCommands: {}
+        customCommands: {},
       },
-      entityConfigs: {}
+      entityConfigs: {},
     };
   }
 
   /**
    * Validate configuration schema (optional, for development)
    */
-  static validateConfiguration(configJson: string): { valid: boolean; errors: string[] } {
+  static validateConfiguration(configJson: string): {
+    valid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     try {
@@ -118,24 +143,31 @@ export class EntityConfigurationService {
       }
 
       // Validate custom commands
-      Object.entries(parsed.entityConfigs || {}).forEach(([entityName, config]: [string, any]) => {
-        if (config.customCommands) {
-          Object.entries(config.customCommands).forEach(([key, cmd]: [string, any]) => {
-            if (!cmd.label) errors.push(`${entityName}.${key}: Missing label`);
-            if (!cmd.actionType) errors.push(`${entityName}.${key}: Missing actionType`);
-            if (!cmd.actionName) errors.push(`${entityName}.${key}: Missing actionName`);
-          });
-        }
-      });
+      Object.entries(parsed.entityConfigs || {}).forEach(
+        ([entityName, config]: [string, any]) => {
+          if (config.customCommands) {
+            Object.entries(config.customCommands).forEach(
+              ([key, cmd]: [string, any]) => {
+                if (!cmd.label)
+                  errors.push(`${entityName}.${key}: Missing label`);
+                if (!cmd.actionType)
+                  errors.push(`${entityName}.${key}: Missing actionType`);
+                if (!cmd.actionName)
+                  errors.push(`${entityName}.${key}: Missing actionName`);
+              },
+            );
+          }
+        },
+      );
 
       return {
         valid: errors.length === 0,
-        errors
+        errors,
       };
     } catch (error) {
       return {
         valid: false,
-        errors: [`Invalid JSON: ${(error as Error).message}`]
+        errors: [`Invalid JSON: ${(error as Error).message}`],
       };
     }
   }

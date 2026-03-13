@@ -83,7 +83,12 @@ export const DEFAULT_SECTION_STATES: ISectionDefaults = {
 /**
  * All controllable section names
  */
-export const ALL_SECTION_NAMES = ["dates", "relatedEvent", "description", "history"] as const;
+export const ALL_SECTION_NAMES = [
+  "dates",
+  "relatedEvent",
+  "description",
+  "history",
+] as const;
 
 /**
  * Type for section names
@@ -206,7 +211,9 @@ export class EventTypeService {
    * // Returns: null (no error logged)
    * ```
    */
-  parseFieldConfigJson(jsonString: string | null | undefined): IEventTypeFieldConfig | null {
+  parseFieldConfigJson(
+    jsonString: string | null | undefined,
+  ): IEventTypeFieldConfig | null {
     if (!jsonString || jsonString.trim() === "") {
       return null;
     }
@@ -225,25 +232,25 @@ export class EventTypeService {
 
       if (Array.isArray(parsed.visibleFields)) {
         config.visibleFields = parsed.visibleFields.filter(
-          (f: unknown) => typeof f === "string"
+          (f: unknown) => typeof f === "string",
         );
       }
 
       if (Array.isArray(parsed.hiddenFields)) {
         config.hiddenFields = parsed.hiddenFields.filter(
-          (f: unknown) => typeof f === "string"
+          (f: unknown) => typeof f === "string",
         );
       }
 
       if (Array.isArray(parsed.requiredFields)) {
         config.requiredFields = parsed.requiredFields.filter(
-          (f: unknown) => typeof f === "string"
+          (f: unknown) => typeof f === "string",
         );
       }
 
       if (Array.isArray(parsed.optionalFields)) {
         config.optionalFields = parsed.optionalFields.filter(
-          (f: unknown) => typeof f === "string"
+          (f: unknown) => typeof f === "string",
         );
       }
 
@@ -251,12 +258,18 @@ export class EventTypeService {
         // Validate section names against known sections
         const validSections = new Set(ALL_SECTION_NAMES);
         config.hiddenSections = parsed.hiddenSections.filter(
-          (s: unknown) => typeof s === "string" && validSections.has(s as SectionName)
+          (s: unknown) =>
+            typeof s === "string" && validSections.has(s as SectionName),
         );
       }
 
-      if (parsed.sectionDefaults && typeof parsed.sectionDefaults === "object") {
-        config.sectionDefaults = this.parseSectionDefaults(parsed.sectionDefaults);
+      if (
+        parsed.sectionDefaults &&
+        typeof parsed.sectionDefaults === "object"
+      ) {
+        config.sectionDefaults = this.parseSectionDefaults(
+          parsed.sectionDefaults,
+        );
       }
 
       return config;
@@ -272,14 +285,18 @@ export class EventTypeService {
    * @param defaults - Raw section defaults object
    * @returns Validated section defaults
    */
-  private parseSectionDefaults(defaults: Record<string, unknown>): ISectionDefaults {
+  private parseSectionDefaults(
+    defaults: Record<string, unknown>,
+  ): ISectionDefaults {
     const result: ISectionDefaults = {};
     const validStates = ["expanded", "collapsed"];
 
     for (const key of ["dates", "relatedEvent", "description", "history"]) {
       const value = defaults[key];
       if (typeof value === "string" && validStates.includes(value)) {
-        result[key as keyof ISectionDefaults] = value as "expanded" | "collapsed";
+        result[key as keyof ISectionDefaults] = value as
+          | "expanded"
+          | "collapsed";
       }
     }
 
@@ -302,7 +319,7 @@ export class EventTypeService {
    */
   computeFieldStates(
     config: IEventTypeFieldConfig | null,
-    customDefaults?: IFieldDefaultStates
+    customDefaults?: IFieldDefaultStates,
   ): IComputedFieldStates {
     const defaults = customDefaults ?? DEFAULT_EVENT_FIELD_STATES;
     const fields = new Map<string, IComputedFieldState>();
@@ -403,7 +420,7 @@ export class EventTypeService {
   getFieldState(
     config: IEventTypeFieldConfig | null,
     fieldName: string,
-    customDefaults?: IFieldDefaultStates
+    customDefaults?: IFieldDefaultStates,
   ): IComputedFieldState | null {
     const computed = this.computeFieldStates(config, customDefaults);
     return computed.fields.get(fieldName) ?? null;
@@ -416,7 +433,10 @@ export class EventTypeService {
    * @param fieldName - Field schema name
    * @returns True if field should be visible
    */
-  isFieldVisible(config: IEventTypeFieldConfig | null, fieldName: string): boolean {
+  isFieldVisible(
+    config: IEventTypeFieldConfig | null,
+    fieldName: string,
+  ): boolean {
     const state = this.getFieldState(config, fieldName);
     return state?.isVisible ?? true; // Default to visible if unknown field
   }
@@ -428,7 +448,10 @@ export class EventTypeService {
    * @param fieldName - Field schema name
    * @returns True if field is required
    */
-  isFieldRequired(config: IEventTypeFieldConfig | null, fieldName: string): boolean {
+  isFieldRequired(
+    config: IEventTypeFieldConfig | null,
+    fieldName: string,
+  ): boolean {
     const state = this.getFieldState(config, fieldName);
     return state?.requiredLevel === "required";
   }
@@ -442,7 +465,7 @@ export class EventTypeService {
    */
   getFieldRequiredLevel(
     config: IEventTypeFieldConfig | null,
-    fieldName: string
+    fieldName: string,
   ): RequiredLevel {
     const state = this.getFieldState(config, fieldName);
     return state?.requiredLevel ?? "none";
@@ -510,7 +533,10 @@ export class EventTypeService {
     // Check for unknown fields
     const allKnownFields = new Set(ALL_EVENT_FIELDS);
 
-    const checkFields = (fieldNames: string[] | undefined, listName: string) => {
+    const checkFields = (
+      fieldNames: string[] | undefined,
+      listName: string,
+    ) => {
       if (!fieldNames) return;
       for (const field of fieldNames) {
         if (!allKnownFields.has(field)) {
@@ -530,7 +556,7 @@ export class EventTypeService {
       for (const field of config.requiredFields) {
         if (hiddenSet.has(field)) {
           errors.push(
-            `Field '${field}' is in both hiddenFields and requiredFields (required takes precedence)`
+            `Field '${field}' is in both hiddenFields and requiredFields (required takes precedence)`,
           );
         }
       }
@@ -619,7 +645,8 @@ const EVENT_TYPE_ENTITY = "sprk_eventtype";
 /**
  * Fields to retrieve from Event Type record
  */
-const EVENT_TYPE_SELECT_FIELDS = "sprk_eventtypeid,sprk_name,sprk_fieldconfigjson";
+const EVENT_TYPE_SELECT_FIELDS =
+  "sprk_eventtypeid,sprk_name,sprk_fieldconfigjson";
 
 /**
  * Result of getEventTypeFieldConfig operation
@@ -694,7 +721,7 @@ export interface IGetEventTypeFieldConfigResult {
 export async function getEventTypeFieldConfig(
   webApi: IWebApiLike,
   eventTypeId: string,
-  options?: { service?: EventTypeService }
+  options?: { service?: EventTypeService },
 ): Promise<IGetEventTypeFieldConfigResult> {
   // Validate input
   if (!eventTypeId || eventTypeId.trim() === "") {
@@ -728,7 +755,7 @@ export async function getEventTypeFieldConfig(
     const record = await webApi.retrieveRecord(
       EVENT_TYPE_ENTITY,
       normalizedId,
-      `?$select=${EVENT_TYPE_SELECT_FIELDS}`
+      `?$select=${EVENT_TYPE_SELECT_FIELDS}`,
     );
 
     // Extract fields from response
@@ -761,9 +788,7 @@ export async function getEventTypeFieldConfig(
       errorMessage.toLowerCase().includes("does not exist");
 
     if (isNotFound) {
-      console.warn(
-        `[EventTypeService] Event Type not found: ${normalizedId}`
-      );
+      console.warn(`[EventTypeService] Event Type not found: ${normalizedId}`);
       return {
         success: false,
         config: null,
@@ -775,7 +800,7 @@ export async function getEventTypeFieldConfig(
 
     // Log and return generic error
     console.error(
-      `[EventTypeService] Failed to fetch Event Type config: ${errorMessage}`
+      `[EventTypeService] Failed to fetch Event Type config: ${errorMessage}`,
     );
     return {
       success: false,

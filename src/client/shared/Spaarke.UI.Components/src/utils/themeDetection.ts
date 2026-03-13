@@ -22,7 +22,7 @@ export interface IThemeContext {
  */
 export function detectTheme(
   context: any,
-  themeMode: ThemeMode = "Auto"
+  themeMode: ThemeMode = "Auto",
 ): Theme {
   // User explicitly chose Spaarke theme
   if (themeMode === "Spaarke") {
@@ -31,7 +31,8 @@ export function detectTheme(
 
   // User explicitly chose Host theme
   if (themeMode === "Host") {
-    const hostTheme = (context as IThemeContext).fluentDesignLanguage?.tokenTheme;
+    const hostTheme = (context as IThemeContext).fluentDesignLanguage
+      ?.tokenTheme;
     if (hostTheme) {
       return hostTheme;
     }

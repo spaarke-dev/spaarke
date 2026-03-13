@@ -35,13 +35,13 @@ export {
   officeApiClient,
   createOfficeApiClient,
   OfficeApiClientImpl,
-} from './OfficeApiClient';
+} from "./OfficeApiClient";
 
 export type {
   IOfficeApiClient,
   OfficeApiClientConfig,
   RequestOptions,
-} from './OfficeApiClient';
+} from "./OfficeApiClient";
 
 // Error handling
 export {
@@ -54,7 +54,7 @@ export {
   parseRetryAfter,
   isRetryableError,
   formatValidationErrors,
-} from './errors';
+} from "./errors";
 
 // Types
 export type {
@@ -109,6 +109,6 @@ export type {
   SseJobCompleteEvent,
   SseEventType,
   SseEventData,
-} from './types';
+} from "./types";
 
-export { OfficeApiErrorCode } from './types';
+export { OfficeApiErrorCode } from "./types";

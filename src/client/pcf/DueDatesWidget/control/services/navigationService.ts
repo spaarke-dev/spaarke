@@ -35,7 +35,13 @@ const EVENT_DETAIL_PAGE_NAME = "sprk_eventdetailsidepane";
 const PANE_WIDTH = 400;
 
 /** Common names for Events tab on entity forms */
-const EVENTS_TAB_NAMES = ["events", "Events", "eventsTab", "tab_events", "sprk_events"];
+const EVENTS_TAB_NAMES = [
+  "events",
+  "Events",
+  "eventsTab",
+  "tab_events",
+  "sprk_events",
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -45,83 +51,83 @@ const EVENTS_TAB_NAMES = ["events", "Events", "eventsTab", "tab_events", "sprk_e
  * Parameters for navigating to an event
  */
 export interface NavigateToEventParams {
-    /** GUID of the Event record to display */
-    eventId: string;
-    /** GUID of the Event Type lookup (optional) */
-    eventType?: string;
-    /** Whether to navigate to Events tab first (default: true) */
-    navigateToTab?: boolean;
-    /** Callback when navigation completes */
-    onNavigationComplete?: () => void;
-    /** Callback when navigation fails */
-    onNavigationError?: (error: string) => void;
+  /** GUID of the Event record to display */
+  eventId: string;
+  /** GUID of the Event Type lookup (optional) */
+  eventType?: string;
+  /** Whether to navigate to Events tab first (default: true) */
+  navigateToTab?: boolean;
+  /** Callback when navigation completes */
+  onNavigationComplete?: () => void;
+  /** Callback when navigation fails */
+  onNavigationError?: (error: string) => void;
 }
 
 /**
  * Result of the navigation operation
  */
 export interface NavigationResult {
-    /** Whether the operation succeeded */
-    success: boolean;
-    /** Error message if failed */
-    error?: string;
-    /** Whether tab navigation was performed */
-    navigatedToTab: boolean;
-    /** Whether side pane was opened */
-    openedSidePane: boolean;
+  /** Whether the operation succeeded */
+  success: boolean;
+  /** Error message if failed */
+  error?: string;
+  /** Whether tab navigation was performed */
+  navigatedToTab: boolean;
+  /** Whether side pane was opened */
+  openedSidePane: boolean;
 }
 
 /**
  * Xrm.App.sidePanes type definitions (subset of full API)
  */
 interface SidePaneCreateOptions {
-    title: string;
-    paneId: string;
-    canClose: boolean;
-    width: number;
-    imageSrc?: string;
-    hideHeader?: boolean;
-    isSelected?: boolean;
-    badge?: boolean;
+  title: string;
+  paneId: string;
+  canClose: boolean;
+  width: number;
+  imageSrc?: string;
+  hideHeader?: boolean;
+  isSelected?: boolean;
+  badge?: boolean;
 }
 
 interface SidePane {
-    paneId: string;
-    title?: string;
-    close(): void;
-    select(): void;
-    navigate(pageInput: SidePanePageInput): Promise<void>;
+  paneId: string;
+  title?: string;
+  close(): void;
+  select(): void;
+  navigate(pageInput: SidePanePageInput): Promise<void>;
 }
 
 interface SidePanePageInput {
-    pageType: "webresource";
-    webresourceName: string;
-    data?: string;
+  pageType: "webresource";
+  webresourceName: string;
+  data?: string;
 }
 
 interface AppSidePanes {
-    state: 0 | 1;
-    createPane(options: SidePaneCreateOptions): Promise<SidePane>;
-    getPane(paneId: string): SidePane | undefined;
-    getAllPanes(): SidePane[];
+  state: 0 | 1;
+  createPane(options: SidePaneCreateOptions): Promise<SidePane>;
+  getPane(paneId: string): SidePane | undefined;
+  getAllPanes(): SidePane[];
 }
 
 /**
  * Form context tab interface (simplified)
  */
 interface FormTab {
-    getName(): string;
-    setFocus(): void;
-    setVisible(visible: boolean): void;
-    getVisible(): boolean;
+  getName(): string;
+  setFocus(): void;
+  setVisible(visible: boolean): void;
+  getVisible(): boolean;
 }
 
 interface FormContextUi {
-    tabs: {
-        get(tabName?: string): FormTab | FormTab[];
-        getLength(): number;
-        forEach(callback: (tab: FormTab, index: number) => void): void;
-    };
+  tabs: {
+    get(tabName?: string): FormTab | FormTab[];
+    getLength(): number;
+    forEach(callback: (tab: FormTab, index: number) => void): void;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,61 +138,60 @@ interface FormContextUi {
  * Check if Xrm.App.sidePanes API is available
  */
 function isSidePanesAvailable(): boolean {
-    return !!(
-        typeof Xrm !== "undefined" &&
-        Xrm.App &&
-        (Xrm.App as unknown as { sidePanes?: AppSidePanes }).sidePanes
-    );
+  return !!(
+    typeof Xrm !== "undefined" &&
+    Xrm.App &&
+    (Xrm.App as unknown as { sidePanes?: AppSidePanes }).sidePanes
+  );
 }
 
 /**
  * Get the sidePanes API with proper typing
  */
 function getSidePanes(): AppSidePanes | null {
-    if (!isSidePanesAvailable()) {
-        return null;
-    }
-    return (Xrm.App as unknown as { sidePanes: AppSidePanes }).sidePanes;
+  if (!isSidePanesAvailable()) {
+    return null;
+  }
+  return (Xrm.App as unknown as { sidePanes: AppSidePanes }).sidePanes;
 }
 
 /**
  * Check if form context is available for tab navigation
  */
 function isFormContextAvailable(): boolean {
-    return !!(
-        typeof Xrm !== "undefined" &&
-        Xrm.Page &&
-        Xrm.Page.ui
-    );
+  return !!(typeof Xrm !== "undefined" && Xrm.Page && Xrm.Page.ui);
 }
 
 /**
  * Get form context UI for tab operations
  */
 function getFormContextUi(): FormContextUi | null {
-    if (!isFormContextAvailable()) {
-        return null;
-    }
-    return Xrm.Page.ui as FormContextUi;
+  if (!isFormContextAvailable()) {
+    return null;
+  }
+  return Xrm.Page.ui as FormContextUi;
 }
 
 /**
  * Build the web resource input for side pane navigation.
  * Uses webresource pageType to load the React app directly (bypasses Custom Page iframe limitation).
  */
-function buildPageInput(eventId: string, eventType?: string): SidePanePageInput {
-    // Build query parameters
-    const params = new URLSearchParams();
-    params.set("eventId", eventId);
-    if (eventType) {
-        params.set("eventType", eventType);
-    }
+function buildPageInput(
+  eventId: string,
+  eventType?: string,
+): SidePanePageInput {
+  // Build query parameters
+  const params = new URLSearchParams();
+  params.set("eventId", eventId);
+  if (eventType) {
+    params.set("eventType", eventType);
+  }
 
-    return {
-        pageType: "webresource",
-        webresourceName: "sprk_eventdetailsidepane.html",
-        data: params.toString(),
-    };
+  return {
+    pageType: "webresource",
+    webresourceName: "sprk_eventdetailsidepane.html",
+    data: params.toString(),
+  };
 }
 
 /**
@@ -194,61 +199,68 @@ function buildPageInput(eventId: string, eventType?: string): SidePanePageInput 
  * Returns true if tab was found and focused
  */
 function navigateToEventsTab(): boolean {
-    const ui = getFormContextUi();
-    if (!ui || !ui.tabs) {
-        console.log("[NavigationService] Form context not available for tab navigation");
-        return false;
-    }
-
-    // Try to find the Events tab by common names
-    for (const tabName of EVENTS_TAB_NAMES) {
-        try {
-            const tab = ui.tabs.get(tabName) as FormTab | undefined;
-            if (tab && typeof tab.setFocus === "function") {
-                // Make sure tab is visible before focusing
-                if (typeof tab.getVisible === "function" && !tab.getVisible()) {
-                    if (typeof tab.setVisible === "function") {
-                        tab.setVisible(true);
-                    }
-                }
-                tab.setFocus();
-                console.log(`[NavigationService] Navigated to Events tab: ${tabName}`);
-                return true;
-            }
-        } catch (e) {
-            // Tab with this name doesn't exist, try next
-            continue;
-        }
-    }
-
-    // Try to find tab by iterating through all tabs and checking names
-    try {
-        let foundTabByIteration: FormTab | undefined = undefined;
-        ui.tabs.forEach((tab: FormTab) => {
-            const name = tab.getName().toLowerCase();
-            if (name.includes("event") && foundTabByIteration === undefined) {
-                foundTabByIteration = tab;
-            }
-        });
-
-        if (foundTabByIteration !== undefined) {
-            // Type assertion needed because TypeScript doesn't track forEach mutations
-            const tabToFocus = foundTabByIteration as FormTab;
-            if (typeof tabToFocus.getVisible === "function" && !tabToFocus.getVisible()) {
-                if (typeof tabToFocus.setVisible === "function") {
-                    tabToFocus.setVisible(true);
-                }
-            }
-            tabToFocus.setFocus();
-            console.log(`[NavigationService] Navigated to Events tab (found by iteration)`);
-            return true;
-        }
-    } catch (e) {
-        console.log("[NavigationService] Error iterating tabs:", e);
-    }
-
-    console.log("[NavigationService] Events tab not found on current form");
+  const ui = getFormContextUi();
+  if (!ui || !ui.tabs) {
+    console.log(
+      "[NavigationService] Form context not available for tab navigation",
+    );
     return false;
+  }
+
+  // Try to find the Events tab by common names
+  for (const tabName of EVENTS_TAB_NAMES) {
+    try {
+      const tab = ui.tabs.get(tabName) as FormTab | undefined;
+      if (tab && typeof tab.setFocus === "function") {
+        // Make sure tab is visible before focusing
+        if (typeof tab.getVisible === "function" && !tab.getVisible()) {
+          if (typeof tab.setVisible === "function") {
+            tab.setVisible(true);
+          }
+        }
+        tab.setFocus();
+        console.log(`[NavigationService] Navigated to Events tab: ${tabName}`);
+        return true;
+      }
+    } catch (e) {
+      // Tab with this name doesn't exist, try next
+      continue;
+    }
+  }
+
+  // Try to find tab by iterating through all tabs and checking names
+  try {
+    let foundTabByIteration: FormTab | undefined = undefined;
+    ui.tabs.forEach((tab: FormTab) => {
+      const name = tab.getName().toLowerCase();
+      if (name.includes("event") && foundTabByIteration === undefined) {
+        foundTabByIteration = tab;
+      }
+    });
+
+    if (foundTabByIteration !== undefined) {
+      // Type assertion needed because TypeScript doesn't track forEach mutations
+      const tabToFocus = foundTabByIteration as FormTab;
+      if (
+        typeof tabToFocus.getVisible === "function" &&
+        !tabToFocus.getVisible()
+      ) {
+        if (typeof tabToFocus.setVisible === "function") {
+          tabToFocus.setVisible(true);
+        }
+      }
+      tabToFocus.setFocus();
+      console.log(
+        `[NavigationService] Navigated to Events tab (found by iteration)`,
+      );
+      return true;
+    }
+  } catch (e) {
+    console.log("[NavigationService] Error iterating tabs:", e);
+  }
+
+  console.log("[NavigationService] Events tab not found on current form");
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,123 +288,130 @@ function navigateToEventsTab(): boolean {
  * ```
  */
 export async function navigateToEvent(
-    params: NavigateToEventParams
+  params: NavigateToEventParams,
 ): Promise<NavigationResult> {
-    const {
-        eventId,
-        eventType,
-        navigateToTab = true,
-        onNavigationComplete,
-        onNavigationError
-    } = params;
+  const {
+    eventId,
+    eventType,
+    navigateToTab = true,
+    onNavigationComplete,
+    onNavigationError,
+  } = params;
 
-    const result: NavigationResult = {
-        success: false,
-        navigatedToTab: false,
-        openedSidePane: false
-    };
+  const result: NavigationResult = {
+    success: false,
+    navigatedToTab: false,
+    openedSidePane: false,
+  };
 
-    console.log("[NavigationService] Navigating to event", { eventId, eventType, navigateToTab });
+  console.log("[NavigationService] Navigating to event", {
+    eventId,
+    eventType,
+    navigateToTab,
+  });
 
-    // Validate eventId
-    if (!eventId || eventId.trim() === "") {
-        const error = "eventId is required for navigation";
-        console.error("[NavigationService]", error);
-        result.error = error;
-        onNavigationError?.(error);
-        return result;
-    }
-
-    // Step 1: Navigate to Events tab (if requested and available)
-    if (navigateToTab) {
-        result.navigatedToTab = navigateToEventsTab();
-    }
-
-    // Step 2: Open side pane
-    const sidePanes = getSidePanes();
-    if (!sidePanes) {
-        // If sidePanes API not available, we may be in test harness or custom page
-        // Fall back to just the tab navigation result
-        const warning = "Xrm.App.sidePanes API is not available. Side pane cannot be opened.";
-        console.warn("[NavigationService]", warning);
-
-        // If we at least navigated to the tab, consider partial success
-        if (result.navigatedToTab) {
-            result.success = true;
-            onNavigationComplete?.();
-        } else {
-            result.error = warning;
-            onNavigationError?.(warning);
-        }
-        return result;
-    }
-
-    try {
-        // Check for existing pane
-        const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
-
-        if (existingPane) {
-            // Pane exists - navigate to new event (reuses pane)
-            console.log("[NavigationService] Reusing existing side pane");
-
-            const pageInput = buildPageInput(eventId, eventType);
-            await existingPane.navigate(pageInput);
-            existingPane.select();
-
-            result.openedSidePane = true;
-            result.success = true;
-        } else {
-            // Create new pane
-            console.log("[NavigationService] Creating new side pane");
-
-            const newPane = await sidePanes.createPane({
-                title: "Event Details",
-                paneId: EVENT_DETAIL_PANE_ID,
-                canClose: true,
-                width: PANE_WIDTH,
-                isSelected: true,
-            });
-
-            const pageInput = buildPageInput(eventId, eventType);
-            await newPane.navigate(pageInput);
-
-            result.openedSidePane = true;
-            result.success = true;
-        }
-
-        console.log("[NavigationService] Navigation complete", result);
-        onNavigationComplete?.();
-
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("[NavigationService] Failed to open side pane:", errorMessage);
-
-        result.error = `Failed to open side pane: ${errorMessage}`;
-
-        // If tab navigation worked, still partial success
-        if (result.navigatedToTab) {
-            result.success = true;
-            onNavigationComplete?.();
-        } else {
-            onNavigationError?.(result.error);
-        }
-    }
-
+  // Validate eventId
+  if (!eventId || eventId.trim() === "") {
+    const error = "eventId is required for navigation";
+    console.error("[NavigationService]", error);
+    result.error = error;
+    onNavigationError?.(error);
     return result;
+  }
+
+  // Step 1: Navigate to Events tab (if requested and available)
+  if (navigateToTab) {
+    result.navigatedToTab = navigateToEventsTab();
+  }
+
+  // Step 2: Open side pane
+  const sidePanes = getSidePanes();
+  if (!sidePanes) {
+    // If sidePanes API not available, we may be in test harness or custom page
+    // Fall back to just the tab navigation result
+    const warning =
+      "Xrm.App.sidePanes API is not available. Side pane cannot be opened.";
+    console.warn("[NavigationService]", warning);
+
+    // If we at least navigated to the tab, consider partial success
+    if (result.navigatedToTab) {
+      result.success = true;
+      onNavigationComplete?.();
+    } else {
+      result.error = warning;
+      onNavigationError?.(warning);
+    }
+    return result;
+  }
+
+  try {
+    // Check for existing pane
+    const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
+
+    if (existingPane) {
+      // Pane exists - navigate to new event (reuses pane)
+      console.log("[NavigationService] Reusing existing side pane");
+
+      const pageInput = buildPageInput(eventId, eventType);
+      await existingPane.navigate(pageInput);
+      existingPane.select();
+
+      result.openedSidePane = true;
+      result.success = true;
+    } else {
+      // Create new pane
+      console.log("[NavigationService] Creating new side pane");
+
+      const newPane = await sidePanes.createPane({
+        title: "Event Details",
+        paneId: EVENT_DETAIL_PANE_ID,
+        canClose: true,
+        width: PANE_WIDTH,
+        isSelected: true,
+      });
+
+      const pageInput = buildPageInput(eventId, eventType);
+      await newPane.navigate(pageInput);
+
+      result.openedSidePane = true;
+      result.success = true;
+    }
+
+    console.log("[NavigationService] Navigation complete", result);
+    onNavigationComplete?.();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(
+      "[NavigationService] Failed to open side pane:",
+      errorMessage,
+    );
+
+    result.error = `Failed to open side pane: ${errorMessage}`;
+
+    // If tab navigation worked, still partial success
+    if (result.navigatedToTab) {
+      result.success = true;
+      onNavigationComplete?.();
+    } else {
+      onNavigationError?.(result.error);
+    }
+  }
+
+  return result;
 }
 
 /**
  * Check if event navigation is available (sidePanes API exists)
  */
 export function isNavigationAvailable(): boolean {
-    return isSidePanesAvailable();
+  return isSidePanesAvailable();
 }
 
 /**
  * Check if tab navigation is available (form context exists)
  */
 export function isTabNavigationAvailable(): boolean {
-    return isFormContextAvailable();
+  return isFormContextAvailable();
 }
 
 /**
@@ -400,41 +419,41 @@ export function isTabNavigationAvailable(): boolean {
  * @returns true if pane was closed
  */
 export function closeEventDetailPane(): boolean {
-    const sidePanes = getSidePanes();
-    if (!sidePanes) {
-        return false;
-    }
-
-    const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
-    if (existingPane) {
-        console.log("[NavigationService] Closing Event Detail pane");
-        existingPane.close();
-        return true;
-    }
-
+  const sidePanes = getSidePanes();
+  if (!sidePanes) {
     return false;
+  }
+
+  const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
+  if (existingPane) {
+    console.log("[NavigationService] Closing Event Detail pane");
+    existingPane.close();
+    return true;
+  }
+
+  return false;
 }
 
 /**
  * Check if the Event Detail Side Pane is currently open.
  */
 export function isEventDetailPaneOpen(): boolean {
-    const sidePanes = getSidePanes();
-    if (!sidePanes) {
-        return false;
-    }
+  const sidePanes = getSidePanes();
+  if (!sidePanes) {
+    return false;
+  }
 
-    return !!sidePanes.getPane(EVENT_DETAIL_PANE_ID);
+  return !!sidePanes.getPane(EVENT_DETAIL_PANE_ID);
 }
 
 /**
  * Parameters for navigating to Events page
  */
 export interface NavigateToEventsPageParams {
-    /** Callback when navigation completes */
-    onNavigationComplete?: () => void;
-    /** Callback when navigation fails */
-    onNavigationError?: (error: string) => void;
+  /** Callback when navigation completes */
+  onNavigationComplete?: () => void;
+  /** Callback when navigation fails */
+  onNavigationError?: (error: string) => void;
 }
 
 /**
@@ -453,51 +472,68 @@ export interface NavigateToEventsPageParams {
  * @see projects/events-workspace-apps-UX-r1/tasks/055-duedateswidget-all-events-link.poml
  */
 export async function navigateToEventsPage(
-    params?: NavigateToEventsPageParams
+  params?: NavigateToEventsPageParams,
 ): Promise<boolean> {
-    const { onNavigationComplete, onNavigationError } = params || {};
+  const { onNavigationComplete, onNavigationError } = params || {};
 
-    console.log("[NavigationService] Navigating to Events page/tab");
+  console.log("[NavigationService] Navigating to Events page/tab");
 
-    // First try to navigate to the Events tab on the current form
-    if (navigateToEventsTab()) {
-        console.log("[NavigationService] Navigated to Events tab on current form");
-        onNavigationComplete?.();
-        return true;
+  // First try to navigate to the Events tab on the current form
+  if (navigateToEventsTab()) {
+    console.log("[NavigationService] Navigated to Events tab on current form");
+    onNavigationComplete?.();
+    return true;
+  }
+
+  // If no Events tab found, try navigating to the Events Custom Page
+  try {
+    if (
+      typeof Xrm !== "undefined" &&
+      Xrm.Navigation &&
+      Xrm.Navigation.navigateTo
+    ) {
+      console.log("[NavigationService] Navigating to Events Custom Page");
+      await Xrm.Navigation.navigateTo({
+        pageType: "custom",
+        name: "sprk_eventspage",
+      });
+      onNavigationComplete?.();
+      return true;
     }
+  } catch (error) {
+    console.error(
+      "[NavigationService] Failed to navigate to Events page:",
+      error,
+    );
+  }
 
-    // If no Events tab found, try navigating to the Events Custom Page
-    try {
-        if (typeof Xrm !== "undefined" && Xrm.Navigation && Xrm.Navigation.navigateTo) {
-            console.log("[NavigationService] Navigating to Events Custom Page");
-            await Xrm.Navigation.navigateTo({
-                pageType: "custom",
-                name: "sprk_eventspage"
-            });
-            onNavigationComplete?.();
-            return true;
-        }
-    } catch (error) {
-        console.error("[NavigationService] Failed to navigate to Events page:", error);
+  // Fallback: try to navigate to the Events entity list
+  try {
+    if (
+      typeof Xrm !== "undefined" &&
+      Xrm.Navigation &&
+      Xrm.Navigation.navigateTo
+    ) {
+      console.log(
+        "[NavigationService] Navigating to Events entity list (fallback)",
+      );
+      await Xrm.Navigation.navigateTo({
+        pageType: "entitylist",
+        entityName: "sprk_event",
+      });
+      onNavigationComplete?.();
+      return true;
     }
+  } catch (error) {
+    console.error(
+      "[NavigationService] Failed to navigate to Events entity list:",
+      error,
+    );
+  }
 
-    // Fallback: try to navigate to the Events entity list
-    try {
-        if (typeof Xrm !== "undefined" && Xrm.Navigation && Xrm.Navigation.navigateTo) {
-            console.log("[NavigationService] Navigating to Events entity list (fallback)");
-            await Xrm.Navigation.navigateTo({
-                pageType: "entitylist",
-                entityName: "sprk_event"
-            });
-            onNavigationComplete?.();
-            return true;
-        }
-    } catch (error) {
-        console.error("[NavigationService] Failed to navigate to Events entity list:", error);
-    }
-
-    const errorMsg = "Unable to navigate to Events page - Xrm.Navigation API not available";
-    console.warn("[NavigationService]", errorMsg);
-    onNavigationError?.(errorMsg);
-    return false;
+  const errorMsg =
+    "Unable to navigate to Events page - Xrm.Navigation API not available";
+  console.warn("[NavigationService]", errorMsg);
+  onNavigationError?.(errorMsg);
+  return false;
 }

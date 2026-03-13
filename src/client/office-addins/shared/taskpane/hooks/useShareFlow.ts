@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from "react";
 
 /**
  * Document result from search API.
@@ -35,12 +35,12 @@ export interface ShareDocument {
 /**
  * Sharing role options.
  */
-export type ShareRole = 'ViewOnly' | 'Download' | 'Edit';
+export type ShareRole = "ViewOnly" | "Download" | "Edit";
 
 /**
  * Share action type.
  */
-export type ShareActionType = 'insertLink' | 'attachCopy' | 'copyLink';
+export type ShareActionType = "insertLink" | "attachCopy" | "copyLink";
 
 /**
  * Share link generation result.
@@ -111,7 +111,7 @@ export interface ShareFlowCallbacks {
   onGenerateLinks?: (
     documentIds: string[],
     role: ShareRole,
-    recipientEmails?: string[]
+    recipientEmails?: string[],
   ) => Promise<ShareLink[]>;
   /** Prepare document attachments */
   onPrepareAttachments?: (documentIds: string[]) => Promise<ShareAttachment[]>;
@@ -199,12 +199,12 @@ const MAX_TOTAL_ATTACHMENT_SIZE_BYTES = 100 * 1024 * 1024;
  * Initial state for share flow.
  */
 const initialState: ShareFlowState = {
-  searchQuery: '',
+  searchQuery: "",
   isSearching: false,
   searchResults: [],
   searchError: null,
   selectedDocumentIds: new Set(),
-  selectedRole: 'ViewOnly',
+  selectedRole: "ViewOnly",
   generatedLinks: [],
   preparedAttachments: [],
   isGenerating: false,
@@ -239,16 +239,20 @@ const initialState: ShareFlowState = {
  * });
  * ```
  */
-export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowResult {
+export function useShareFlow(
+  callbacks: ShareFlowCallbacks = {},
+): UseShareFlowResult {
   const [state, setState] = useState<ShareFlowState>(initialState);
 
   // Derived: selected documents from search results and recent
   const selectedDocuments = useMemo(() => {
     const allDocuments = [...state.searchResults, ...state.recentDocuments];
     const uniqueDocuments = allDocuments.filter(
-      (doc, index, self) => self.findIndex((d) => d.id === doc.id) === index
+      (doc, index, self) => self.findIndex((d) => d.id === doc.id) === index,
     );
-    return uniqueDocuments.filter((doc) => state.selectedDocumentIds.has(doc.id));
+    return uniqueDocuments.filter((doc) =>
+      state.selectedDocumentIds.has(doc.id),
+    );
   }, [state.searchResults, state.recentDocuments, state.selectedDocumentIds]);
 
   // Derived: has selection
@@ -263,13 +267,15 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   // Derived: total selected size
   const totalSelectedSize = useMemo(
     () => selectedDocuments.reduce((sum, doc) => sum + doc.size, 0),
-    [selectedDocuments]
+    [selectedDocuments],
   );
 
   // Derived: exceeds attachment limit
   const exceedsAttachmentLimit = useMemo(() => {
     if (selectedDocuments.length === 0) return false;
-    const exceedsSingle = selectedDocuments.some((doc) => doc.size > MAX_ATTACHMENT_SIZE_BYTES);
+    const exceedsSingle = selectedDocuments.some(
+      (doc) => doc.size > MAX_ATTACHMENT_SIZE_BYTES,
+    );
     const exceedsTotal = totalSelectedSize > MAX_TOTAL_ATTACHMENT_SIZE_BYTES;
     return exceedsSingle || exceedsTotal;
   }, [selectedDocuments, totalSelectedSize]);
@@ -301,7 +307,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       setState((prev) => ({
         ...prev,
         isSearching: false,
-        searchError: error instanceof Error ? error.message : 'Search failed',
+        searchError: error instanceof Error ? error.message : "Search failed",
       }));
     }
   }, [state.searchQuery, callbacks]);
@@ -309,7 +315,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const clearSearch = useCallback(() => {
     setState((prev) => ({
       ...prev,
-      searchQuery: '',
+      searchQuery: "",
       searchResults: [],
       searchError: null,
     }));
@@ -363,7 +369,9 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
   const selectAll = useCallback(() => {
     const allDocuments = [...state.searchResults, ...state.recentDocuments];
-    const shareableIds = allDocuments.filter((doc) => doc.canShare).map((doc) => doc.id);
+    const shareableIds = allDocuments
+      .filter((doc) => doc.canShare)
+      .map((doc) => doc.id);
     setState((prev) => ({
       ...prev,
       selectedDocumentIds: new Set(shareableIds),
@@ -397,7 +405,8 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
   const generateLinks = useCallback(
     async (recipientEmails?: string[]) => {
-      if (!callbacks.onGenerateLinks || state.selectedDocumentIds.size === 0) return;
+      if (!callbacks.onGenerateLinks || state.selectedDocumentIds.size === 0)
+        return;
 
       setState((prev) => ({
         ...prev,
@@ -411,27 +420,34 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
         const links = await callbacks.onGenerateLinks(
           documentIds,
           state.selectedRole,
-          state.grantAccessToRecipients ? recipientEmails : undefined
+          state.grantAccessToRecipients ? recipientEmails : undefined,
         );
         setState((prev) => ({
           ...prev,
           isGenerating: false,
           generatedLinks: links,
-          successMessage: `Generated ${links.length} share link${links.length !== 1 ? 's' : ''}`,
+          successMessage: `Generated ${links.length} share link${links.length !== 1 ? "s" : ""}`,
         }));
       } catch (error) {
         setState((prev) => ({
           ...prev,
           isGenerating: false,
-          actionError: error instanceof Error ? error.message : 'Failed to generate links',
+          actionError:
+            error instanceof Error ? error.message : "Failed to generate links",
         }));
       }
     },
-    [callbacks, state.selectedDocumentIds, state.selectedRole, state.grantAccessToRecipients]
+    [
+      callbacks,
+      state.selectedDocumentIds,
+      state.selectedRole,
+      state.grantAccessToRecipients,
+    ],
   );
 
   const prepareAttachments = useCallback(async () => {
-    if (!callbacks.onPrepareAttachments || state.selectedDocumentIds.size === 0) return;
+    if (!callbacks.onPrepareAttachments || state.selectedDocumentIds.size === 0)
+      return;
 
     setState((prev) => ({
       ...prev,
@@ -447,13 +463,16 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
         ...prev,
         isGenerating: false,
         preparedAttachments: attachments,
-        successMessage: `Prepared ${attachments.length} attachment${attachments.length !== 1 ? 's' : ''}`,
+        successMessage: `Prepared ${attachments.length} attachment${attachments.length !== 1 ? "s" : ""}`,
       }));
     } catch (error) {
       setState((prev) => ({
         ...prev,
         isGenerating: false,
-        actionError: error instanceof Error ? error.message : 'Failed to prepare attachments',
+        actionError:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare attachments",
       }));
     }
   }, [callbacks, state.selectedDocumentIds]);
@@ -472,19 +491,21 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       setState((prev) => ({
         ...prev,
         isInserting: false,
-        successMessage: `Inserted ${state.generatedLinks.length} link${state.generatedLinks.length !== 1 ? 's' : ''} into email`,
+        successMessage: `Inserted ${state.generatedLinks.length} link${state.generatedLinks.length !== 1 ? "s" : ""} into email`,
       }));
     } catch (error) {
       setState((prev) => ({
         ...prev,
         isInserting: false,
-        actionError: error instanceof Error ? error.message : 'Failed to insert links',
+        actionError:
+          error instanceof Error ? error.message : "Failed to insert links",
       }));
     }
   }, [callbacks, state.generatedLinks]);
 
   const attachFiles = useCallback(async () => {
-    if (!callbacks.onAttachFiles || state.preparedAttachments.length === 0) return;
+    if (!callbacks.onAttachFiles || state.preparedAttachments.length === 0)
+      return;
 
     setState((prev) => ({
       ...prev,
@@ -497,13 +518,14 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       setState((prev) => ({
         ...prev,
         isInserting: false,
-        successMessage: `Attached ${state.preparedAttachments.length} file${state.preparedAttachments.length !== 1 ? 's' : ''} to email`,
+        successMessage: `Attached ${state.preparedAttachments.length} file${state.preparedAttachments.length !== 1 ? "s" : ""} to email`,
       }));
     } catch (error) {
       setState((prev) => ({
         ...prev,
         isInserting: false,
-        actionError: error instanceof Error ? error.message : 'Failed to attach files',
+        actionError:
+          error instanceof Error ? error.message : "Failed to attach files",
       }));
     }
   }, [callbacks, state.preparedAttachments]);
@@ -513,7 +535,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
     const linkText = state.generatedLinks
       .map((link) => `${link.title}: ${link.url}`)
-      .join('\n');
+      .join("\n");
 
     try {
       if (callbacks.onCopyToClipboard) {
@@ -523,12 +545,15 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       }
       setState((prev) => ({
         ...prev,
-        successMessage: 'Links copied to clipboard',
+        successMessage: "Links copied to clipboard",
       }));
     } catch (error) {
       setState((prev) => ({
         ...prev,
-        actionError: error instanceof Error ? error.message : 'Failed to copy to clipboard',
+        actionError:
+          error instanceof Error
+            ? error.message
+            : "Failed to copy to clipboard",
       }));
     }
   }, [callbacks, state.generatedLinks]);
@@ -615,7 +640,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       clearError,
       clearSuccess,
       reset,
-    ]
+    ],
   );
 
   return {

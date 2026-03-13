@@ -12,8 +12,12 @@
  * @see https://learn.microsoft.com/en-us/office/dev/add-ins/develop/enable-nested-app-authentication-in-your-add-in
  */
 
-import type { Configuration, PopupRequest, SilentRequest } from '@azure/msal-browser';
-import { LogLevel } from '@azure/msal-browser';
+import type {
+  Configuration,
+  PopupRequest,
+  SilentRequest,
+} from "@azure/msal-browser";
+import { LogLevel } from "@azure/msal-browser";
 
 /**
  * Azure AD application configuration for the Office Add-in
@@ -39,22 +43,26 @@ export interface NaaAuthConfig {
  */
 export const DEFAULT_AUTH_CONFIG: NaaAuthConfig = {
   // Client ID from Azure AD app registration (Task 001)
-  clientId: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
+  clientId:
+    process.env.ADDIN_CLIENT_ID || "c1258e2d-1688-49d2-ac99-a7485ebd9995",
 
   // Tenant ID for single-tenant app
-  tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
+  tenantId: process.env.TENANT_ID || "a221a95e-6abc-4434-aecc-e48338a1b2f2",
 
   // BFF API client ID for user_impersonation scope
-  bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
+  bffApiClientId:
+    process.env.BFF_API_CLIENT_ID || "1e40baad-e065-4aea-a8d4-4b7ab273458c",
 
   // BFF API base URL
-  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  bffApiBaseUrl:
+    process.env.BFF_API_BASE_URL ||
+    "https://spe-api-dev-67e2xz.azurewebsites.net",
 
   // NAA broker redirect URI (required for Nested App Authentication)
-  redirectUri: 'brk-multihub://localhost',
+  redirectUri: "brk-multihub://localhost",
 
   // Fallback redirect URI for Dialog API (when NAA is not supported)
-  fallbackRedirectUri: process.env.FALLBACK_REDIRECT_URI || '',
+  fallbackRedirectUri: process.env.FALLBACK_REDIRECT_URI || "",
 };
 
 /**
@@ -65,7 +73,9 @@ export const DEFAULT_AUTH_CONFIG: NaaAuthConfig = {
  * @param config - Optional override configuration
  * @returns MSAL Configuration object for NAA
  */
-export function createNaaMsalConfig(config: Partial<NaaAuthConfig> = {}): Configuration {
+export function createNaaMsalConfig(
+  config: Partial<NaaAuthConfig> = {},
+): Configuration {
   const mergedConfig = { ...DEFAULT_AUTH_CONFIG, ...config };
 
   return {
@@ -80,7 +90,7 @@ export function createNaaMsalConfig(config: Partial<NaaAuthConfig> = {}): Config
     cache: {
       // MUST use sessionStorage per auth.md constraints
       // sessionStorage is cleared on tab close, providing better security
-      cacheLocation: 'sessionStorage',
+      cacheLocation: "sessionStorage",
       // Cookies are not needed for Office Add-ins running in iframe
       storeAuthStateInCookie: false,
     },
@@ -99,19 +109,25 @@ export function createNaaMsalConfig(config: Partial<NaaAuthConfig> = {}): Config
               break;
             case LogLevel.Info:
               // Only log info in development
-              if (process.env.NODE_ENV === 'development') {
+              if (process.env.NODE_ENV === "development") {
                 console.info(`[NAA Auth] ${message}`);
               }
               break;
             case LogLevel.Verbose:
               // Only log verbose in development with debug flag
-              if (process.env.NODE_ENV === 'development' && process.env.AUTH_DEBUG) {
+              if (
+                process.env.NODE_ENV === "development" &&
+                process.env.AUTH_DEBUG
+              ) {
                 console.debug(`[NAA Auth] ${message}`);
               }
               break;
           }
         },
-        logLevel: process.env.NODE_ENV === 'development' ? LogLevel.Warning : LogLevel.Error,
+        logLevel:
+          process.env.NODE_ENV === "development"
+            ? LogLevel.Warning
+            : LogLevel.Error,
         piiLoggingEnabled: false,
       },
       // Allow popup and redirect handling
@@ -128,18 +144,22 @@ export function createNaaMsalConfig(config: Partial<NaaAuthConfig> = {}): Config
  * @param config - Optional override configuration
  * @returns MSAL Configuration object for standard authentication
  */
-export function createFallbackMsalConfig(config: Partial<NaaAuthConfig> = {}): Configuration {
+export function createFallbackMsalConfig(
+  config: Partial<NaaAuthConfig> = {},
+): Configuration {
   const mergedConfig = { ...DEFAULT_AUTH_CONFIG, ...config };
 
   return {
     auth: {
       clientId: mergedConfig.clientId,
       authority: `https://login.microsoftonline.com/${mergedConfig.tenantId}`,
-      redirectUri: mergedConfig.fallbackRedirectUri || `${window.location.origin}/auth-callback.html`,
+      redirectUri:
+        mergedConfig.fallbackRedirectUri ||
+        `${window.location.origin}/auth-callback.html`,
       navigateToLoginRequestUrl: false,
     },
     cache: {
-      cacheLocation: 'sessionStorage',
+      cacheLocation: "sessionStorage",
       storeAuthStateInCookie: false,
     },
     system: {
@@ -166,7 +186,8 @@ export function createFallbackMsalConfig(config: Partial<NaaAuthConfig> = {}): C
  * @returns Array of scopes to request
  */
 export function getBffApiScopes(config: Partial<NaaAuthConfig> = {}): string[] {
-  const bffApiClientId = config.bffApiClientId || DEFAULT_AUTH_CONFIG.bffApiClientId;
+  const bffApiClientId =
+    config.bffApiClientId || DEFAULT_AUTH_CONFIG.bffApiClientId;
   return [`api://${bffApiClientId}/user_impersonation`];
 }
 
@@ -178,8 +199,17 @@ export function getBffApiScopes(config: Partial<NaaAuthConfig> = {}): string[] {
  * @returns SilentRequest for acquireTokenSilent
  */
 export function createSilentRequest(
-  account: { homeAccountId: string; environment: string; tenantId: string; username: string; localAccountId: string; name?: string; idTokenClaims?: object; nativeAccountId?: string },
-  config: Partial<NaaAuthConfig> = {}
+  account: {
+    homeAccountId: string;
+    environment: string;
+    tenantId: string;
+    username: string;
+    localAccountId: string;
+    name?: string;
+    idTokenClaims?: object;
+    nativeAccountId?: string;
+  },
+  config: Partial<NaaAuthConfig> = {},
 ): SilentRequest {
   return {
     scopes: getBffApiScopes(config),
@@ -195,18 +225,21 @@ export function createSilentRequest(
  * @param config - Optional override configuration
  * @returns PopupRequest for acquireTokenPopup
  */
-export function createPopupRequest(loginHint?: string, config: Partial<NaaAuthConfig> = {}): PopupRequest {
+export function createPopupRequest(
+  loginHint?: string,
+  config: Partial<NaaAuthConfig> = {},
+): PopupRequest {
   return {
     scopes: getBffApiScopes(config),
     loginHint,
-    prompt: 'select_account',
+    prompt: "select_account",
   };
 }
 
 /**
  * Token cache key prefix for manual caching operations.
  */
-export const TOKEN_CACHE_PREFIX = 'spaarke_naa_';
+export const TOKEN_CACHE_PREFIX = "spaarke_naa_";
 
 /**
  * Token expiry buffer in seconds (5 minutes).

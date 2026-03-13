@@ -1,25 +1,25 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   webLightTheme,
   webDarkTheme,
   teamsHighContrastTheme,
   type Theme,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 
 /**
  * Theme storage key for user preference persistence.
  */
-const THEME_STORAGE_KEY = 'spaarke-theme-preference';
+const THEME_STORAGE_KEY = "spaarke-theme-preference";
 
 /**
  * Theme preference options.
  */
-export type ThemePreference = 'auto' | 'light' | 'dark';
+export type ThemePreference = "auto" | "light" | "dark";
 
 /**
  * Resolved theme type after applying preference logic.
  */
-export type ResolvedThemeType = 'light' | 'dark' | 'high-contrast';
+export type ResolvedThemeType = "light" | "dark" | "high-contrast";
 
 /**
  * Hook return value.
@@ -46,45 +46,45 @@ export interface UseThemeResult {
  */
 function detectSystemTheme(): ResolvedThemeType {
   // Check for high contrast first
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    if (window.matchMedia('(forced-colors: active)').matches) {
-      return 'high-contrast';
+  if (typeof window !== "undefined" && window.matchMedia) {
+    if (window.matchMedia("(forced-colors: active)").matches) {
+      return "high-contrast";
     }
   }
 
   // Try to detect from Office context
-  if (typeof Office !== 'undefined' && Office.context?.officeTheme) {
+  if (typeof Office !== "undefined" && Office.context?.officeTheme) {
     const officeTheme = Office.context.officeTheme;
 
     // High contrast detection
     if (
-      officeTheme.controlBackgroundColor === '#000000' ||
-      officeTheme.bodyBackgroundColor === '#000000'
+      officeTheme.controlBackgroundColor === "#000000" ||
+      officeTheme.bodyBackgroundColor === "#000000"
     ) {
-      return 'high-contrast';
+      return "high-contrast";
     }
 
     // Dark mode detection based on background color
-    const bgColor = officeTheme.bodyBackgroundColor?.toLowerCase() || '';
+    const bgColor = officeTheme.bodyBackgroundColor?.toLowerCase() || "";
     if (
-      bgColor.startsWith('#1') ||
-      bgColor.startsWith('#2') ||
-      bgColor.startsWith('#0')
+      bgColor.startsWith("#1") ||
+      bgColor.startsWith("#2") ||
+      bgColor.startsWith("#0")
     ) {
-      return 'dark';
+      return "dark";
     }
 
-    return 'light';
+    return "light";
   }
 
   // Fallback to system preference
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
+  if (typeof window !== "undefined" && window.matchMedia) {
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      return "dark";
     }
   }
 
-  return 'light';
+  return "light";
 }
 
 /**
@@ -92,23 +92,23 @@ function detectSystemTheme(): ResolvedThemeType {
  * Uses sessionStorage per auth.md constraints.
  */
 function getStoredPreference(): ThemePreference {
-  if (typeof sessionStorage === 'undefined') {
-    return 'auto';
+  if (typeof sessionStorage === "undefined") {
+    return "auto";
   }
 
   const stored = sessionStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'auto') {
+  if (stored === "light" || stored === "dark" || stored === "auto") {
     return stored;
   }
 
-  return 'auto';
+  return "auto";
 }
 
 /**
  * Saves user preference to sessionStorage.
  */
 function savePreference(preference: ThemePreference): void {
-  if (typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== "undefined") {
     sessionStorage.setItem(THEME_STORAGE_KEY, preference);
   }
 }
@@ -118,11 +118,11 @@ function savePreference(preference: ThemePreference): void {
  */
 function getThemeForType(themeType: ResolvedThemeType): Theme {
   switch (themeType) {
-    case 'dark':
+    case "dark":
       return webDarkTheme;
-    case 'high-contrast':
+    case "high-contrast":
       return teamsHighContrastTheme;
-    case 'light':
+    case "light":
     default:
       return webLightTheme;
   }
@@ -133,19 +133,19 @@ function getThemeForType(themeType: ResolvedThemeType): Theme {
  */
 function resolveThemeType(
   preference: ThemePreference,
-  systemTheme: ResolvedThemeType
+  systemTheme: ResolvedThemeType,
 ): ResolvedThemeType {
   // High contrast always takes precedence
-  if (systemTheme === 'high-contrast') {
-    return 'high-contrast';
+  if (systemTheme === "high-contrast") {
+    return "high-contrast";
   }
 
   // User explicit preference
-  if (preference === 'light') {
-    return 'light';
+  if (preference === "light") {
+    return "light";
   }
-  if (preference === 'dark') {
-    return 'dark';
+  if (preference === "dark") {
+    return "dark";
   }
 
   // Auto: follow system
@@ -172,37 +172,37 @@ function resolveThemeType(
  */
 export function useTheme(): UseThemeResult {
   const [preference, setPreferenceState] = useState<ThemePreference>(() =>
-    getStoredPreference()
+    getStoredPreference(),
   );
   const [systemTheme, setSystemTheme] = useState<ResolvedThemeType>(() =>
-    detectSystemTheme()
+    detectSystemTheme(),
   );
 
   // Set up system theme detection listeners
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) {
+    if (typeof window === "undefined" || !window.matchMedia) {
       return undefined;
     }
 
-    const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const highContrastQuery = window.matchMedia('(forced-colors: active)');
+    const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const highContrastQuery = window.matchMedia("(forced-colors: active)");
 
     const handleChange = () => {
       setSystemTheme(detectSystemTheme());
     };
 
-    darkModeQuery.addEventListener?.('change', handleChange);
-    highContrastQuery.addEventListener?.('change', handleChange);
+    darkModeQuery.addEventListener?.("change", handleChange);
+    highContrastQuery.addEventListener?.("change", handleChange);
 
     return () => {
-      darkModeQuery.removeEventListener?.('change', handleChange);
-      highContrastQuery.removeEventListener?.('change', handleChange);
+      darkModeQuery.removeEventListener?.("change", handleChange);
+      highContrastQuery.removeEventListener?.("change", handleChange);
     };
   }, []);
 
   // Set up Office theme polling (Office doesn't have a reliable theme change event)
   useEffect(() => {
-    if (typeof Office === 'undefined' || !Office.context?.officeTheme) {
+    if (typeof Office === "undefined" || !Office.context?.officeTheme) {
       return undefined;
     }
 
@@ -224,19 +224,23 @@ export function useTheme(): UseThemeResult {
   // Toggle through themes: auto -> light -> dark -> auto
   const toggleTheme = useCallback(() => {
     const nextPreference: ThemePreference =
-      preference === 'auto' ? 'light' : preference === 'light' ? 'dark' : 'auto';
+      preference === "auto"
+        ? "light"
+        : preference === "light"
+          ? "dark"
+          : "auto";
     setPreference(nextPreference);
   }, [preference, setPreference]);
 
   // Compute resolved values
   const resolvedType = useMemo(
     () => resolveThemeType(preference, systemTheme),
-    [preference, systemTheme]
+    [preference, systemTheme],
   );
 
   const theme = useMemo(() => getThemeForType(resolvedType), [resolvedType]);
-  const isDarkMode = resolvedType === 'dark';
-  const isHighContrast = resolvedType === 'high-contrast';
+  const isDarkMode = resolvedType === "dark";
+  const isHighContrast = resolvedType === "high-contrast";
 
   return {
     preference,

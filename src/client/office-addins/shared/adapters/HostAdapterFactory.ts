@@ -16,8 +16,8 @@
  * ```
  */
 
-import type { IHostAdapter } from './IHostAdapter';
-import type { HostType, HostAdapterError, HostAdapterErrorCode } from './types';
+import type { IHostAdapter } from "./IHostAdapter";
+import type { HostType, HostAdapterError, HostAdapterErrorCode } from "./types";
 
 /**
  * Type definition for host adapter constructors.
@@ -41,7 +41,7 @@ let cachedAdapter: IHostAdapter | null = null;
 function createError(
   code: HostAdapterErrorCode,
   message: string,
-  innerError?: Error
+  innerError?: Error,
 ): HostAdapterError {
   return { code, message, innerError };
 }
@@ -71,7 +71,10 @@ export const HostAdapterFactory = {
    * HostAdapterFactory.registerAdapter('outlook', OutlookHostAdapter);
    * ```
    */
-  registerAdapter(hostType: HostType, adapterClass: HostAdapterConstructor): void {
+  registerAdapter(
+    hostType: HostType,
+    adapterClass: HostAdapterConstructor,
+  ): void {
     adapterRegistry.set(hostType, adapterClass);
   },
 
@@ -86,26 +89,26 @@ export const HostAdapterFactory = {
    */
   detectHostType(): HostType {
     // Check if Office.js is available
-    if (typeof Office === 'undefined' || !Office.context) {
+    if (typeof Office === "undefined" || !Office.context) {
       throw createError(
-        'API_NOT_AVAILABLE',
-        'Office.js is not available. Make sure the script is running within an Office add-in context.'
+        "API_NOT_AVAILABLE",
+        "Office.js is not available. Make sure the script is running within an Office add-in context.",
       );
     }
 
     const host = Office.context.host;
 
     if (host === Office.HostType.Outlook) {
-      return 'outlook';
+      return "outlook";
     }
 
     if (host === Office.HostType.Word) {
-      return 'word';
+      return "word";
     }
 
     throw createError(
-      'INVALID_HOST',
-      `Unsupported Office host: ${host}. Only Outlook and Word are supported.`
+      "INVALID_HOST",
+      `Unsupported Office host: ${host}. Only Outlook and Word are supported.`,
     );
   },
 
@@ -125,9 +128,9 @@ export const HostAdapterFactory = {
 
     if (!AdapterClass) {
       throw createError(
-        'INVALID_HOST',
+        "INVALID_HOST",
         `No adapter registered for host type: ${targetHost}. ` +
-        `Register an adapter using HostAdapterFactory.registerAdapter().`
+          `Register an adapter using HostAdapterFactory.registerAdapter().`,
       );
     }
 
@@ -207,27 +210,27 @@ export const HostAdapterFactory = {
    */
   async waitForOfficeReady(): Promise<HostType> {
     return new Promise((resolve, reject) => {
-      if (typeof Office === 'undefined') {
+      if (typeof Office === "undefined") {
         reject(
           createError(
-            'API_NOT_AVAILABLE',
-            'Office.js is not loaded. Make sure to include the Office.js script.'
-          )
+            "API_NOT_AVAILABLE",
+            "Office.js is not loaded. Make sure to include the Office.js script.",
+          ),
         );
         return;
       }
 
       Office.onReady((info) => {
         if (info.host === Office.HostType.Outlook) {
-          resolve('outlook');
+          resolve("outlook");
         } else if (info.host === Office.HostType.Word) {
-          resolve('word');
+          resolve("word");
         } else {
           reject(
             createError(
-              'INVALID_HOST',
-              `Unsupported Office host: ${info.host}`
-            )
+              "INVALID_HOST",
+              `Unsupported Office host: ${info.host}`,
+            ),
           );
         }
       });
@@ -243,12 +246,12 @@ export const HostAdapterFactory = {
  */
 export function isHostAdapterError(error: unknown): error is HostAdapterError {
   return (
-    typeof error === 'object' &&
+    typeof error === "object" &&
     error !== null &&
-    'code' in error &&
-    'message' in error &&
-    typeof (error as HostAdapterError).code === 'string' &&
-    typeof (error as HostAdapterError).message === 'string'
+    "code" in error &&
+    "message" in error &&
+    typeof (error as HostAdapterError).code === "string" &&
+    typeof (error as HostAdapterError).message === "string"
   );
 }
 

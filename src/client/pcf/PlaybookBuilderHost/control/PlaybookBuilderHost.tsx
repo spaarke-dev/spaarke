@@ -12,8 +12,8 @@
  * @version 2.20.0
  */
 
-import * as React from 'react';
-import { useEffect, useCallback, useRef, useState } from 'react';
+import * as React from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import {
   Button,
   Spinner,
@@ -22,11 +22,15 @@ import {
   makeStyles,
   tokens,
   shorthands,
-} from '@fluentui/react-components';
-import { DocumentMultiple20Regular } from '@fluentui/react-icons';
-import { ReactFlowProvider } from 'react-flow-renderer';
-import { BuilderLayout, TemplateLibraryDialog } from './components';
-import { useCanvasStore, useTemplateStore, useAiAssistantStore } from './stores';
+} from "@fluentui/react-components";
+import { DocumentMultiple20Regular } from "@fluentui/react-icons";
+import { ReactFlowProvider } from "react-flow-renderer";
+import { BuilderLayout, TemplateLibraryDialog } from "./components";
+import {
+  useCanvasStore,
+  useTemplateStore,
+  useAiAssistantStore,
+} from "./stores";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -48,98 +52,106 @@ export interface PlaybookBuilderHostProps {
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    height: '100%',
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    height: "100%",
     flex: 1,
     minHeight: 0, // Critical for flex child sizing
-    boxSizing: 'border-box',
-    ...shorthands.overflow('hidden'),
+    boxSizing: "border-box",
+    ...shorthands.overflow("hidden"),
   },
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalL),
     ...shorthands.gap(tokens.spacingHorizontalM),
-    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.borderBottom(
+      tokens.strokeWidthThin,
+      "solid",
+      tokens.colorNeutralStroke1,
+    ),
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
-    position: 'sticky',
+    position: "sticky",
     top: 0,
     zIndex: 100,
   },
   headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalM),
   },
   headerTitle: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
   },
   headerStatus: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
   headerActions: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   builderContainer: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
     minHeight: 0, // Allow flex shrink, parent has explicit height
-    ...shorthands.overflow('hidden'),
+    ...shorthands.overflow("hidden"),
   },
   loading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    flexDirection: 'column',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalM),
   },
   error: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
     ...shorthands.padding(tokens.spacingVerticalXXL),
-    textAlign: 'center',
+    textAlign: "center",
     color: tokens.colorPaletteRedForeground1,
   },
   statusDot: {
-    width: '8px',
-    height: '8px',
-    ...shorthands.borderRadius('50%'),
+    width: "8px",
+    height: "8px",
+    ...shorthands.borderRadius("50%"),
     backgroundColor: tokens.colorPaletteGreenBackground3,
   },
   statusDotUnsaved: {
     backgroundColor: tokens.colorPaletteMarigoldBackground3,
   },
   footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.borderTop(
+      tokens.strokeWidthThin,
+      "solid",
+      tokens.colorNeutralStroke2,
+    ),
     flexShrink: 0,
   },
   versionBadge: {
-    fontSize: '10px',
+    fontSize: "10px",
     color: tokens.colorNeutralForeground3,
-    pointerEvents: 'none',
+    pointerEvents: "none",
   },
 });
 
@@ -150,9 +162,9 @@ const useStyles = makeStyles({
 export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   playbookId,
   playbookName,
-  playbookDescription = '',
+  playbookDescription = "",
   canvasJson,
-  apiBaseUrl = '',
+  apiBaseUrl = "",
   onDirtyChange,
   onSave,
 }) => {
@@ -170,19 +182,23 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   }));
 
   // AI Assistant store - initialize playbook ID and service config
-  const { setPlaybookId, setServiceConfig, startSession } = useAiAssistantStore((state) => ({
-    setPlaybookId: state.setPlaybookId,
-    setServiceConfig: state.setServiceConfig,
-    startSession: state.startSession,
-  }));
+  const { setPlaybookId, setServiceConfig, startSession } = useAiAssistantStore(
+    (state) => ({
+      setPlaybookId: state.setPlaybookId,
+      setServiceConfig: state.setServiceConfig,
+      startSession: state.startSession,
+    }),
+  );
 
   // Get store state and actions
-  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
-    isDirty: state.isDirty,
-    loadCanvas: state.loadCanvas,
-    getCanvasJson: state.getCanvasJson,
-    clearDirty: state.clearDirty,
-  }));
+  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore(
+    (state) => ({
+      isDirty: state.isDirty,
+      loadCanvas: state.loadCanvas,
+      getCanvasJson: state.getCanvasJson,
+      clearDirty: state.clearDirty,
+    }),
+  );
 
   // Debounce timer ref for auto-sync
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -193,7 +209,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
     initializedRef.current = true;
 
     try {
-      console.info('[PlaybookBuilderHost] Initializing canvas', {
+      console.info("[PlaybookBuilderHost] Initializing canvas", {
         playbookId,
         playbookName,
         hasCanvasJson: !!canvasJson,
@@ -205,8 +221,8 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       setIsLoading(false);
     } catch (err) {
-      console.error('[PlaybookBuilderHost] Failed to initialize canvas:', err);
-      setError('Failed to load the playbook canvas. Please try again.');
+      console.error("[PlaybookBuilderHost] Failed to initialize canvas:", err);
+      setError("Failed to load the playbook canvas. Please try again.");
       setIsLoading(false);
     }
   }, [canvasJson, loadCanvas, playbookId, playbookName]);
@@ -229,7 +245,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       // The BFF API endpoint will return an error if authentication is required
       setServiceConfig({
         apiBaseUrl,
-        accessToken: '', // TODO: Get access token from PCF context or auth provider
+        accessToken: "", // TRACKED: GitHub #234 - Get access token from PCF context
       });
     }
   }, [playbookId, apiBaseUrl, setPlaybookId, setServiceConfig, startSession]);
@@ -253,15 +269,18 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
     syncTimerRef.current = setTimeout(() => {
       try {
         const json = getCanvasJson();
-        console.info('[PlaybookBuilderHost] Auto-syncing canvas to bound field', {
-          jsonLength: json.length,
-        });
+        console.info(
+          "[PlaybookBuilderHost] Auto-syncing canvas to bound field",
+          {
+            jsonLength: json.length,
+          },
+        );
         // Sync to bound field - form Save button will persist
-        onSave(json, playbookName, playbookDescription || '');
+        onSave(json, playbookName, playbookDescription || "");
         // Clear dirty state - canvas is now synced to bound field
         clearDirty();
       } catch (err) {
-        console.error('[PlaybookBuilderHost] Failed to sync canvas:', err);
+        console.error("[PlaybookBuilderHost] Failed to sync canvas:", err);
       }
     }, 500);
 
@@ -270,7 +289,14 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
         clearTimeout(syncTimerRef.current);
       }
     };
-  }, [isDirty, getCanvasJson, onSave, playbookName, playbookDescription, clearDirty]);
+  }, [
+    isDirty,
+    getCanvasJson,
+    onSave,
+    playbookName,
+    playbookDescription,
+    clearDirty,
+  ]);
 
   // Handle retry
   const handleRetryClick = useCallback(() => {
@@ -284,8 +310,8 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       }
       setIsLoading(false);
     } catch (err) {
-      console.error('[PlaybookBuilderHost] Retry failed:', err);
-      setError('Failed to load the playbook canvas. Please try again.');
+      console.error("[PlaybookBuilderHost] Retry failed:", err);
+      setError("Failed to load the playbook canvas. Please try again.");
       setIsLoading(false);
     }
   }, [canvasJson, loadCanvas]);
@@ -301,33 +327,48 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   }, []);
 
   // Handle clone success - navigate to the cloned playbook
-  const handleCloneSuccess = useCallback((clonedId: string, clonedName: string) => {
-    setTemplateDialogOpen(false);
-    console.info('[PlaybookBuilderHost] Template cloned successfully', { clonedId, clonedName });
+  const handleCloneSuccess = useCallback(
+    (clonedId: string, clonedName: string) => {
+      setTemplateDialogOpen(false);
+      console.info("[PlaybookBuilderHost] Template cloned successfully", {
+        clonedId,
+        clonedName,
+      });
 
-    // Navigate to the cloned playbook record
-    // In Dataverse, we use Xrm.Navigation.openForm to navigate to records
-    try {
-      const Xrm = (window as unknown as { Xrm?: { Navigation?: { openForm: (options: unknown) => void } } }).Xrm;
-      if (Xrm?.Navigation?.openForm) {
-        Xrm.Navigation.openForm({
-          entityName: 'sprk_analysisplaybook',
-          entityId: clonedId,
-        });
-      } else {
-        // Fallback: reload the page with the new record ID in URL
-        const currentUrl = window.location.href;
-        const newUrl = currentUrl.replace(/id=[^&]+/, `id=${clonedId}`);
-        if (newUrl !== currentUrl) {
-          window.location.href = newUrl;
+      // Navigate to the cloned playbook record
+      // In Dataverse, we use Xrm.Navigation.openForm to navigate to records
+      try {
+        const Xrm = (
+          window as unknown as {
+            Xrm?: { Navigation?: { openForm: (options: unknown) => void } };
+          }
+        ).Xrm;
+        if (Xrm?.Navigation?.openForm) {
+          Xrm.Navigation.openForm({
+            entityName: "sprk_analysisplaybook",
+            entityId: clonedId,
+          });
         } else {
-          console.warn('[PlaybookBuilderHost] Could not navigate to cloned playbook - Xrm.Navigation not available');
+          // Fallback: reload the page with the new record ID in URL
+          const currentUrl = window.location.href;
+          const newUrl = currentUrl.replace(/id=[^&]+/, `id=${clonedId}`);
+          if (newUrl !== currentUrl) {
+            window.location.href = newUrl;
+          } else {
+            console.warn(
+              "[PlaybookBuilderHost] Could not navigate to cloned playbook - Xrm.Navigation not available",
+            );
+          }
         }
+      } catch (err) {
+        console.error(
+          "[PlaybookBuilderHost] Failed to navigate to cloned playbook:",
+          err,
+        );
       }
-    } catch (err) {
-      console.error('[PlaybookBuilderHost] Failed to navigate to cloned playbook:', err);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Error state
   if (error) {
@@ -367,10 +408,10 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
           <Text className={styles.headerTitle}>Playbook Builder</Text>
           <div className={styles.headerStatus}>
             <span
-              className={`${styles.statusDot} ${isDirty ? styles.statusDotUnsaved : ''}`}
+              className={`${styles.statusDot} ${isDirty ? styles.statusDotUnsaved : ""}`}
             />
             <Text size={200}>
-              {isDirty ? 'Unsaved changes' : 'All changes saved'}
+              {isDirty ? "Unsaved changes" : "All changes saved"}
             </Text>
           </div>
         </div>
@@ -378,7 +419,10 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
         {/* Right side: Action buttons */}
         <div className={styles.headerActions}>
           {apiBaseUrl && (
-            <Tooltip content="Browse playbook templates" relationship="description">
+            <Tooltip
+              content="Browse playbook templates"
+              relationship="description"
+            >
               <Button
                 appearance="subtle"
                 size="small"

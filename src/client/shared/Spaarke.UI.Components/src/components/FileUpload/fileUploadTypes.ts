@@ -12,12 +12,12 @@
 
 /** MIME types recognized by the default file upload validation. */
 export type AcceptedMimeType =
-  | 'application/pdf'
-  | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  | 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  | "application/pdf"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /** Category derived from accepted file type — drives icon selection. */
-export type UploadedFileType = 'pdf' | 'docx' | 'xlsx';
+export type UploadedFileType = "pdf" | "docx" | "xlsx";
 
 // ---------------------------------------------------------------------------
 // Data models

@@ -115,19 +115,38 @@ const useStyles = makeStyles({
   },
 });
 
-const MONTH_ABBREVS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_ABBREVS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
-function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): "danger" | "warning" | "success" {
-  if (isOverdue || daysUntilDue < 3) return "danger";     // red: overdue or <3 days
-  if (daysUntilDue <= 5) return "warning";                 // yellow: 3-5 days
-  return "success";                                        // green: 6+ days
+function getDueBadgeAppearance(
+  daysUntilDue: number,
+  isOverdue: boolean,
+): "danger" | "warning" | "success" {
+  if (isOverdue || daysUntilDue < 3) return "danger"; // red: overdue or <3 days
+  if (daysUntilDue <= 5) return "warning"; // yellow: 3-5 days
+  return "success"; // green: 6+ days
 }
 
 /**
  * Get urgency-based background color for the date column.
  * Uses CSS custom properties from Fluent v9 theme for dark mode support.
  */
-function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
+function getUrgencyDateStyle(
+  daysUntilDue: number,
+  isOverdue: boolean,
+): React.CSSProperties {
   if (isOverdue || daysUntilDue < 3) {
     return { backgroundColor: "var(--colorStatusDangerBackground2, #fde7e9)" };
   }
@@ -159,18 +178,24 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = (props) => {
         handleClick();
       }
     },
-    [handleClick]
+    [handleClick],
   );
 
   // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
-  const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
+  const dateColumnStyle = getUrgencyDateStyle(
+    props.daysUntilDue,
+    props.isOverdue,
+  );
 
   const day = props.dueDate.getDate();
   const month = MONTH_ABBREVS[props.dueDate.getMonth()];
 
   return (
     <Card
-      className={mergeClasses(styles.card, props.isNavigating && styles.cardDisabled)}
+      className={mergeClasses(
+        styles.card,
+        props.isNavigating && styles.cardDisabled,
+      )}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
@@ -190,7 +215,9 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = (props) => {
           <Text className={styles.description}>{props.description}</Text>
         )}
         {props.assignedTo && (
-          <Text className={styles.assignedTo}>Assigned To: {props.assignedTo}</Text>
+          <Text className={styles.assignedTo}>
+            Assigned To: {props.assignedTo}
+          </Text>
         )}
       </div>
 

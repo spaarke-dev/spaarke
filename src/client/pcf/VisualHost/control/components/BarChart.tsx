@@ -158,7 +158,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
       xAxisCalloutData: point.value.toString(),
       yAxisCalloutData: point.label,
       onClick: () => handleBarClick(point),
-    })
+    }),
   );
 
   const chartProps: IChartProps = {

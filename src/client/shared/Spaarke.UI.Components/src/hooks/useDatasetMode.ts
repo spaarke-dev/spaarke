@@ -36,7 +36,7 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
         isSecured: colSecurity?.secured === true,
         canRead: colSecurity?.readable !== false,
         canUpdate: colSecurity?.editable !== false,
-        canCreate: colSecurity?.editable !== false
+        canCreate: colSecurity?.editable !== false,
       };
     });
   }, [dataset.columns]);
@@ -55,7 +55,7 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
 
       const dataRecord: IDatasetRecord = {
         id: recordId,
-        entityName: dataset.getTargetEntityType()
+        entityName: dataset.getTargetEntityType(),
       };
 
       // Extract all column values
@@ -96,7 +96,9 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
       dataset.refresh();
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh dataset");
+      setError(
+        err instanceof Error ? err.message : "Failed to refresh dataset",
+      );
     }
   };
 
@@ -119,6 +121,6 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
     hasPreviousPage,
     loadNextPage,
     loadPreviousPage,
-    refresh
+    refresh,
   };
 }

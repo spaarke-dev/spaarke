@@ -22,7 +22,10 @@ import type {
  */
 export class ConfigurationService {
   private xrm: XrmContext;
-  private cache: Map<string, { configs: IGridConfiguration[]; timestamp: number }> = new Map();
+  private cache: Map<
+    string,
+    { configs: IGridConfiguration[]; timestamp: number }
+  > = new Map();
   private cacheTTL: number = 5 * 60 * 1000; // 5 minutes
   private entityExists: boolean | null = null;
 
@@ -39,7 +42,9 @@ export class ConfigurationService {
    * @param entityLogicalName - Entity to get configurations for
    * @returns Promise resolving to array of grid configurations
    */
-  async getConfigurations(entityLogicalName: string): Promise<IGridConfiguration[]> {
+  async getConfigurations(
+    entityLogicalName: string,
+  ): Promise<IGridConfiguration[]> {
     // Check if entity exists
     if (this.entityExists === false) {
       return [];
@@ -75,13 +80,13 @@ export class ConfigurationService {
 
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
         "sprk_gridconfiguration",
-        `?$select=${select}&$filter=${filter}&$orderby=sprk_sortorder`
+        `?$select=${select}&$filter=${filter}&$orderby=sprk_sortorder`,
       );
 
       this.entityExists = true;
 
-      const configs = (result.entities as IGridConfigurationRecord[]).map((record) =>
-        this.mapRecordToConfiguration(record)
+      const configs = (result.entities as IGridConfigurationRecord[]).map(
+        (record) => this.mapRecordToConfiguration(record),
       );
 
       // Cache results
@@ -92,10 +97,15 @@ export class ConfigurationService {
       // Entity might not exist - handle gracefully
       if (this.isEntityNotFoundError(error)) {
         this.entityExists = false;
-        console.debug("[ConfigurationService] sprk_gridconfiguration entity not found");
+        console.debug(
+          "[ConfigurationService] sprk_gridconfiguration entity not found",
+        );
         return [];
       }
-      console.error("[ConfigurationService] Failed to fetch configurations:", error);
+      console.error(
+        "[ConfigurationService] Failed to fetch configurations:",
+        error,
+      );
       return [];
     }
   }
@@ -105,7 +115,9 @@ export class ConfigurationService {
    * @param entityLogicalName - Entity to get default for
    * @returns Promise resolving to default configuration or undefined
    */
-  async getDefaultConfiguration(entityLogicalName: string): Promise<IGridConfiguration | undefined> {
+  async getDefaultConfiguration(
+    entityLogicalName: string,
+  ): Promise<IGridConfiguration | undefined> {
     const configs = await this.getConfigurations(entityLogicalName);
 
     // Find configuration marked as default
@@ -123,7 +135,9 @@ export class ConfigurationService {
    * @param configurationId - Configuration ID (sprk_gridconfigurationid)
    * @returns Promise resolving to configuration or undefined
    */
-  async getConfigurationById(configurationId: string): Promise<IGridConfiguration | undefined> {
+  async getConfigurationById(
+    configurationId: string,
+  ): Promise<IGridConfiguration | undefined> {
     // Check cache first
     for (const cached of this.cache.values()) {
       const found = cached.configs.find((c) => c.id === configurationId);
@@ -157,7 +171,7 @@ export class ConfigurationService {
       const record = await this.xrm.WebApi.retrieveRecord(
         "sprk_gridconfiguration",
         configurationId,
-        `?$select=${select}`
+        `?$select=${select}`,
       );
 
       this.entityExists = true;
@@ -224,7 +238,7 @@ export class ConfigurationService {
       // Try to fetch a single record to check if entity exists
       await this.xrm.WebApi.retrieveMultipleRecords(
         "sprk_gridconfiguration",
-        "?$top=1&$select=sprk_gridconfigurationid"
+        "?$top=1&$select=sprk_gridconfigurationid",
       );
       this.entityExists = true;
       return true;
@@ -245,14 +259,19 @@ export class ConfigurationService {
   /**
    * Map Dataverse record to IGridConfiguration
    */
-  private mapRecordToConfiguration(record: IGridConfigurationRecord): IGridConfiguration {
+  private mapRecordToConfiguration(
+    record: IGridConfigurationRecord,
+  ): IGridConfiguration {
     let configJson: IGridConfigJson | undefined;
 
     if (record.sprk_configjson) {
       try {
         configJson = JSON.parse(record.sprk_configjson) as IGridConfigJson;
       } catch {
-        console.warn("[ConfigurationService] Failed to parse configjson for", record.sprk_name);
+        console.warn(
+          "[ConfigurationService] Failed to parse configjson for",
+          record.sprk_name,
+        );
       }
     }
 

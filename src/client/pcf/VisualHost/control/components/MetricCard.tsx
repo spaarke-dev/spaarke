@@ -13,10 +13,7 @@ import {
   tokens,
   mergeClasses,
 } from "@fluentui/react-components";
-import {
-  ArrowUpRegular,
-  ArrowDownRegular,
-} from "@fluentui/react-icons";
+import { ArrowUpRegular, ArrowDownRegular } from "@fluentui/react-icons";
 import type { DrillInteraction, ValueFormatType } from "../types";
 import { formatValue as formatValueUtil } from "../utils/valueFormatters";
 
@@ -188,7 +185,7 @@ const useStyles = makeStyles({
 const formatDisplayValue = (
   val: string | number,
   format?: ValueFormatType,
-  nullText?: string
+  nullText?: string,
 ): string => {
   if (format && typeof val === "number") {
     return formatValueUtil(val, format, nullText);
@@ -286,23 +283,29 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         styles.card,
         isInteractive && styles.cardInteractive,
         compact && styles.cardCompact,
-        fillContainer && !hasExplicitDimensions && styles.cardFillContainer
+        fillContainer && !hasExplicitDimensions && styles.cardFillContainer,
       )}
       style={{
-        ...(fillContainer && !hasExplicitDimensions ? { width: "100%", flex: "1 1 0%" } : undefined),
-        ...(hasExplicitDimensions ? {
-          width: `${explicitWidth}px`,
-          height: `${explicitHeight}px`,
-          minWidth: "unset",
-          minHeight: "unset",
-        } : undefined),
+        ...(fillContainer && !hasExplicitDimensions
+          ? { width: "100%", flex: "1 1 0%" }
+          : undefined),
+        ...(hasExplicitDimensions
+          ? {
+              width: `${explicitWidth}px`,
+              height: `${explicitHeight}px`,
+              minWidth: "unset",
+              minHeight: "unset",
+            }
+          : undefined),
         ...(cardBackground ? { backgroundColor: cardBackground } : undefined),
       }}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
       role={isInteractive ? "button" : undefined}
-      aria-label={isInteractive ? `${label}: ${value}. Click to view details.` : undefined}
+      aria-label={
+        isInteractive ? `${label}: ${value}. Click to view details.` : undefined
+      }
     >
       {/* Color-coded left border accent */}
       {accentColor && (
@@ -315,24 +318,36 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         className={mergeClasses(
           styles.content,
           compact && styles.contentCompact,
-          (justification === "center" || justification === "left-center" || justification === "right-center") && styles.contentCenter,
-          justification === "right" && styles.contentRight
+          (justification === "center" ||
+            justification === "left-center" ||
+            justification === "right-center") &&
+            styles.contentCenter,
+          justification === "right" && styles.contentRight,
         )}
       >
         {IconComponent ? (
           <div className={styles.headerWithIcon}>
-            <span className={styles.iconSlot} style={iconColor ? { color: iconColor } : undefined}>
+            <span
+              className={styles.iconSlot}
+              style={iconColor ? { color: iconColor } : undefined}
+            >
               <IconComponent />
             </span>
             <Text
-              className={mergeClasses(styles.label, compact && styles.labelCompact)}
+              className={mergeClasses(
+                styles.label,
+                compact && styles.labelCompact,
+              )}
             >
               {label}
             </Text>
           </div>
         ) : (
           <Text
-            className={mergeClasses(styles.label, compact && styles.labelCompact)}
+            className={mergeClasses(
+              styles.label,
+              compact && styles.labelCompact,
+            )}
           >
             {label}
           </Text>
@@ -341,7 +356,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
           <Text
             className={mergeClasses(
               styles.value,
-              compact && styles.valueCompact
+              compact && styles.valueCompact,
             )}
             style={valueColor ? { color: valueColor } : undefined}
           >

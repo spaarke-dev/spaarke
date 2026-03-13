@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 /**
  * Props for the SpaarkeLogo component.
@@ -9,7 +9,7 @@ export interface SpaarkeLogoProps {
   /** Additional class name */
   className?: string;
   /** Aria label for accessibility */
-  'aria-label'?: string;
+  "aria-label"?: string;
 }
 
 /**
@@ -24,7 +24,7 @@ export interface SpaarkeLogoProps {
 export const SpaarkeLogo: React.FC<SpaarkeLogoProps> = ({
   size = 48,
   className,
-  'aria-label': ariaLabel = 'Spaarke logo',
+  "aria-label": ariaLabel = "Spaarke logo",
 }) => {
   return (
     <svg

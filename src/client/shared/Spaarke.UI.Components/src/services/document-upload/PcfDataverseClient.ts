@@ -7,7 +7,7 @@
  * @version 1.0.0
  */
 
-import type { IDataverseClient, DataverseRecordRef } from './types';
+import type { IDataverseClient, DataverseRecordRef } from "./types";
 
 /**
  * Dataverse client backed by PCF context.webAPI.
@@ -19,32 +19,30 @@ import type { IDataverseClient, DataverseRecordRef } from './types';
  * ```
  */
 export class PcfDataverseClient implements IDataverseClient {
-    /**
-     * @param webApi - ComponentFramework.WebApi instance from PCF context
-     */
-    constructor(
-        private readonly webApi: ComponentFramework.WebApi
-    ) {}
+  /**
+   * @param webApi - ComponentFramework.WebApi instance from PCF context
+   */
+  constructor(private readonly webApi: ComponentFramework.WebApi) {}
 
-    /**
-     * Create a record via context.webAPI.createRecord().
-     */
-    async createRecord(
-        entityLogicalName: string,
-        data: Record<string, unknown>
-    ): Promise<DataverseRecordRef> {
-        const result = await this.webApi.createRecord(entityLogicalName, data);
-        return { id: result.id };
-    }
+  /**
+   * Create a record via context.webAPI.createRecord().
+   */
+  async createRecord(
+    entityLogicalName: string,
+    data: Record<string, unknown>,
+  ): Promise<DataverseRecordRef> {
+    const result = await this.webApi.createRecord(entityLogicalName, data);
+    return { id: result.id };
+  }
 
-    /**
-     * Update a record via context.webAPI.updateRecord().
-     */
-    async updateRecord(
-        entityLogicalName: string,
-        id: string,
-        data: Record<string, unknown>
-    ): Promise<void> {
-        await this.webApi.updateRecord(entityLogicalName, id, data);
-    }
+  /**
+   * Update a record via context.webAPI.updateRecord().
+   */
+  async updateRecord(
+    entityLogicalName: string,
+    id: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    await this.webApi.updateRecord(entityLogicalName, id, data);
+  }
 }

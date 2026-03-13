@@ -6,7 +6,7 @@
  * @version 2.0.0
  */
 
-import { create } from 'zustand';
+import { create } from "zustand";
 import {
   Node,
   Edge,
@@ -17,18 +17,18 @@ import {
   applyEdgeChanges,
   addEdge,
   XYPosition,
-} from 'react-flow-renderer';
+} from "react-flow-renderer";
 
 // Node type constants
 export type PlaybookNodeType =
-  | 'aiAnalysis'
-  | 'aiCompletion'
-  | 'condition'
-  | 'deliverOutput'
-  | 'updateRecord'
-  | 'createTask'
-  | 'sendEmail'
-  | 'wait';
+  | "aiAnalysis"
+  | "aiCompletion"
+  | "condition"
+  | "deliverOutput"
+  | "updateRecord"
+  | "createTask"
+  | "sendEmail"
+  | "wait";
 
 // Node data type for playbook nodes
 export interface PlaybookNodeData {
@@ -81,7 +81,11 @@ interface CanvasState {
   selectNode: (nodeId: string | null) => void;
 
   // Drag and drop
-  onDrop: (position: XYPosition, nodeType: PlaybookNodeType, label: string) => void;
+  onDrop: (
+    position: XYPosition,
+    nodeType: PlaybookNodeType,
+    label: string,
+  ) => void;
 
   // Persistence
   loadFromJson: (json: string) => void;
@@ -147,7 +151,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       nodes: state.nodes.map((node) =>
         node.id === nodeId
           ? { ...node, data: { ...node.data, ...data } }
-          : node
+          : node,
       ),
       isDirty: true,
     })),
@@ -156,7 +160,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((state) => ({
       nodes: state.nodes.filter((node) => node.id !== nodeId),
       edges: state.edges.filter(
-        (edge) => edge.source !== nodeId && edge.target !== nodeId
+        (edge) => edge.source !== nodeId && edge.target !== nodeId,
       ),
       selectedNodeId:
         state.selectedNodeId === nodeId ? null : state.selectedNodeId,
@@ -175,18 +179,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onConnect: (connection) =>
     set((state) => {
       // Determine edge type based on source node and handle
-      let edgeType = 'smoothstep';
+      let edgeType = "smoothstep";
       let animated = true;
 
       // Check if source is a condition node
       const sourceNode = state.nodes.find((n) => n.id === connection.source);
-      if (sourceNode?.data.type === 'condition' && connection.sourceHandle) {
+      if (sourceNode?.data.type === "condition" && connection.sourceHandle) {
         // Use branch-specific edge types for condition nodes
-        if (connection.sourceHandle === 'true') {
-          edgeType = 'trueBranch';
+        if (connection.sourceHandle === "true") {
+          edgeType = "trueBranch";
           animated = false; // Static for better visual clarity
-        } else if (connection.sourceHandle === 'false') {
-          edgeType = 'falseBranch';
+        } else if (connection.sourceHandle === "false") {
+          edgeType = "falseBranch";
           animated = false;
         }
       }
@@ -198,7 +202,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             type: edgeType,
             animated,
           },
-          state.edges
+          state.edges,
         ),
         isDirty: true,
       };
@@ -247,9 +251,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         isDirty: false,
         lastSavedJson: json,
       });
-      console.info('[CanvasStore] Loaded canvas from JSON');
+      console.info("[CanvasStore] Loaded canvas from JSON");
     } catch (error) {
-      console.error('[CanvasStore] Failed to parse canvas JSON:', error);
+      console.error("[CanvasStore] Failed to parse canvas JSON:", error);
     }
   },
 

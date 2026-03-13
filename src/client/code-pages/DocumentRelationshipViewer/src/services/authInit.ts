@@ -19,7 +19,7 @@ import { initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
  * Replaces MsalAuthProvider.getInstance().initialize() from the old local auth.
  */
 export async function initializeAuth(): Promise<void> {
-    await initAuth();
+  await initAuth();
 }
 
 /**
@@ -27,7 +27,7 @@ export async function initializeAuth(): Promise<void> {
  * Drop-in replacement for MsalAuthProvider.getInstance().getToken().
  */
 export async function getToken(): Promise<string> {
-    return getAuthProvider().getAccessToken();
+  return getAuthProvider().getAccessToken();
 }
 
 /**
@@ -35,7 +35,7 @@ export async function getToken(): Promise<string> {
  * Drop-in replacement for MsalAuthProvider.getInstance().clearCache().
  */
 export function clearAuthCache(): void {
-    getAuthProvider().clearCache();
+  getAuthProvider().clearCache();
 }
 
 /**
@@ -43,7 +43,7 @@ export function clearAuthCache(): void {
  * Drop-in replacement for MsalAuthProvider.getInstance().isAuthenticated().
  */
 export function isAuthenticated(): boolean {
-    return getAuthProvider().isAuthenticated();
+  return getAuthProvider().isAuthenticated();
 }
 
 // Re-export authenticatedFetch for convenience

@@ -19,7 +19,10 @@ import {
   DEFAULT_SECTION_STATES,
   getEventTypeFieldConfig,
 } from "../EventTypeService";
-import type { IEventTypeFieldConfig, ISectionDefaults } from "../../types/EventTypeConfig";
+import type {
+  IEventTypeFieldConfig,
+  ISectionDefaults,
+} from "../../types/EventTypeConfig";
 import type { IWebApiLike } from "../../types/WebApiLike";
 
 describe("EventTypeService", () => {
@@ -62,8 +65,10 @@ describe("EventTypeService", () => {
         const result = service.parseFieldConfigJson("{invalid json}");
         expect(result).toBeNull();
         expect(consoleSpy).toHaveBeenCalledWith(
-          expect.stringContaining("[EventTypeService] Failed to parse config JSON"),
-          expect.anything()
+          expect.stringContaining(
+            "[EventTypeService] Failed to parse config JSON",
+          ),
+          expect.anything(),
         );
         consoleSpy.mockRestore();
       });
@@ -136,7 +141,8 @@ describe("EventTypeService", () => {
       });
 
       it("parses sectionDefaults", () => {
-        const json = '{"sectionDefaults": {"dates": "expanded", "relatedEvent": "collapsed"}}';
+        const json =
+          '{"sectionDefaults": {"dates": "expanded", "relatedEvent": "collapsed"}}';
         const result = service.parseFieldConfigJson(json);
         expect(result).toEqual({
           sectionDefaults: {
@@ -167,9 +173,13 @@ describe("EventTypeService", () => {
 
     describe("field filtering", () => {
       it("filters non-string values from visibleFields", () => {
-        const json = '{"visibleFields": ["sprk_duedate", 123, null, "sprk_priority", true]}';
+        const json =
+          '{"visibleFields": ["sprk_duedate", 123, null, "sprk_priority", true]}';
         const result = service.parseFieldConfigJson(json);
-        expect(result?.visibleFields).toEqual(["sprk_duedate", "sprk_priority"]);
+        expect(result?.visibleFields).toEqual([
+          "sprk_duedate",
+          "sprk_priority",
+        ]);
       });
 
       it("filters non-string values from hiddenFields", () => {
@@ -179,9 +189,13 @@ describe("EventTypeService", () => {
       });
 
       it("filters non-string values from requiredFields", () => {
-        const json = '{"requiredFields": ["sprk_duedate", [], "sprk_eventname"]}';
+        const json =
+          '{"requiredFields": ["sprk_duedate", [], "sprk_eventname"]}';
         const result = service.parseFieldConfigJson(json);
-        expect(result?.requiredFields).toEqual(["sprk_duedate", "sprk_eventname"]);
+        expect(result?.requiredFields).toEqual([
+          "sprk_duedate",
+          "sprk_eventname",
+        ]);
       });
 
       it("ignores non-array visibleFields", () => {
@@ -199,7 +213,8 @@ describe("EventTypeService", () => {
 
     describe("sectionDefaults validation", () => {
       it("ignores invalid section state values", () => {
-        const json = '{"sectionDefaults": {"dates": "invalid", "relatedEvent": "collapsed"}}';
+        const json =
+          '{"sectionDefaults": {"dates": "invalid", "relatedEvent": "collapsed"}}';
         const result = service.parseFieldConfigJson(json);
         expect(result?.sectionDefaults).toEqual({
           relatedEvent: "collapsed",
@@ -213,7 +228,8 @@ describe("EventTypeService", () => {
       });
 
       it("ignores unknown section keys", () => {
-        const json = '{"sectionDefaults": {"dates": "expanded", "unknownSection": "collapsed"}}';
+        const json =
+          '{"sectionDefaults": {"dates": "expanded", "unknownSection": "collapsed"}}';
         const result = service.parseFieldConfigJson(json);
         expect(result?.sectionDefaults).toEqual({
           dates: "expanded",
@@ -345,7 +361,9 @@ describe("EventTypeService", () => {
       };
       const result = service.validateConfig(config);
       expect(result.isValid).toBe(true); // Warnings don't invalidate
-      expect(result.warnings).toContain("Unknown field 'unknown_field' in visibleFields");
+      expect(result.warnings).toContain(
+        "Unknown field 'unknown_field' in visibleFields",
+      );
     });
 
     it("errors when field is in both hiddenFields and requiredFields", () => {
@@ -356,7 +374,7 @@ describe("EventTypeService", () => {
       const result = service.validateConfig(config);
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain(
-        "Field 'sprk_duedate' is in both hiddenFields and requiredFields (required takes precedence)"
+        "Field 'sprk_duedate' is in both hiddenFields and requiredFields (required takes precedence)",
       );
     });
 
@@ -411,8 +429,12 @@ describe("EventTypeService", () => {
       const config: IEventTypeFieldConfig = {
         requiredFields: ["sprk_duedate"],
       };
-      expect(service.getFieldRequiredLevel(config, "sprk_duedate")).toBe("required");
-      expect(service.getFieldRequiredLevel(config, "sprk_basedate")).toBe("none");
+      expect(service.getFieldRequiredLevel(config, "sprk_duedate")).toBe(
+        "required",
+      );
+      expect(service.getFieldRequiredLevel(config, "sprk_basedate")).toBe(
+        "none",
+      );
     });
 
     it("getDefaultFieldState returns default for known field", () => {
@@ -465,7 +487,10 @@ describe("EventTypeService", () => {
     });
 
     it("expires cache after TTL", () => {
-      const service = new EventTypeService({ enableCache: true, cacheTtlMs: 100 });
+      const service = new EventTypeService({
+        enableCache: true,
+        cacheTtlMs: 100,
+      });
       const config: IEventTypeFieldConfig = { visibleFields: ["sprk_duedate"] };
       service.setCachedConfig("some-id", config);
 
@@ -501,7 +526,9 @@ describe("EventTypeService", () => {
       service.clearCacheForEventType("id-1");
 
       expect(service.getCachedConfig("id-1")).toBeNull();
-      expect(service.getCachedConfig("id-2")).toEqual({ visibleFields: ["field2"] });
+      expect(service.getCachedConfig("id-2")).toEqual({
+        visibleFields: ["field2"],
+      });
     });
   });
 
@@ -515,7 +542,9 @@ describe("EventTypeService", () => {
     });
 
     it("singleton parseFieldConfigJson works correctly", () => {
-      const result = eventTypeService.parseFieldConfigJson('{"visibleFields": ["sprk_duedate"]}');
+      const result = eventTypeService.parseFieldConfigJson(
+        '{"visibleFields": ["sprk_duedate"]}',
+      );
       expect(result).toEqual({ visibleFields: ["sprk_duedate"] });
     });
   });
@@ -577,7 +606,10 @@ describe("EventTypeService", () => {
       states.sprk_eventname = { visible: false, requiredLevel: "none" };
 
       const freshStates = service.getDefaultFieldStates();
-      expect(freshStates.sprk_eventname).toEqual({ visible: true, requiredLevel: "required" });
+      expect(freshStates.sprk_eventname).toEqual({
+        visible: true,
+        requiredLevel: "required",
+      });
     });
   });
 
@@ -587,22 +619,35 @@ describe("EventTypeService", () => {
 
   describe("helper method edge cases", () => {
     it("isFieldVisible returns true for unknown field (safe default)", () => {
-      expect(service.isFieldVisible(null, "completely_unknown_field")).toBe(true);
+      expect(service.isFieldVisible(null, "completely_unknown_field")).toBe(
+        true,
+      );
     });
 
     it("isFieldRequired returns false for unknown field", () => {
-      expect(service.isFieldRequired(null, "completely_unknown_field")).toBe(false);
+      expect(service.isFieldRequired(null, "completely_unknown_field")).toBe(
+        false,
+      );
     });
 
     it("getFieldRequiredLevel returns 'none' for unknown field", () => {
-      expect(service.getFieldRequiredLevel(null, "completely_unknown_field")).toBe("none");
+      expect(
+        service.getFieldRequiredLevel(null, "completely_unknown_field"),
+      ).toBe("none");
     });
 
     it("getFieldState returns null for field not in custom defaults", () => {
       const customDefaults = {
-        custom_only_field: { visible: true, requiredLevel: "required" as const },
+        custom_only_field: {
+          visible: true,
+          requiredLevel: "required" as const,
+        },
       };
-      const state = service.getFieldState(null, "sprk_eventname", customDefaults);
+      const state = service.getFieldState(
+        null,
+        "sprk_eventname",
+        customDefaults,
+      );
       expect(state).toBeNull(); // sprk_eventname is not in custom defaults
     });
   });
@@ -614,7 +659,9 @@ describe("EventTypeService", () => {
 
 describe("getEventTypeFieldConfig", () => {
   // Mock WebAPI
-  const createMockWebApi = (overrides: Partial<IWebApiLike> = {}): IWebApiLike => ({
+  const createMockWebApi = (
+    overrides: Partial<IWebApiLike> = {},
+  ): IWebApiLike => ({
     retrieveRecord: jest.fn().mockResolvedValue({}),
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     ...overrides,
@@ -623,7 +670,10 @@ describe("getEventTypeFieldConfig", () => {
   describe("input validation", () => {
     it("returns error for null eventTypeId", async () => {
       const mockWebApi = createMockWebApi();
-      const result = await getEventTypeFieldConfig(mockWebApi, null as unknown as string);
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        null as unknown as string,
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Event Type ID is required");
@@ -657,12 +707,15 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      await getEventTypeFieldConfig(mockWebApi, "{12345678-1234-1234-1234-123456789ABC}");
+      await getEventTypeFieldConfig(
+        mockWebApi,
+        "{12345678-1234-1234-1234-123456789ABC}",
+      );
 
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledWith(
         "sprk_eventtype",
         "12345678-1234-1234-1234-123456789abc",
-        expect.any(String)
+        expect.any(String),
       );
     });
 
@@ -674,12 +727,15 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      await getEventTypeFieldConfig(mockWebApi, "ABCD1234-ABCD-ABCD-ABCD-ABCD12345678");
+      await getEventTypeFieldConfig(
+        mockWebApi,
+        "ABCD1234-ABCD-ABCD-ABCD-ABCD12345678",
+      );
 
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledWith(
         "sprk_eventtype",
         "abcd1234-abcd-abcd-abcd-abcd12345678",
-        expect.any(String)
+        expect.any(String),
       );
     });
   });
@@ -693,7 +749,10 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(true);
       expect(result.eventTypeName).toBe("Meeting");
@@ -709,7 +768,10 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(true);
       expect(result.config).toBeNull();
@@ -723,7 +785,10 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(true);
       expect(result.config).toBeNull();
@@ -748,7 +813,10 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(true);
       expect(result.config).toEqual(fullConfig);
@@ -762,7 +830,10 @@ describe("getEventTypeFieldConfig", () => {
         retrieveRecord: jest.fn().mockRejectedValue(new Error("404 Not Found")),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(false);
       expect(result.notFound).toBe(true);
@@ -773,10 +844,15 @@ describe("getEventTypeFieldConfig", () => {
     it("returns notFound for 'does not exist' error", async () => {
       const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
       const mockWebApi = createMockWebApi({
-        retrieveRecord: jest.fn().mockRejectedValue(new Error("Record does not exist")),
+        retrieveRecord: jest
+          .fn()
+          .mockRejectedValue(new Error("Record does not exist")),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(false);
       expect(result.notFound).toBe(true);
@@ -786,10 +862,15 @@ describe("getEventTypeFieldConfig", () => {
     it("returns generic error for network failure", async () => {
       const consoleSpy = jest.spyOn(console, "error").mockImplementation();
       const mockWebApi = createMockWebApi({
-        retrieveRecord: jest.fn().mockRejectedValue(new Error("Network request failed")),
+        retrieveRecord: jest
+          .fn()
+          .mockRejectedValue(new Error("Network request failed")),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(false);
       expect(result.notFound).toBe(false);
@@ -803,7 +884,10 @@ describe("getEventTypeFieldConfig", () => {
         retrieveRecord: jest.fn().mockRejectedValue("String error"),
       });
 
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("String error");
@@ -822,16 +906,24 @@ describe("getEventTypeFieldConfig", () => {
       });
 
       // First call - hits WebAPI
-      const result1 = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012", {
-        service: cacheService,
-      });
+      const result1 = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+        {
+          service: cacheService,
+        },
+      );
       expect(result1.success).toBe(true);
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledTimes(1);
 
       // Second call - should use cache
-      const result2 = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012", {
-        service: cacheService,
-      });
+      const result2 = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+        {
+          service: cacheService,
+        },
+      );
       expect(result2.success).toBe(true);
       expect(result2.config).toEqual({ visibleFields: ["sprk_duedate"] });
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledTimes(1); // Still only 1 call
@@ -847,14 +939,22 @@ describe("getEventTypeFieldConfig", () => {
       });
 
       // First call
-      await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012", {
-        service: cacheService,
-      });
+      await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+        {
+          service: cacheService,
+        },
+      );
 
       // Second call - should hit WebAPI again since null wasn't cached
-      await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012", {
-        service: cacheService,
-      });
+      await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+        {
+          service: cacheService,
+        },
+      );
 
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledTimes(2);
     });
@@ -868,7 +968,10 @@ describe("getEventTypeFieldConfig", () => {
       });
 
       // Call without service option - should use eventTypeService singleton
-      const result = await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      const result = await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(result.success).toBe(true);
     });
@@ -884,12 +987,15 @@ describe("getEventTypeFieldConfig", () => {
         }),
       });
 
-      await getEventTypeFieldConfig(mockWebApi, "12345678-1234-1234-1234-123456789012");
+      await getEventTypeFieldConfig(
+        mockWebApi,
+        "12345678-1234-1234-1234-123456789012",
+      );
 
       expect(mockWebApi.retrieveRecord).toHaveBeenCalledWith(
         "sprk_eventtype",
         "12345678-1234-1234-1234-123456789012",
-        "?$select=sprk_eventtypeid,sprk_name,sprk_fieldconfigjson"
+        "?$select=sprk_eventtypeid,sprk_name,sprk_fieldconfigjson",
       );
     });
   });

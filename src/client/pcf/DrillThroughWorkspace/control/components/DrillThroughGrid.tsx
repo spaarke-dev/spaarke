@@ -118,7 +118,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
 
   // Track selected record IDs
   const [selectedRecordIds, setSelectedRecordIds] = React.useState<string[]>(
-    () => dataset.getSelectedRecordIds() || []
+    () => dataset.getSelectedRecordIds() || [],
   );
 
   // Convert dataset to rows format
@@ -137,7 +137,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
           (column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
             const value = record.getFormattedValue(column.name);
             row[column.name] = value || "";
-          }
+          },
         );
       }
 
@@ -186,7 +186,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
             );
           },
         });
-      }
+      },
     );
   }, [dataset.columns, activeFilter?.field]);
 
@@ -194,7 +194,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
   const handleSelectionChange = React.useCallback(
     (
       _e: React.MouseEvent | React.KeyboardEvent,
-      data: { selectedItems: Set<unknown> }
+      data: { selectedItems: Set<unknown> },
     ) => {
       const newSelection = Array.from(data.selectedItems) as string[];
       setSelectedRecordIds(newSelection);
@@ -205,13 +205,15 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
       // Notify parent
       onSelectionChange?.(newSelection);
     },
-    [dataset, onSelectionChange]
+    [dataset, onSelectionChange],
   );
 
   // Sync selection when dataset changes externally
   React.useEffect(() => {
     const contextSelection = dataset.getSelectedRecordIds() || [];
-    if (JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)) {
+    if (
+      JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)
+    ) {
       setSelectedRecordIds(contextSelection);
     }
   }, [dataset, selectedRecordIds]);
@@ -258,9 +260,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
           <Text size={200} weight="medium">
             Filtered by: {activeFilter.field}
           </Text>
-          {activeFilter.label && (
-            <Text size={200}>= {activeFilter.label}</Text>
-          )}
+          {activeFilter.label && <Text size={200}>= {activeFilter.label}</Text>}
         </div>
       )}
 

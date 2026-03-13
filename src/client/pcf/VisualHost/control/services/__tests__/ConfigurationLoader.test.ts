@@ -58,7 +58,7 @@ function createMockContext(overrides?: Partial<IMockWebApi>): IMockContext {
  * Create a mock Dataverse record
  */
 function createMockRecord(
-  overrides?: Partial<Record<string, unknown>>
+  overrides?: Partial<Record<string, unknown>>,
 ): Record<string, unknown> {
   return {
     sprk_chartdefinitionid: "12345678-1234-1234-1234-123456789012",
@@ -89,7 +89,7 @@ describe("ConfigurationLoader", () => {
 
       const result = await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       expect(result).toEqual({
@@ -113,13 +113,13 @@ describe("ConfigurationLoader", () => {
 
       await loadChartDefinition(
         mockContext,
-        "{12345678-1234-1234-1234-123456789012}"
+        "{12345678-1234-1234-1234-123456789012}",
       );
 
       expect(mockContext.webAPI.retrieveRecord).toHaveBeenCalledWith(
         "sprk_chartdefinition",
         "12345678-1234-1234-1234-123456789012",
-        expect.any(String)
+        expect.any(String),
       );
     });
 
@@ -132,13 +132,13 @@ describe("ConfigurationLoader", () => {
       // First call
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       // Second call
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       // Should only be called once (cached)
@@ -154,14 +154,14 @@ describe("ConfigurationLoader", () => {
       // First call
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       // Second call with skipCache
       await loadChartDefinition(
         mockContext,
         "12345678-1234-1234-1234-123456789012",
-        true
+        true,
       );
 
       expect(mockContext.webAPI.retrieveRecord).toHaveBeenCalledTimes(2);
@@ -169,31 +169,29 @@ describe("ConfigurationLoader", () => {
 
     it("should throw ConfigurationNotFoundError when record not found", async () => {
       const mockContext = createMockContext({
-        retrieveRecord: jest.fn().mockRejectedValue(
-          new Error("Record does not exist")
-        ),
+        retrieveRecord: jest
+          .fn()
+          .mockRejectedValue(new Error("Record does not exist")),
       });
 
       await expect(
         loadChartDefinition(
           mockContext,
-          "12345678-1234-1234-1234-999999999999"
-        )
+          "12345678-1234-1234-1234-999999999999",
+        ),
       ).rejects.toThrow(ConfigurationNotFoundError);
     });
 
     it("should throw ConfigurationLoadError for other errors", async () => {
       const mockContext = createMockContext({
-        retrieveRecord: jest.fn().mockRejectedValue(
-          new Error("Network error")
-        ),
+        retrieveRecord: jest.fn().mockRejectedValue(new Error("Network error")),
       });
 
       await expect(
         loadChartDefinition(
           mockContext,
-          "12345678-1234-1234-1234-123456789012"
-        )
+          "12345678-1234-1234-1234-123456789012",
+        ),
       ).rejects.toThrow(ConfigurationLoadError);
     });
 
@@ -201,7 +199,7 @@ describe("ConfigurationLoader", () => {
       const mockContext = createMockContext();
 
       await expect(loadChartDefinition(mockContext, "")).rejects.toThrow(
-        ConfigurationLoadError
+        ConfigurationLoadError,
       );
     });
 
@@ -217,7 +215,7 @@ describe("ConfigurationLoader", () => {
 
       const result = await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       expect(result.sprk_name).toBe("Minimal Chart");
@@ -236,7 +234,7 @@ describe("ConfigurationLoader", () => {
 
       const result = await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       expect(result.sprk_visualtype).toBe(VisualType.MetricCard);
@@ -307,7 +305,7 @@ describe("ConfigurationLoader", () => {
 
       const results = await queryChartDefinitions(
         mockContext,
-        "sprk_visualtype eq 100000001"
+        "sprk_visualtype eq 100000001",
       );
 
       expect(results).toHaveLength(2);
@@ -328,7 +326,7 @@ describe("ConfigurationLoader", () => {
 
       expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledWith(
         "sprk_chartdefinition",
-        expect.not.stringContaining("$filter")
+        expect.not.stringContaining("$filter"),
       );
     });
 
@@ -346,7 +344,7 @@ describe("ConfigurationLoader", () => {
       // Now load by ID - should use cache
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       // retrieveRecord should not be called (cached from query)
@@ -420,7 +418,7 @@ describe("ConfigurationLoader", () => {
       // Load to populate cache
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       // Clear specific entry
@@ -429,7 +427,7 @@ describe("ConfigurationLoader", () => {
       // Load again - should call API
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
 
       expect(mockContext.webAPI.retrieveRecord).toHaveBeenCalledTimes(2);
@@ -453,11 +451,11 @@ describe("ConfigurationLoader", () => {
       // Load two records
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
       await loadChartDefinition(
         mockContext,
-        "22222222-2222-2222-2222-222222222222"
+        "22222222-2222-2222-2222-222222222222",
       );
 
       // Clear all
@@ -466,11 +464,11 @@ describe("ConfigurationLoader", () => {
       // Load again - should call API for both
       await loadChartDefinition(
         mockContext,
-        "12345678-1234-1234-1234-123456789012"
+        "12345678-1234-1234-1234-123456789012",
       );
       await loadChartDefinition(
         mockContext,
-        "22222222-2222-2222-2222-222222222222"
+        "22222222-2222-2222-2222-222222222222",
       );
 
       expect(mockContext.webAPI.retrieveRecord).toHaveBeenCalledTimes(4);

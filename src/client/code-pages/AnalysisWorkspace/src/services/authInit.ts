@@ -17,10 +17,10 @@
  */
 
 import {
-    initAuth,
-    getAuthProvider,
-    authenticatedFetch,
-    AuthError,
+  initAuth,
+  getAuthProvider,
+  authenticatedFetch,
+  AuthError,
 } from "@spaarke/auth";
 import type { SpaarkeAuthProvider } from "@spaarke/auth";
 
@@ -38,8 +38,8 @@ export type { SpaarkeAuthProvider };
  * @returns The initial access token string
  */
 export async function initializeAuth(): Promise<string> {
-    const provider = await initAuth();
-    return provider.getAccessToken();
+  const provider = await initAuth();
+  return provider.getAccessToken();
 }
 
 /**
@@ -47,7 +47,7 @@ export async function initializeAuth(): Promise<string> {
  * Delegates to the shared auth provider.
  */
 export async function getAccessToken(): Promise<string> {
-    return getAuthProvider().getAccessToken();
+  return getAuthProvider().getAccessToken();
 }
 
 /**
@@ -55,5 +55,5 @@ export async function getAccessToken(): Promise<string> {
  * Call on 401 responses to force re-acquisition.
  */
 export function clearTokenCache(): void {
-    getAuthProvider().clearCache();
+  getAuthProvider().clearCache();
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 import {
   makeStyles,
   tokens,
@@ -12,60 +12,60 @@ import {
   MessageBar,
   MessageBarBody,
   Button,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   CheckmarkCircleRegular,
   ErrorCircleRegular,
   ClockRegular,
   ArrowSyncRegular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   jobCard: {
     marginBottom: tokens.spacingVerticalS,
   },
   jobHeader: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   stageList: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
     marginTop: tokens.spacingVerticalS,
   },
   stageItem: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalXS,
   },
   stageIcon: {
-    width: '20px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: "20px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
   },
   actions: {
-    display: 'flex',
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "flex-end",
     marginTop: tokens.spacingVerticalS,
   },
 });
@@ -81,8 +81,13 @@ export interface StatusViewProps {
 
 export interface ProcessingJob {
   id: string;
-  jobType: 'DocumentSave' | 'EmailSave' | 'ShareLinks' | 'ProfileSummary' | 'DeepAnalysis';
-  status: 'Pending' | 'InProgress' | 'Completed' | 'Failed' | 'Cancelled';
+  jobType:
+    | "DocumentSave"
+    | "EmailSave"
+    | "ShareLinks"
+    | "ProfileSummary"
+    | "DeepAnalysis";
+  status: "Pending" | "InProgress" | "Completed" | "Failed" | "Cancelled";
   progress: number;
   currentStage?: string;
   stages?: string[];
@@ -92,28 +97,36 @@ export interface ProcessingJob {
   completedDate?: string;
 }
 
-type BadgeColor = 'informative' | 'success' | 'danger' | 'warning';
+type BadgeColor = "informative" | "success" | "danger" | "warning";
 
 const statusColors: Record<string, BadgeColor> = {
-  Pending: 'informative',
-  InProgress: 'informative',
-  Completed: 'success',
-  Failed: 'danger',
-  Cancelled: 'warning',
+  Pending: "informative",
+  InProgress: "informative",
+  Completed: "success",
+  Failed: "danger",
+  Cancelled: "warning",
 };
 
 function getStatusColor(status: string): BadgeColor {
-  return statusColors[status] || 'informative';
+  return statusColors[status] || "informative";
 }
 
 const StageIcon: React.FC<{ status: string }> = ({ status }) => {
   switch (status) {
-    case 'Completed':
-      return <CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} />;
-    case 'InProgress':
+    case "Completed":
+      return (
+        <CheckmarkCircleRegular
+          style={{ color: tokens.colorPaletteGreenForeground1 }}
+        />
+      );
+    case "InProgress":
       return <Spinner size="tiny" />;
-    case 'Failed':
-      return <ErrorCircleRegular style={{ color: tokens.colorPaletteRedForeground1 }} />;
+    case "Failed":
+      return (
+        <ErrorCircleRegular
+          style={{ color: tokens.colorPaletteRedForeground1 }}
+        />
+      );
     default:
       return <ClockRegular style={{ color: tokens.colorNeutralForeground3 }} />;
   }
@@ -150,8 +163,12 @@ export const StatusView: React.FC<StatusViewProps> = ({
     return undefined;
   }, [refreshInterval]);
 
-  const activeJobs = jobs.filter((j) => j.status === 'Pending' || j.status === 'InProgress');
-  const recentJobs = jobs.filter((j) => j.status !== 'Pending' && j.status !== 'InProgress').slice(0, 5);
+  const activeJobs = jobs.filter(
+    (j) => j.status === "Pending" || j.status === "InProgress",
+  );
+  const recentJobs = jobs
+    .filter((j) => j.status !== "Pending" && j.status !== "InProgress")
+    .slice(0, 5);
 
   return (
     <div className={styles.container}>
@@ -170,7 +187,9 @@ export const StatusView: React.FC<StatusViewProps> = ({
               <Text weight="semibold">Active Jobs ({activeJobs.length})</Text>
               <Button
                 appearance="subtle"
-                icon={isLoading ? <Spinner size="tiny" /> : <ArrowSyncRegular />}
+                icon={
+                  isLoading ? <Spinner size="tiny" /> : <ArrowSyncRegular />
+                }
                 onClick={fetchJobs}
                 disabled={isLoading}
               />
@@ -179,7 +198,12 @@ export const StatusView: React.FC<StatusViewProps> = ({
         />
         {activeJobs.length === 0 ? (
           <div className={styles.emptyState}>
-            <ClockRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
+            <ClockRegular
+              style={{
+                fontSize: "32px",
+                marginBottom: tokens.spacingVerticalS,
+              }}
+            />
             <Body1>No active jobs</Body1>
           </div>
         ) : (
@@ -202,7 +226,7 @@ export const StatusView: React.FC<StatusViewProps> = ({
                     return (
                       <div key={stage} className={styles.stageItem}>
                         <div className={styles.stageIcon}>
-                          <StageIcon status={stageInfo?.status || 'Pending'} />
+                          <StageIcon status={stageInfo?.status || "Pending"} />
                         </div>
                         <Text size={200}>{stage}</Text>
                       </div>
@@ -230,7 +254,7 @@ export const StatusView: React.FC<StatusViewProps> = ({
                   Completed: {new Date(job.completedDate).toLocaleString()}
                 </Text>
               )}
-              {job.status === 'Failed' && job.errorMessage && (
+              {job.status === "Failed" && job.errorMessage && (
                 <MessageBar intent="error">
                   <MessageBarBody>{job.errorMessage}</MessageBarBody>
                 </MessageBar>

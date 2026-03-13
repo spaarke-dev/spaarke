@@ -25,43 +25,46 @@
  * @see WizardShell — underlying generic dialog shell
  * @see ADR-012 — Shared Component Library
  */
-import * as React from 'react';
+import * as React from "react";
 import {
   MessageBar,
   MessageBarBody,
   Text,
   makeStyles,
   tokens,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 
-import { WizardShell } from '../Wizard/WizardShell';
+import { WizardShell } from "../Wizard/WizardShell";
 import type {
   IWizardShellHandle,
   IWizardStepConfig,
   IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+} from "../Wizard/wizardShellTypes";
 
-import { FileUploadZone } from '../FileUpload/FileUploadZone';
-import { UploadedFileList } from '../FileUpload/UploadedFileList';
-import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
-import type { ILookupItem } from '../../types/LookupTypes';
+import { FileUploadZone } from "../FileUpload/FileUploadZone";
+import { UploadedFileList } from "../FileUpload/UploadedFileList";
+import type {
+  IUploadedFile,
+  IFileValidationError,
+} from "../FileUpload/fileUploadTypes";
+import type { ILookupItem } from "../../types/LookupTypes";
 
 import type {
   ICreateRecordWizardProps,
   FollowOnActionId,
   IRecipientItem,
-} from './types';
+} from "./types";
 
 import {
   NextStepsStep,
   FOLLOW_ON_STEP_ID_MAP,
   FOLLOW_ON_STEP_LABEL_MAP,
   FOLLOW_ON_CANONICAL_ORDER,
-} from './FollowOnSteps';
+} from "./FollowOnSteps";
 
-import { AssignResourcesStep } from './steps/AssignResourcesStep';
-import { DraftSummaryStep } from './steps/DraftSummaryStep';
-import { SendEmailStep } from './steps/SendEmailStep';
+import { AssignResourcesStep } from "./steps/AssignResourcesStep";
+import { DraftSummaryStep } from "./steps/DraftSummaryStep";
+import { SendEmailStep } from "./steps/SendEmailStep";
 
 // ---------------------------------------------------------------------------
 // File reducer
@@ -73,20 +76,20 @@ interface IFileState {
 }
 
 type FileAction =
-  | { type: 'ADD_FILES'; files: IUploadedFile[] }
-  | { type: 'REMOVE_FILE'; fileId: string }
-  | { type: 'SET_VALIDATION_ERRORS'; errors: IFileValidationError[] }
-  | { type: 'CLEAR_VALIDATION_ERRORS' }
-  | { type: 'RESET' };
+  | { type: "ADD_FILES"; files: IUploadedFile[] }
+  | { type: "REMOVE_FILE"; fileId: string }
+  | { type: "SET_VALIDATION_ERRORS"; errors: IFileValidationError[] }
+  | { type: "CLEAR_VALIDATION_ERRORS" }
+  | { type: "RESET" };
 
 function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
-    case 'ADD_FILES': {
+    case "ADD_FILES": {
       const existing = new Set(
-        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
+        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`),
       );
       const newFiles = action.files.filter(
-        (f) => !existing.has(`${f.name}::${f.sizeBytes}`)
+        (f) => !existing.has(`${f.name}::${f.sizeBytes}`),
       );
       return {
         ...state,
@@ -94,16 +97,18 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
         validationErrors: [],
       };
     }
-    case 'REMOVE_FILE':
+    case "REMOVE_FILE":
       return {
         ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
+        uploadedFiles: state.uploadedFiles.filter(
+          (f) => f.id !== action.fileId,
+        ),
       };
-    case 'SET_VALIDATION_ERRORS':
+    case "SET_VALIDATION_ERRORS":
       return { ...state, validationErrors: action.errors };
-    case 'CLEAR_VALIDATION_ERRORS':
+    case "CLEAR_VALIDATION_ERRORS":
       return { ...state, validationErrors: [] };
-    case 'RESET':
+    case "RESET":
       return { uploadedFiles: [], validationErrors: [] };
     default:
       return state;
@@ -153,29 +158,33 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   });
 
   // ── Follow-on step selections ───────────────────────────────────────────
-  const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
+  const [selectedActions, setSelectedActions] = React.useState<
+    FollowOnActionId[]
+  >([]);
 
   // ── Assign Resources state ──────────────────────────────────────────────
-  const [assignedAttorneyId, setAssignedAttorneyId] = React.useState('');
-  const [assignedAttorneyName, setAssignedAttorneyName] = React.useState('');
-  const [assignedParalegalId, setAssignedParalegalId] = React.useState('');
-  const [assignedParalegalName, setAssignedParalegalName] = React.useState('');
-  const [assignedOutsideCounselId, setAssignedOutsideCounselId] = React.useState('');
-  const [assignedOutsideCounselName, setAssignedOutsideCounselName] = React.useState('');
+  const [assignedAttorneyId, setAssignedAttorneyId] = React.useState("");
+  const [assignedAttorneyName, setAssignedAttorneyName] = React.useState("");
+  const [assignedParalegalId, setAssignedParalegalId] = React.useState("");
+  const [assignedParalegalName, setAssignedParalegalName] = React.useState("");
+  const [assignedOutsideCounselId, setAssignedOutsideCounselId] =
+    React.useState("");
+  const [assignedOutsideCounselName, setAssignedOutsideCounselName] =
+    React.useState("");
   const [notifyResources, setNotifyResources] = React.useState(false);
 
   // ── Draft Summary state ─────────────────────────────────────────────────
-  const [summaryText, setSummaryText] = React.useState('');
+  const [summaryText, setSummaryText] = React.useState("");
   const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
   const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
 
   // ── Send Email state ────────────────────────────────────────────────────
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  const [emailTo, setEmailTo] = React.useState("");
+  const [emailSubject, setEmailSubject] = React.useState("");
+  const [emailBody, setEmailBody] = React.useState("");
 
   // ── SPE container ID ────────────────────────────────────────────────────
-  const [speContainerId, setSpeContainerId] = React.useState('');
+  const [speContainerId, setSpeContainerId] = React.useState("");
 
   React.useEffect(() => {
     if (open && config.resolveSpeContainerId) {
@@ -186,21 +195,21 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   // ── Reset all state on open ─────────────────────────────────────────────
   React.useEffect(() => {
     if (open) {
-      fileDispatch({ type: 'RESET' });
+      fileDispatch({ type: "RESET" });
       setSelectedActions([]);
-      setAssignedAttorneyId('');
-      setAssignedAttorneyName('');
-      setAssignedParalegalId('');
-      setAssignedParalegalName('');
-      setAssignedOutsideCounselId('');
-      setAssignedOutsideCounselName('');
+      setAssignedAttorneyId("");
+      setAssignedAttorneyName("");
+      setAssignedParalegalId("");
+      setAssignedParalegalName("");
+      setAssignedOutsideCounselId("");
+      setAssignedOutsideCounselName("");
       setNotifyResources(false);
-      setSummaryText('');
+      setSummaryText("");
       setRecipients([]);
       setCcRecipients([]);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmailTo("");
+      setEmailSubject("");
+      setEmailBody("");
     }
   }, [open]);
 
@@ -237,7 +246,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   assignedParalegalNameRef.current = assignedParalegalName;
   const assignedOutsideCounselIdRef = React.useRef(assignedOutsideCounselId);
   assignedOutsideCounselIdRef.current = assignedOutsideCounselId;
-  const assignedOutsideCounselNameRef = React.useRef(assignedOutsideCounselName);
+  const assignedOutsideCounselNameRef = React.useRef(
+    assignedOutsideCounselName,
+  );
   assignedOutsideCounselNameRef.current = assignedOutsideCounselName;
 
   // ── Search callbacks (from config, with fallbacks) ──────────────────────
@@ -246,26 +257,23 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
 
   // ── Assign Resources change handlers ────────────────────────────────────
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setAssignedAttorneyId(item?.id ?? '');
-      setAssignedAttorneyName(item?.name ?? '');
-    },
-    []
-  );
+  const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignedAttorneyId(item?.id ?? "");
+    setAssignedAttorneyName(item?.name ?? "");
+  }, []);
   const handleParalegalChange = React.useCallback(
     (item: ILookupItem | null) => {
-      setAssignedParalegalId(item?.id ?? '');
-      setAssignedParalegalName(item?.name ?? '');
+      setAssignedParalegalId(item?.id ?? "");
+      setAssignedParalegalName(item?.name ?? "");
     },
-    []
+    [],
   );
   const handleOutsideCounselChange = React.useCallback(
     (item: ILookupItem | null) => {
-      setAssignedOutsideCounselId(item?.id ?? '');
-      setAssignedOutsideCounselName(item?.name ?? '');
+      setAssignedOutsideCounselId(item?.id ?? "");
+      setAssignedOutsideCounselName(item?.name ?? "");
     },
-    []
+    [],
   );
 
   // ── Sync dynamic steps with selected action cards ───────────────────────
@@ -284,26 +292,36 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
           id: stepId,
           label: stepLabel,
           canAdvance: () => {
-            if (stepId === 'followon-send-email') {
+            if (stepId === "followon-send-email") {
               return (
-                emailToRef.current.trim() !== '' &&
-                emailSubjectRef.current.trim() !== '' &&
-                emailBodyRef.current.trim() !== ''
+                emailToRef.current.trim() !== "" &&
+                emailSubjectRef.current.trim() !== "" &&
+                emailBodyRef.current.trim() !== ""
               );
             }
             return true;
           },
           renderContent: () => {
-            if (stepId === 'followon-assign-counsel') {
+            if (stepId === "followon-assign-counsel") {
               const attVal: ILookupItem | null = assignedAttorneyIdRef.current
-                ? { id: assignedAttorneyIdRef.current, name: assignedAttorneyNameRef.current }
+                ? {
+                    id: assignedAttorneyIdRef.current,
+                    name: assignedAttorneyNameRef.current,
+                  }
                 : null;
               const paraVal: ILookupItem | null = assignedParalegalIdRef.current
-                ? { id: assignedParalegalIdRef.current, name: assignedParalegalNameRef.current }
+                ? {
+                    id: assignedParalegalIdRef.current,
+                    name: assignedParalegalNameRef.current,
+                  }
                 : null;
-              const ocVal: ILookupItem | null = assignedOutsideCounselIdRef.current
-                ? { id: assignedOutsideCounselIdRef.current, name: assignedOutsideCounselNameRef.current }
-                : null;
+              const ocVal: ILookupItem | null =
+                assignedOutsideCounselIdRef.current
+                  ? {
+                      id: assignedOutsideCounselIdRef.current,
+                      name: assignedOutsideCounselNameRef.current,
+                    }
+                  : null;
 
               return (
                 <AssignResourcesStep
@@ -321,7 +339,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
                 />
               );
             }
-            if (stepId === 'followon-draft-summary') {
+            if (stepId === "followon-draft-summary") {
               return (
                 <DraftSummaryStep
                   summaryText={summaryTextRef.current}
@@ -335,7 +353,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
                 />
               );
             }
-            if (stepId === 'followon-send-email') {
+            if (stepId === "followon-send-email") {
               return (
                 <SendEmailStep
                   emailTo={emailToRef.current}
@@ -352,7 +370,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
           },
         };
 
-        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
+        shellRef.current?.addDynamicStep(
+          dynamicConfig,
+          FOLLOW_ON_CANONICAL_ORDER,
+        );
       }
     });
 
@@ -376,8 +397,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   // ── Email pre-fill when send-email is selected ──────────────────────────
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && !emailSubject) {
-      const entityName = config.getEntityName?.() ?? '';
+    if (selectedActions.includes("send-email") && !emailSubject) {
+      const entityName = config.getEntityName?.() ?? "";
       if (entityName) {
         const subject = config.buildEmailSubject
           ? config.buildEmailSubject(entityName)
@@ -395,62 +416,69 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   // ── File handler callbacks ──────────────────────────────────────────────
   const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
-    []
+    (files: IUploadedFile[]) => fileDispatch({ type: "ADD_FILES", files }),
+    [],
   );
   const handleValidationErrors = React.useCallback(
     (errors: IFileValidationError[]) =>
-      fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
-    []
+      fileDispatch({ type: "SET_VALIDATION_ERRORS", errors }),
+    [],
   );
   const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
-    []
+    (fileId: string) => fileDispatch({ type: "REMOVE_FILE", fileId }),
+    [],
   );
   const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
-    []
+    () => fileDispatch({ type: "CLEAR_VALIDATION_ERRORS" }),
+    [],
   );
 
   // ── Finish handler ──────────────────────────────────────────────────────
-  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
-    return config.onFinish({
-      uploadedFiles: fileStateRef.current.uploadedFiles,
-      speContainerId: speContainerIdRef.current,
-      selectedActions: selectedActionsRef.current,
-      followOn: {
-        assignedAttorneyId: assignedAttorneyIdRef.current,
-        assignedAttorneyName: assignedAttorneyNameRef.current,
-        assignedParalegalId: assignedParalegalIdRef.current,
-        assignedParalegalName: assignedParalegalNameRef.current,
-        assignedOutsideCounselId: assignedOutsideCounselIdRef.current,
-        assignedOutsideCounselName: assignedOutsideCounselNameRef.current,
-        notifyResources: notifyResourcesRef.current,
-        summaryText: summaryTextRef.current,
-        recipients: recipientsRef.current,
-        ccRecipients: ccRecipientsRef.current,
-        emailTo: emailToRef.current,
-        emailSubject: emailSubjectRef.current,
-        emailBody: emailBodyRef.current,
-      },
-    });
-  }, [config]);
+  const handleFinish =
+    React.useCallback(async (): Promise<IWizardSuccessConfig> => {
+      return config.onFinish({
+        uploadedFiles: fileStateRef.current.uploadedFiles,
+        speContainerId: speContainerIdRef.current,
+        selectedActions: selectedActionsRef.current,
+        followOn: {
+          assignedAttorneyId: assignedAttorneyIdRef.current,
+          assignedAttorneyName: assignedAttorneyNameRef.current,
+          assignedParalegalId: assignedParalegalIdRef.current,
+          assignedParalegalName: assignedParalegalNameRef.current,
+          assignedOutsideCounselId: assignedOutsideCounselIdRef.current,
+          assignedOutsideCounselName: assignedOutsideCounselNameRef.current,
+          notifyResources: notifyResourcesRef.current,
+          summaryText: summaryTextRef.current,
+          recipients: recipientsRef.current,
+          ccRecipients: ccRecipientsRef.current,
+          emailTo: emailToRef.current,
+          emailSubject: emailSubjectRef.current,
+          emailBody: emailBodyRef.current,
+        },
+      });
+    }, [config]);
 
   // ── Step configurations ─────────────────────────────────────────────────
-  const filesStepSubtitle = config.filesStepSubtitle ??
-    'Upload documents for AI analysis, or click Next to skip.';
+  const filesStepSubtitle =
+    config.filesStepSubtitle ??
+    "Upload documents for AI analysis, or click Next to skip.";
 
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
     () => [
       {
-        id: 'add-files',
-        label: 'Add file(s)',
+        id: "add-files",
+        label: "Add file(s)",
         canAdvance: () => true, // always skip-able
         isSkippable: true,
         renderContent: () => (
           <>
             <div>
-              <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+              <Text
+                as="h2"
+                size={500}
+                weight="semibold"
+                className={styles.stepTitle}
+              >
                 Add file(s)
               </Text>
               <Text size={200} className={styles.stepSubtitle}>
@@ -492,11 +520,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
         id: config.infoStep.id,
         label: config.infoStep.label,
         canAdvance: config.infoStep.canAdvance,
-        renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
+        renderContent: () =>
+          config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
       },
       {
-        id: 'next-steps',
-        label: 'Next Steps',
+        id: "next-steps",
+        label: "Next Steps",
         canAdvance: () => true,
         isEarlyFinish: () => selectedActions.length === 0,
         renderContent: () => (
@@ -519,7 +548,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       handleValidationErrors,
       handleRemoveFile,
       handleClearErrors,
-    ]
+    ],
   );
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -532,7 +561,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       steps={stepConfigs}
       onClose={onClose}
       onFinish={handleFinish}
-      finishingLabel={config.finishingLabel ?? 'Creating\u2026'}
+      finishingLabel={config.finishingLabel ?? "Creating\u2026"}
       finishLabel="Finish"
     />
   );

@@ -5,8 +5,8 @@
  * Auto-saves changes to the Zustand store.
  */
 
-import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import * as React from "react";
+import { useCallback, useMemo } from "react";
 import {
   makeStyles,
   tokens,
@@ -21,37 +21,42 @@ import {
   AccordionItem,
   AccordionPanel,
   shorthands,
-} from '@fluentui/react-components';
-import { Delete20Regular } from '@fluentui/react-icons';
+} from "@fluentui/react-components";
+import { Delete20Regular } from "@fluentui/react-icons";
 import type {
   SpinButtonChangeEvent,
   SpinButtonOnChangeData,
-} from '@fluentui/react-components';
-import { useCanvasStore, PlaybookNode, PlaybookNodeData, PlaybookNodeType } from '../../stores';
-import { ScopeSelector } from './ScopeSelector';
-import { ConditionEditor } from './ConditionEditor';
-import { ModelSelector } from './ModelSelector';
+} from "@fluentui/react-components";
+import {
+  useCanvasStore,
+  PlaybookNode,
+  PlaybookNodeData,
+  PlaybookNodeType,
+} from "../../stores";
+import { ScopeSelector } from "./ScopeSelector";
+import { ConditionEditor } from "./ConditionEditor";
+import { ModelSelector } from "./ModelSelector";
 
 const useStyles = makeStyles({
   form: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
   },
   headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: tokens.spacingVerticalS,
     ...shorthands.padding(tokens.spacingVerticalS, 0),
   },
   nodeTypeHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   field: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalS,
   },
@@ -65,27 +70,27 @@ const useStyles = makeStyles({
 
 // Human-readable labels for node types
 const nodeTypeLabels: Record<PlaybookNodeType, string> = {
-  aiAnalysis: 'AI Analysis',
-  aiCompletion: 'AI Completion',
-  condition: 'Condition',
-  deliverOutput: 'Deliver Output',
-  createTask: 'Create Task',
-  sendEmail: 'Send Email',
-  wait: 'Wait',
+  aiAnalysis: "AI Analysis",
+  aiCompletion: "AI Completion",
+  condition: "Condition",
+  deliverOutput: "Deliver Output",
+  createTask: "Create Task",
+  sendEmail: "Send Email",
+  wait: "Wait",
 };
 
 // Badge colors for node types
 const nodeTypeBadgeColors: Record<
   PlaybookNodeType,
-  'brand' | 'warning' | 'success' | 'important'
+  "brand" | "warning" | "success" | "important"
 > = {
-  aiAnalysis: 'brand',
-  aiCompletion: 'brand',
-  condition: 'warning',
-  deliverOutput: 'success',
-  createTask: 'important',
-  sendEmail: 'important',
-  wait: 'important',
+  aiAnalysis: "brand",
+  aiCompletion: "brand",
+  condition: "warning",
+  deliverOutput: "success",
+  createTask: "important",
+  sendEmail: "important",
+  wait: "important",
 };
 
 interface NodePropertiesFormProps {
@@ -104,15 +109,16 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
   const updateNode = useCanvasStore((state) => state.updateNode);
   const removeNode = useCanvasStore((state) => state.removeNode);
 
-  const isConditionNode = node.data.type === 'condition';
-  const isAiNode = node.data.type === 'aiAnalysis' || node.data.type === 'aiCompletion';
+  const isConditionNode = node.data.type === "condition";
+  const isAiNode =
+    node.data.type === "aiAnalysis" || node.data.type === "aiCompletion";
 
   // Create a memoized update handler
   const handleUpdate = useCallback(
     (field: keyof PlaybookNodeData, value: unknown) => {
       updateNode(node.id, { [field]: value });
     },
-    [node.id, updateNode]
+    [node.id, updateNode],
   );
 
   // Handler for text inputs
@@ -121,7 +127,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
       (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         handleUpdate(field, e.target.value);
       },
-    [handleUpdate]
+    [handleUpdate],
   );
 
   // Handler for spin button (number inputs)
@@ -132,7 +138,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
           handleUpdate(field, data.value);
         }
       },
-    [handleUpdate]
+    [handleUpdate],
   );
 
   // Handler for deleting the node
@@ -143,8 +149,8 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
   // Get current values with defaults
   const values = useMemo(
     () => ({
-      label: node.data.label || '',
-      outputVariable: node.data.outputVariable || '',
+      label: node.data.label || "",
+      outputVariable: node.data.outputVariable || "",
       timeoutSeconds: node.data.timeoutSeconds ?? 300,
       retryCount: node.data.retryCount ?? 0,
       conditionJson:
@@ -155,11 +161,11 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
       toolId: node.data.toolId,
       modelDeploymentId: node.data.modelDeploymentId,
     }),
-    [node.data]
+    [node.data],
   );
 
   // Default open sections - Basic is always open
-  const defaultOpenItems = ['basic'];
+  const defaultOpenItems = ["basic"];
 
   return (
     <div className={styles.form}>
@@ -169,7 +175,10 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
           <Text size={200} weight="semibold">
             Type:
           </Text>
-          <Badge appearance="filled" color={nodeTypeBadgeColors[node.data.type]}>
+          <Badge
+            appearance="filled"
+            color={nodeTypeBadgeColors[node.data.type]}
+          >
             {nodeTypeLabels[node.data.type]}
           </Badge>
         </div>
@@ -182,11 +191,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
         />
       </div>
 
-      <Accordion
-        multiple
-        collapsible
-        defaultOpenItems={defaultOpenItems}
-      >
+      <Accordion multiple collapsible defaultOpenItems={defaultOpenItems}>
         {/* Basic Properties Section */}
         <AccordionItem value="basic">
           <AccordionHeader size="small">Basic</AccordionHeader>
@@ -199,7 +204,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
                 id="node-label"
                 size="small"
                 value={values.label}
-                onChange={handleTextChange('label')}
+                onChange={handleTextChange("label")}
                 placeholder="Enter node name"
               />
             </div>
@@ -212,13 +217,13 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
                 id="output-variable"
                 size="small"
                 value={values.outputVariable}
-                onChange={handleTextChange('outputVariable')}
+                onChange={handleTextChange("outputVariable")}
                 placeholder="e.g., extractedEntities"
               />
               <Text size={100} className={styles.fieldHint}>
-                Reference as {'{{'}
-                {values.outputVariable || 'variableName'}
-                {'}}'}
+                Reference as {"{{"}
+                {values.outputVariable || "variableName"}
+                {"}}"}
               </Text>
             </div>
           </AccordionPanel>
@@ -301,7 +306,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
                 id="timeout-seconds"
                 size="small"
                 value={values.timeoutSeconds}
-                onChange={handleNumberChange('timeoutSeconds')}
+                onChange={handleNumberChange("timeoutSeconds")}
                 min={30}
                 max={3600}
                 step={30}
@@ -319,7 +324,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
                 id="retry-count"
                 size="small"
                 value={values.retryCount}
-                onChange={handleNumberChange('retryCount')}
+                onChange={handleNumberChange("retryCount")}
                 min={0}
                 max={5}
                 step={1}
@@ -338,7 +343,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
             <AccordionPanel className={styles.accordionPanel}>
               <ConditionEditor
                 conditionJson={values.conditionJson}
-                onChange={(json) => handleUpdate('conditionJson', json)}
+                onChange={(json) => handleUpdate("conditionJson", json)}
               />
             </AccordionPanel>
           </AccordionItem>

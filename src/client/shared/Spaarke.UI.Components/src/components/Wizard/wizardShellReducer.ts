@@ -13,7 +13,7 @@ import type {
   IWizardShellStep,
   IWizardStepConfig,
   WizardShellAction,
-} from './wizardShellTypes';
+} from "./wizardShellTypes";
 
 // ---------------------------------------------------------------------------
 // Initial state builder
@@ -35,7 +35,7 @@ export function buildInitialShellState(
   const shellSteps: IWizardShellStep[] = steps.map((config, index) => ({
     id: config.id,
     label: config.label,
-    status: index === 0 ? 'active' : 'pending',
+    status: index === 0 ? "active" : "pending",
   }));
 
   return {
@@ -59,9 +59,9 @@ function rebuildStatuses(
   activeIndex: number,
 ): IWizardShellStep[] {
   return steps.map((step, i) => {
-    if (i < activeIndex) return { ...step, status: 'completed' };
-    if (i === activeIndex) return { ...step, status: 'active' };
-    return { ...step, status: 'pending' };
+    if (i < activeIndex) return { ...step, status: "completed" };
+    if (i === activeIndex) return { ...step, status: "active" };
+    return { ...step, status: "pending" };
   });
 }
 
@@ -73,7 +73,7 @@ function toShellStep(config: IWizardStepConfig): IWizardShellStep {
   return {
     id: config.id,
     label: config.label,
-    status: 'pending',
+    status: "pending",
   };
 }
 
@@ -97,7 +97,7 @@ export function wizardShellReducer(
 ): IWizardShellState {
   switch (action.type) {
     // ----- NEXT_STEP --------------------------------------------------------
-    case 'NEXT_STEP': {
+    case "NEXT_STEP": {
       const nextIndex = state.currentStepIndex + 1;
       if (nextIndex >= state.steps.length) return state; // already at last step
 
@@ -109,7 +109,7 @@ export function wizardShellReducer(
     }
 
     // ----- PREV_STEP --------------------------------------------------------
-    case 'PREV_STEP': {
+    case "PREV_STEP": {
       const prevIndex = state.currentStepIndex - 1;
       if (prevIndex < 0) return state; // already at first step
 
@@ -121,7 +121,7 @@ export function wizardShellReducer(
     }
 
     // ----- GO_TO_STEP -------------------------------------------------------
-    case 'GO_TO_STEP': {
+    case "GO_TO_STEP": {
       const targetIndex = Math.max(
         0,
         Math.min(action.stepIndex, state.steps.length - 1),
@@ -135,7 +135,7 @@ export function wizardShellReducer(
     }
 
     // ----- ADD_DYNAMIC_STEP -------------------------------------------------
-    case 'ADD_DYNAMIC_STEP': {
+    case "ADD_DYNAMIC_STEP": {
       // No-op if a step with the same id already exists
       if (state.steps.some((s) => s.id === action.config.id)) {
         return state;
@@ -196,7 +196,7 @@ export function wizardShellReducer(
     }
 
     // ----- REMOVE_DYNAMIC_STEP ----------------------------------------------
-    case 'REMOVE_DYNAMIC_STEP': {
+    case "REMOVE_DYNAMIC_STEP": {
       const removeIndex = state.steps.findIndex((s) => s.id === action.stepId);
       if (removeIndex === -1) return state; // step not found — no-op
 

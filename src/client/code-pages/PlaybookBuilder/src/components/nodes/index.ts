@@ -42,14 +42,14 @@ import { WaitNode } from "./WaitNode";
  * unnecessary re-renders per React Flow documentation.
  */
 export const nodeTypes: NodeTypes = {
-    start: StartNode,
-    aiAnalysis: AiAnalysisNode,
-    aiCompletion: AiCompletionNode,
-    condition: ConditionNode,
-    deliverOutput: DeliverOutputNode,
-    deliverToIndex: DeliverToIndexNode,
-    updateRecord: UpdateRecordNode,
-    createTask: CreateTaskNode,
-    sendEmail: SendEmailNode,
-    wait: WaitNode,
+  start: StartNode,
+  aiAnalysis: AiAnalysisNode,
+  aiCompletion: AiCompletionNode,
+  condition: ConditionNode,
+  deliverOutput: DeliverOutputNode,
+  deliverToIndex: DeliverToIndexNode,
+  updateRecord: UpdateRecordNode,
+  createTask: CreateTaskNode,
+  sendEmail: SendEmailNode,
+  wait: WaitNode,
 };

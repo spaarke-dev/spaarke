@@ -238,9 +238,7 @@ export const loginRequest = {
    * 3. Token B has FileStorageContainer.Selected and Files.Read.All permissions
    * 4. BFF uses Token B to access SharePoint Embedded containers on behalf of user
    */
-  scopes: [
-    "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"
-  ],
+  scopes: ["api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"],
 
   /**
    * Login hint (user email)
@@ -273,7 +271,7 @@ export function validateMsalConfig(): void {
     throw new Error(
       "[MSAL Config] CLIENT_ID not set. " +
         "Update msalConfig.ts with actual Azure App Registration Client ID. " +
-        "Find at: Azure Portal → App registrations → SDAP → Overview → Application (client) ID"
+        "Find at: Azure Portal → App registrations → SDAP → Overview → Application (client) ID",
     );
   }
 
@@ -282,7 +280,7 @@ export function validateMsalConfig(): void {
     throw new Error(
       "[MSAL Config] TENANT_ID not set. " +
         "Update msalConfig.ts with actual Azure AD Tenant ID. " +
-        "Find at: Azure Portal → App registrations → SDAP → Overview → Directory (tenant) ID"
+        "Find at: Azure Portal → App registrations → SDAP → Overview → Directory (tenant) ID",
     );
   }
 
@@ -292,32 +290,36 @@ export function validateMsalConfig(): void {
       "[MSAL Config] REDIRECT_URI not set. " +
         "Update msalConfig.ts with actual Dataverse environment URL. " +
         "Format: https://<your-org>.crm.dynamics.com " +
-        "Must match: Azure Portal → App registrations → SDAP → Authentication → Redirect URIs"
+        "Must match: Azure Portal → App registrations → SDAP → Authentication → Redirect URIs",
     );
   }
 
   // Validate GUID format for CLIENT_ID and TENANT_ID
-  const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const guidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   if (!guidRegex.test(CLIENT_ID)) {
     throw new Error(
       `[MSAL Config] CLIENT_ID has invalid GUID format: "${CLIENT_ID}". ` +
-        "Expected format: 12345678-1234-1234-1234-123456789abc"
+        "Expected format: 12345678-1234-1234-1234-123456789abc",
     );
   }
 
   if (!guidRegex.test(TENANT_ID)) {
     throw new Error(
       `[MSAL Config] TENANT_ID has invalid GUID format: "${TENANT_ID}". ` +
-        "Expected format: 12345678-1234-1234-1234-123456789abc"
+        "Expected format: 12345678-1234-1234-1234-123456789abc",
     );
   }
 
   // Validate REDIRECT_URI format
-  if (!REDIRECT_URI.startsWith("https://") || !REDIRECT_URI.includes(".dynamics.com")) {
+  if (
+    !REDIRECT_URI.startsWith("https://") ||
+    !REDIRECT_URI.includes(".dynamics.com")
+  ) {
     throw new Error(
       `[MSAL Config] REDIRECT_URI has invalid format: "${REDIRECT_URI}". ` +
-        "Expected format: https://<org>.crm.dynamics.com (or .crm2, .crm3, etc.)"
+        "Expected format: https://<org>.crm.dynamics.com (or .crm2, .crm3, etc.)",
     );
   }
 

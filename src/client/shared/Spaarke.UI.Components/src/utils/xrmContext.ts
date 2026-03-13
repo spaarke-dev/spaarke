@@ -28,24 +28,24 @@ export interface XrmWebApi {
   retrieveMultipleRecords(
     entityLogicalName: string,
     options?: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ): Promise<RetrieveMultipleResult>;
 
   retrieveRecord(
     entityLogicalName: string,
     id: string,
-    options?: string
+    options?: string,
   ): Promise<Record<string, any>>;
 
   createRecord(
     entityLogicalName: string,
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Promise<EntityReference>;
 
   updateRecord(
     entityLogicalName: string,
     id: string,
-    data: Record<string, any>
+    data: Record<string, any>,
   ): Promise<EntityReference>;
 
   deleteRecord(entityLogicalName: string, id: string): Promise<EntityReference>;
@@ -214,7 +214,11 @@ export function getXrm(): XrmContext | undefined {
 
   // Try parent.Xrm for Custom Pages running in iframe
   try {
-    if (typeof window !== "undefined" && window.parent && window.parent !== window) {
+    if (
+      typeof window !== "undefined" &&
+      window.parent &&
+      window.parent !== window
+    ) {
       const parentXrm = (window.parent as any).Xrm;
       if (parentXrm?.WebApi) {
         return parentXrm as XrmContext;
@@ -234,9 +238,11 @@ export function getXrm(): XrmContext | undefined {
  */
 export function isCustomPageContext(): boolean {
   try {
-    return typeof window !== "undefined" &&
-           window.parent !== undefined &&
-           window.parent !== window;
+    return (
+      typeof window !== "undefined" &&
+      window.parent !== undefined &&
+      window.parent !== window
+    );
   } catch {
     return false;
   }
@@ -249,8 +255,10 @@ export function isCustomPageContext(): boolean {
  */
 export function isPcfContext(): boolean {
   try {
-    return typeof (window as any).Xrm !== "undefined" &&
-           (window as any).Xrm?.WebApi !== undefined;
+    return (
+      typeof (window as any).Xrm !== "undefined" &&
+      (window as any).Xrm?.WebApi !== undefined
+    );
   } catch {
     return false;
   }

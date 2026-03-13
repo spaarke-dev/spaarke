@@ -164,7 +164,9 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           hideLegend={!showLegend}
           hideTooltip={false}
           innerRadius={innerRadius * (chartSize / 2)}
-          valueInsideDonut={showCenterValue ? (centerLabel || total.toLocaleString()) : undefined}
+          valueInsideDonut={
+            showCenterValue ? centerLabel || total.toLocaleString() : undefined
+          }
           {...chartProps}
         />
       </div>

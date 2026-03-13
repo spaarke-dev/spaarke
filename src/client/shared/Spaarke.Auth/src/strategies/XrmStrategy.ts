@@ -1,4 +1,4 @@
-import type { ITokenResult, ITokenStrategy } from '../types';
+import type { ITokenResult, ITokenStrategy } from "../types";
 
 /**
  * Acquire token via Xrm platform APIs (Dataverse host).
@@ -10,7 +10,7 @@ import type { ITokenResult, ITokenStrategy } from '../types';
  *   - Deeply nested iframes (window.top.Xrm)
  */
 export class XrmStrategy implements ITokenStrategy {
-  readonly name = 'xrm' as const;
+  readonly name = "xrm" as const;
 
   private readonly scope: string;
 
@@ -44,7 +44,7 @@ export class XrmStrategy implements ITokenStrategy {
   }
 
   private _resolveXrm(): XrmLike | null {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
 
     // Frame-walk: window → parent → top
     const frames: Window[] = [window];
@@ -83,7 +83,7 @@ export class XrmStrategy implements ITokenStrategy {
     return {
       accessToken: token,
       expiresOn: Date.now() + 55 * 60 * 1000,
-      source: 'xrm',
+      source: "xrm",
     };
   }
 }

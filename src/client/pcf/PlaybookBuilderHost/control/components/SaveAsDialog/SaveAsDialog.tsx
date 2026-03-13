@@ -7,8 +7,8 @@
  * @version 1.0.0
  */
 
-import * as React from 'react';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import * as React from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogSurface,
@@ -27,7 +27,7 @@ import {
   makeStyles,
   tokens,
   shorthands,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   Copy20Regular,
   Dismiss20Regular,
@@ -35,8 +35,12 @@ import {
   LockClosed16Regular,
   Person16Regular,
   Info16Regular,
-} from '@fluentui/react-icons';
-import type { ScopeItem, ScopeType, OwnershipType } from '../ScopeBrowser/ScopeBrowser';
+} from "@fluentui/react-icons";
+import type {
+  ScopeItem,
+  ScopeType,
+  OwnershipType,
+} from "../ScopeBrowser/ScopeBrowser";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -63,22 +67,22 @@ export interface SaveAsDialogProps {
 
 const useStyles = makeStyles({
   dialogSurface: {
-    maxWidth: '500px',
-    width: '90vw',
+    maxWidth: "500px",
+    width: "90vw",
   },
   header: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   content: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalM),
   },
   sourceSection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalS),
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
@@ -87,12 +91,12 @@ const useStyles = makeStyles({
   sourceLabel: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
   },
   sourceInfo: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   sourceName: {
@@ -114,13 +118,13 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
   },
   newSection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalS),
   },
   ownershipInfo: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -148,10 +152,10 @@ const useStyles = makeStyles({
 // -----------------------------------------------------------------------------
 
 const SCOPE_TYPE_LABELS: Record<ScopeType, string> = {
-  actions: 'Action',
-  skills: 'Skill',
-  tools: 'Tool',
-  knowledge: 'Knowledge',
+  actions: "Action",
+  skills: "Skill",
+  tools: "Tool",
+  knowledge: "Knowledge",
 };
 
 // -----------------------------------------------------------------------------
@@ -163,17 +167,26 @@ interface OwnershipBadgeProps {
   className?: string;
 }
 
-const OwnershipBadge: React.FC<OwnershipBadgeProps> = ({ ownershipType, className }) => {
+const OwnershipBadge: React.FC<OwnershipBadgeProps> = ({
+  ownershipType,
+  className,
+}) => {
   const styles = useStyles();
 
   return (
     <Badge
       appearance="filled"
       size="small"
-      className={`${className || ''} ${ownershipType === 'system' ? styles.systemBadge : styles.customerBadge}`}
-      icon={ownershipType === 'system' ? <LockClosed16Regular /> : <Person16Regular />}
+      className={`${className || ""} ${ownershipType === "system" ? styles.systemBadge : styles.customerBadge}`}
+      icon={
+        ownershipType === "system" ? (
+          <LockClosed16Regular />
+        ) : (
+          <Person16Regular />
+        )
+      }
     >
-      {ownershipType === 'system' ? 'SYS' : 'CUST'}
+      {ownershipType === "system" ? "SYS" : "CUST"}
     </Badge>
   );
 };
@@ -193,7 +206,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
   const styles = useStyles();
 
   // State
-  const [newName, setNewName] = useState('');
+  const [newName, setNewName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -212,17 +225,17 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
   const validateNameInput = useCallback(
     async (name: string): Promise<boolean> => {
       if (!name.trim()) {
-        setValidationError('Name is required');
+        setValidationError("Name is required");
         return false;
       }
 
       if (name.trim().length < 3) {
-        setValidationError('Name must be at least 3 characters');
+        setValidationError("Name must be at least 3 characters");
         return false;
       }
 
       if (name.trim().length > 100) {
-        setValidationError('Name must be less than 100 characters');
+        setValidationError("Name must be less than 100 characters");
         return false;
       }
 
@@ -230,7 +243,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
       if (validateName) {
         const isUnique = await validateName(name.trim());
         if (!isUnique) {
-          setValidationError('A scope with this name already exists');
+          setValidationError("A scope with this name already exists");
           return false;
         }
       }
@@ -238,7 +251,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
       setValidationError(null);
       return true;
     },
-    [validateName]
+    [validateName],
   );
 
   // Handle name change
@@ -250,7 +263,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
         setValidationError(null);
       }
     },
-    [validationError]
+    [validationError],
   );
 
   // Handle save
@@ -267,7 +280,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
       await onSave(newName.trim());
       // Dialog will be closed by parent after successful save
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save copy');
+      setError(err instanceof Error ? err.message : "Failed to save copy");
     } finally {
       setIsSubmitting(false);
     }
@@ -283,13 +296,13 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
   // Handle keyboard
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !isSubmitting) {
+      if (e.key === "Enter" && !isSubmitting) {
         handleSave();
-      } else if (e.key === 'Escape' && !isSubmitting) {
+      } else if (e.key === "Escape" && !isSubmitting) {
         handleCancel();
       }
     },
-    [handleSave, handleCancel, isSubmitting]
+    [handleSave, handleCancel, isSubmitting],
   );
 
   // Dialog title
@@ -298,7 +311,10 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
   }, [scopeType]);
 
   return (
-    <Dialog open={open} onOpenChange={(_, data) => !data.open && handleCancel()}>
+    <Dialog
+      open={open}
+      onOpenChange={(_, data) => !data.open && handleCancel()}
+    >
       <DialogSurface className={styles.dialogSurface} onKeyDown={handleKeyDown}>
         <DialogTitle>
           <div className={styles.header}>
@@ -324,10 +340,15 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
                   ownershipType={sourceScope.ownershipType}
                   className={styles.ownershipBadge}
                 />
-                <Text className={styles.sourceName}>{sourceScope.displayName}</Text>
+                <Text className={styles.sourceName}>
+                  {sourceScope.displayName}
+                </Text>
               </div>
               {sourceScope.description && (
-                <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                <Text
+                  size={200}
+                  style={{ color: tokens.colorNeutralForeground2 }}
+                >
                   {sourceScope.description}
                 </Text>
               )}
@@ -339,7 +360,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
                 label="New Name"
                 required
                 validationMessage={validationError}
-                validationState={validationError ? 'error' : undefined}
+                validationState={validationError ? "error" : undefined}
               >
                 <Input
                   value={newName}
@@ -355,7 +376,8 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
             <div className={styles.ownershipInfo}>
               <Info16Regular className={styles.infoIcon} />
               <Text className={styles.ownershipText}>
-                The copy will be created as a <strong>Customer</strong> scope (CUST-) and will be fully editable.
+                The copy will be created as a <strong>Customer</strong> scope
+                (CUST-) and will be fully editable.
               </Text>
             </div>
           </DialogContent>
@@ -376,7 +398,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
             onClick={handleSave}
             disabled={isSubmitting || !newName.trim()}
           >
-            {isSubmitting ? 'Saving...' : 'Save Copy'}
+            {isSubmitting ? "Saving..." : "Save Copy"}
           </Button>
         </DialogActions>
       </DialogSurface>

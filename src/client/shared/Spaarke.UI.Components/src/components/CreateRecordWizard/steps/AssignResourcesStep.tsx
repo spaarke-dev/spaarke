@@ -7,15 +7,10 @@
  *
  * @see CreateRecordWizard — wires search callbacks and form state
  */
-import * as React from 'react';
-import {
-  Text,
-  Checkbox,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import { LookupField } from '../../LookupField/LookupField';
-import type { ILookupItem } from '../../../types/LookupTypes';
+import * as React from "react";
+import { Text, Checkbox, makeStyles, tokens } from "@fluentui/react-components";
+import { LookupField } from "../../LookupField/LookupField";
+import type { ILookupItem } from "../../../types/LookupTypes";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -44,13 +39,13 @@ export interface IAssignResourcesStepProps {
 
 const useStyles = makeStyles({
   root: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalL,
   },
   headerText: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   stepTitle: {
@@ -60,31 +55,31 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   section: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   sectionTitle: {
     color: tokens.colorNeutralForeground1,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
     borderBottomColor: tokens.colorNeutralStroke2,
     paddingBottom: tokens.spacingVerticalXS,
   },
   sectionFields: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalS,
   },
   notifySection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   notifyHint: {
     color: tokens.colorNeutralForeground4,
-    paddingLeft: '28px',
+    paddingLeft: "28px",
   },
 });
 
@@ -114,7 +109,8 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
           Assign Resources
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Search and assign internal and external resources. All fields are optional.
+          Search and assign internal and external resources. All fields are
+          optional.
         </Text>
       </div>
 
@@ -129,7 +125,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={attorneyValue}
             onChange={onAttorneyChange}
             onSearch={onSearchAttorneys}
-
             minSearchLength={2}
           />
           <LookupField
@@ -138,7 +133,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={paralegalValue}
             onChange={onParalegalChange}
             onSearch={onSearchParalegals}
-
             minSearchLength={2}
           />
         </div>
@@ -155,7 +149,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={outsideCounselValue}
             onChange={onOutsideCounselChange}
             onSearch={onSearchOutsideCounsel}
-
             minSearchLength={2}
           />
         </div>

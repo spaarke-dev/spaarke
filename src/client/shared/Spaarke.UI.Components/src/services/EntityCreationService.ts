@@ -29,8 +29,8 @@
  * ```
  */
 
-import type { IWebApiWithCreate } from '../types/WebApiLike';
-import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
+import type { IWebApiWithCreate } from "../types/WebApiLike";
+import type { IUploadedFile } from "../components/FileUpload/fileUploadTypes";
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -74,8 +74,12 @@ export interface ISendEmailInput {
   cc?: string | string[];
   subject: string;
   body: string;
-  bodyFormat?: 'HTML' | 'Text';
-  associations?: Array<{ entityType: string; entityId: string; entityName?: string }>;
+  bodyFormat?: "HTML" | "Text";
+  associations?: Array<{
+    entityType: string;
+    entityId: string;
+    entityName?: string;
+  }>;
 }
 
 /** Result of a send-email operation. */
@@ -89,12 +93,15 @@ export interface IUploadProgress {
   current: number;
   total: number;
   currentFileName: string;
-  status: 'uploading' | 'complete' | 'failed';
+  status: "uploading" | "complete" | "failed";
   error?: string;
 }
 
 /** Authenticated fetch function signature (injected by caller). */
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetchFn = (
+  url: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
 // ---------------------------------------------------------------------------
 // EntityCreationService
@@ -120,10 +127,16 @@ export class EntityCreationService {
   async uploadFilesToSpe(
     containerId: string,
     files: IUploadedFile[],
-    onProgress?: (progress: IUploadProgress) => void
+    onProgress?: (progress: IUploadProgress) => void,
   ): Promise<IFileUploadResult> {
     if (files.length === 0) {
-      return { success: true, successCount: 0, failureCount: 0, uploadedFiles: [], errors: [] };
+      return {
+        success: true,
+        successCount: 0,
+        failureCount: 0,
+        uploadedFiles: [],
+        errors: [],
+      };
     }
 
     const uploadedFiles: ISpeFileMetadata[] = [];
@@ -137,29 +150,34 @@ export class EntityCreationService {
         current: i + 1,
         total: files.length,
         currentFileName: file.name,
-        status: 'uploading',
+        status: "uploading",
       });
 
       try {
         const response = await this._authenticatedFetch(
           `${this._bffBaseUrl}/obo/containers/${containerId}/files/${fileName}`,
           {
-            method: 'PUT',
+            method: "PUT",
             body: file.file,
             headers: {
-              'Content-Type': file.file.type || 'application/octet-stream',
+              "Content-Type": file.file.type || "application/octet-stream",
             },
-          }
+          },
         );
 
         if (!response.ok) {
-          const errorText = await response.text().catch(() => response.statusText);
-          errors.push({ fileName: file.name, error: `HTTP ${response.status}: ${errorText}` });
+          const errorText = await response
+            .text()
+            .catch(() => response.statusText);
+          errors.push({
+            fileName: file.name,
+            error: `HTTP ${response.status}: ${errorText}`,
+          });
           onProgress?.({
             current: i + 1,
             total: files.length,
             currentFileName: file.name,
-            status: 'failed',
+            status: "failed",
             error: `HTTP ${response.status}`,
           });
           continue;
@@ -172,16 +190,16 @@ export class EntityCreationService {
           current: i + 1,
           total: files.length,
           currentFileName: file.name,
-          status: 'complete',
+          status: "complete",
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Upload failed';
+        const message = err instanceof Error ? err.message : "Upload failed";
         errors.push({ fileName: file.name, error: message });
         onProgress?.({
           current: i + 1,
           total: files.length,
           currentFileName: file.name,
-          status: 'failed',
+          status: "failed",
           error: message,
         });
       }
@@ -205,7 +223,7 @@ export class EntityCreationService {
    */
   async createEntityRecord(
     entityName: string,
-    entityData: Record<string, unknown>
+    entityData: Record<string, unknown>,
   ): Promise<string> {
     const result = await this._webApi.createRecord(entityName, entityData);
     return result.id;
@@ -239,7 +257,7 @@ export class EntityCreationService {
       parentRecordName?: string;
       /** Parent entity logical name (e.g., 'sprk_matter'). If omitted, derived from parentEntityName by removing trailing 's'. */
       parentEntityLogicalName?: string;
-    }
+    },
   ): Promise<IDocumentLinkResult> {
     const warnings: string[] = [];
     let linkedCount = 0;
@@ -265,16 +283,30 @@ export class EntityCreationService {
             `/${parentEntityName}(${parentEntityId})`;
         }
 
-        console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
-        const result = await this._webApi.createRecord('sprk_document', documentEntity);
+        console.info(
+          "[EntityCreationService] createDocumentRecord payload:",
+          JSON.stringify(documentEntity, null, 2),
+        );
+        const result = await this._webApi.createRecord(
+          "sprk_document",
+          documentEntity,
+        );
         createdDocumentIds.push(result.id);
         linkedCount++;
       } catch (err) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const errObj = err as any;
-        const message = errObj?.message || (err instanceof Error ? err.message : 'Unknown error');
-        console.error('[EntityCreationService] createDocumentRecord failed:', message, err);
-        warnings.push(`Failed to create document record for "${file.name}": ${message}`);
+        const message =
+          errObj?.message ||
+          (err instanceof Error ? err.message : "Unknown error");
+        console.error(
+          "[EntityCreationService] createDocumentRecord failed:",
+          message,
+          err,
+        );
+        warnings.push(
+          `Failed to create document record for "${file.name}": ${message}`,
+        );
       }
     }
 
@@ -298,21 +330,28 @@ export class EntityCreationService {
    */
   private async _triggerDocumentAnalysis(
     documentIds: string[],
-    warnings: string[]
+    warnings: string[],
   ): Promise<void> {
     for (const docId of documentIds) {
       try {
         const response = await this._authenticatedFetch(
           `${this._bffBaseUrl}/documents/${docId}/analyze`,
-          { method: 'POST' }
+          { method: "POST" },
         );
         if (response.ok) {
-          console.info(`[EntityCreationService] Document analysis queued for ${docId}`);
+          console.info(
+            `[EntityCreationService] Document analysis queued for ${docId}`,
+          );
         } else {
-          console.warn(`[EntityCreationService] Failed to queue analysis for ${docId}: HTTP ${response.status}`);
+          console.warn(
+            `[EntityCreationService] Failed to queue analysis for ${docId}: HTTP ${response.status}`,
+          );
         }
       } catch (err) {
-        console.warn(`[EntityCreationService] Could not queue analysis for ${docId}:`, err);
+        console.warn(
+          `[EntityCreationService] Could not queue analysis for ${docId}:`,
+          err,
+        );
       }
     }
   }
@@ -340,22 +379,26 @@ export class EntityCreationService {
       const response = await this._authenticatedFetch(
         `${this._bffBaseUrl}/communications/send`,
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             to,
             cc: cc.length > 0 ? cc : undefined,
             subject: input.subject,
             body: input.body,
-            bodyFormat: input.bodyFormat ?? 'HTML',
+            bodyFormat: input.bodyFormat ?? "HTML",
             associations: input.associations,
           }),
-        }
+        },
       );
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.warn('[EntityCreationService] Email send failed:', response.status, errorText);
+        const errorText = await response.text().catch(() => "Unknown error");
+        console.warn(
+          "[EntityCreationService] Email send failed:",
+          response.status,
+          errorText,
+        );
         return {
           success: false,
           warning: `Could not send email (${response.status}). Please send manually.`,
@@ -364,7 +407,7 @@ export class EntityCreationService {
 
       return { success: true };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
+      const message = err instanceof Error ? err.message : "Unknown error";
       return {
         success: false,
         warning: `Could not send email (${message}). Please send manually.`,

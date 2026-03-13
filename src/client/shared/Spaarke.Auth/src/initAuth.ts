@@ -1,6 +1,6 @@
-import type { IAuthConfig } from './types';
-import { AuthError } from './errors';
-import { SpaarkeAuthProvider } from './SpaarkeAuthProvider';
+import type { IAuthConfig } from "./types";
+import { AuthError } from "./errors";
+import { SpaarkeAuthProvider } from "./SpaarkeAuthProvider";
 
 let _provider: SpaarkeAuthProvider | null = null;
 
@@ -25,7 +25,9 @@ let _provider: SpaarkeAuthProvider | null = null;
  * const response = await authenticatedFetch('/api/documents/123/preview-url');
  * ```
  */
-export async function initAuth(config?: IAuthConfig): Promise<SpaarkeAuthProvider> {
+export async function initAuth(
+  config?: IAuthConfig,
+): Promise<SpaarkeAuthProvider> {
   // Dispose previous instance if re-initializing
   if (_provider) {
     _provider.dispose();
@@ -46,8 +48,8 @@ export async function initAuth(config?: IAuthConfig): Promise<SpaarkeAuthProvide
 export function getAuthProvider(): SpaarkeAuthProvider {
   if (!_provider) {
     throw new AuthError(
-      'Auth not initialized. Call initAuth() before using authenticatedFetch().',
-      'not_initialized',
+      "Auth not initialized. Call initAuth() before using authenticatedFetch().",
+      "not_initialized",
     );
   }
   return _provider;

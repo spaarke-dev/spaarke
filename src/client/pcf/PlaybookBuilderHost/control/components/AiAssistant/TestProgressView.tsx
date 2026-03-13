@@ -13,8 +13,8 @@
  * @version 1.0.0
  */
 
-import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import * as React from "react";
+import { useCallback, useMemo } from "react";
 import {
   ProgressBar,
   Spinner,
@@ -27,7 +27,7 @@ import {
   mergeClasses,
   MessageBar,
   MessageBarBody,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   Checkmark16Regular,
   Dismiss16Regular,
@@ -36,12 +36,12 @@ import {
   Clock16Regular,
   Warning16Regular,
   ArrowForward16Regular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 import {
   useAiAssistantStore,
   type TestNodeProgress,
   type TestMode,
-} from '../../stores/aiAssistantStore';
+} from "../../stores/aiAssistantStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -49,63 +49,63 @@ import {
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalM),
     ...shorthands.padding(tokens.spacingVerticalM),
   },
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     ...shorthands.gap(tokens.spacingHorizontalM),
   },
   headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   modeBadge: {
-    textTransform: 'capitalize',
+    textTransform: "capitalize",
   },
   progressSection: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalXS),
   },
   progressInfo: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   progressText: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
   },
   currentStep: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorBrandBackground2,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
+    ...shorthands.border("1px", "solid", tokens.colorBrandStroke1),
   },
   currentStepLabel: {
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
   },
   nodeList: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalXS),
-    maxHeight: '300px',
-    overflowY: 'auto',
-    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
+    maxHeight: "300px",
+    overflowY: "auto",
+    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
   },
   nodeItem: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
@@ -113,7 +113,7 @@ const useStyles = makeStyles({
   },
   nodeItemRunning: {
     backgroundColor: tokens.colorBrandBackground2,
-    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
+    ...shorthands.border("1px", "solid", tokens.colorBrandStroke1),
   },
   nodeItemCompleted: {
     backgroundColor: tokens.colorPaletteGreenBackground1,
@@ -127,11 +127,11 @@ const useStyles = makeStyles({
   },
   nodeIcon: {
     flexShrink: 0,
-    width: '16px',
-    height: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: "16px",
+    height: "16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   nodeIconPending: {
     color: tokens.colorNeutralForeground3,
@@ -150,9 +150,9 @@ const useStyles = makeStyles({
   },
   nodeLabel: {
     flex: 1,
-    ...shorthands.overflow('hidden'),
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    ...shorthands.overflow("hidden"),
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   nodeDuration: {
     color: tokens.colorNeutralForeground3,
@@ -160,8 +160,8 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   summary: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM),
     backgroundColor: tokens.colorNeutralBackground2,
@@ -169,20 +169,20 @@ const useStyles = makeStyles({
   },
   summaryCompleted: {
     backgroundColor: tokens.colorPaletteGreenBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteGreenBorder1),
+    ...shorthands.border("1px", "solid", tokens.colorPaletteGreenBorder1),
   },
   summaryFailed: {
     backgroundColor: tokens.colorPaletteRedBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorPaletteRedBorder1),
+    ...shorthands.border("1px", "solid", tokens.colorPaletteRedBorder1),
   },
   summaryStats: {
-    display: 'flex',
+    display: "flex",
     ...shorthands.gap(tokens.spacingHorizontalL),
-    flexWrap: 'wrap',
+    flexWrap: "wrap",
   },
   statItem: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   statLabel: {
@@ -193,8 +193,8 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   actions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
+    display: "flex",
+    justifyContent: "flex-end",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
 });
@@ -219,14 +219,14 @@ const formatDuration = (ms: number): string => {
  */
 const getModeLabel = (mode: TestMode | null): string => {
   switch (mode) {
-    case 'mock':
-      return 'Mock Test';
-    case 'quick':
-      return 'Quick Test';
-    case 'production':
-      return 'Production Test';
+    case "mock":
+      return "Mock Test";
+    case "quick":
+      return "Quick Test";
+    case "production":
+      return "Production Test";
     default:
-      return 'Test';
+      return "Test";
   }
 };
 
@@ -257,29 +257,32 @@ const NodeItem: React.FC<NodeItemProps> = ({ node }) => {
   // Get status-specific styling
   const getStatusClasses = () => {
     switch (node.status) {
-      case 'running':
+      case "running":
         return { item: styles.nodeItemRunning, icon: styles.nodeIconRunning };
-      case 'completed':
-        return { item: styles.nodeItemCompleted, icon: styles.nodeIconCompleted };
-      case 'failed':
+      case "completed":
+        return {
+          item: styles.nodeItemCompleted,
+          icon: styles.nodeIconCompleted,
+        };
+      case "failed":
         return { item: styles.nodeItemFailed, icon: styles.nodeIconFailed };
-      case 'skipped':
+      case "skipped":
         return { item: styles.nodeItemSkipped, icon: styles.nodeIconSkipped };
       default:
-        return { item: '', icon: styles.nodeIconPending };
+        return { item: "", icon: styles.nodeIconPending };
     }
   };
 
   // Get status icon
   const getStatusIcon = () => {
     switch (node.status) {
-      case 'running':
+      case "running":
         return <Spinner size="extra-tiny" />;
-      case 'completed':
+      case "completed":
         return <Checkmark16Regular />;
-      case 'failed':
+      case "failed":
         return <Dismiss16Regular />;
-      case 'skipped':
+      case "skipped":
         return <ArrowForward16Regular />;
       default:
         return <Clock16Regular />;
@@ -296,8 +299,10 @@ const NodeItem: React.FC<NodeItemProps> = ({ node }) => {
       <Text className={styles.nodeLabel} size={200}>
         {node.label}
       </Text>
-      {node.durationMs !== undefined && node.status === 'completed' && (
-        <Text className={styles.nodeDuration}>{formatDuration(node.durationMs)}</Text>
+      {node.durationMs !== undefined && node.status === "completed" && (
+        <Text className={styles.nodeDuration}>
+          {formatDuration(node.durationMs)}
+        </Text>
       )}
       {node.error && (
         <Badge appearance="filled" color="danger" size="small">
@@ -328,7 +333,10 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
     if (nodesProgress.length === 0) return 0;
 
     const completed = nodesProgress.filter(
-      (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
+      (n) =>
+        n.status === "completed" ||
+        n.status === "failed" ||
+        n.status === "skipped",
     ).length;
 
     return completed / nodesProgress.length;
@@ -339,22 +347,25 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
     const { nodesProgress } = testExecution;
     return {
       total: nodesProgress.length,
-      completed: nodesProgress.filter((n) => n.status === 'completed').length,
-      failed: nodesProgress.filter((n) => n.status === 'failed').length,
-      skipped: nodesProgress.filter((n) => n.status === 'skipped').length,
-      pending: nodesProgress.filter((n) => n.status === 'pending').length,
-      running: nodesProgress.filter((n) => n.status === 'running').length,
+      completed: nodesProgress.filter((n) => n.status === "completed").length,
+      failed: nodesProgress.filter((n) => n.status === "failed").length,
+      skipped: nodesProgress.filter((n) => n.status === "skipped").length,
+      pending: nodesProgress.filter((n) => n.status === "pending").length,
+      running: nodesProgress.filter((n) => n.status === "running").length,
     };
   }, [testExecution.nodesProgress]);
 
   // Current node
   const currentNode = useMemo(() => {
     if (!testExecution.currentNodeId) return null;
-    return testExecution.nodesProgress.find((n) => n.nodeId === testExecution.currentNodeId);
+    return testExecution.nodesProgress.find(
+      (n) => n.nodeId === testExecution.currentNodeId,
+    );
   }, [testExecution.currentNodeId, testExecution.nodesProgress]);
 
   // Is test complete?
-  const isComplete = !testExecution.isActive && testExecution.nodesProgress.length > 0;
+  const isComplete =
+    !testExecution.isActive && testExecution.nodesProgress.length > 0;
   const hasError = testExecution.error !== null || stats.failed > 0;
 
   // Handle cancel
@@ -381,16 +392,20 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
           {testExecution.isActive ? (
             <Spinner size="tiny" />
           ) : hasError ? (
-            <Warning16Regular style={{ color: tokens.colorPaletteRedForeground1 }} />
+            <Warning16Regular
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+            />
           ) : (
-            <Checkmark16Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
+            <Checkmark16Regular
+              style={{ color: tokens.colorPaletteGreenForeground1 }}
+            />
           )}
           <Text weight="semibold">
             {testExecution.isActive
-              ? 'Running Test...'
+              ? "Running Test..."
               : hasError
-              ? 'Test Failed'
-              : 'Test Complete'}
+                ? "Test Failed"
+                : "Test Complete"}
           </Text>
           <Badge appearance="outline" size="small" className={styles.modeBadge}>
             {getModeLabel(testExecution.mode)}
@@ -410,9 +425,12 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
         <div className={styles.progressSection}>
           <div className={styles.progressInfo}>
             <Text className={styles.progressText}>
-              {stats.completed + stats.failed + stats.skipped} of {stats.total} nodes
+              {stats.completed + stats.failed + stats.skipped} of {stats.total}{" "}
+              nodes
             </Text>
-            <Text className={styles.progressText}>{Math.round(progress * 100)}%</Text>
+            <Text className={styles.progressText}>
+              {Math.round(progress * 100)}%
+            </Text>
           </div>
           <ProgressBar value={progress} thickness="large" />
         </div>
@@ -440,7 +458,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
         <div
           className={mergeClasses(
             styles.summary,
-            hasError ? styles.summaryFailed : styles.summaryCompleted
+            hasError ? styles.summaryFailed : styles.summaryCompleted,
           )}
         >
           <div className={styles.summaryStats}>
@@ -451,7 +469,10 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
             {stats.failed > 0 && (
               <div className={styles.statItem}>
                 <Text className={styles.statLabel}>Failed:</Text>
-                <Text className={styles.statValue} style={{ color: tokens.colorPaletteRedForeground1 }}>
+                <Text
+                  className={styles.statValue}
+                  style={{ color: tokens.colorPaletteRedForeground1 }}
+                >
                   {stats.failed}
                 </Text>
               </div>
@@ -464,7 +485,9 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
             )}
             <div className={styles.statItem}>
               <Text className={styles.statLabel}>Duration:</Text>
-              <Text className={styles.statValue}>{formatDuration(testExecution.totalDurationMs)}</Text>
+              <Text className={styles.statValue}>
+                {formatDuration(testExecution.totalDurationMs)}
+              </Text>
             </div>
           </div>
           {testExecution.analysisId && (

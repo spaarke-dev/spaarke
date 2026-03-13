@@ -18,25 +18,22 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Terminal node (no source handle / output connection).
  */
 export const DeliverToIndexNode = React.memo(function DeliverToIndexNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<DatabaseSearch20Regular />}
-            typeLabel="Deliver to Index"
-            sourceHandleCount={0}
-        >
-            {data.indexName && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Index: {data.indexName as string}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<DatabaseSearch20Regular />}
+      typeLabel="Deliver to Index"
+      sourceHandleCount={0}
+    >
+      {data.indexName && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Index: {data.indexName as string}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

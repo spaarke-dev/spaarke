@@ -27,18 +27,17 @@ function showTaskPane(event: Office.AddinCommands.Event): void {
  */
 async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
   try {
-    // TODO: Implement quick save functionality
+    // TRACKED: GitHub #234 - Implement quick save functionality
     // Will be implemented in task 040-implement-save-document-endpoint
 
     // Show notification
     await Word.run(async (context) => {
       // Placeholder for actual save logic
-      console.log('Quick save initiated');
+      console.log("Quick save initiated");
       await context.sync();
     });
-
   } catch (error) {
-    console.error('Quick save failed:', error);
+    console.error("Quick save failed:", error);
   } finally {
     event.completed();
   }
@@ -50,13 +49,12 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
  */
 async function shareDocument(event: Office.AddinCommands.Event): Promise<void> {
   try {
-    // TODO: Implement share functionality
+    // TRACKED: GitHub #234 - Implement share functionality
     // Will be implemented in task 050-implement-share-links
 
-    console.log('Share document initiated');
-
+    console.log("Share document initiated");
   } catch (error) {
-    console.error('Share document failed:', error);
+    console.error("Share document failed:", error);
   } finally {
     event.completed();
   }

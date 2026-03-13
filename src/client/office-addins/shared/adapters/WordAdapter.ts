@@ -20,7 +20,7 @@
  * ```
  */
 
-import type { IHostAdapter } from './IHostAdapter';
+import type { IHostAdapter } from "./IHostAdapter";
 import type {
   HostType,
   ItemType,
@@ -33,12 +33,12 @@ import type {
   GetDocumentContentOptions,
   HostAdapterError,
   HostAdapterErrorCode,
-} from './types';
+} from "./types";
 
 /**
  * Minimum required WordApi version for this adapter.
  */
-const MIN_WORD_API_VERSION = '1.3';
+const MIN_WORD_API_VERSION = "1.3";
 
 /**
  * Word-specific host adapter implementation.
@@ -55,7 +55,7 @@ export class WordAdapter implements IHostAdapter {
    * @returns 'word'
    */
   getHostType(): HostType {
-    return 'word';
+    return "word";
   }
 
   /**
@@ -63,7 +63,7 @@ export class WordAdapter implements IHostAdapter {
    * @returns 'document' for Word
    */
   getItemType(): ItemType {
-    return 'document';
+    return "document";
   }
 
   /**
@@ -89,14 +89,15 @@ export class WordAdapter implements IHostAdapter {
       const properties = document.properties;
 
       // Load properties to help generate a unique ID
-      properties.load(['title', 'author', 'creationDate']);
+      properties.load(["title", "author", "creationDate"]);
       await context.sync();
 
       // Try to construct a meaningful identifier
       // Note: Office.js doesn't directly expose the file URL in all scenarios
-      const title = properties.title || 'untitled';
-      const author = properties.author || 'unknown';
-      const creationDate = properties.creationDate?.toISOString() || Date.now().toString();
+      const title = properties.title || "untitled";
+      const author = properties.author || "unknown";
+      const creationDate =
+        properties.creationDate?.toISOString() || Date.now().toString();
 
       // Generate a consistent ID based on document properties
       const id = `word-doc-${this.hashString(`${title}-${author}-${creationDate}`)}`;
@@ -118,9 +119,9 @@ export class WordAdapter implements IHostAdapter {
 
     return Word.run(async (context) => {
       const properties = context.document.properties;
-      properties.load('title');
+      properties.load("title");
       await context.sync();
-      return properties.title || 'Untitled Document';
+      return properties.title || "Untitled Document";
     });
   }
 
@@ -133,25 +134,25 @@ export class WordAdapter implements IHostAdapter {
    * @param preferredType - 'html' or 'text'. Defaults to 'html'.
    * @returns Promise resolving to the body content with type indicator
    */
-  async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
+  async getBody(preferredType: "html" | "text" = "html"): Promise<BodyContent> {
     this.ensureInitialized();
 
     return Word.run(async (context) => {
       const body = context.document.body;
 
-      if (preferredType === 'html') {
+      if (preferredType === "html") {
         const html = body.getHtml();
         await context.sync();
         return {
           content: html.value,
-          type: 'html',
+          type: "html",
         };
       } else {
-        body.load('text');
+        body.load("text");
         await context.sync();
         return {
           content: body.text,
-          type: 'text',
+          type: "text",
         };
       }
     });
@@ -180,8 +181,8 @@ export class WordAdapter implements IHostAdapter {
    */
   async getAttachmentContent(_attachmentId: string): Promise<AttachmentInfo> {
     throw this.createError(
-      'CAPABILITY_NOT_SUPPORTED',
-      'Word documents do not support attachments. Use getDocumentContent() instead.'
+      "CAPABILITY_NOT_SUPPORTED",
+      "Word documents do not support attachments. Use getDocumentContent() instead.",
     );
   }
 
@@ -194,7 +195,7 @@ export class WordAdapter implements IHostAdapter {
    */
   async getSenderEmail(): Promise<string> {
     // Not applicable for Word documents
-    return '';
+    return "";
   }
 
   /**
@@ -218,46 +219,48 @@ export class WordAdapter implements IHostAdapter {
    * @param options - Options specifying the desired format
    * @returns Promise resolving to the document content as ArrayBuffer
    */
-  async getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer> {
+  async getDocumentContent(
+    options?: GetDocumentContentOptions,
+  ): Promise<ArrayBuffer> {
     this.ensureInitialized();
 
-    const format = options?.format ?? 'ooxml';
+    const format = options?.format ?? "ooxml";
 
     return Word.run(async (context) => {
       const body = context.document.body;
       let content: string;
 
       switch (format) {
-        case 'ooxml': {
+        case "ooxml": {
           const ooxml = body.getOoxml();
           await context.sync();
           content = ooxml.value;
           break;
         }
-        case 'html': {
+        case "html": {
           const html = body.getHtml();
           await context.sync();
           content = html.value;
           break;
         }
-        case 'text': {
-          body.load('text');
+        case "text": {
+          body.load("text");
           await context.sync();
           content = body.text;
           break;
         }
-        case 'pdf': {
+        case "pdf": {
           // PDF export is not directly available via Word.js API
           // Server-side conversion is required
           throw this.createError(
-            'CAPABILITY_NOT_SUPPORTED',
-            'PDF export requires server-side conversion. Retrieve as OOXML and convert on server.'
+            "CAPABILITY_NOT_SUPPORTED",
+            "PDF export requires server-side conversion. Retrieve as OOXML and convert on server.",
           );
         }
         default: {
           throw this.createError(
-            'CAPABILITY_NOT_SUPPORTED',
-            `Unsupported format: ${format}. Use 'ooxml', 'html', or 'text'.`
+            "CAPABILITY_NOT_SUPPORTED",
+            `Unsupported format: ${format}. Use 'ooxml', 'html', or 'text'.`,
           );
         }
       }
@@ -278,7 +281,10 @@ export class WordAdapter implements IHostAdapter {
    * @returns The capabilities object
    */
   getCapabilities(): HostCapabilities {
-    const isApiSupported = this.checkRequirementSet('WordApi', MIN_WORD_API_VERSION);
+    const isApiSupported = this.checkRequirementSet(
+      "WordApi",
+      MIN_WORD_API_VERSION,
+    );
 
     return {
       canGetAttachments: false,
@@ -308,21 +314,21 @@ export class WordAdapter implements IHostAdapter {
         if (info.host !== Office.HostType.Word) {
           reject(
             this.createError(
-              'INVALID_HOST',
-              `Expected Word host but running in: ${info.host ?? 'unknown'}`
-            )
+              "INVALID_HOST",
+              `Expected Word host but running in: ${info.host ?? "unknown"}`,
+            ),
           );
           return;
         }
 
         // Check for minimum required API version
-        if (!this.checkRequirementSet('WordApi', MIN_WORD_API_VERSION)) {
+        if (!this.checkRequirementSet("WordApi", MIN_WORD_API_VERSION)) {
           reject(
             this.createError(
-              'API_NOT_AVAILABLE',
+              "API_NOT_AVAILABLE",
               `WordApi ${MIN_WORD_API_VERSION} or higher is required. ` +
-              'Please update your Office client.'
-            )
+                "Please update your Office client.",
+            ),
           );
           return;
         }
@@ -351,7 +357,10 @@ export class WordAdapter implements IHostAdapter {
    * @param displayText - Optional display text for the link
    * @returns Promise resolving to the result of the insertion
    */
-  async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
+  async insertLink(
+    url: string,
+    displayText?: string,
+  ): Promise<InsertLinkResult> {
     this.ensureInitialized();
 
     try {
@@ -369,7 +378,8 @@ export class WordAdapter implements IHostAdapter {
 
       return { success: true };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error inserting link';
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error inserting link";
       return {
         success: false,
         errorMessage,
@@ -390,11 +400,12 @@ export class WordAdapter implements IHostAdapter {
   async attachFile(
     _content: string,
     _fileName: string,
-    _contentType: string
+    _contentType: string,
   ): Promise<AttachFileResult> {
     return {
       success: false,
-      errorMessage: 'Attaching files is not supported in Word. This feature is only available in Outlook compose mode.',
+      errorMessage:
+        "Attaching files is not supported in Word. This feature is only available in Outlook compose mode.",
     };
   }
 
@@ -409,8 +420,8 @@ export class WordAdapter implements IHostAdapter {
   private ensureInitialized(): void {
     if (!this._initialized) {
       throw this.createError(
-        'NOT_INITIALIZED',
-        'WordAdapter has not been initialized. Call initialize() first.'
+        "NOT_INITIALIZED",
+        "WordAdapter has not been initialized. Call initialize() first.",
       );
     }
   }
@@ -437,7 +448,7 @@ export class WordAdapter implements IHostAdapter {
    */
   private createError(
     code: HostAdapterErrorCode,
-    message: string
+    message: string,
   ): HostAdapterError {
     return { code, message };
   }
@@ -449,11 +460,11 @@ export class WordAdapter implements IHostAdapter {
    */
   private escapeHtml(text: string): string {
     const htmlEntities: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
     };
     return text.replace(/[&<>"']/g, (char) => htmlEntities[char] || char);
   }
@@ -467,7 +478,7 @@ export class WordAdapter implements IHostAdapter {
     let hash = 0;
     for (let i = 0; i < input.length; i++) {
       const char = input.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash).toString(16);

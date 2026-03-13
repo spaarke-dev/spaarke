@@ -152,7 +152,7 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
       className={mergeClasses(
         styles.toolbar,
         compact && styles.toolbarCompact,
-        className
+        className,
       )}
       role="toolbar"
       aria-label="View toolbar"
@@ -165,7 +165,8 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
             {children}
             {recordCount !== undefined && (
               <Text className={styles.recordCount}>
-                ({recordCount.toLocaleString()} {recordCount === 1 ? "record" : "records"})
+                ({recordCount.toLocaleString()}{" "}
+                {recordCount === 1 ? "record" : "records"})
               </Text>
             )}
           </>

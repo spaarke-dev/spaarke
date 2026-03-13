@@ -185,7 +185,12 @@ export const DEFAULT_VISUAL_HOST_CONFIG: IVisualHostConfig = {
  * Each maps to a predefined set of Fluent UI v9 semantic tokens
  * that auto-adapt to light/dark mode.
  */
-export type ColorTokenSet = "brand" | "warning" | "danger" | "success" | "neutral";
+export type ColorTokenSet =
+  | "brand"
+  | "warning"
+  | "danger"
+  | "success"
+  | "neutral";
 
 /**
  * Color threshold rule — maps a value range to a Fluent token set
@@ -222,7 +227,11 @@ export type ValueFormatType =
 /**
  * Color source type as string (for config resolution)
  */
-export type ColorSourceType = "none" | "optionSetColor" | "valueThreshold" | "signBased";
+export type ColorSourceType =
+  | "none"
+  | "optionSetColor"
+  | "valueThreshold"
+  | "signBased";
 
 /**
  * Resolved card configuration — merged from Chart Definition fields,
@@ -264,10 +273,15 @@ export interface ICardConfig {
   /** Card aspect ratio (e.g., "5 / 3", "1 / 1", "3 / 5") from sprk_metriccardshape */
   aspectRatio?: string;
   /** Content alignment within each card: left, left-center, center, right-center, right */
-  dataJustification?: "left" | "left-center" | "center" | "right-center" | "right";
+  dataJustification?:
+    | "left"
+    | "left-center"
+    | "center"
+    | "right-center"
+    | "right";
   /** Invert sign-based coloring (negative=success, positive=danger) */
   invertSign?: boolean;
-};
+}
 
 /**
  * Field Pivot Configuration

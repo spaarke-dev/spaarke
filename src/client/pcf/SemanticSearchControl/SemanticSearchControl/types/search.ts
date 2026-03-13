@@ -12,7 +12,17 @@
  * - "matter", "project", "invoice", "account", "contact": Explicit entity-scoped search
  * - "custom": Custom scope using documentIds (future)
  */
-export type SearchScope = "all" | "entity" | "matter" | "project" | "invoice" | "account" | "contact" | "document" | "custom" | (string & {});
+export type SearchScope =
+  | "all"
+  | "entity"
+  | "matter"
+  | "project"
+  | "invoice"
+  | "account"
+  | "contact"
+  | "document"
+  | "custom"
+  | (string & {});
 
 /**
  * Search mode for controlling how vector and keyword search are combined.
@@ -26,93 +36,98 @@ export type SearchMode = "hybrid" | "vectorOnly" | "keywordOnly";
  * Date range filter
  */
 export interface DateRange {
-    from: string | null;
-    to: string | null;
+  from: string | null;
+  to: string | null;
 }
 
 /**
  * Filters applied to semantic search
  */
 export interface SearchFilters {
-    documentTypes: string[];
-    matterTypes: string[];
-    dateRange: DateRange | null;
-    fileTypes: string[];
-    /** Minimum relevance score threshold (0-100). 0 = show all results. */
-    threshold: number;
-    /** Search mode: hybrid (default), vectorOnly, or keywordOnly */
-    searchMode: SearchMode;
+  documentTypes: string[];
+  matterTypes: string[];
+  dateRange: DateRange | null;
+  fileTypes: string[];
+  /** Minimum relevance score threshold (0-100). 0 = show all results. */
+  threshold: number;
+  /** Search mode: hybrid (default), vectorOnly, or keywordOnly */
+  searchMode: SearchMode;
 }
 
 /**
  * Pagination and result options
  */
 export interface SearchOptions {
-    limit: number;
-    offset: number;
-    includeHighlights: boolean;
+  limit: number;
+  offset: number;
+  includeHighlights: boolean;
 }
 
 /**
  * Request body for semantic search API
  */
 export interface SearchRequest {
-    query: string;
-    scope: SearchScope;
-    scopeId: string | null;
-    filters: SearchFilters;
-    options: SearchOptions;
+  query: string;
+  scope: SearchScope;
+  scopeId: string | null;
+  filters: SearchFilters;
+  options: SearchOptions;
 }
 
 /**
  * Single search result from the API
  */
 export interface SearchResult {
-    documentId: string;
-    name: string;
-    fileType: string;
-    documentType: string;
-    matterName: string | null;
-    matterId: string | null;
-    createdAt: string | null;
-    combinedScore: number;
-    highlights: string[];
-    fileUrl: string;
-    recordUrl: string;
-    entityLogicalName?: string;
-    recordId?: string;
-    createdBy: string | null;
-    summary: string | null;
-    tldr: string | null;
+  documentId: string;
+  name: string;
+  fileType: string;
+  documentType: string;
+  matterName: string | null;
+  matterId: string | null;
+  createdAt: string | null;
+  combinedScore: number;
+  highlights: string[];
+  fileUrl: string;
+  recordUrl: string;
+  entityLogicalName?: string;
+  recordId?: string;
+  createdBy: string | null;
+  summary: string | null;
+  tldr: string | null;
 }
 
 /**
  * Metadata about the search execution
  */
 export interface SearchMetadata {
-    searchTimeMs: number;
-    query: string;
+  searchTimeMs: number;
+  query: string;
 }
 
 /**
  * Response from semantic search API
  */
 export interface SearchResponse {
-    results: SearchResult[];
-    totalCount: number;
-    metadata: SearchMetadata;
+  results: SearchResult[];
+  totalCount: number;
+  metadata: SearchMetadata;
 }
 
 /**
  * Search state for hook management
  */
-export type SearchState = "idle" | "loading" | "loadingMore" | "error" | "success";
+export type SearchState =
+  | "idle"
+  | "loading"
+  | "loadingMore"
+  | "error"
+  | "success";
 
 /**
  * Error information
  */
 export interface SearchError {
-    message: string;
-    code?: string;
-    retryable: boolean;
+  message: string;
+  code?: string;
+  retryable: boolean;
 }

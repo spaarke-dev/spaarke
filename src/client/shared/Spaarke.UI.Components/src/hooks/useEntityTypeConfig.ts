@@ -77,7 +77,7 @@ export interface UseEntityTypeConfigResult<TConfig> {
  * @returns Loading state, error, and parsed config
  */
 export function useEntityTypeConfig<TConfig>(
-  options: UseEntityTypeConfigOptions
+  options: UseEntityTypeConfigOptions,
 ): UseEntityTypeConfigResult<TConfig> {
   const { entityName, recordId, configFieldName, selectFields } = options;
 
@@ -116,7 +116,7 @@ export function useEntityTypeConfig<TConfig>(
         const record = await xrm.WebApi.retrieveRecord(
           entityName,
           normalizedId,
-          `?$select=${selectFields}`
+          `?$select=${selectFields}`,
         );
 
         if (cancelled) return;
@@ -126,9 +126,7 @@ export function useEntityTypeConfig<TConfig>(
 
         // Extract name field (convention: look for common name patterns)
         const nameValue =
-          (record["sprk_name"] as string) ??
-          (record["name"] as string) ??
-          null;
+          (record["sprk_name"] as string) ?? (record["name"] as string) ?? null;
         setTypeName(nameValue);
 
         if (!configJson) {
@@ -145,15 +143,19 @@ export function useEntityTypeConfig<TConfig>(
         } catch (parseError) {
           console.error(
             `[useEntityTypeConfig] Invalid JSON in ${entityName}.${configFieldName}:`,
-            parseError
+            parseError,
           );
           setError(`Invalid configuration JSON for ${entityName}`);
           setConfig(null);
         }
       } catch (fetchError) {
         if (cancelled) return;
-        const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-        console.error(`[useEntityTypeConfig] Failed to fetch ${entityName} config:`, msg);
+        const msg =
+          fetchError instanceof Error ? fetchError.message : String(fetchError);
+        console.error(
+          `[useEntityTypeConfig] Failed to fetch ${entityName} config:`,
+          msg,
+        );
         setError(msg);
         setConfig(null);
       } finally {

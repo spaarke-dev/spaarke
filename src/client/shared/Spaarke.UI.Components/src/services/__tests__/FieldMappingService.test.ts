@@ -9,9 +9,7 @@
  * - Cache management
  */
 
-import {
-  FieldMappingService,
-} from "../FieldMappingService";
+import { FieldMappingService } from "../FieldMappingService";
 
 import {
   FieldType,
@@ -35,7 +33,9 @@ const createMockWebApi = (): ComponentFramework.WebApi => ({
 });
 
 // Helper to create a test profile
-const createTestProfile = (overrides?: Partial<IFieldMappingProfile>): IFieldMappingProfile => ({
+const createTestProfile = (
+  overrides?: Partial<IFieldMappingProfile>,
+): IFieldMappingProfile => ({
   id: "profile-001",
   name: "Test Profile",
   sourceEntity: "sprk_matter",
@@ -48,7 +48,9 @@ const createTestProfile = (overrides?: Partial<IFieldMappingProfile>): IFieldMap
 });
 
 // Helper to create a test rule
-const createTestRule = (overrides?: Partial<IFieldMappingRule>): IFieldMappingRule => ({
+const createTestRule = (
+  overrides?: Partial<IFieldMappingRule>,
+): IFieldMappingRule => ({
   id: "rule-001",
   profileId: "profile-001",
   sourceField: "sprk_client",
@@ -81,7 +83,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Text,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -93,7 +95,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Text,
         FieldType.Memo,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -104,7 +106,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Memo,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -114,7 +116,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Lookup,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -126,7 +128,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Number,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -136,7 +138,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.DateTime,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -146,7 +148,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Boolean,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -156,7 +158,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.OptionSet,
         FieldType.Text,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(true);
@@ -166,7 +168,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Text,
         FieldType.Lookup,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(false);
@@ -178,7 +180,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Text,
         FieldType.Number,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(false);
@@ -188,7 +190,7 @@ describe("FieldMappingService", () => {
       const result = service.validateTypeCompatibility(
         FieldType.Text,
         FieldType.OptionSet,
-        CompatibilityMode.Strict
+        CompatibilityMode.Strict,
       );
 
       expect(result.isCompatible).toBe(false);
@@ -204,7 +206,7 @@ describe("FieldMappingService", () => {
           const result = service.validateTypeCompatibility(
             sourceTypeNum,
             targetType,
-            CompatibilityMode.Strict
+            CompatibilityMode.Strict,
           );
 
           expect(result.isCompatible).toBe(true);
@@ -244,40 +246,72 @@ describe("FieldMappingService", () => {
 
   describe("isTypeCompatible", () => {
     it("should return true for exact type match", () => {
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.Text)).toBe(true);
-      expect(service.isTypeCompatible(FieldType.Lookup, FieldType.Lookup)).toBe(true);
-      expect(service.isTypeCompatible(FieldType.Number, FieldType.Number)).toBe(true);
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.Text)).toBe(
+        true,
+      );
+      expect(service.isTypeCompatible(FieldType.Lookup, FieldType.Lookup)).toBe(
+        true,
+      );
+      expect(service.isTypeCompatible(FieldType.Number, FieldType.Number)).toBe(
+        true,
+      );
     });
 
     it("should return true for Lookup to Text (widening)", () => {
-      expect(service.isTypeCompatible(FieldType.Lookup, FieldType.Text)).toBe(true);
+      expect(service.isTypeCompatible(FieldType.Lookup, FieldType.Text)).toBe(
+        true,
+      );
     });
 
     it("should return false for Text to Lookup (narrowing)", () => {
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.Lookup)).toBe(false);
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.Lookup)).toBe(
+        false,
+      );
     });
 
     it("should return true for Text to Memo", () => {
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.Memo)).toBe(true);
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.Memo)).toBe(
+        true,
+      );
     });
 
     it("should return true for Memo to Text", () => {
-      expect(service.isTypeCompatible(FieldType.Memo, FieldType.Text)).toBe(true);
+      expect(service.isTypeCompatible(FieldType.Memo, FieldType.Text)).toBe(
+        true,
+      );
     });
 
     it("should return true for all types to Text (widening)", () => {
-      expect(service.isTypeCompatible(FieldType.Number, FieldType.Text)).toBe(true);
-      expect(service.isTypeCompatible(FieldType.DateTime, FieldType.Text)).toBe(true);
-      expect(service.isTypeCompatible(FieldType.Boolean, FieldType.Text)).toBe(true);
-      expect(service.isTypeCompatible(FieldType.OptionSet, FieldType.Text)).toBe(true);
+      expect(service.isTypeCompatible(FieldType.Number, FieldType.Text)).toBe(
+        true,
+      );
+      expect(service.isTypeCompatible(FieldType.DateTime, FieldType.Text)).toBe(
+        true,
+      );
+      expect(service.isTypeCompatible(FieldType.Boolean, FieldType.Text)).toBe(
+        true,
+      );
+      expect(
+        service.isTypeCompatible(FieldType.OptionSet, FieldType.Text),
+      ).toBe(true);
     });
 
     it("should return false for incompatible conversions", () => {
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.Number)).toBe(false);
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.Boolean)).toBe(false);
-      expect(service.isTypeCompatible(FieldType.Text, FieldType.DateTime)).toBe(false);
-      expect(service.isTypeCompatible(FieldType.Number, FieldType.Boolean)).toBe(false);
-      expect(service.isTypeCompatible(FieldType.DateTime, FieldType.Number)).toBe(false);
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.Number)).toBe(
+        false,
+      );
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.Boolean)).toBe(
+        false,
+      );
+      expect(service.isTypeCompatible(FieldType.Text, FieldType.DateTime)).toBe(
+        false,
+      );
+      expect(
+        service.isTypeCompatible(FieldType.Number, FieldType.Boolean),
+      ).toBe(false);
+      expect(
+        service.isTypeCompatible(FieldType.DateTime, FieldType.Number),
+      ).toBe(false);
     });
   });
 
@@ -502,7 +536,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.success).toBe(true);
@@ -513,16 +547,14 @@ describe("FieldMappingService", () => {
 
     it("should skip inactive rules", async () => {
       const profile = createTestProfile({
-        rules: [
-          createTestRule({ isActive: false }),
-        ],
+        rules: [createTestRule({ isActive: false })],
       });
       const targetRecord: Record<string, unknown> = {};
 
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.skippedRules).toBe(1);
@@ -549,7 +581,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.appliedRules).toBe(1);
@@ -574,7 +606,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.success).toBe(false);
@@ -602,7 +634,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.success).toBe(true);
@@ -632,7 +664,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.errors).toHaveLength(1);
@@ -661,7 +693,7 @@ describe("FieldMappingService", () => {
         "source-id",
         targetRecord,
         profile,
-        { dryRun: true }
+        { dryRun: true },
       );
 
       expect(result.success).toBe(true);
@@ -691,7 +723,7 @@ describe("FieldMappingService", () => {
         "source-id",
         targetRecord,
         profile,
-        { skipValidation: true }
+        { skipValidation: true },
       );
 
       // Should apply despite type mismatch when validation is skipped
@@ -740,7 +772,7 @@ describe("FieldMappingService", () => {
       const result = await service.applyMappings(
         "source-id",
         targetRecord,
-        profile
+        profile,
       );
 
       expect(result.success).toBe(true);
@@ -772,7 +804,7 @@ describe("FieldMappingService", () => {
         "source-id",
         targetRecord,
         profile,
-        { maxPasses: 1 }
+        { maxPasses: 1 },
       );
 
       // With maxPasses: 1, no cascading pass should occur
@@ -865,8 +897,16 @@ describe("FieldMappingService", () => {
       });
 
       // Simulate adding cache entries (internal implementation)
-      (serviceWithCache as any).profileCache.set("test", { data: [], cachedAt: Date.now(), expiresAt: Date.now() + 10000 });
-      (serviceWithCache as any).ruleCache.set("test", { data: [], cachedAt: Date.now(), expiresAt: Date.now() + 10000 });
+      (serviceWithCache as any).profileCache.set("test", {
+        data: [],
+        cachedAt: Date.now(),
+        expiresAt: Date.now() + 10000,
+      });
+      (serviceWithCache as any).ruleCache.set("test", {
+        data: [],
+        cachedAt: Date.now(),
+        expiresAt: Date.now() + 10000,
+      });
 
       serviceWithCache.clearCache();
 
@@ -880,13 +920,25 @@ describe("FieldMappingService", () => {
         enableCache: true,
       });
 
-      (serviceWithCache as any).ruleCache.set("rules:profile-001", { data: [], cachedAt: Date.now(), expiresAt: Date.now() + 10000 });
-      (serviceWithCache as any).ruleCache.set("rules:profile-002", { data: [], cachedAt: Date.now(), expiresAt: Date.now() + 10000 });
+      (serviceWithCache as any).ruleCache.set("rules:profile-001", {
+        data: [],
+        cachedAt: Date.now(),
+        expiresAt: Date.now() + 10000,
+      });
+      (serviceWithCache as any).ruleCache.set("rules:profile-002", {
+        data: [],
+        cachedAt: Date.now(),
+        expiresAt: Date.now() + 10000,
+      });
 
       serviceWithCache.clearProfileCache("profile-001");
 
-      expect((serviceWithCache as any).ruleCache.has("rules:profile-001")).toBe(false);
-      expect((serviceWithCache as any).ruleCache.has("rules:profile-002")).toBe(true);
+      expect((serviceWithCache as any).ruleCache.has("rules:profile-001")).toBe(
+        false,
+      );
+      expect((serviceWithCache as any).ruleCache.has("rules:profile-002")).toBe(
+        true,
+      );
     });
   });
 
@@ -915,7 +967,10 @@ describe("FieldMappingService", () => {
 
   describe("getProfileForEntityPair", () => {
     it("should return null when no matching profile exists", async () => {
-      const profile = await service.getProfileForEntityPair("sprk_matter", "sprk_event");
+      const profile = await service.getProfileForEntityPair(
+        "sprk_matter",
+        "sprk_event",
+      );
 
       expect(profile).toBeNull();
     });
@@ -932,7 +987,11 @@ describe("FieldMappingService", () => {
 
   describe("getSourceValues", () => {
     it("should return empty object when no fields requested", async () => {
-      const values = await service.getSourceValues("sprk_matter", "record-001", []);
+      const values = await service.getSourceValues(
+        "sprk_matter",
+        "record-001",
+        [],
+      );
 
       expect(values).toEqual({});
     });

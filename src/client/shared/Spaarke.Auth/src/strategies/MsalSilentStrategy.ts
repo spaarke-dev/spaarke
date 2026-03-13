@@ -1,5 +1,9 @@
-import type { PublicClientApplication, Configuration, AuthenticationResult } from '@azure/msal-browser';
-import type { ITokenResult, ITokenStrategy } from '../types';
+import type {
+  PublicClientApplication,
+  Configuration,
+  AuthenticationResult,
+} from "@azure/msal-browser";
+import type { ITokenResult, ITokenStrategy } from "../types";
 
 /**
  * Acquire token via MSAL.js silent flow.
@@ -10,7 +14,7 @@ import type { ITokenResult, ITokenStrategy } from '../types';
  *   2. ssoSilent (Azure AD session cookie)
  */
 export class MsalSilentStrategy implements ITokenStrategy {
-  readonly name = 'msal-silent' as const;
+  readonly name = "msal-silent" as const;
 
   private _instance: PublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
@@ -65,13 +69,14 @@ export class MsalSilentStrategy implements ITokenStrategy {
       this._initPromise = (async () => {
         try {
           // Dynamic import avoids bundling MSAL if bridge/cache strategies succeed
-          const { PublicClientApplication: PCA } = await import('@azure/msal-browser');
+          const { PublicClientApplication: PCA } =
+            await import("@azure/msal-browser");
           const instance = new PCA(this._msalConfig);
           await instance.initialize();
           await instance.handleRedirectPromise();
           this._instance = instance;
         } catch (err) {
-          console.warn('[SpaarkeAuth] MSAL initialization failed', err);
+          console.warn("[SpaarkeAuth] MSAL initialization failed", err);
           this._instance = null;
         }
       })();
@@ -85,7 +90,7 @@ export class MsalSilentStrategy implements ITokenStrategy {
     return {
       accessToken: result.accessToken,
       expiresOn: result.expiresOn?.getTime() ?? Date.now() + 55 * 60 * 1000,
-      source: 'msal-silent',
+      source: "msal-silent",
     };
   }
 }

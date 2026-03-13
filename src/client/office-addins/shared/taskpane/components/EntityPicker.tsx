@@ -5,7 +5,7 @@ import React, {
   useEffect,
   forwardRef,
   type KeyboardEvent,
-} from 'react';
+} from "react";
 import {
   makeStyles,
   tokens,
@@ -19,7 +19,7 @@ import {
   Body1,
   mergeClasses,
   Divider,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   SearchRegular,
   AddRegular,
@@ -31,36 +31,36 @@ import {
   DismissCircleRegular,
   HistoryRegular,
   ChevronDownRegular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 import {
   useEntitySearch,
   type EntityType,
   type EntitySearchResult,
   type UseEntitySearchOptions,
   ALL_ENTITY_TYPES,
-} from '../hooks/useEntitySearch';
+} from "../hooks/useEntitySearch";
 
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
  */
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
-    width: '100%',
+    width: "100%",
   },
   filterChips: {
-    display: 'flex',
-    flexWrap: 'wrap',
+    display: "flex",
+    flexWrap: "wrap",
     gap: tokens.spacingHorizontalXS,
     marginBottom: tokens.spacingVerticalXS,
   },
   filterChip: {
-    cursor: 'pointer',
-    transition: 'all 0.15s ease-in-out',
-    '&:hover': {
-      transform: 'scale(1.02)',
+    cursor: "pointer",
+    transition: "all 0.15s ease-in-out",
+    "&:hover": {
+      transform: "scale(1.02)",
     },
   },
   filterChipActive: {
@@ -68,21 +68,21 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForegroundOnBrand,
   },
   comboboxWrapper: {
-    position: 'relative',
-    width: '100%',
+    position: "relative",
+    width: "100%",
   },
   combobox: {
-    width: '100%',
+    width: "100%",
   },
   loadingSpinner: {
-    position: 'absolute',
+    position: "absolute",
     right: tokens.spacingHorizontalM,
-    top: '50%',
-    transform: 'translateY(-50%)',
+    top: "50%",
+    transform: "translateY(-50%)",
   },
   optionContent: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXXS,
     padding: tokens.spacingVerticalXS,
   },
@@ -98,8 +98,8 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   optionRow: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
   },
   entityBadge: {
     marginLeft: tokens.spacingHorizontalS,
@@ -107,18 +107,18 @@ const useStyles = makeStyles({
   },
   emptyState: {
     padding: tokens.spacingVerticalL,
-    textAlign: 'center',
+    textAlign: "center",
     color: tokens.colorNeutralForeground3,
   },
   createNewOption: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalS,
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
-    cursor: 'pointer',
-    '&:hover': {
+    cursor: "pointer",
+    "&:hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -128,25 +128,25 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXS,
   },
   selectedEntity: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
   },
   selectedInfo: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   clearButton: {
-    minWidth: 'auto',
+    minWidth: "auto",
     padding: tokens.spacingHorizontalXS,
   },
   recentHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
@@ -169,13 +169,20 @@ const ENTITY_ICONS: Record<EntityType, React.ReactElement> = {
  */
 const ENTITY_BADGE_COLORS: Record<
   EntityType,
-  'brand' | 'danger' | 'important' | 'informative' | 'severe' | 'subtle' | 'success' | 'warning'
+  | "brand"
+  | "danger"
+  | "important"
+  | "informative"
+  | "severe"
+  | "subtle"
+  | "success"
+  | "warning"
 > = {
-  Matter: 'brand',
-  Project: 'informative',
-  Invoice: 'warning',
-  Account: 'success',
-  Contact: 'subtle',
+  Matter: "brand",
+  Project: "informative",
+  Invoice: "warning",
+  Account: "success",
+  Contact: "subtle",
 };
 
 /**
@@ -209,7 +216,7 @@ export interface EntityPickerProps {
   /** Search options */
   searchOptions?: UseEntitySearchOptions;
   /** Accessible label for screen readers */
-  'aria-label'?: string;
+  "aria-label"?: string;
   /** ID for form association */
   id?: string;
   /** Class name for custom styling */
@@ -249,7 +256,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
       value,
       onChange,
       onQuickCreate,
-      placeholder = 'Search for an association target...',
+      placeholder = "Search for an association target...",
       allowedTypes = ALL_ENTITY_TYPES,
       disabled = false,
       required = false,
@@ -259,7 +266,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
       showRecent = true,
       showQuickCreate = true,
       searchOptions,
-      'aria-label': ariaLabel,
+      "aria-label": ariaLabel,
       id,
       className,
     } = props;
@@ -285,20 +292,28 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
       clear,
     } = useEntitySearch({
       ...searchOptions,
-      initialTypeFilter: allowedTypes.length < ALL_ENTITY_TYPES.length ? allowedTypes : [],
+      initialTypeFilter:
+        allowedTypes.length < ALL_ENTITY_TYPES.length ? allowedTypes : [],
     });
 
     // Filter allowed types based on props
-    const effectiveAllowedTypes = allowedTypes.filter((t) => ALL_ENTITY_TYPES.includes(t));
+    const effectiveAllowedTypes = allowedTypes.filter((t) =>
+      ALL_ENTITY_TYPES.includes(t),
+    );
 
     // Combine recent and search results for rendering
-    const showRecentSection = showRecent && recentEntities.length > 0 && query.length < 2;
+    const showRecentSection =
+      showRecent && recentEntities.length > 0 && query.length < 2;
     const showResultsSection = results.length > 0 && query.length >= 2;
-    const showEmptyState = query.length >= 2 && !isLoading && results.length === 0;
+    const showEmptyState =
+      query.length >= 2 && !isLoading && results.length === 0;
     const showCreateOption = showQuickCreate && query.length >= 2 && !isLoading;
 
     // All options for keyboard navigation
-    const allOptions: (EntitySearchResult | { type: 'create'; entityType: EntityType })[] = [];
+    const allOptions: (
+      | EntitySearchResult
+      | { type: "create"; entityType: EntityType }
+    )[] = [];
     if (showRecentSection) {
       allOptions.push(...recentEntities);
     }
@@ -307,9 +322,10 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
     }
     if (showCreateOption) {
       // Add Quick Create options for active type filters
-      const createTypes = typeFilter.length > 0 ? typeFilter : effectiveAllowedTypes;
+      const createTypes =
+        typeFilter.length > 0 ? typeFilter : effectiveAllowedTypes;
       createTypes.forEach((type) => {
-        allOptions.push({ type: 'create', entityType: type });
+        allOptions.push({ type: "create", entityType: type });
       });
     }
 
@@ -321,7 +337,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
         clear();
         setIsOpen(false);
       },
-      [addToRecent, onChange, clear]
+      [addToRecent, onChange, clear],
     );
 
     // Handle Quick Create
@@ -330,7 +346,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
         onQuickCreate?.(entityType, query);
         setIsOpen(false);
       },
-      [onQuickCreate, query]
+      [onQuickCreate, query],
     );
 
     // Handle clearing selection
@@ -351,7 +367,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
           setIsOpen(true);
         }
       },
-      [setQuery, clearError, isOpen]
+      [setQuery, clearError, isOpen],
     );
 
     // Keyboard navigation
@@ -360,31 +376,31 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
         const optionsCount = allOptions.length;
 
         switch (event.key) {
-          case 'ArrowDown':
+          case "ArrowDown":
             event.preventDefault();
             if (!isOpen) {
               setIsOpen(true);
             }
             setHighlightedIndex((prev) =>
-              prev < optionsCount - 1 ? prev + 1 : 0
+              prev < optionsCount - 1 ? prev + 1 : 0,
             );
             break;
 
-          case 'ArrowUp':
+          case "ArrowUp":
             event.preventDefault();
             if (!isOpen) {
               setIsOpen(true);
             }
             setHighlightedIndex((prev) =>
-              prev > 0 ? prev - 1 : optionsCount - 1
+              prev > 0 ? prev - 1 : optionsCount - 1,
             );
             break;
 
-          case 'Enter':
+          case "Enter":
             event.preventDefault();
             if (highlightedIndex >= 0 && highlightedIndex < optionsCount) {
               const selected = allOptions[highlightedIndex];
-              if ('type' in selected && selected.type === 'create') {
+              if ("type" in selected && selected.type === "create") {
                 handleQuickCreate(selected.entityType);
               } else {
                 handleSelect(selected as EntitySearchResult);
@@ -392,20 +408,27 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
             }
             break;
 
-          case 'Escape':
+          case "Escape":
             event.preventDefault();
             setIsOpen(false);
             setHighlightedIndex(-1);
             clear();
             break;
 
-          case 'Tab':
+          case "Tab":
             setIsOpen(false);
             setHighlightedIndex(-1);
             break;
         }
       },
-      [allOptions, highlightedIndex, isOpen, handleSelect, handleQuickCreate, clear]
+      [
+        allOptions,
+        highlightedIndex,
+        isOpen,
+        handleSelect,
+        handleQuickCreate,
+        clear,
+      ],
     );
 
     // Handle focus
@@ -479,7 +502,9 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
         >
           <div className={styles.createNewOption}>
             <AddRegular />
-            <span>Create new {entityType}: &quot;{query}&quot;</span>
+            <span>
+              Create new {entityType}: &quot;{query}&quot;
+            </span>
           </div>
         </Option>
       );
@@ -534,22 +559,23 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
             aria-label="Filter by entity type"
           >
             {effectiveAllowedTypes.map((type) => {
-              const isActive = typeFilter.length === 0 || typeFilter.includes(type);
+              const isActive =
+                typeFilter.length === 0 || typeFilter.includes(type);
               return (
                 <Badge
                   key={type}
                   className={mergeClasses(
                     styles.filterChip,
-                    isActive && styles.filterChipActive
+                    isActive && styles.filterChipActive,
                   )}
-                  appearance={isActive ? 'filled' : 'outline'}
-                  color={isActive ? ENTITY_BADGE_COLORS[type] : 'subtle'}
+                  appearance={isActive ? "filled" : "outline"}
+                  color={isActive ? ENTITY_BADGE_COLORS[type] : "subtle"}
                   onClick={() => toggleTypeFilter(type)}
                   role="checkbox"
                   aria-checked={isActive}
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       toggleTypeFilter(type);
                     }
@@ -580,18 +606,26 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
             open={isOpen}
             disabled={disabled}
             required={required}
-            aria-label={ariaLabel || label || 'Select association target'}
+            aria-label={ariaLabel || label || "Select association target"}
             aria-expanded={isOpen}
             aria-haspopup="listbox"
             aria-invalid={!!errorMessage || !!searchError}
-            aria-describedby={errorMessage || searchError ? `${id}-error` : undefined}
+            aria-describedby={
+              errorMessage || searchError ? `${id}-error` : undefined
+            }
             expandIcon={isLoading ? null : <ChevronDownRegular />}
             freeform
           >
             {/* Loading State */}
             {isLoading && (
               <Option value="loading" disabled>
-                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: tokens.spacingHorizontalS,
+                  }}
+                >
                   <Spinner size="tiny" />
                   <span>Searching...</span>
                 </div>
@@ -600,12 +634,14 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
 
             {/* Recent Entities */}
             {showRecentSection && !isLoading && (
-              <OptionGroup label={
-                <div className={styles.recentHeader}>
-                  <HistoryRegular />
-                  <span>Recent</span>
-                </div>
-              }>
+              <OptionGroup
+                label={
+                  <div className={styles.recentHeader}>
+                    <HistoryRegular />
+                    <span>Recent</span>
+                  </div>
+                }
+              >
                 {recentEntities.map((entity) => {
                   const idx = optionIndex++;
                   return renderOption(entity, idx);
@@ -641,7 +677,10 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
             {/* Quick Create Options */}
             {showCreateOption && (
               <OptionGroup label="Quick Create">
-                {(typeFilter.length > 0 ? typeFilter : effectiveAllowedTypes).map((type) => {
+                {(typeFilter.length > 0
+                  ? typeFilter
+                  : effectiveAllowedTypes
+                ).map((type) => {
                   const idx = optionIndex++;
                   return renderCreateOption(type, idx);
                 })}
@@ -659,17 +698,13 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(
 
         {/* Error Messages */}
         {(errorMessage || searchError) && (
-          <span
-            id={`${id}-error`}
-            className={styles.error}
-            role="alert"
-          >
+          <span id={`${id}-error`} className={styles.error} role="alert">
             {errorMessage || searchError}
           </span>
         )}
       </div>
     );
-  }
+  },
 );
 
 export default EntityPicker;

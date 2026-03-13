@@ -95,9 +95,9 @@ export interface IViewDefinition {
  * View type indicating source
  */
 export type ViewType =
-  | "savedquery"      // System view from savedquery entity
-  | "userquery"       // Personal view from userquery entity
-  | "custom";         // Custom view from sprk_gridconfiguration
+  | "savedquery" // System view from savedquery entity
+  | "userquery" // Personal view from userquery entity
+  | "custom"; // Custom view from sprk_gridconfiguration
 
 /**
  * Options for FetchXML execution

@@ -6,22 +6,26 @@ export type {
   IProblemDetails,
   TokenCacheEntry,
   TokenSource,
-} from './types';
+} from "./types";
 
 // Errors
-export { AuthError, ApiError } from './errors';
+export { AuthError, ApiError } from "./errors";
 
 // Config
-export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
+export {
+  resolveConfig,
+  TOKEN_EXPIRY_BUFFER_MS,
+  PROACTIVE_REFRESH_INTERVAL_MS,
+} from "./config";
 
 // Token bridge
-export { publishToken, readBridgeToken, clearBridgeToken } from './tokenBridge';
+export { publishToken, readBridgeToken, clearBridgeToken } from "./tokenBridge";
 
 // Core provider
-export { SpaarkeAuthProvider } from './SpaarkeAuthProvider';
+export { SpaarkeAuthProvider } from "./SpaarkeAuthProvider";
 
 // Authenticated fetch
-export { authenticatedFetch } from './authenticatedFetch';
+export { authenticatedFetch } from "./authenticatedFetch";
 
 // Public init API
-export { initAuth, getAuthProvider } from './initAuth';
+export { initAuth, getAuthProvider } from "./initAuth";

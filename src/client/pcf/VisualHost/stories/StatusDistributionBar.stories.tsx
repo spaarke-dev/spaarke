@@ -5,7 +5,10 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { action } from "@storybook/addon-actions";
-import { StatusDistributionBar, IStatusSegment } from "../control/components/StatusDistributionBar";
+import {
+  StatusDistributionBar,
+  IStatusSegment,
+} from "../control/components/StatusDistributionBar";
 
 const meta: Meta<typeof StatusDistributionBar> = {
   title: "Charts/StatusDistributionBar",
@@ -14,7 +17,8 @@ const meta: Meta<typeof StatusDistributionBar> = {
     layout: "padded",
     docs: {
       description: {
-        component: "StatusDistributionBar shows status distribution as a horizontal stacked bar.",
+        component:
+          "StatusDistributionBar shows status distribution as a horizontal stacked bar.",
       },
     },
   },

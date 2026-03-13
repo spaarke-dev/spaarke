@@ -1,31 +1,35 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import type { EntitySearchResult } from './useEntitySearch';
-import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import type { EntitySearchResult } from "./useEntitySearch";
+import type { AttachmentInfo, HostType } from "@shared/adapters/types";
 import {
   type ProblemDetails,
   mapProblemDetailsToMessage,
   isProblemDetails,
   createErrorFromException,
   type ErrorMessage,
-} from '../utils/errorMessages';
-import { createSseConnection, type SseConnection, type SseEvent } from '../services/SseClient';
+} from "../utils/errorMessages";
+import {
+  createSseConnection,
+  type SseConnection,
+  type SseEvent,
+} from "../services/SseClient";
 
 /**
  * Source types for save operations.
  */
-export type SourceType = 'OutlookEmail' | 'OutlookAttachment' | 'WordDocument';
+export type SourceType = "OutlookEmail" | "OutlookAttachment" | "WordDocument";
 
 /**
  * Save flow states based on spec.md Task Pane State Diagram.
  */
 export type SaveFlowState =
-  | 'idle'
-  | 'selecting'
-  | 'uploading'
-  | 'processing'
-  | 'complete'
-  | 'error'
-  | 'duplicate';
+  | "idle"
+  | "selecting"
+  | "uploading"
+  | "processing"
+  | "complete"
+  | "error"
+  | "duplicate";
 
 /**
  * Processing options for the save operation.
@@ -44,7 +48,7 @@ export interface ProcessingOptions {
  */
 export interface StageStatus {
   name: string;
-  status: 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Skipped';
+  status: "Pending" | "Running" | "Completed" | "Failed" | "Skipped";
   completedAt?: string;
 }
 
@@ -90,7 +94,13 @@ export interface JobErrorResponse {
  */
 export interface JobStatus {
   jobId: string;
-  status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'PartialSuccess' | 'Cancelled';
+  status:
+    | "Queued"
+    | "Running"
+    | "Completed"
+    | "Failed"
+    | "PartialSuccess"
+    | "Cancelled";
   jobType: string;
   progress: number;
   currentPhase?: string;
@@ -158,7 +168,7 @@ export interface SaveRequest {
 export interface EmailRecipient {
   email: string;
   displayName?: string;
-  type: 'to' | 'cc' | 'bcc';
+  type: "to" | "cc" | "bcc";
 }
 
 /**
@@ -273,13 +283,13 @@ const DEFAULT_PROCESSING_OPTIONS: ProcessingOptions = {
 /**
  * Storage key for last-used association.
  */
-const LAST_ASSOCIATION_KEY = 'spaarke-last-association';
+const LAST_ASSOCIATION_KEY = "spaarke-last-association";
 
 /**
  * Get last-used association from sessionStorage.
  */
 function getLastAssociation(): EntitySearchResult | null {
-  if (typeof sessionStorage === 'undefined') return null;
+  if (typeof sessionStorage === "undefined") return null;
 
   try {
     const stored = sessionStorage.getItem(LAST_ASSOCIATION_KEY);
@@ -293,7 +303,7 @@ function getLastAssociation(): EntitySearchResult | null {
  * Save last-used association to sessionStorage.
  */
 function saveLastAssociation(entity: EntitySearchResult): void {
-  if (typeof sessionStorage === 'undefined') return;
+  if (typeof sessionStorage === "undefined") return;
 
   try {
     sessionStorage.setItem(LAST_ASSOCIATION_KEY, JSON.stringify(entity));
@@ -318,9 +328,9 @@ async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
 
   const encoder = new TextEncoder();
   const data = encoder.encode(canonical);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -357,7 +367,7 @@ async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
  */
 export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const {
-    apiBaseUrl = '',
+    apiBaseUrl = "",
     getAccessToken,
     pollingIntervalMs = 3000,
     sseTimeoutMs = 30000,
@@ -367,14 +377,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   } = options;
 
   // State
-  const [flowState, setFlowState] = useState<SaveFlowState>('idle');
-  const [selectedEntity, setSelectedEntityState] = useState<EntitySearchResult | null>(
-    () => getLastAssociation()
-  );
-  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<Set<string>>(new Set());
+  const [flowState, setFlowState] = useState<SaveFlowState>("idle");
+  const [selectedEntity, setSelectedEntityState] =
+    useState<EntitySearchResult | null>(() => getLastAssociation());
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<
+    Set<string>
+  >(new Set());
   const [includeBody, setIncludeBody] = useState(true);
   const [processingOptions, setProcessingOptions] = useState<ProcessingOptions>(
-    DEFAULT_PROCESSING_OPTIONS
+    DEFAULT_PROCESSING_OPTIONS,
   );
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<ErrorMessage | null>(null);
@@ -387,14 +398,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Refs
   const sseConnectionRef = useRef<SseConnection | null>(null);
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const savedContextRef = useRef<SaveFlowContext | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pollingRetryCountRef = useRef<number>(0);
   const maxPollingRetries = 3;
 
   // Computed values
-  const isSaving = flowState === 'uploading' || flowState === 'processing';
+  const isSaving = flowState === "uploading" || flowState === "processing";
   // Association is optional - user can save without selecting an entity
   const isValid = true;
 
@@ -408,7 +421,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Toggle processing option
   const toggleProcessingOption = useCallback((key: keyof ProcessingOptions) => {
-    setProcessingOptions(prev => ({
+    setProcessingOptions((prev) => ({
       ...prev,
       [key]: !prev[key],
     }));
@@ -417,8 +430,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // Clear error
   const clearError = useCallback(() => {
     setError(null);
-    if (flowState === 'error') {
-      setFlowState('selecting');
+    if (flowState === "error") {
+      setFlowState("selecting");
     }
   }, [flowState]);
 
@@ -442,7 +455,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // Reset state
   const reset = useCallback(() => {
     cleanup();
-    setFlowState('idle');
+    setFlowState("idle");
     setSelectedAttachmentIds(new Set());
     setIncludeBody(true);
     setProcessingOptions(DEFAULT_PROCESSING_OPTIONS);
@@ -455,479 +468,559 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   }, [cleanup]);
 
   // Handle SSE event
-  const handleSseEvent = useCallback((event: SseEvent) => {
-    // SSE events have different structures based on event type
-    // Server sends events like: progress, stage, complete, failed, heartbeat
-    const eventType = event.event || 'message';
-    const data = event.data as Record<string, unknown>;
+  const handleSseEvent = useCallback(
+    (event: SseEvent) => {
+      // SSE events have different structures based on event type
+      // Server sends events like: progress, stage, complete, failed, heartbeat
+      const eventType = event.event || "message";
+      const data = event.data as Record<string, unknown>;
 
-    if (eventType === 'progress' || eventType === 'message') {
-      // Progress update: { progress: number, currentPhase: string }
-      setJobStatus(prev => {
-        if (!prev) return null;
-        const progress = typeof data.progress === 'number' ? data.progress : prev.progress;
-        const currentPhase = typeof data.currentPhase === 'string' ? data.currentPhase : prev.currentPhase;
+      if (eventType === "progress" || eventType === "message") {
+        // Progress update: { progress: number, currentPhase: string }
+        setJobStatus((prev) => {
+          if (!prev) return null;
+          const progress =
+            typeof data.progress === "number" ? data.progress : prev.progress;
+          const currentPhase =
+            typeof data.currentPhase === "string"
+              ? data.currentPhase
+              : prev.currentPhase;
 
-        // Update stages based on current phase
-        const stages = prev.stages?.map(s => {
-          if (s.name === currentPhase) {
-            return { ...s, status: 'Running' as const };
-          }
-          return s;
+          // Update stages based on current phase
+          const stages = prev.stages?.map((s) => {
+            if (s.name === currentPhase) {
+              return { ...s, status: "Running" as const };
+            }
+            return s;
+          });
+
+          return { ...prev, progress, currentPhase, stages };
         });
+      } else if (eventType === "stage") {
+        // Stage update: { stage: string, status: string, timestamp: string }
+        const stageName = data.stage as string;
+        const stageStatus = data.status as string;
+        const timestamp = data.timestamp as string;
 
-        return { ...prev, progress, currentPhase, stages };
-      });
-    } else if (eventType === 'stage') {
-      // Stage update: { stage: string, status: string, timestamp: string }
-      const stageName = data.stage as string;
-      const stageStatus = data.status as string;
-      const timestamp = data.timestamp as string;
+        setJobStatus((prev) => {
+          if (!prev) return null;
+          const stages = prev.stages?.map((s) =>
+            s.name === stageName
+              ? {
+                  ...s,
+                  status: stageStatus as StageStatus["status"],
+                  completedAt: timestamp,
+                }
+              : s,
+          );
+          return { ...prev, stages };
+        });
+      } else if (eventType === "complete") {
+        // Completion: { jobId: string, documentId?: string, documentUrl?: string }
+        const documentId = data.documentId as string | undefined;
+        const documentUrl = data.documentUrl as string | undefined;
 
-      setJobStatus(prev => {
-        if (!prev) return null;
-        const stages = prev.stages?.map(s =>
-          s.name === stageName
-            ? { ...s, status: stageStatus as StageStatus['status'], completedAt: timestamp }
-            : s
-        );
-        return { ...prev, stages };
-      });
-    } else if (eventType === 'complete') {
-      // Completion: { jobId: string, documentId?: string, documentUrl?: string }
-      const documentId = data.documentId as string | undefined;
-      const documentUrl = data.documentUrl as string | undefined;
-
-      if (documentId) {
-        setSavedDocumentId(documentId);
-        setSavedDocumentUrl(documentUrl || null);
-        setFlowState('complete');
-        onComplete?.(documentId, documentUrl || '');
-      }
-      cleanup();
-    } else if (eventType === 'failed' || eventType === 'error') {
-      // Error: { code: string, message: string, retryable?: boolean }
-      const errorMsg: ErrorMessage = {
-        title: 'Processing Failed',
-        message: (data.message as string) || 'An error occurred during processing.',
-        type: 'error',
-        recoverable: (data.retryable as boolean) ?? true,
-      };
-      setError(errorMsg);
-      setFlowState('error');
-      onError?.(errorMsg);
-      cleanup();
-    }
-    // Ignore heartbeat events
-  }, [cleanup, onComplete, onError]);
-
-  // Poll for job status
-  const pollJobStatus = useCallback(async (jobId: string, accessToken: string) => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/office/jobs/${jobId}`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal: abortControllerRef.current?.signal,
-      });
-
-      if (!response.ok) {
-        // Increment retry counter on failure
-        pollingRetryCountRef.current++;
-        console.warn(
-          `Polling failed (attempt ${pollingRetryCountRef.current}/${maxPollingRetries}): ${response.status}`
-        );
-
-        // Stop polling after max retries
-        if (pollingRetryCountRef.current >= maxPollingRetries) {
-          console.error(`Max polling retries (${maxPollingRetries}) exceeded, stopping`);
-          const errorMsg: ErrorMessage = {
-            title: 'Job Status Unavailable',
-            message: `Unable to retrieve job status after ${maxPollingRetries} attempts. The save may still be processing in the background.`,
-            type: 'error',
-            recoverable: true,
-          };
-          setError(errorMsg);
-          setFlowState('error');
-          onError?.(errorMsg);
-          cleanup();
-          return;
-        }
-
-        const errorData = await response.json().catch(() => null);
-        if (isProblemDetails(errorData)) {
-          throw errorData;
-        }
-        throw new Error(`Failed to fetch job status: ${response.status}`);
-      }
-
-      // Reset retry counter on success
-      pollingRetryCountRef.current = 0;
-
-      const rawStatus = (await response.json()) as JobStatus;
-
-      // Map server response to UI-compatible format
-      const mappedStages: StageStatus[] = [];
-
-      // Build stages from completedPhases and currentPhase
-      const phaseOrder = ['RecordsCreated', 'FileUploaded', 'ProfileSummary', 'Indexed', 'DeepAnalysis'];
-      const completedPhaseNames = new Set(rawStatus.completedPhases?.map(p => p.name) || []);
-
-      for (const phaseName of phaseOrder) {
-        if (completedPhaseNames.has(phaseName)) {
-          const phase = rawStatus.completedPhases?.find(p => p.name === phaseName);
-          mappedStages.push({
-            name: phaseName,
-            status: 'Completed',
-            completedAt: phase?.completedAt,
-          });
-        } else if (rawStatus.currentPhase === phaseName) {
-          mappedStages.push({
-            name: phaseName,
-            status: 'Running',
-          });
-        } else if (rawStatus.status !== 'Completed') {
-          // Only show pending stages if job is not complete
-          mappedStages.push({
-            name: phaseName,
-            status: 'Pending',
-          });
-        }
-      }
-
-      // Extract document info from result.artifact
-      const documentId = rawStatus.result?.artifact?.id;
-      const documentUrl = rawStatus.result?.artifact?.webUrl;
-
-      const status: JobStatus = {
-        ...rawStatus,
-        stages: mappedStages,
-        documentId,
-        documentUrl,
-      };
-
-      setJobStatus(status);
-
-      // Check for completion
-      if (status.status === 'Completed' || status.status === 'Failed') {
-        if (status.status === 'Completed' && documentId) {
+        if (documentId) {
           setSavedDocumentId(documentId);
           setSavedDocumentUrl(documentUrl || null);
-          setFlowState('complete');
-          onComplete?.(documentId, documentUrl || '');
-        } else if (status.status === 'Failed') {
-          const errorMsg: ErrorMessage = {
-            title: 'Processing Failed',
-            message: status.error?.message || 'An error occurred during processing.',
-            type: 'error',
-            recoverable: status.error?.retryable ?? true,
-          };
-          setError(errorMsg);
-          setFlowState('error');
-          onError?.(errorMsg);
+          setFlowState("complete");
+          onComplete?.(documentId, documentUrl || "");
         }
         cleanup();
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return; // Cancelled
-      }
-      console.error('Polling error:', err);
-
-      // Increment retry counter on exception
-      pollingRetryCountRef.current++;
-      if (pollingRetryCountRef.current >= maxPollingRetries) {
-        console.error(`Max polling retries (${maxPollingRetries}) exceeded after exception, stopping`);
+      } else if (eventType === "failed" || eventType === "error") {
+        // Error: { code: string, message: string, retryable?: boolean }
         const errorMsg: ErrorMessage = {
-          title: 'Job Status Unavailable',
-          message: `Unable to retrieve job status after ${maxPollingRetries} attempts. Please try again later.`,
-          type: 'error',
-          recoverable: true,
+          title: "Processing Failed",
+          message:
+            (data.message as string) || "An error occurred during processing.",
+          type: "error",
+          recoverable: (data.retryable as boolean) ?? true,
         };
         setError(errorMsg);
-        setFlowState('error');
+        setFlowState("error");
         onError?.(errorMsg);
         cleanup();
       }
-    }
-  }, [apiBaseUrl, cleanup, onComplete, onError]);
+      // Ignore heartbeat events
+    },
+    [cleanup, onComplete, onError],
+  );
+
+  // Poll for job status
+  const pollJobStatus = useCallback(
+    async (jobId: string, accessToken: string) => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/office/jobs/${jobId}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: abortControllerRef.current?.signal,
+        });
+
+        if (!response.ok) {
+          // Increment retry counter on failure
+          pollingRetryCountRef.current++;
+          console.warn(
+            `Polling failed (attempt ${pollingRetryCountRef.current}/${maxPollingRetries}): ${response.status}`,
+          );
+
+          // Stop polling after max retries
+          if (pollingRetryCountRef.current >= maxPollingRetries) {
+            console.error(
+              `Max polling retries (${maxPollingRetries}) exceeded, stopping`,
+            );
+            const errorMsg: ErrorMessage = {
+              title: "Job Status Unavailable",
+              message: `Unable to retrieve job status after ${maxPollingRetries} attempts. The save may still be processing in the background.`,
+              type: "error",
+              recoverable: true,
+            };
+            setError(errorMsg);
+            setFlowState("error");
+            onError?.(errorMsg);
+            cleanup();
+            return;
+          }
+
+          const errorData = await response.json().catch(() => null);
+          if (isProblemDetails(errorData)) {
+            throw errorData;
+          }
+          throw new Error(`Failed to fetch job status: ${response.status}`);
+        }
+
+        // Reset retry counter on success
+        pollingRetryCountRef.current = 0;
+
+        const rawStatus = (await response.json()) as JobStatus;
+
+        // Map server response to UI-compatible format
+        const mappedStages: StageStatus[] = [];
+
+        // Build stages from completedPhases and currentPhase
+        const phaseOrder = [
+          "RecordsCreated",
+          "FileUploaded",
+          "ProfileSummary",
+          "Indexed",
+          "DeepAnalysis",
+        ];
+        const completedPhaseNames = new Set(
+          rawStatus.completedPhases?.map((p) => p.name) || [],
+        );
+
+        for (const phaseName of phaseOrder) {
+          if (completedPhaseNames.has(phaseName)) {
+            const phase = rawStatus.completedPhases?.find(
+              (p) => p.name === phaseName,
+            );
+            mappedStages.push({
+              name: phaseName,
+              status: "Completed",
+              completedAt: phase?.completedAt,
+            });
+          } else if (rawStatus.currentPhase === phaseName) {
+            mappedStages.push({
+              name: phaseName,
+              status: "Running",
+            });
+          } else if (rawStatus.status !== "Completed") {
+            // Only show pending stages if job is not complete
+            mappedStages.push({
+              name: phaseName,
+              status: "Pending",
+            });
+          }
+        }
+
+        // Extract document info from result.artifact
+        const documentId = rawStatus.result?.artifact?.id;
+        const documentUrl = rawStatus.result?.artifact?.webUrl;
+
+        const status: JobStatus = {
+          ...rawStatus,
+          stages: mappedStages,
+          documentId,
+          documentUrl,
+        };
+
+        setJobStatus(status);
+
+        // Check for completion
+        if (status.status === "Completed" || status.status === "Failed") {
+          if (status.status === "Completed" && documentId) {
+            setSavedDocumentId(documentId);
+            setSavedDocumentUrl(documentUrl || null);
+            setFlowState("complete");
+            onComplete?.(documentId, documentUrl || "");
+          } else if (status.status === "Failed") {
+            const errorMsg: ErrorMessage = {
+              title: "Processing Failed",
+              message:
+                status.error?.message || "An error occurred during processing.",
+              type: "error",
+              recoverable: status.error?.retryable ?? true,
+            };
+            setError(errorMsg);
+            setFlowState("error");
+            onError?.(errorMsg);
+          }
+          cleanup();
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          return; // Cancelled
+        }
+        console.error("Polling error:", err);
+
+        // Increment retry counter on exception
+        pollingRetryCountRef.current++;
+        if (pollingRetryCountRef.current >= maxPollingRetries) {
+          console.error(
+            `Max polling retries (${maxPollingRetries}) exceeded after exception, stopping`,
+          );
+          const errorMsg: ErrorMessage = {
+            title: "Job Status Unavailable",
+            message: `Unable to retrieve job status after ${maxPollingRetries} attempts. Please try again later.`,
+            type: "error",
+            recoverable: true,
+          };
+          setError(errorMsg);
+          setFlowState("error");
+          onError?.(errorMsg);
+          cleanup();
+        }
+      }
+    },
+    [apiBaseUrl, cleanup, onComplete, onError],
+  );
 
   // Start SSE connection with polling fallback
-  const startJobTracking = useCallback(async (
-    jobId: string,
-    streamUrl: string,
-    accessToken: string
-  ) => {
-    setFlowState('processing');
+  const startJobTracking = useCallback(
+    async (jobId: string, streamUrl: string, accessToken: string) => {
+      setFlowState("processing");
 
-    // Reset retry counter at start of tracking
-    pollingRetryCountRef.current = 0;
+      // Reset retry counter at start of tracking
+      pollingRetryCountRef.current = 0;
 
-    // Initialize job status with standard stages
-    const initialStages: StageStatus[] = [
-      { name: 'RecordsCreated', status: 'Pending' },
-      { name: 'FileUploaded', status: 'Pending' },
-    ];
+      // Initialize job status with standard stages
+      const initialStages: StageStatus[] = [
+        { name: "RecordsCreated", status: "Pending" },
+        { name: "FileUploaded", status: "Pending" },
+      ];
 
-    if (processingOptions.profileSummary) {
-      initialStages.push({ name: 'ProfileSummary', status: 'Pending' });
-    }
-    if (processingOptions.ragIndex) {
-      initialStages.push({ name: 'Indexed', status: 'Pending' });
-    }
-    if (processingOptions.deepAnalysis) {
-      initialStages.push({ name: 'DeepAnalysis', status: 'Pending' });
-    }
+      if (processingOptions.profileSummary) {
+        initialStages.push({ name: "ProfileSummary", status: "Pending" });
+      }
+      if (processingOptions.ragIndex) {
+        initialStages.push({ name: "Indexed", status: "Pending" });
+      }
+      if (processingOptions.deepAnalysis) {
+        initialStages.push({ name: "DeepAnalysis", status: "Pending" });
+      }
 
-    setJobStatus({
-      jobId,
-      status: 'Queued',
-      stages: initialStages,
-    });
-
-    // Always start polling as the primary mechanism
-    // SSE is optional enhancement but may not receive events if Redis pub/sub isn't configured
-    console.log('[SaveFlow] Starting job polling for', jobId);
-    pollingIntervalRef.current = setInterval(() => {
-      pollJobStatus(jobId, accessToken);
-    }, pollingIntervalMs);
-
-    // Also do an immediate poll to get current status
-    pollJobStatus(jobId, accessToken);
-
-    // Try SSE as enhancement (provides faster updates when available)
-    try {
-      sseConnectionRef.current = createSseConnection(`${apiBaseUrl}${streamUrl}`, {
-        accessToken,
-        onEvent: handleSseEvent,
-        onError: (err) => {
-          console.warn('SSE error (polling continues):', err.message);
-        },
-        onClose: () => {
-          sseConnectionRef.current = null;
-        },
-        timeout: sseTimeoutMs,
+      setJobStatus({
+        jobId,
+        status: "Queued",
+        stages: initialStages,
       });
-    } catch (err) {
-      console.warn('Failed to create SSE connection (polling continues):', err);
-    }
-  }, [apiBaseUrl, handleSseEvent, pollJobStatus, pollingIntervalMs, processingOptions, sseTimeoutMs]);
+
+      // Always start polling as the primary mechanism
+      // SSE is optional enhancement but may not receive events if Redis pub/sub isn't configured
+      console.log("[SaveFlow] Starting job polling for", jobId);
+      pollingIntervalRef.current = setInterval(() => {
+        pollJobStatus(jobId, accessToken);
+      }, pollingIntervalMs);
+
+      // Also do an immediate poll to get current status
+      pollJobStatus(jobId, accessToken);
+
+      // Try SSE as enhancement (provides faster updates when available)
+      try {
+        sseConnectionRef.current = createSseConnection(
+          `${apiBaseUrl}${streamUrl}`,
+          {
+            accessToken,
+            onEvent: handleSseEvent,
+            onError: (err) => {
+              console.warn("SSE error (polling continues):", err.message);
+            },
+            onClose: () => {
+              sseConnectionRef.current = null;
+            },
+            timeout: sseTimeoutMs,
+          },
+        );
+      } catch (err) {
+        console.warn(
+          "Failed to create SSE connection (polling continues):",
+          err,
+        );
+      }
+    },
+    [
+      apiBaseUrl,
+      handleSseEvent,
+      pollJobStatus,
+      pollingIntervalMs,
+      processingOptions,
+      sseTimeoutMs,
+    ],
+  );
 
   // Start save operation
-  const startSave = useCallback(async (context: SaveFlowContext) => {
-    // Association is optional - user can save without selecting an entity
+  const startSave = useCallback(
+    async (context: SaveFlowContext) => {
+      // Association is optional - user can save without selecting an entity
 
-    // Save context for retry
-    savedContextRef.current = context;
-    setFlowState('uploading');
-    setError(null);
-    setDuplicateInfo(null);
+      // Save context for retry
+      savedContextRef.current = context;
+      setFlowState("uploading");
+      setError(null);
+      setDuplicateInfo(null);
 
-    // Cancel any existing operations
-    cleanup();
-    abortControllerRef.current = new AbortController();
+      // Cancel any existing operations
+      cleanup();
+      abortControllerRef.current = new AbortController();
 
-    try {
-      const accessToken = await getAccessToken();
-
-      // Determine content type for server API
-      let contentType: 'Email' | 'Attachment' | 'Document';
-      if (context.hostType === 'outlook') {
-        // Always save as Email when in Outlook
-        // The selectedAttachmentFileNames array controls which attachments become Documents
-        contentType = 'Email';
-      } else {
-        contentType = 'Document';
-      }
-
-      // Use custom documentName if provided, otherwise fall back to itemName
-      const effectiveDocumentName = context.documentName || context.itemName;
-
-      // Build request in server-expected format
-      // Server requires: contentType, targetEntity, and type-specific metadata
-      const serverRequest: Record<string, unknown> = {
-        contentType,
-        triggerAiProcessing: processingOptions.deepAnalysis || processingOptions.ragIndex || processingOptions.profileSummary,
-        aiOptions: {
-          profileSummary: processingOptions.profileSummary,
-          ragIndex: processingOptions.ragIndex,
-          deepAnalysis: processingOptions.deepAnalysis,
-        },
-        // Include custom document name and description for Dataverse fields
-        documentMetadata: {
-          name: effectiveDocumentName,
-          description: context.documentDescription || undefined,
-        },
-      };
-
-      // Add target entity if an association was selected
-      if (selectedEntity?.id) {
-        serverRequest.targetEntity = {
-          entityType: selectedEntity.entityType,
-          entityId: selectedEntity.id,
-          displayName: selectedEntity.name,
-        };
-      }
-
-      // Add content-type-specific metadata
-      if (contentType === 'Email') {
-        // Build recipients array for server (matches EmailMetadata.Recipients model)
-        // Server expects: { type: 'To'|'Cc'|'Bcc', email: string, name?: string }
-        const recipients = context.recipients?.map(r => ({
-          type: r.type === 'to' ? 'To' : r.type === 'cc' ? 'Cc' : 'Bcc',
-          email: r.email,
-          name: r.displayName,
-        })) || [];
-
-        // Note: Email body and attachment content are retrieved server-side via Graph API
-        // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
-
-        // Get selected attachment filenames (for creating as Documents)
-        // Always send the list if email has attachments (even if empty array for "create no Documents")
-        // Send undefined only if email has no attachments at all
-        const selectedAttachmentFileNames = context.attachments.length > 0
-          ? Array.from(selectedAttachmentIds)
-              .map(id => context.attachments.find(a => a.id === id)?.name)
-              .filter((name): name is string => !!name)
-          : undefined;
-
-        serverRequest.email = {
-          subject: effectiveDocumentName || 'Untitled Email',
-          senderEmail: context.senderEmail || 'unknown@placeholder.com',
-          senderName: context.senderDisplayName,
-          recipients,
-          sentDate: context.sentDate?.toISOString(),
-          body: undefined, // Retrieved server-side via Graph API
-          isBodyHtml: true,
-          internetMessageId: context.itemId, // Server uses this to fetch email via Graph
-          selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
-        };
-      } else if (contentType === 'Attachment') {
-        const attachmentId = Array.from(selectedAttachmentIds)[0];
-        const attachment = context.attachments.find(a => a.id === attachmentId);
-        serverRequest.attachment = {
-          attachmentId: attachmentId,
-          fileName: attachment?.name || 'attachment',
-          contentType: attachment?.contentType,
-          size: attachment?.size,
-          parentEmailId: context.itemId, // Parent email's internetMessageId - server uses this to fetch attachment via Graph API
-        };
-      } else if (contentType === 'Document') {
-        // Document content is required for Word documents
-        if (!context.documentContentBase64) {
-          throw new Error('Document content is required. Please ensure the document is captured before saving.');
-        }
-        serverRequest.document = {
-          fileName: effectiveDocumentName || 'document.docx',
-          title: effectiveDocumentName,
-          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          contentBase64: context.documentContentBase64,
-        };
-      }
-
-      // Build legacy request for idempotency key computation (keep format stable)
-      const request: SaveRequest = {
-        sourceType: context.hostType === 'outlook'
-          ? (selectedAttachmentIds.size > 0 ? 'OutlookAttachment' : 'OutlookEmail')
-          : 'WordDocument',
-        associationType: selectedEntity?.entityType || '',
-        associationId: selectedEntity?.id || '',
-        content: {
-          emailId: context.itemId,
-          includeBody: includeBody && context.hostType === 'outlook',
-          attachmentIds: Array.from(selectedAttachmentIds),
-          documentUrl: context.documentUrl,
-          documentName: effectiveDocumentName,
-        },
-        processing: processingOptions,
-        metadata: context.documentDescription ? {
-          description: context.documentDescription,
-        } : undefined,
-      };
-
-      // Compute idempotency key from legacy format for consistency
-      const idempotencyKey = await computeIdempotencyKey(request);
-
-      // Submit save request
-      console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
-      const response = await fetch(`${apiBaseUrl}/office/save`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          'X-Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify(serverRequest),
-        signal: abortControllerRef.current.signal,
-      });
-
-      // Get raw response text first for debugging
-      const responseText = await response.text();
-      console.log('[SaveFlow] Response status:', response.status);
-      console.log('[SaveFlow] Response text (raw):', responseText);
-
-      // Parse as JSON if possible
-      let responseData: unknown;
       try {
-        responseData = JSON.parse(responseText);
-        console.log('[SaveFlow] Response data (parsed):', JSON.stringify(responseData, null, 2));
-      } catch (parseError) {
-        console.error('[SaveFlow] Failed to parse response as JSON:', parseError);
-        // If 400 with non-JSON response, show raw text as error
-        if (!response.ok) {
-          throw new Error(`Save failed (${response.status}): ${responseText.substring(0, 500)}`);
+        const accessToken = await getAccessToken();
+
+        // Determine content type for server API
+        let contentType: "Email" | "Attachment" | "Document";
+        if (context.hostType === "outlook") {
+          // Always save as Email when in Outlook
+          // The selectedAttachmentFileNames array controls which attachments become Documents
+          contentType = "Email";
+        } else {
+          contentType = "Document";
         }
-      }
 
-      // Handle different responses
-      if (response.status === 200 && responseData.duplicate) {
-        // Duplicate detected
-        setDuplicateInfo({
-          documentId: responseData.documentId,
-          message: responseData.message || 'This item was previously saved.',
+        // Use custom documentName if provided, otherwise fall back to itemName
+        const effectiveDocumentName = context.documentName || context.itemName;
+
+        // Build request in server-expected format
+        // Server requires: contentType, targetEntity, and type-specific metadata
+        const serverRequest: Record<string, unknown> = {
+          contentType,
+          triggerAiProcessing:
+            processingOptions.deepAnalysis ||
+            processingOptions.ragIndex ||
+            processingOptions.profileSummary,
+          aiOptions: {
+            profileSummary: processingOptions.profileSummary,
+            ragIndex: processingOptions.ragIndex,
+            deepAnalysis: processingOptions.deepAnalysis,
+          },
+          // Include custom document name and description for Dataverse fields
+          documentMetadata: {
+            name: effectiveDocumentName,
+            description: context.documentDescription || undefined,
+          },
+        };
+
+        // Add target entity if an association was selected
+        if (selectedEntity?.id) {
+          serverRequest.targetEntity = {
+            entityType: selectedEntity.entityType,
+            entityId: selectedEntity.id,
+            displayName: selectedEntity.name,
+          };
+        }
+
+        // Add content-type-specific metadata
+        if (contentType === "Email") {
+          // Build recipients array for server (matches EmailMetadata.Recipients model)
+          // Server expects: { type: 'To'|'Cc'|'Bcc', email: string, name?: string }
+          const recipients =
+            context.recipients?.map((r) => ({
+              type: r.type === "to" ? "To" : r.type === "cc" ? "Cc" : "Bcc",
+              email: r.email,
+              name: r.displayName,
+            })) || [];
+
+          // Note: Email body and attachment content are retrieved server-side via Graph API
+          // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
+
+          // Get selected attachment filenames (for creating as Documents)
+          // Always send the list if email has attachments (even if empty array for "create no Documents")
+          // Send undefined only if email has no attachments at all
+          const selectedAttachmentFileNames =
+            context.attachments.length > 0
+              ? Array.from(selectedAttachmentIds)
+                  .map(
+                    (id) => context.attachments.find((a) => a.id === id)?.name,
+                  )
+                  .filter((name): name is string => !!name)
+              : undefined;
+
+          serverRequest.email = {
+            subject: effectiveDocumentName || "Untitled Email",
+            senderEmail: context.senderEmail || "unknown@placeholder.com",
+            senderName: context.senderDisplayName,
+            recipients,
+            sentDate: context.sentDate?.toISOString(),
+            body: undefined, // Retrieved server-side via Graph API
+            isBodyHtml: true,
+            internetMessageId: context.itemId, // Server uses this to fetch email via Graph
+            selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
+          };
+        } else if (contentType === "Attachment") {
+          const attachmentId = Array.from(selectedAttachmentIds)[0];
+          const attachment = context.attachments.find(
+            (a) => a.id === attachmentId,
+          );
+          serverRequest.attachment = {
+            attachmentId: attachmentId,
+            fileName: attachment?.name || "attachment",
+            contentType: attachment?.contentType,
+            size: attachment?.size,
+            parentEmailId: context.itemId, // Parent email's internetMessageId - server uses this to fetch attachment via Graph API
+          };
+        } else if (contentType === "Document") {
+          // Document content is required for Word documents
+          if (!context.documentContentBase64) {
+            throw new Error(
+              "Document content is required. Please ensure the document is captured before saving.",
+            );
+          }
+          serverRequest.document = {
+            fileName: effectiveDocumentName || "document.docx",
+            title: effectiveDocumentName,
+            contentType:
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            contentBase64: context.documentContentBase64,
+          };
+        }
+
+        // Build legacy request for idempotency key computation (keep format stable)
+        const request: SaveRequest = {
+          sourceType:
+            context.hostType === "outlook"
+              ? selectedAttachmentIds.size > 0
+                ? "OutlookAttachment"
+                : "OutlookEmail"
+              : "WordDocument",
+          associationType: selectedEntity?.entityType || "",
+          associationId: selectedEntity?.id || "",
+          content: {
+            emailId: context.itemId,
+            includeBody: includeBody && context.hostType === "outlook",
+            attachmentIds: Array.from(selectedAttachmentIds),
+            documentUrl: context.documentUrl,
+            documentName: effectiveDocumentName,
+          },
+          processing: processingOptions,
+          metadata: context.documentDescription
+            ? {
+                description: context.documentDescription,
+              }
+            : undefined,
+        };
+
+        // Compute idempotency key from legacy format for consistency
+        const idempotencyKey = await computeIdempotencyKey(request);
+
+        // Submit save request
+        console.log(
+          "[SaveFlow] Sending request:",
+          JSON.stringify(serverRequest, null, 2),
+        );
+        const response = await fetch(`${apiBaseUrl}/office/save`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            "X-Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify(serverRequest),
+          signal: abortControllerRef.current.signal,
         });
-        setFlowState('duplicate');
-        onDuplicate?.(responseData.documentId, responseData.message);
-        return;
-      }
 
-      if (!response.ok) {
-        // Error response
-        if (isProblemDetails(responseData)) {
-          const errorMsg = mapProblemDetailsToMessage(responseData);
-          setError(errorMsg);
-          setFlowState('error');
-          onError?.(errorMsg);
+        // Get raw response text first for debugging
+        const responseText = await response.text();
+        console.log("[SaveFlow] Response status:", response.status);
+        console.log("[SaveFlow] Response text (raw):", responseText);
+
+        // Parse as JSON if possible
+        let responseData: unknown;
+        try {
+          responseData = JSON.parse(responseText);
+          console.log(
+            "[SaveFlow] Response data (parsed):",
+            JSON.stringify(responseData, null, 2),
+          );
+        } catch (parseError) {
+          console.error(
+            "[SaveFlow] Failed to parse response as JSON:",
+            parseError,
+          );
+          // If 400 with non-JSON response, show raw text as error
+          if (!response.ok) {
+            throw new Error(
+              `Save failed (${response.status}): ${responseText.substring(0, 500)}`,
+            );
+          }
+        }
+
+        // Handle different responses
+        if (response.status === 200 && responseData.duplicate) {
+          // Duplicate detected
+          setDuplicateInfo({
+            documentId: responseData.documentId,
+            message: responseData.message || "This item was previously saved.",
+          });
+          setFlowState("duplicate");
+          onDuplicate?.(responseData.documentId, responseData.message);
           return;
         }
-        throw new Error(`Save failed: ${response.status}`);
-      }
 
-      // Success - start job tracking
-      const saveResponse = responseData as SaveResponse;
-      await startJobTracking(saveResponse.jobId, saveResponse.streamUrl, accessToken);
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return; // Cancelled
-      }
+        if (!response.ok) {
+          // Error response
+          if (isProblemDetails(responseData)) {
+            const errorMsg = mapProblemDetailsToMessage(responseData);
+            setError(errorMsg);
+            setFlowState("error");
+            onError?.(errorMsg);
+            return;
+          }
+          throw new Error(`Save failed: ${response.status}`);
+        }
 
-      const errorMsg = createErrorFromException(err, 'Failed to save. Please try again.');
-      setError(errorMsg);
-      setFlowState('error');
-      onError?.(errorMsg);
-    }
-  }, [
-    apiBaseUrl,
-    cleanup,
-    getAccessToken,
-    includeBody,
-    onDuplicate,
-    onError,
-    processingOptions,
-    selectedAttachmentIds,
-    selectedEntity,
-    startJobTracking,
-  ]);
+        // Success - start job tracking
+        const saveResponse = responseData as SaveResponse;
+        await startJobTracking(
+          saveResponse.jobId,
+          saveResponse.streamUrl,
+          accessToken,
+        );
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          return; // Cancelled
+        }
+
+        const errorMsg = createErrorFromException(
+          err,
+          "Failed to save. Please try again.",
+        );
+        setError(errorMsg);
+        setFlowState("error");
+        onError?.(errorMsg);
+      }
+    },
+    [
+      apiBaseUrl,
+      cleanup,
+      getAccessToken,
+      includeBody,
+      onDuplicate,
+      onError,
+      processingOptions,
+      selectedAttachmentIds,
+      selectedEntity,
+      startJobTracking,
+    ],
+  );
 
   // Retry after error
   const retry = useCallback(() => {

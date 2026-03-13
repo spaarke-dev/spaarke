@@ -2,11 +2,11 @@
  * Send Email Node - sends an email via Dataverse.
  */
 
-import * as React from 'react';
-import { Text, tokens } from '@fluentui/react-components';
-import { Mail20Regular } from '@fluentui/react-icons';
-import { BaseNode } from './BaseNode';
-import type { PlaybookNodeData } from '../../stores';
+import * as React from "react";
+import { Text, tokens } from "@fluentui/react-components";
+import { Mail20Regular } from "@fluentui/react-icons";
+import { BaseNode } from "./BaseNode";
+import type { PlaybookNodeData } from "../../stores";
 
 interface SendEmailNodeProps {
   data: PlaybookNodeData;

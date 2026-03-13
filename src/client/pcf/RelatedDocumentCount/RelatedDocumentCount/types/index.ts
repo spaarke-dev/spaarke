@@ -8,16 +8,16 @@
 import { IInputs } from "../generated/ManifestTypes";
 
 export interface IRelatedDocumentCountProps {
-    /** PCF context for accessing framework APIs. */
-    context: ComponentFramework.Context<IInputs>;
-    /** Document ID to look up related document count. */
-    documentId: string;
-    /** Azure AD tenant ID for authentication. */
-    tenantId?: string;
-    /** BFF API base URL. */
-    apiBaseUrl?: string;
-    /** Title displayed on the count card. Defaults to "RELATED DOCUMENTS". */
-    cardTitle?: string;
-    /** Whether the Fluent theme is dark mode. */
-    isDarkMode: boolean;
+  /** PCF context for accessing framework APIs. */
+  context: ComponentFramework.Context<IInputs>;
+  /** Document ID to look up related document count. */
+  documentId: string;
+  /** Azure AD tenant ID for authentication. */
+  tenantId?: string;
+  /** BFF API base URL. */
+  apiBaseUrl?: string;
+  /** Title displayed on the count card. Defaults to "RELATED DOCUMENTS". */
+  cardTitle?: string;
+  /** Whether the Fluent theme is dark mode. */
+  isDarkMode: boolean;
 }

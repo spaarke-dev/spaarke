@@ -41,7 +41,11 @@ class MockBroadcastChannel {
   postMessage(data: unknown): void {
     // Deliver to all OTHER instances with same name (simulates cross-tab)
     for (const instance of MockBroadcastChannel.instances) {
-      if (instance !== this && instance.name === this.name && !instance.closed) {
+      if (
+        instance !== this &&
+        instance.name === this.name &&
+        !instance.closed
+      ) {
         if (instance.onmessage) {
           instance.onmessage(new MessageEvent("message", { data }));
         }
@@ -79,7 +83,7 @@ function makeStreamStart(operationId: string): DocumentStreamStartPayload {
 function makeStreamToken(
   operationId: string,
   token: string,
-  index: number
+  index: number,
 ): DocumentStreamTokenPayload {
   return { operationId, token, index };
 }
@@ -88,7 +92,7 @@ function makeStreamToken(
 function makeStreamEnd(
   operationId: string,
   totalTokens: number,
-  cancelled = false
+  cancelled = false,
 ): DocumentStreamEndPayload {
   return { operationId, cancelled, totalTokens };
 }
@@ -279,13 +283,13 @@ describe("SprkChatBridge Integration Tests", () => {
       for (let i = 0; i < TOKEN_COUNT; i++) {
         sender.emit(
           "document_stream_token",
-          makeStreamToken(operationId, `token-${i}`, i)
+          makeStreamToken(operationId, `token-${i}`, i),
         );
       }
 
       sender.emit(
         "document_stream_end",
-        makeStreamEnd(operationId, TOKEN_COUNT)
+        makeStreamEnd(operationId, TOKEN_COUNT),
       );
 
       // Assert — total event count: 1 start + 50 tokens + 1 end = 52
@@ -294,7 +298,7 @@ describe("SprkChatBridge Integration Tests", () => {
       // First event is stream_start
       expect(allEvents[0].type).toBe("document_stream_start");
       expect(
-        (allEvents[0].payload as DocumentStreamStartPayload).operationId
+        (allEvents[0].payload as DocumentStreamStartPayload).operationId,
       ).toBe(operationId);
 
       // Middle events are tokens in exact order
@@ -310,12 +314,12 @@ describe("SprkChatBridge Integration Tests", () => {
       // Last event is stream_end
       const endEvent = allEvents[TOKEN_COUNT + 1];
       expect(endEvent.type).toBe("document_stream_end");
-      expect(
-        (endEvent.payload as DocumentStreamEndPayload).totalTokens
-      ).toBe(TOKEN_COUNT);
-      expect(
-        (endEvent.payload as DocumentStreamEndPayload).cancelled
-      ).toBe(false);
+      expect((endEvent.payload as DocumentStreamEndPayload).totalTokens).toBe(
+        TOKEN_COUNT,
+      );
+      expect((endEvent.payload as DocumentStreamEndPayload).cancelled).toBe(
+        false,
+      );
     });
 
     it("emit_100TokenStreamingSequence_NoDroppedTokens", () => {
@@ -332,7 +336,7 @@ describe("SprkChatBridge Integration Tests", () => {
       for (let i = 0; i < TOKEN_COUNT; i++) {
         sender.emit(
           "document_stream_token",
-          makeStreamToken(operationId, `w${i}`, i)
+          makeStreamToken(operationId, `w${i}`, i),
         );
       }
 
@@ -359,7 +363,7 @@ describe("SprkChatBridge Integration Tests", () => {
       // Act — send tokens interleaved with selection changes
       sender.emit(
         "document_stream_token",
-        makeStreamToken("op-mix", "first", 0)
+        makeStreamToken("op-mix", "first", 0),
       );
       sender.emit("selection_changed", {
         text: "sel1",
@@ -368,7 +372,7 @@ describe("SprkChatBridge Integration Tests", () => {
       });
       sender.emit(
         "document_stream_token",
-        makeStreamToken("op-mix", "second", 1)
+        makeStreamToken("op-mix", "second", 1),
       );
       sender.emit("selection_changed", {
         text: "sel2",
@@ -377,7 +381,7 @@ describe("SprkChatBridge Integration Tests", () => {
       });
       sender.emit(
         "document_stream_token",
-        makeStreamToken("op-mix", "third", 2)
+        makeStreamToken("op-mix", "third", 2),
       );
 
       // Assert — each event type received in order, independent of each other
@@ -406,7 +410,7 @@ describe("SprkChatBridge Integration Tests", () => {
     function dispatchPostMessage(
       channelName: string,
       event: SprkChatBridgeEventName,
-      payload: unknown
+      payload: unknown,
     ): void {
       const msgEvent = new MessageEvent("message", {
         data: { channel: channelName, event, payload },
@@ -436,7 +440,7 @@ describe("SprkChatBridge Integration Tests", () => {
       dispatchPostMessage(
         "sprk-workspace-integ-pm-flow",
         "document_stream_start",
-        payload
+        payload,
       );
 
       // Assert
@@ -463,7 +467,9 @@ describe("SprkChatBridge Integration Tests", () => {
       const bridgeBReceived: DocumentStreamStartPayload[] = [];
 
       bridgeA.subscribe("selection_changed", (p) => bridgeAReceived.push(p));
-      bridgeB.subscribe("document_stream_start", (p) => bridgeBReceived.push(p));
+      bridgeB.subscribe("document_stream_start", (p) =>
+        bridgeBReceived.push(p),
+      );
 
       const channelName = "sprk-workspace-integ-pm-bidir";
 
@@ -476,7 +482,7 @@ describe("SprkChatBridge Integration Tests", () => {
       dispatchPostMessage(
         channelName,
         "document_stream_start",
-        makeStreamStart("op-pm-bidir")
+        makeStreamStart("op-pm-bidir"),
       );
 
       // Assert — both bridges listen on same window, both receive matching events
@@ -520,19 +526,19 @@ describe("SprkChatBridge Integration Tests", () => {
       dispatchPostMessage(
         channelName,
         "document_stream_start",
-        makeStreamStart(operationId)
+        makeStreamStart(operationId),
       );
       for (let i = 0; i < TOKEN_COUNT; i++) {
         dispatchPostMessage(
           channelName,
           "document_stream_token",
-          makeStreamToken(operationId, `pm-tok-${i}`, i)
+          makeStreamToken(operationId, `pm-tok-${i}`, i),
         );
       }
       dispatchPostMessage(
         channelName,
         "document_stream_end",
-        makeStreamEnd(operationId, TOKEN_COUNT)
+        makeStreamEnd(operationId, TOKEN_COUNT),
       );
 
       // Assert — all 52 events received in exact order
@@ -543,7 +549,7 @@ describe("SprkChatBridge Integration Tests", () => {
         expect(event.type).toBe("document_stream_token");
         expect((event.payload as DocumentStreamTokenPayload).index).toBe(i);
         expect((event.payload as DocumentStreamTokenPayload).token).toBe(
-          `pm-tok-${i}`
+          `pm-tok-${i}`,
         );
       }
       expect(allEvents[TOKEN_COUNT + 1].type).toBe("document_stream_end");
@@ -596,13 +602,13 @@ describe("SprkChatBridge Integration Tests", () => {
       const bridgeCReceived: DocumentStreamStartPayload[] = [];
 
       bridgeA.subscribe("document_stream_start", (p) =>
-        bridgeAReceived.push(p)
+        bridgeAReceived.push(p),
       );
       bridgeB.subscribe("document_stream_start", (p) =>
-        bridgeBReceived.push(p)
+        bridgeBReceived.push(p),
       );
       bridgeC.subscribe("document_stream_start", (p) =>
-        bridgeCReceived.push(p)
+        bridgeCReceived.push(p),
       );
 
       const payload = makeStreamStart("op-isolation");
@@ -633,28 +639,28 @@ describe("SprkChatBridge Integration Tests", () => {
       const pairBTokens: string[] = [];
 
       pairA_receiver.subscribe("document_stream_token", (p) =>
-        pairATokens.push(p.token)
+        pairATokens.push(p.token),
       );
       pairB_receiver.subscribe("document_stream_token", (p) =>
-        pairBTokens.push(p.token)
+        pairBTokens.push(p.token),
       );
 
       // Act — interleave tokens between the two pairs
       pairA_sender.emit(
         "document_stream_token",
-        makeStreamToken("op-a", "alpha-0", 0)
+        makeStreamToken("op-a", "alpha-0", 0),
       );
       pairB_sender.emit(
         "document_stream_token",
-        makeStreamToken("op-b", "beta-0", 0)
+        makeStreamToken("op-b", "beta-0", 0),
       );
       pairA_sender.emit(
         "document_stream_token",
-        makeStreamToken("op-a", "alpha-1", 1)
+        makeStreamToken("op-a", "alpha-1", 1),
       );
       pairB_sender.emit(
         "document_stream_token",
-        makeStreamToken("op-b", "beta-1", 1)
+        makeStreamToken("op-b", "beta-1", 1),
       );
 
       // Assert — each pair only sees its own tokens
@@ -725,7 +731,7 @@ describe("SprkChatBridge Integration Tests", () => {
       receiver.disconnect();
       sender.emit(
         "document_stream_token",
-        makeStreamToken("op-disc", "orphan", 0)
+        makeStreamToken("op-disc", "orphan", 0),
       );
 
       // Assert — handler was never called
@@ -746,7 +752,7 @@ describe("SprkChatBridge Integration Tests", () => {
       expect(() => {
         sender.emit(
           "document_stream_token",
-          makeStreamToken("op-disc-send", "fail", 0)
+          makeStreamToken("op-disc-send", "fail", 0),
         );
       }).toThrow("Cannot emit after disconnect");
 
@@ -766,7 +772,7 @@ describe("SprkChatBridge Integration Tests", () => {
       bridgeA.disconnect();
       bridgeC.emit(
         "document_stream_token",
-        makeStreamToken("op-c-sends", "still-alive", 0)
+        makeStreamToken("op-c-sends", "still-alive", 0),
       );
 
       // Assert — B still receives from C even though A disconnected
@@ -789,7 +795,7 @@ describe("SprkChatBridge Integration Tests", () => {
       for (let i = 0; i < 5; i++) {
         sender.emit(
           "document_stream_token",
-          makeStreamToken("op-mid", `tok-${i}`, i)
+          makeStreamToken("op-mid", `tok-${i}`, i),
         );
       }
 
@@ -798,7 +804,7 @@ describe("SprkChatBridge Integration Tests", () => {
       for (let i = 5; i < 10; i++) {
         sender.emit(
           "document_stream_token",
-          makeStreamToken("op-mid", `tok-${i}`, i)
+          makeStreamToken("op-mid", `tok-${i}`, i),
         );
       }
 
@@ -839,7 +845,7 @@ describe("SprkChatBridge Integration Tests", () => {
 
       // Before disconnect: instance exists in MockBroadcastChannel.instances
       const instancesBefore = MockBroadcastChannel.instances.filter(
-        (i) => i.name === "sprk-workspace-integ-cleanup-bc"
+        (i) => i.name === "sprk-workspace-integ-cleanup-bc",
       );
       expect(instancesBefore.length).toBeGreaterThanOrEqual(1);
 
@@ -849,7 +855,7 @@ describe("SprkChatBridge Integration Tests", () => {
       // Assert — after disconnect, the BroadcastChannel instance is removed
       // (MockBroadcastChannel.close() removes from instances array)
       const instancesAfter = MockBroadcastChannel.instances.filter(
-        (i) => i.name === "sprk-workspace-integ-cleanup-bc"
+        (i) => i.name === "sprk-workspace-integ-cleanup-bc",
       );
       expect(instancesAfter).toHaveLength(0);
     });
@@ -875,7 +881,7 @@ describe("SprkChatBridge Integration Tests", () => {
       // Assert — window.removeEventListener was called for "message"
       expect(removeListenerSpy).toHaveBeenCalledWith(
         "message",
-        expect.any(Function)
+        expect.any(Function),
       );
 
       removeListenerSpy.mockRestore();
@@ -908,7 +914,7 @@ describe("SprkChatBridge Integration Tests", () => {
       sender.emit("document_stream_start", makeStreamStart("op-cleanup"));
       sender.emit(
         "document_stream_token",
-        makeStreamToken("op-cleanup", "x", 0)
+        makeStreamToken("op-cleanup", "x", 0),
       );
       sender.emit("document_stream_end", makeStreamEnd("op-cleanup", 1));
       sender.emit("document_replaced", {

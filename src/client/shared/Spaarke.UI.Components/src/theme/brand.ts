@@ -7,7 +7,7 @@ import {
   BrandVariants,
   createLightTheme,
   createDarkTheme,
-  Theme
+  Theme,
 } from "@fluentui/react-components";
 
 /**
@@ -30,7 +30,7 @@ export const spaarkeBrand: BrandVariants = {
   130: "#b9d3ff",
   140: "#d2e2ff",
   150: "#e6eeff",
-  160: "#f3f7ff"
+  160: "#f3f7ff",
 };
 
 /**

@@ -9,7 +9,7 @@
  * @version 1.0.0
  */
 
-import * as React from 'react';
+import * as React from "react";
 import {
   makeStyles,
   tokens,
@@ -17,18 +17,18 @@ import {
   Badge,
   Tooltip,
   mergeClasses,
-} from '@fluentui/react-components';
-import { Sparkle20Regular } from '@fluentui/react-icons';
+} from "@fluentui/react-components";
+import { Sparkle20Regular } from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
   badge: {
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
-    ...shorthands.padding('2px', '6px'),
+    ...shorthands.padding("2px", "6px"),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    display: 'inline-flex',
-    alignItems: 'center',
-    ...shorthands.gap('4px'),
+    display: "inline-flex",
+    alignItems: "center",
+    ...shorthands.gap("4px"),
   },
   highConfidence: {
     backgroundColor: tokens.colorPaletteGreenBackground2,
@@ -43,28 +43,28 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground2,
   },
   icon: {
-    width: '14px',
-    height: '14px',
+    width: "14px",
+    height: "14px",
   },
   // Compact variant for node badges
   compact: {
     fontSize: tokens.fontSizeBase100,
-    ...shorthands.padding('1px', '4px'),
+    ...shorthands.padding("1px", "4px"),
   },
   // Large variant for metrics panel
   large: {
     fontSize: tokens.fontSizeBase300,
-    ...shorthands.padding('4px', '8px'),
+    ...shorthands.padding("4px", "8px"),
   },
 });
 
-export type ConfidenceLevel = 'high' | 'medium' | 'low';
+export type ConfidenceLevel = "high" | "medium" | "low";
 
 export interface ConfidenceBadgeProps {
   /** Confidence score between 0 and 1 */
   confidence: number;
   /** Size variant */
-  size?: 'compact' | 'default' | 'large';
+  size?: "compact" | "default" | "large";
   /** Show icon alongside value */
   showIcon?: boolean;
   /** Custom className */
@@ -78,9 +78,9 @@ export interface ConfidenceBadgeProps {
  * - < 0.7: low (red)
  */
 export function getConfidenceLevel(confidence: number): ConfidenceLevel {
-  if (confidence >= 0.9) return 'high';
-  if (confidence >= 0.7) return 'medium';
-  return 'low';
+  if (confidence >= 0.9) return "high";
+  if (confidence >= 0.7) return "medium";
+  return "low";
 }
 
 /**
@@ -91,11 +91,11 @@ export function getConfidenceDescription(confidence: number): string {
   const percentage = Math.round(confidence * 100);
 
   switch (level) {
-    case 'high':
+    case "high":
       return `High confidence (${percentage}%) - AI is highly certain about this result`;
-    case 'medium':
+    case "medium":
       return `Medium confidence (${percentage}%) - AI is reasonably certain but some uncertainty exists`;
-    case 'low':
+    case "low":
       return `Low confidence (${percentage}%) - AI is uncertain about this result, review recommended`;
   }
 }
@@ -105,7 +105,7 @@ export function getConfidenceDescription(confidence: number): string {
  */
 export const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({
   confidence,
-  size = 'default',
+  size = "default",
   showIcon = false,
   className,
 }) => {
@@ -115,16 +115,16 @@ export const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({
   const description = getConfidenceDescription(confidence);
 
   const levelClassName =
-    level === 'high'
+    level === "high"
       ? styles.highConfidence
-      : level === 'medium'
+      : level === "medium"
         ? styles.mediumConfidence
         : styles.lowConfidence;
 
   const sizeClassName =
-    size === 'compact'
+    size === "compact"
       ? styles.compact
-      : size === 'large'
+      : size === "large"
         ? styles.large
         : undefined;
 
@@ -135,7 +135,7 @@ export const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({
           styles.badge,
           levelClassName,
           sizeClassName,
-          className
+          className,
         )}
       >
         {showIcon && <Sparkle20Regular className={styles.icon} />}
@@ -165,7 +165,7 @@ export const ConfidenceNodeBadge: React.FC<ConfidenceNodeBadgeProps> = ({
   const description = getConfidenceDescription(confidence);
 
   const color =
-    level === 'high' ? 'success' : level === 'medium' ? 'warning' : 'danger';
+    level === "high" ? "success" : level === "medium" ? "warning" : "danger";
 
   return (
     <Tooltip content={description} relationship="description" withArrow>

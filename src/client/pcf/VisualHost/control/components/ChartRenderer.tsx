@@ -21,7 +21,11 @@ import { LineChart } from "./LineChart";
 import { DonutChart } from "./DonutChart";
 import { StatusDistributionBar } from "./StatusDistributionBar";
 import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
-import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from "./MiniTable";
+import {
+  MiniTable,
+  type IMiniTableItem,
+  type IMiniTableColumn,
+} from "./MiniTable";
 import { DueDateCardVisual } from "./DueDateCard";
 import { DueDateCardListVisual } from "./DueDateCardList";
 import { GaugeVisual } from "./GaugeVisual";
@@ -43,7 +47,11 @@ export interface IChartRendererProps {
   /** Current record ID for context filtering */
   contextRecordId?: string;
   /** Callback for configured click actions */
-  onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
+  onClickAction?: (
+    recordId: string,
+    entityName?: string,
+    recordData?: Record<string, unknown>,
+  ) => void;
   /** Callback for "View List" navigation */
   onViewListClick?: () => void;
   /** FetchXML override from PCF property (highest query priority) */
@@ -161,21 +169,31 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   titleFontSize: titleFontSizePcf,
 }) => {
   const styles = useStyles();
-  const { sprk_visualtype, sprk_name, sprk_configurationjson, sprk_groupbyfield } =
-    chartDefinition;
+  const {
+    sprk_visualtype,
+    sprk_name,
+    sprk_configurationjson,
+    sprk_groupbyfield,
+  } = chartDefinition;
 
   // Parse configuration options
   const config = parseConfig(sprk_configurationjson);
 
   // No data available
-  if (!chartData || !chartData.dataPoints || chartData.dataPoints.length === 0) {
+  if (
+    !chartData ||
+    !chartData.dataPoints ||
+    chartData.dataPoints.length === 0
+  ) {
     // Some chart types don't need data (MetricCard, DueDateCard types fetch their own)
-    if (sprk_visualtype !== VT.MetricCard
-      && sprk_visualtype !== VT.ReportCardMetric
-      && sprk_visualtype !== VT.DueDateCard
-      && sprk_visualtype !== VT.DueDateCardList
-      && sprk_visualtype !== VT.Gauge
-      && sprk_visualtype !== VT.HorizontalStackedBar) {
+    if (
+      sprk_visualtype !== VT.MetricCard &&
+      sprk_visualtype !== VT.ReportCardMetric &&
+      sprk_visualtype !== VT.DueDateCard &&
+      sprk_visualtype !== VT.DueDateCardList &&
+      sprk_visualtype !== VT.Gauge &&
+      sprk_visualtype !== VT.HorizontalStackedBar
+    ) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
@@ -221,7 +239,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         dataPoints.length > 0
           ? dataPoints[0].value
           : chartData?.totalRecords || 0;
-      const metricLabel = dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
+      const metricLabel =
+        dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
 
       return (
         <MetricCard
@@ -250,7 +269,9 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         <BarChart
           data={dataPoints}
           title={config.showTitle !== false ? sprk_name : undefined}
-          orientation={config.orientation as "vertical" | "horizontal" | undefined}
+          orientation={
+            config.orientation as "vertical" | "horizontal" | undefined
+          }
           showLabels={config.showLabels as boolean | undefined}
           showLegend={config.showLegend as boolean | undefined}
           onDrillInteraction={onDrillInteraction}
@@ -319,11 +340,12 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       // Calendar expects events with date, count, and optional label/fieldValue
       // Transform dataPoints to calendar events
       const events: ICalendarEvent[] = dataPoints.map((dp) => ({
-        date: dp.fieldValue instanceof Date
-          ? dp.fieldValue
-          : typeof dp.fieldValue === 'string'
-            ? new Date(dp.fieldValue)
-            : new Date(),
+        date:
+          dp.fieldValue instanceof Date
+            ? dp.fieldValue
+            : typeof dp.fieldValue === "string"
+              ? new Date(dp.fieldValue)
+              : new Date(),
         count: dp.value,
         label: dp.label,
         fieldValue: dp.fieldValue,
@@ -453,7 +475,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
             Configuration Error
           </Text>
           <Text size={200}>
-            The configured visual type is not recognized. Please check the chart definition.
+            The configured visual type is not recognized. Please check the chart
+            definition.
           </Text>
         </div>
       );

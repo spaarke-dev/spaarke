@@ -20,7 +20,7 @@ import { FilterStateProvider } from "../../context/FilterStateContext";
  */
 function createMockColumn(
   name: string,
-  displayName: string
+  displayName: string,
 ): ComponentFramework.PropertyHelper.DataSetApi.Column {
   return {
     name,
@@ -40,7 +40,7 @@ function createMockColumn(
  */
 function createMockRecord(
   id: string,
-  values: Record<string, string>
+  values: Record<string, string>,
 ): ComponentFramework.PropertyHelper.DataSetApi.EntityRecord {
   return {
     getRecordId: () => id,
@@ -62,7 +62,7 @@ function createMockDataset(
       ComponentFramework.PropertyHelper.DataSetApi.EntityRecord
     >;
     sortedRecordIds?: string[];
-  } = {}
+  } = {},
 ): ComponentFramework.PropertyTypes.DataSet {
   const defaultColumns = [
     createMockColumn("name", "Name"),
@@ -152,7 +152,7 @@ describe("DrillThroughGrid - Loading States", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("Loading data...")).toBeInTheDocument();
@@ -164,7 +164,7 @@ describe("DrillThroughGrid - Loading States", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} isLoading={true} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("Loading data...")).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("DrillThroughGrid - Loading States", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("Loading columns...")).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe("DrillThroughGrid - Empty States", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("No records found")).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe("DrillThroughGrid - Data Rendering", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("Name")).toBeInTheDocument();
@@ -229,7 +229,7 @@ describe("DrillThroughGrid - Data Rendering", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(screen.getByText("Account A")).toBeInTheDocument();
@@ -246,7 +246,7 @@ describe("DrillThroughGrid - Data Rendering", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // Count rows by looking for cell content
@@ -270,7 +270,7 @@ describe("DrillThroughGrid - Selection", () => {
           dataset={mockDataset}
           onSelectionChange={handleSelectionChange}
         />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // The grid should render and be interactive
@@ -285,7 +285,7 @@ describe("DrillThroughGrid - Selection", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // Grid should have been rendered with initial selection
@@ -304,7 +304,7 @@ describe("DrillThroughGrid - Accessibility", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     const grid = screen.getByRole("grid");
@@ -317,7 +317,7 @@ describe("DrillThroughGrid - Accessibility", () => {
     render(
       <TestWrapper dataset={mockDataset}>
         <DrillThroughGrid dataset={mockDataset} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     const columnHeaders = screen.getAllByRole("columnheader");

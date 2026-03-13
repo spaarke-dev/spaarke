@@ -197,7 +197,18 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
         description: "Refresh data",
       },
     ],
-    [showNew, showDelete, showRefresh, canCreate, canDelete, hasSelection, selectedIds, onNew, onDelete, onRefresh]
+    [
+      showNew,
+      showDelete,
+      showRefresh,
+      canCreate,
+      canDelete,
+      hasSelection,
+      selectedIds,
+      onNew,
+      onDelete,
+      onRefresh,
+    ],
   );
 
   useKeyboardShortcuts(shortcuts);
@@ -208,7 +219,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       const value = e.target.value;
       setSearchText(value);
     },
-    []
+    [],
   );
 
   const handleSearchKeyDown = React.useCallback(
@@ -217,7 +228,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
         onSearch(searchText);
       }
     },
-    [searchText, onSearch]
+    [searchText, onSearch],
   );
 
   // Handle delete click
@@ -233,7 +244,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       className={mergeClasses(
         styles.toolbar,
         compact && styles.toolbarCompact,
-        className
+        className,
       )}
     >
       {/* Left group - Primary commands */}
@@ -315,7 +326,9 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
                 aria-label="Refresh data"
                 aria-keyshortcuts="F5"
               >
-                {!compact && <span className={styles.buttonLabel}>Refresh</span>}
+                {!compact && (
+                  <span className={styles.buttonLabel}>Refresh</span>
+                )}
               </ToolbarButton>
             </Tooltip>
           </>
@@ -339,7 +352,9 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
                 onClick={command.onClick}
                 aria-label={command.label}
               >
-                {!compact && <span className={styles.buttonLabel}>{command.label}</span>}
+                {!compact && (
+                  <span className={styles.buttonLabel}>{command.label}</span>
+                )}
               </ToolbarButton>
             </Tooltip>
             {command.dividerAfter && <ToolbarDivider />}

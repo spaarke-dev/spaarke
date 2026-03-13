@@ -13,9 +13,15 @@ const createMockXrm = (): XrmContext => ({
   WebApi: {
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     retrieveRecord: jest.fn().mockResolvedValue({}),
-    createRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    updateRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    deleteRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    createRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    updateRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    deleteRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
   },
 });
 
@@ -40,7 +46,8 @@ describe("ConfigurationService", () => {
         sprk_entitylogicalname: "sprk_event",
         sprk_viewtype: GridConfigViewType.CustomFetchXML,
         sprk_fetchxml: "<fetch><entity name='sprk_event'/></fetch>",
-        sprk_layoutxml: "<grid><row><cell name='sprk_eventname' width='200'/></row></grid>",
+        sprk_layoutxml:
+          "<grid><row><cell name='sprk_eventname' width='200'/></row></grid>",
         sprk_configjson: '{"features":{"enableSelection":true}}',
         sprk_isdefault: true,
         sprk_sortorder: 10,
@@ -60,7 +67,9 @@ describe("ConfigurationService", () => {
     ];
 
     it("should fetch configurations for an entity", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigurations,
       });
 
@@ -71,12 +80,14 @@ describe("ConfigurationService", () => {
       expect(configs[0].viewType).toBe(GridConfigViewType.CustomFetchXML);
       expect(mockXrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledWith(
         "sprk_gridconfiguration",
-        expect.stringContaining("sprk_entitylogicalname eq 'sprk_event'")
+        expect.stringContaining("sprk_entitylogicalname eq 'sprk_event'"),
       );
     });
 
     it("should parse configJson correctly", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigurations,
       });
 
@@ -87,7 +98,9 @@ describe("ConfigurationService", () => {
     });
 
     it("should handle missing configJson gracefully", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigurations,
       });
 
@@ -109,10 +122,12 @@ describe("ConfigurationService", () => {
     });
 
     it("should return empty array when entity doesn't exist", async () => {
-      const entityNotFoundError = new Error("The entity 'sprk_gridconfiguration' doesn't exist");
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValueOnce(
-        entityNotFoundError
+      const entityNotFoundError = new Error(
+        "The entity 'sprk_gridconfiguration' doesn't exist",
       );
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockRejectedValueOnce(entityNotFoundError);
 
       const configs = await service.getConfigurations("sprk_event");
 
@@ -120,9 +135,11 @@ describe("ConfigurationService", () => {
     });
 
     it("should remember entity doesn't exist and not retry", async () => {
-      const entityNotFoundError = new Error("The entity 'sprk_gridconfiguration' doesn't exist");
+      const entityNotFoundError = new Error(
+        "The entity 'sprk_gridconfiguration' doesn't exist",
+      );
       (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValue(
-        entityNotFoundError
+        entityNotFoundError,
       );
 
       await service.getConfigurations("sprk_event");
@@ -156,7 +173,9 @@ describe("ConfigurationService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigs,
       });
 
@@ -180,7 +199,9 @@ describe("ConfigurationService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigs,
       });
 
@@ -191,7 +212,9 @@ describe("ConfigurationService", () => {
     });
 
     it("should return undefined when no configurations exist", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: [],
       });
 
@@ -215,7 +238,9 @@ describe("ConfigurationService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigs,
       });
 
@@ -240,7 +265,9 @@ describe("ConfigurationService", () => {
         statecode: 0,
       };
 
-      (mockXrm.WebApi.retrieveRecord as jest.Mock).mockResolvedValueOnce(mockConfig);
+      (mockXrm.WebApi.retrieveRecord as jest.Mock).mockResolvedValueOnce(
+        mockConfig,
+      );
 
       const config = await service.getConfigurationById("config-1");
 
@@ -249,7 +276,7 @@ describe("ConfigurationService", () => {
       expect(mockXrm.WebApi.retrieveRecord).toHaveBeenCalledWith(
         "sprk_gridconfiguration",
         "config-1",
-        expect.any(String)
+        expect.any(String),
       );
     });
   });
@@ -271,7 +298,9 @@ describe("ConfigurationService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockConfigs,
       });
 
@@ -290,7 +319,9 @@ describe("ConfigurationService", () => {
 
   describe("checkEntityExists", () => {
     it("should return true when entity exists", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: [],
       });
 
@@ -300,10 +331,12 @@ describe("ConfigurationService", () => {
     });
 
     it("should return false when entity doesn't exist", async () => {
-      const entityNotFoundError = new Error("The entity 'sprk_gridconfiguration' doesn't exist");
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValueOnce(
-        entityNotFoundError
+      const entityNotFoundError = new Error(
+        "The entity 'sprk_gridconfiguration' doesn't exist",
       );
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockRejectedValueOnce(entityNotFoundError);
 
       const exists = await service.checkEntityExists();
 
@@ -311,7 +344,9 @@ describe("ConfigurationService", () => {
     });
 
     it("should cache the entity existence check", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: [],
       });
 

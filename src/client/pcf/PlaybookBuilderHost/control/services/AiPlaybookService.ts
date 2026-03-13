@@ -21,7 +21,7 @@ import type {
   SseEventType,
   CanvasPatch,
   ChatMessage,
-} from '../stores/aiAssistantStore';
+} from "../stores/aiAssistantStore";
 
 // ============================================================================
 // API Request Types (matches BFF API's BuilderRequest model)
@@ -74,7 +74,7 @@ export interface CanvasState {
  * Conversation message for history.
  */
 export interface ConversationMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -121,7 +121,7 @@ export interface ThinkingEventData {
  * Dataverse operation event - record created/updated.
  */
 export interface DataverseOperationEventData {
-  operation: 'create' | 'update' | 'link';
+  operation: "create" | "update" | "link";
   entity: string;
   record?: Record<string, unknown>;
   id?: string;
@@ -242,7 +242,7 @@ export class AiPlaybookService {
    */
   async buildPlaybookCanvas(
     request: BuildPlaybookCanvasRequest,
-    handlers: AiPlaybookEventHandlers
+    handlers: AiPlaybookEventHandlers,
   ): Promise<void> {
     // Abort any existing request
     this.abort();
@@ -259,11 +259,11 @@ export class AiPlaybookService {
       const url = `${this.config.apiBaseUrl}/api/ai/playbook-builder/process`;
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${this.config.accessToken}`,
-          Accept: 'text/event-stream',
+          Accept: "text/event-stream",
         },
         body: JSON.stringify(request),
         signal,
@@ -271,24 +271,26 @@ export class AiPlaybookService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        throw new Error(
+          `HTTP ${response.status}: ${errorText || response.statusText}`,
+        );
       }
 
       if (!response.body) {
-        throw new Error('Response body is null');
+        throw new Error("Response body is null");
       }
 
       // Process the SSE stream
       await this.processStream(response.body, handlers);
     } catch (error) {
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
+        if (error.name === "AbortError") {
           // Request was aborted, don't call error handler
           return;
         }
         handlers.onConnectionError?.(error);
       } else {
-        handlers.onConnectionError?.(new Error('Unknown error occurred'));
+        handlers.onConnectionError?.(new Error("Unknown error occurred"));
       }
     } finally {
       clearTimeout(timeoutId);
@@ -318,37 +320,50 @@ export class AiPlaybookService {
    */
   private async processStream(
     body: ReadableStream<Uint8Array>,
-    handlers: AiPlaybookEventHandlers
+    handlers: AiPlaybookEventHandlers,
   ): Promise<void> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
+    let buffer = "";
 
     try {
       while (true) {
         const { done, value } = await reader.read();
 
         if (done) {
-          console.info('[AiPlaybookService] Stream ended, remaining buffer:', JSON.stringify(buffer));
+          console.info(
+            "[AiPlaybookService] Stream ended, remaining buffer:",
+            JSON.stringify(buffer),
+          );
           break;
         }
 
         // Decode chunk and add to buffer
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
-        console.debug('[AiPlaybookService] Received chunk:', JSON.stringify(chunk));
+        console.debug(
+          "[AiPlaybookService] Received chunk:",
+          JSON.stringify(chunk),
+        );
 
         // Process complete events from buffer
         const events = this.parseEventsFromBuffer(buffer);
         buffer = events.remaining;
-        console.debug('[AiPlaybookService] Parsed events:', events.parsed.length, 'remaining:', JSON.stringify(events.remaining));
+        console.debug(
+          "[AiPlaybookService] Parsed events:",
+          events.parsed.length,
+          "remaining:",
+          JSON.stringify(events.remaining),
+        );
 
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
 
           // Stop processing if done or error
-          if (event.type === 'done' || event.type === 'error') {
-            console.info('[AiPlaybookService] Received terminal event, stopping stream processing');
+          if (event.type === "done" || event.type === "error") {
+            console.info(
+              "[AiPlaybookService] Received terminal event, stopping stream processing",
+            );
             return;
           }
         }
@@ -356,14 +371,20 @@ export class AiPlaybookService {
 
       // Process any remaining data in buffer
       if (buffer.trim()) {
-        console.info('[AiPlaybookService] Processing remaining buffer:', JSON.stringify(buffer));
-        const events = this.parseEventsFromBuffer(buffer + '\n\n');
-        console.info('[AiPlaybookService] Final parsed events:', events.parsed.map(e => e.type));
+        console.info(
+          "[AiPlaybookService] Processing remaining buffer:",
+          JSON.stringify(buffer),
+        );
+        const events = this.parseEventsFromBuffer(buffer + "\n\n");
+        console.info(
+          "[AiPlaybookService] Final parsed events:",
+          events.parsed.map((e) => e.type),
+        );
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
         }
       } else {
-        console.info('[AiPlaybookService] No remaining buffer to process');
+        console.info("[AiPlaybookService] No remaining buffer to process");
       }
     } finally {
       reader.releaseLock();
@@ -379,7 +400,8 @@ export class AiPlaybookService {
     remaining: string;
   } {
     const parsed: SseEvent[] = [];
-    const eventRegex = /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
+    const eventRegex =
+      /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
 
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -391,10 +413,19 @@ export class AiPlaybookService {
       try {
         // Check if this event is complete (followed by double newline or end)
         const afterMatch = buffer.slice(lastIndex);
-        console.debug('[AiPlaybookService] Parsing event:', eventType, 'afterMatch:', JSON.stringify(afterMatch.substring(0, 50)));
-        if (!afterMatch.startsWith('\n') && afterMatch.length > 0 && !afterMatch.startsWith('\nevent:')) {
+        console.debug(
+          "[AiPlaybookService] Parsing event:",
+          eventType,
+          "afterMatch:",
+          JSON.stringify(afterMatch.substring(0, 50)),
+        );
+        if (
+          !afterMatch.startsWith("\n") &&
+          afterMatch.length > 0 &&
+          !afterMatch.startsWith("\nevent:")
+        ) {
           // Event might be incomplete, stop here
-          console.debug('[AiPlaybookService] Event incomplete, stopping parse');
+          console.debug("[AiPlaybookService] Event incomplete, stopping parse");
           break;
         }
 
@@ -403,14 +434,22 @@ export class AiPlaybookService {
           type: eventType as SseEventType,
           data,
         });
-        console.debug('[AiPlaybookService] Successfully parsed event:', eventType);
+        console.debug(
+          "[AiPlaybookService] Successfully parsed event:",
+          eventType,
+        );
       } catch (parseError) {
-        console.warn('[AiPlaybookService] Failed to parse event data:', dataStr, parseError);
+        console.warn(
+          "[AiPlaybookService] Failed to parse event data:",
+          dataStr,
+          parseError,
+        );
       }
     }
 
     // Return remaining unparsed buffer
-    const remaining = lastIndex > 0 ? buffer.slice(lastIndex).replace(/^\n+/, '') : buffer;
+    const remaining =
+      lastIndex > 0 ? buffer.slice(lastIndex).replace(/^\n+/, "") : buffer;
 
     return { parsed, remaining };
   }
@@ -418,44 +457,53 @@ export class AiPlaybookService {
   /**
    * Dispatch event to appropriate handler.
    */
-  private dispatchEvent(event: SseEvent, handlers: AiPlaybookEventHandlers): void {
-    console.info('[AiPlaybookService] SSE event received:', event.type, event.data);
+  private dispatchEvent(
+    event: SseEvent,
+    handlers: AiPlaybookEventHandlers,
+  ): void {
+    console.info(
+      "[AiPlaybookService] SSE event received:",
+      event.type,
+      event.data,
+    );
 
     switch (event.type) {
-      case 'thinking':
+      case "thinking":
         handlers.onThinking?.(event.data as ThinkingEventData);
         break;
 
-      case 'dataverse_operation':
-        handlers.onDataverseOperation?.(event.data as DataverseOperationEventData);
+      case "dataverse_operation":
+        handlers.onDataverseOperation?.(
+          event.data as DataverseOperationEventData,
+        );
         break;
 
-      case 'canvas_patch':
+      case "canvas_patch":
         handlers.onCanvasPatch?.(event.data as CanvasPatchEventData);
         break;
 
-      case 'message':
+      case "message":
         handlers.onMessage?.(event.data as MessageEventData);
         break;
 
-      case 'clarification':
+      case "clarification":
         handlers.onClarification?.(event.data as ClarificationEventData);
         break;
 
-      case 'plan_preview':
+      case "plan_preview":
         handlers.onPlanPreview?.(event.data as PlanPreviewEventData);
         break;
 
-      case 'error':
+      case "error":
         handlers.onError?.(event.data as ErrorEventData);
         break;
 
-      case 'done':
+      case "done":
         handlers.onDone?.(event.data as DoneEventData);
         break;
 
       default:
-        console.warn('[AiPlaybookService] Unknown event type:', event.type);
+        console.warn("[AiPlaybookService] Unknown event type:", event.type);
     }
   }
 }
@@ -468,7 +516,7 @@ export class AiPlaybookService {
  * Create an AiPlaybookService instance.
  */
 export function createAiPlaybookService(
-  config: AiPlaybookServiceConfig
+  config: AiPlaybookServiceConfig,
 ): AiPlaybookService {
   return new AiPlaybookService(config);
 }

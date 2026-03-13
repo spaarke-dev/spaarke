@@ -18,128 +18,149 @@
  * @see spec.md - PCF Coupling Points to Replace (11 Total)
  */
 
-import { getAccessToken, getClientUrl, isSameOriginDataverse } from "./authInit";
+import {
+  getAccessToken,
+  getClientUrl,
+  isSameOriginDataverse,
+} from "./authInit";
 
 const LOG_PREFIX = "[PlaybookBuilder:DataverseClient]";
 
 export interface DataverseRecord {
-    [key: string]: unknown;
+  [key: string]: unknown;
 }
 
 export interface RetrieveMultipleResult {
-    entities: DataverseRecord[];
-    nextLink?: string;
+  entities: DataverseRecord[];
+  nextLink?: string;
 }
 
 function getBaseUrl(): string {
-    const clientUrl = getClientUrl();
-    if (clientUrl) return `${clientUrl}/api/data/v9.2`;
-    // Fallback: assume same origin (web resource on Dataverse form)
-    return `${window.location.origin}/api/data/v9.2`;
+  const clientUrl = getClientUrl();
+  if (clientUrl) return `${clientUrl}/api/data/v9.2`;
+  // Fallback: assume same origin (web resource on Dataverse form)
+  return `${window.location.origin}/api/data/v9.2`;
 }
 
-async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const headers: Record<string, string> = {
-        "Accept": "application/json",
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        "Content-Type": "application/json; charset=utf-8",
-    };
+async function fetchWithAuth(
+  url: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "OData-MaxVersion": "4.0",
+    "OData-Version": "4.0",
+    "Content-Type": "application/json; charset=utf-8",
+  };
 
-    // When running inside Dataverse (same origin), rely on session cookies.
-    // Only add Bearer token when running cross-origin (dev server, etc.).
-    if (!isSameOriginDataverse()) {
-        try {
-            const token = await getAccessToken();
-            headers["Authorization"] = `Bearer ${token}`;
-        } catch (err) {
-            console.warn(`${LOG_PREFIX} Token acquisition failed, proceeding without auth header`, err);
-        }
+  // When running inside Dataverse (same origin), rely on session cookies.
+  // Only add Bearer token when running cross-origin (dev server, etc.).
+  if (!isSameOriginDataverse()) {
+    try {
+      const token = await getAccessToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } catch (err) {
+      console.warn(
+        `${LOG_PREFIX} Token acquisition failed, proceeding without auth header`,
+        err,
+      );
     }
+  }
 
-    const response = await fetch(url, {
-        ...options,
-        credentials: "include",
-        headers: {
-            ...headers,
-            ...options.headers,
-        },
-    });
+  const response = await fetch(url, {
+    ...options,
+    credentials: "include",
+    headers: {
+      ...headers,
+      ...options.headers,
+    },
+  });
 
-    if (!response.ok) {
-        const errorBody = await response.text().catch(() => "");
-        console.error(`${LOG_PREFIX} ${options.method || "GET"} ${url} failed: ${response.status}`, errorBody);
-        throw new Error(`Dataverse API ${response.status}: ${response.statusText}`);
-    }
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error(
+      `${LOG_PREFIX} ${options.method || "GET"} ${url} failed: ${response.status}`,
+      errorBody,
+    );
+    throw new Error(`Dataverse API ${response.status}: ${response.statusText}`);
+  }
 
-    return response;
+  return response;
 }
 
 /**
  * Create a new record in a Dataverse table.
  * @returns The ID of the created record (GUID without braces).
  */
-export async function createRecord(entitySetName: string, data: DataverseRecord): Promise<string> {
-    const url = `${getBaseUrl()}/${entitySetName}`;
-    const response = await fetchWithAuth(url, {
-        method: "POST",
-        body: JSON.stringify(data),
-        headers: { "Prefer": "return=representation" },
-    });
+export async function createRecord(
+  entitySetName: string,
+  data: DataverseRecord,
+): Promise<string> {
+  const url = `${getBaseUrl()}/${entitySetName}`;
+  const response = await fetchWithAuth(url, {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { Prefer: "return=representation" },
+  });
 
-    // Extract ID from OData-EntityId header or response body
-    const entityIdHeader = response.headers.get("OData-EntityId");
-    if (entityIdHeader) {
-        const match = entityIdHeader.match(/\(([0-9a-f-]+)\)/i);
-        if (match) return match[1];
-    }
+  // Extract ID from OData-EntityId header or response body
+  const entityIdHeader = response.headers.get("OData-EntityId");
+  if (entityIdHeader) {
+    const match = entityIdHeader.match(/\(([0-9a-f-]+)\)/i);
+    if (match) return match[1];
+  }
 
-    const body = await response.json();
-    const idKey = Object.keys(body).find(k => k.endsWith("id") && typeof body[k] === "string");
-    if (idKey) return (body[idKey] as string).replace(/[{}]/g, "");
+  const body = await response.json();
+  const idKey = Object.keys(body).find(
+    (k) => k.endsWith("id") && typeof body[k] === "string",
+  );
+  if (idKey) return (body[idKey] as string).replace(/[{}]/g, "");
 
-    throw new Error("Could not extract record ID from create response");
+  throw new Error("Could not extract record ID from create response");
 }
 
 /**
  * Retrieve a single record by ID.
  */
 export async function retrieveRecord(
-    entitySetName: string,
-    id: string,
-    options?: string
+  entitySetName: string,
+  id: string,
+  options?: string,
 ): Promise<DataverseRecord> {
-    const cleanId = id.replace(/[{}]/g, "");
-    let url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
-    if (options) url += `?${options}`;
+  const cleanId = id.replace(/[{}]/g, "");
+  let url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
+  if (options) url += `?${options}`;
 
-    const response = await fetchWithAuth(url);
-    return response.json();
+  const response = await fetchWithAuth(url);
+  return response.json();
 }
 
 /**
  * Update an existing record by ID.
  */
 export async function updateRecord(
-    entitySetName: string,
-    id: string,
-    data: DataverseRecord
+  entitySetName: string,
+  id: string,
+  data: DataverseRecord,
 ): Promise<void> {
-    const cleanId = id.replace(/[{}]/g, "");
-    const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
-    await fetchWithAuth(url, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-    });
+  const cleanId = id.replace(/[{}]/g, "");
+  const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
+  await fetchWithAuth(url, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
 }
 
 /**
  * Delete a record by ID.
  */
-export async function deleteRecord(entitySetName: string, id: string): Promise<void> {
-    const cleanId = id.replace(/[{}]/g, "");
-    const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
-    await fetchWithAuth(url, { method: "DELETE" });
+export async function deleteRecord(
+  entitySetName: string,
+  id: string,
+): Promise<void> {
+  const cleanId = id.replace(/[{}]/g, "");
+  const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
+  await fetchWithAuth(url, { method: "DELETE" });
 }
 
 /**
@@ -147,19 +168,19 @@ export async function deleteRecord(entitySetName: string, id: string): Promise<v
  * @param queryOptions - OData query string (e.g., "$select=name&$filter=status eq 1&$orderby=name")
  */
 export async function retrieveMultipleRecords(
-    entitySetName: string,
-    queryOptions?: string
+  entitySetName: string,
+  queryOptions?: string,
 ): Promise<RetrieveMultipleResult> {
-    let url = `${getBaseUrl()}/${entitySetName}`;
-    if (queryOptions) url += `?${queryOptions}`;
+  let url = `${getBaseUrl()}/${entitySetName}`;
+  if (queryOptions) url += `?${queryOptions}`;
 
-    const response = await fetchWithAuth(url);
-    const body = await response.json();
+  const response = await fetchWithAuth(url);
+  const body = await response.json();
 
-    return {
-        entities: body.value ?? [],
-        nextLink: body["@odata.nextLink"],
-    };
+  return {
+    entities: body.value ?? [],
+    nextLink: body["@odata.nextLink"],
+  };
 }
 
 /**
@@ -167,21 +188,21 @@ export async function retrieveMultipleRecords(
  * POST /{entitySetName}({id})/{navigationProperty}/$ref
  */
 export async function associate(
-    entitySetName: string,
-    id: string,
-    navigationProperty: string,
-    relatedEntitySetName: string,
-    relatedId: string
+  entitySetName: string,
+  id: string,
+  navigationProperty: string,
+  relatedEntitySetName: string,
+  relatedId: string,
 ): Promise<void> {
-    const cleanId = id.replace(/[{}]/g, "");
-    const cleanRelatedId = relatedId.replace(/[{}]/g, "");
-    const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}/$ref`;
-    await fetchWithAuth(url, {
-        method: "POST",
-        body: JSON.stringify({
-            "@odata.id": `${getBaseUrl()}/${relatedEntitySetName}(${cleanRelatedId})`,
-        }),
-    });
+  const cleanId = id.replace(/[{}]/g, "");
+  const cleanRelatedId = relatedId.replace(/[{}]/g, "");
+  const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}/$ref`;
+  await fetchWithAuth(url, {
+    method: "POST",
+    body: JSON.stringify({
+      "@odata.id": `${getBaseUrl()}/${relatedEntitySetName}(${cleanRelatedId})`,
+    }),
+  });
 }
 
 /**
@@ -189,13 +210,13 @@ export async function associate(
  * DELETE /{entitySetName}({id})/{navigationProperty}({relatedId})/$ref
  */
 export async function disassociate(
-    entitySetName: string,
-    id: string,
-    navigationProperty: string,
-    relatedId: string
+  entitySetName: string,
+  id: string,
+  navigationProperty: string,
+  relatedId: string,
 ): Promise<void> {
-    const cleanId = id.replace(/[{}]/g, "");
-    const cleanRelatedId = relatedId.replace(/[{}]/g, "");
-    const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}(${cleanRelatedId})/$ref`;
-    await fetchWithAuth(url, { method: "DELETE" });
+  const cleanId = id.replace(/[{}]/g, "");
+  const cleanRelatedId = relatedId.replace(/[{}]/g, "");
+  const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}(${cleanRelatedId})/$ref`;
+  await fetchWithAuth(url, { method: "DELETE" });
 }

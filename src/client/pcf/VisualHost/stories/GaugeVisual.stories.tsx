@@ -5,8 +5,15 @@
 
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { GaugeVisual, IGaugeVisualProps } from "../control/components/GaugeVisual";
-import type { IAggregatedDataPoint, ICardConfig, IColorThreshold } from "../control/types";
+import {
+  GaugeVisual,
+  IGaugeVisualProps,
+} from "../control/components/GaugeVisual";
+import type {
+  IAggregatedDataPoint,
+  ICardConfig,
+  IColorThreshold,
+} from "../control/types";
 
 const meta: Meta<typeof GaugeVisual> = {
   title: "Charts/GaugeVisual",

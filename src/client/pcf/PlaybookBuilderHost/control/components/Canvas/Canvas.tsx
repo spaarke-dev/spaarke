@@ -5,26 +5,26 @@
  * Supports node placement, edge connections, zoom/pan, and drag-drop.
  */
 
-import * as React from 'react';
-import { useCallback, useRef, DragEvent, CSSProperties } from 'react';
+import * as React from "react";
+import { useCallback, useRef, DragEvent, CSSProperties } from "react";
 import ReactFlow, {
   Background,
   Controls,
   ReactFlowInstance,
   Node,
   BackgroundVariant,
-} from 'react-flow-renderer';
-import { makeStyles, tokens } from '@fluentui/react-components';
-import { useCanvasStore, PlaybookNodeType, PlaybookNode } from '../../stores';
-import { nodeTypes } from '../Nodes';
-import { edgeTypes } from '../Edges';
-import 'react-flow-renderer/dist/style.css';
+} from "react-flow-renderer";
+import { makeStyles, tokens } from "@fluentui/react-components";
+import { useCanvasStore, PlaybookNodeType, PlaybookNode } from "../../stores";
+import { nodeTypes } from "../Nodes";
+import { edgeTypes } from "../Edges";
+import "react-flow-renderer/dist/style.css";
 
 const useStyles = makeStyles({
   container: {
     // Use absolute positioning to fill the relatively-positioned parent
     // This ensures the canvas fills all available space (fixes bottom spacing issue)
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
@@ -35,9 +35,8 @@ const useStyles = makeStyles({
 
 // CSS custom properties for React Flow theming
 const reactFlowStyle: CSSProperties = {
-  backgroundColor: 'var(--colorNeutralBackground1)',
+  backgroundColor: "var(--colorNeutralBackground1)",
 };
-
 
 /**
  * Main canvas component using React Flow v10.
@@ -69,7 +68,7 @@ export const Canvas = React.memo(function Canvas() {
     (_event: React.MouseEvent, node: Node) => {
       selectNode(node.id);
     },
-    [selectNode]
+    [selectNode],
   );
 
   // Handle click on canvas (deselect)
@@ -80,7 +79,7 @@ export const Canvas = React.memo(function Canvas() {
   // Handle drag over for drop target
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
+    event.dataTransfer.dropEffect = "move";
   }, []);
 
   // Handle drop from palette
@@ -91,7 +90,7 @@ export const Canvas = React.memo(function Canvas() {
       if (!reactFlowWrapper.current || !reactFlowInstance.current) return;
 
       // Get node data from drag event
-      const nodeTypeData = event.dataTransfer.getData('application/reactflow');
+      const nodeTypeData = event.dataTransfer.getData("application/reactflow");
       if (!nodeTypeData) return;
 
       try {
@@ -109,10 +108,10 @@ export const Canvas = React.memo(function Canvas() {
 
         onDrop(position, type, label);
       } catch (e) {
-        console.error('Failed to parse dropped node data:', e);
+        console.error("Failed to parse dropped node data:", e);
       }
     },
-    [onDrop]
+    [onDrop],
   );
 
   return (
@@ -134,7 +133,7 @@ export const Canvas = React.memo(function Canvas() {
         snapToGrid
         snapGrid={[16, 16]}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: "smoothstep",
           animated: true,
         }}
         style={reactFlowStyle}

@@ -15,12 +15,12 @@ import { scaleTime, scaleLinear } from "d3-scale";
 import { extent } from "d3-array";
 import type { VisualizationColorBy, TimelineDateField } from "../types";
 import {
-    type SearchResult,
-    getScore,
-    getResultId,
-    getResultName,
-    getResultDate,
-    extractClusterKey,
+  type SearchResult,
+  getScore,
+  getResultId,
+  getResultName,
+  getResultDate,
+  extractClusterKey,
 } from "../utils/groupResults";
 
 // =============================================
@@ -29,24 +29,24 @@ import {
 
 /** A single result positioned on the timeline. */
 export interface TimelinePoint {
-    /** Unique result ID (documentId or recordId). */
-    id: string;
-    /** Parsed date (null for undated results). */
-    date: Date | null;
-    /** Horizontal pixel position. */
-    x: number;
-    /** Vertical pixel position (higher score = higher up). */
-    y: number;
-    /** Dot radius: 3 + score * 10. */
-    radius: number;
-    /** Relevance score (0-1). */
-    score: number;
-    /** Display name of the result. */
-    name: string;
-    /** Category key for color-coding. */
-    category: string;
-    /** Original search result for drill-down. */
-    result: SearchResult;
+  /** Unique result ID (documentId or recordId). */
+  id: string;
+  /** Parsed date (null for undated results). */
+  date: Date | null;
+  /** Horizontal pixel position. */
+  x: number;
+  /** Vertical pixel position (higher score = higher up). */
+  y: number;
+  /** Dot radius: 3 + score * 10. */
+  radius: number;
+  /** Relevance score (0-1). */
+  score: number;
+  /** Display name of the result. */
+  name: string;
+  /** Category key for color-coding. */
+  category: string;
+  /** Original search result for drill-down. */
+  result: SearchResult;
 }
 
 // =============================================
@@ -62,12 +62,12 @@ const TICK_COUNT = 6;
 // =============================================
 
 interface ParsedResult {
-    result: SearchResult;
-    id: string;
-    name: string;
-    score: number;
-    category: string;
-    date: Date | null;
+  result: SearchResult;
+  id: string;
+  name: string;
+  score: number;
+  category: string;
+  date: Date | null;
 }
 
 /**
@@ -75,9 +75,9 @@ interface ParsedResult {
  * missing, empty, or produces an invalid Date.
  */
 function tryParseDate(dateStr: string | undefined): Date | null {
-    if (!dateStr) return null;
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? null : d;
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // =============================================
@@ -95,126 +95,126 @@ function tryParseDate(dateStr: string | undefined): Date | null {
  * @returns Dated points, undated points, x-axis domain, and tick marks.
  */
 export function useTimelineLayout(
-    results: SearchResult[],
-    dateField: TimelineDateField,
-    colorBy: VisualizationColorBy,
-    width: number,
-    height: number,
+  results: SearchResult[],
+  dateField: TimelineDateField,
+  colorBy: VisualizationColorBy,
+  width: number,
+  height: number,
 ): {
-    dated: TimelinePoint[];
-    undated: TimelinePoint[];
-    xDomain: [Date, Date] | null;
-    ticks: Date[];
+  dated: TimelinePoint[];
+  undated: TimelinePoint[];
+  xDomain: [Date, Date] | null;
+  ticks: Date[];
 } {
-    return useMemo(() => {
-        const empty: {
-            dated: TimelinePoint[];
-            undated: TimelinePoint[];
-            xDomain: [Date, Date] | null;
-            ticks: Date[];
-        } = { dated: [], undated: [], xDomain: null, ticks: [] };
+  return useMemo(() => {
+    const empty: {
+      dated: TimelinePoint[];
+      undated: TimelinePoint[];
+      xDomain: [Date, Date] | null;
+      ticks: Date[];
+    } = { dated: [], undated: [], xDomain: null, ticks: [] };
 
-        // Guard: invalid dimensions or empty results
-        if (width <= 0 || height <= 0 || results.length === 0) {
-            return empty;
-        }
+    // Guard: invalid dimensions or empty results
+    if (width <= 0 || height <= 0 || results.length === 0) {
+      return empty;
+    }
 
-        // 1. Parse dates and enrich each result
-        const parsed: ParsedResult[] = results.map((result) => ({
-            result,
-            id: getResultId(result),
-            name: getResultName(result),
-            score: getScore(result),
-            category: extractClusterKey(result, colorBy),
-            date: tryParseDate(getResultDate(result, dateField)),
-        }));
+    // 1. Parse dates and enrich each result
+    const parsed: ParsedResult[] = results.map((result) => ({
+      result,
+      id: getResultId(result),
+      name: getResultName(result),
+      score: getScore(result),
+      category: extractClusterKey(result, colorBy),
+      date: tryParseDate(getResultDate(result, dateField)),
+    }));
 
-        // 2. Separate into dated and undated
-        const datedParsed: ParsedResult[] = [];
-        const undatedParsed: ParsedResult[] = [];
+    // 2. Separate into dated and undated
+    const datedParsed: ParsedResult[] = [];
+    const undatedParsed: ParsedResult[] = [];
 
-        for (const item of parsed) {
-            if (item.date !== null) {
-                datedParsed.push(item);
-            } else {
-                undatedParsed.push(item);
-            }
-        }
+    for (const item of parsed) {
+      if (item.date !== null) {
+        datedParsed.push(item);
+      } else {
+        undatedParsed.push(item);
+      }
+    }
 
-        // 3. If no dated results, return all as undated with evenly distributed x
-        if (datedParsed.length === 0) {
-            const undated: TimelinePoint[] = undatedParsed.map((item, index) => ({
-                id: item.id,
-                date: null,
-                x:
-                    undatedParsed.length > 1
-                        ? MARGIN.left +
-                          (index / (undatedParsed.length - 1)) *
-                              (width - MARGIN.left - MARGIN.right)
-                        : width / 2,
-                y: height - 15,
-                radius: 5 + item.score * 18,
-                score: item.score,
-                name: item.name,
-                category: item.category,
-                result: item.result,
-            }));
+    // 3. If no dated results, return all as undated with evenly distributed x
+    if (datedParsed.length === 0) {
+      const undated: TimelinePoint[] = undatedParsed.map((item, index) => ({
+        id: item.id,
+        date: null,
+        x:
+          undatedParsed.length > 1
+            ? MARGIN.left +
+              (index / (undatedParsed.length - 1)) *
+                (width - MARGIN.left - MARGIN.right)
+            : width / 2,
+        y: height - 15,
+        radius: 5 + item.score * 18,
+        score: item.score,
+        name: item.name,
+        category: item.category,
+        result: item.result,
+      }));
 
-            return { dated: [], undated, xDomain: null, ticks: [] };
-        }
+      return { dated: [], undated, xDomain: null, ticks: [] };
+    }
 
-        // 4. Compute x domain from dated results
-        const [minDate, maxDate] = extent(datedParsed, (d) => d.date as Date) as [
-            Date,
-            Date,
-        ];
-        const xDomain: [Date, Date] = [minDate, maxDate];
+    // 4. Compute x domain from dated results
+    const [minDate, maxDate] = extent(datedParsed, (d) => d.date as Date) as [
+      Date,
+      Date,
+    ];
+    const xDomain: [Date, Date] = [minDate, maxDate];
 
-        // 5. Create scales
-        const xScale = scaleTime()
-            .domain(xDomain)
-            .range([MARGIN.left, width - MARGIN.right]);
+    // 5. Create scales
+    const xScale = scaleTime()
+      .domain(xDomain)
+      .range([MARGIN.left, width - MARGIN.right]);
 
-        const yScale = scaleLinear()
-            .domain([0, 1])
-            .range([height - MARGIN.bottom - UNDATED_STRIP_HEIGHT, MARGIN.top]);
+    const yScale = scaleLinear()
+      .domain([0, 1])
+      .range([height - MARGIN.bottom - UNDATED_STRIP_HEIGHT, MARGIN.top]);
 
-        // 6. Map dated results to TimelinePoint[]
-        const dated: TimelinePoint[] = datedParsed.map((item) => ({
-            id: item.id,
-            date: item.date,
-            x: xScale(item.date as Date),
-            y: yScale(item.score),
-            radius: 5 + item.score * 18,
-            score: item.score,
-            name: item.name,
-            category: item.category,
-            result: item.result,
-        }));
+    // 6. Map dated results to TimelinePoint[]
+    const dated: TimelinePoint[] = datedParsed.map((item) => ({
+      id: item.id,
+      date: item.date,
+      x: xScale(item.date as Date),
+      y: yScale(item.score),
+      radius: 5 + item.score * 18,
+      score: item.score,
+      name: item.name,
+      category: item.category,
+      result: item.result,
+    }));
 
-        // 7. Map undated results: spread evenly along x, pinned to bottom strip
-        const undated: TimelinePoint[] = undatedParsed.map((item, index) => ({
-            id: item.id,
-            date: null,
-            x:
-                undatedParsed.length > 1
-                    ? MARGIN.left +
-                      (index / (undatedParsed.length - 1)) *
-                          (width - MARGIN.left - MARGIN.right)
-                    : width / 2,
-            y: height - 15,
-            radius: 5 + item.score * 18,
-            score: item.score,
-            name: item.name,
-            category: item.category,
-            result: item.result,
-        }));
+    // 7. Map undated results: spread evenly along x, pinned to bottom strip
+    const undated: TimelinePoint[] = undatedParsed.map((item, index) => ({
+      id: item.id,
+      date: null,
+      x:
+        undatedParsed.length > 1
+          ? MARGIN.left +
+            (index / (undatedParsed.length - 1)) *
+              (width - MARGIN.left - MARGIN.right)
+          : width / 2,
+      y: height - 15,
+      radius: 5 + item.score * 18,
+      score: item.score,
+      name: item.name,
+      category: item.category,
+      result: item.result,
+    }));
 
-        // 8. Generate tick marks for the x axis
-        const ticks: Date[] = xScale.ticks(TICK_COUNT);
+    // 8. Generate tick marks for the x axis
+    const ticks: Date[] = xScale.ticks(TICK_COUNT);
 
-        return { dated, undated, xDomain, ticks };
-    }, [results, dateField, colorBy, width, height]);
+    return { dated, undated, xDomain, ticks };
+  }, [results, dateField, colorBy, width, height]);
 }
 
 export default useTimelineLayout;

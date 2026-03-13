@@ -33,7 +33,11 @@ class MockBroadcastChannel {
   postMessage(data: unknown): void {
     // Deliver to all OTHER instances with same name (simulates cross-tab)
     for (const instance of MockBroadcastChannel.instances) {
-      if (instance !== this && instance.name === this.name && !instance.closed) {
+      if (
+        instance !== this &&
+        instance.name === this.name &&
+        !instance.closed
+      ) {
         if (instance.onmessage) {
           instance.onmessage(new MessageEvent("message", { data }));
         }
@@ -59,17 +63,20 @@ class MockBroadcastChannel {
 // ---------------------------------------------------------------------------
 
 describe("SprkChatBridge", () => {
-  const originalBroadcastChannel = (globalThis as Record<string, unknown>).BroadcastChannel;
+  const originalBroadcastChannel = (globalThis as Record<string, unknown>)
+    .BroadcastChannel;
 
   beforeEach(() => {
     MockBroadcastChannel.reset();
-    (globalThis as Record<string, unknown>).BroadcastChannel = MockBroadcastChannel;
+    (globalThis as Record<string, unknown>).BroadcastChannel =
+      MockBroadcastChannel;
   });
 
   afterEach(() => {
     MockBroadcastChannel.reset();
     if (originalBroadcastChannel) {
-      (globalThis as Record<string, unknown>).BroadcastChannel = originalBroadcastChannel;
+      (globalThis as Record<string, unknown>).BroadcastChannel =
+        originalBroadcastChannel;
     } else {
       delete (globalThis as Record<string, unknown>).BroadcastChannel;
     }
@@ -588,7 +595,7 @@ describe("SprkChatBridge", () => {
 
       expect(removeEventListenerSpy).toHaveBeenCalledWith(
         "message",
-        expect.any(Function)
+        expect.any(Function),
       );
 
       removeEventListenerSpy.mockRestore();

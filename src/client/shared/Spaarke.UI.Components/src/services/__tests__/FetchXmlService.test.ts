@@ -17,9 +17,15 @@ const createMockXrm = (overrides?: Partial<XrmContext>): XrmContext => ({
       "@Microsoft.Dynamics.CRM.morerecords": false,
     }),
     retrieveRecord: jest.fn().mockResolvedValue({}),
-    createRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    updateRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    deleteRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    createRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    updateRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    deleteRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
   },
   ...overrides,
 });
@@ -55,10 +61,10 @@ describe("FetchXmlService", () => {
         "@Microsoft.Dynamics.CRM.morerecords": false,
       });
 
-      const result = await service.executeFetchXml<{ accountid: string; name: string }>(
-        "account",
-        sampleFetchXml
-      );
+      const result = await service.executeFetchXml<{
+        accountid: string;
+        name: string;
+      }>("account", sampleFetchXml);
 
       expect(result.entities).toHaveLength(2);
       expect(result.entities[0].name).toBe("Account 1");
@@ -76,8 +82,11 @@ describe("FetchXmlService", () => {
         pageNumber: 2,
       });
 
-      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
-      const fetchXmlParam = decodeURIComponent(callArgs[1].replace("?fetchXml=", ""));
+      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock)
+        .mock.calls[0];
+      const fetchXmlParam = decodeURIComponent(
+        callArgs[1].replace("?fetchXml=", ""),
+      );
 
       expect(fetchXmlParam).toContain('count="25"');
       expect(fetchXmlParam).toContain('page="2"');
@@ -95,8 +104,11 @@ describe("FetchXmlService", () => {
         pagingCookie,
       });
 
-      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
-      const fetchXmlParam = decodeURIComponent(callArgs[1].replace("?fetchXml=", ""));
+      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock)
+        .mock.calls[0];
+      const fetchXmlParam = decodeURIComponent(
+        callArgs[1].replace("?fetchXml=", ""),
+      );
 
       expect(fetchXmlParam).toContain(`paging-cookie="${pagingCookie}"`);
     });
@@ -112,8 +124,11 @@ describe("FetchXmlService", () => {
         returnTotalRecordCount: true,
       });
 
-      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
-      const fetchXmlParam = decodeURIComponent(callArgs[1].replace("?fetchXml=", ""));
+      const callArgs = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock)
+        .mock.calls[0];
+      const fetchXmlParam = decodeURIComponent(
+        callArgs[1].replace("?fetchXml=", ""),
+      );
 
       expect(fetchXmlParam).toContain('returntotalrecordcount="true"');
       expect(result.totalRecordCount).toBe(100);
@@ -139,10 +154,12 @@ describe("FetchXmlService", () => {
 
     it("should handle API errors gracefully", async () => {
       const error = new Error("API Error");
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValue(error);
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValue(
+        error,
+      );
 
       await expect(
-        service.executeFetchXml("account", sampleFetchXml)
+        service.executeFetchXml("account", sampleFetchXml),
       ).rejects.toThrow("API Error");
     });
   });
@@ -234,9 +251,7 @@ describe("FetchXmlService", () => {
     it("should add filter to FetchXML without existing filter", () => {
       const filterGroup: IFilterGroup = {
         type: "and",
-        conditions: [
-          { attribute: "statecode", operator: "eq", value: 0 },
-        ],
+        conditions: [{ attribute: "statecode", operator: "eq", value: 0 }],
       };
 
       const result = service.mergeFetchXmlFilter(baseFetchXml, filterGroup);
@@ -261,12 +276,13 @@ describe("FetchXmlService", () => {
 
       const filterGroup: IFilterGroup = {
         type: "and",
-        conditions: [
-          { attribute: "statecode", operator: "eq", value: 0 },
-        ],
+        conditions: [{ attribute: "statecode", operator: "eq", value: 0 }],
       };
 
-      const result = service.mergeFetchXmlFilter(fetchXmlWithFilter, filterGroup);
+      const result = service.mergeFetchXmlFilter(
+        fetchXmlWithFilter,
+        filterGroup,
+      );
 
       // Should have both conditions wrapped in AND
       expect(result).toContain('attribute="name"');
@@ -290,9 +306,7 @@ describe("FetchXmlService", () => {
     it("should handle nested filter groups", () => {
       const filterGroup: IFilterGroup = {
         type: "and",
-        conditions: [
-          { attribute: "statecode", operator: "eq", value: 0 },
-        ],
+        conditions: [{ attribute: "statecode", operator: "eq", value: 0 }],
         filters: [
           {
             type: "or",
@@ -356,7 +370,8 @@ describe("FetchXmlService", () => {
 
   describe("getEntityFromFetchXml", () => {
     it("should extract entity name from FetchXML", () => {
-      const fetchXml = '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>';
+      const fetchXml =
+        '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>';
 
       const entity = service.getEntityFromFetchXml(fetchXml);
 

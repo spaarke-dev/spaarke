@@ -12,10 +12,7 @@ import {
   tokens,
   mergeClasses,
 } from "@fluentui/react-components";
-import {
-  ArrowUpRegular,
-  ArrowDownRegular,
-} from "@fluentui/react-icons";
+import { ArrowUpRegular, ArrowDownRegular } from "@fluentui/react-icons";
 import type { DrillInteraction } from "../../types";
 
 export type TrendDirection = "up" | "down" | "neutral";
@@ -209,18 +206,20 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
       className={mergeClasses(
         styles.card,
         isInteractive && styles.cardInteractive,
-        compact && styles.cardCompact
+        compact && styles.cardCompact,
       )}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
       role={isInteractive ? "button" : undefined}
-      aria-label={isInteractive ? `${label}: ${value}. Click to view details.` : undefined}
+      aria-label={
+        isInteractive ? `${label}: ${value}. Click to view details.` : undefined
+      }
     >
       <div
         className={mergeClasses(
           styles.content,
-          compact && styles.contentCompact
+          compact && styles.contentCompact,
         )}
       >
         <Text
@@ -232,7 +231,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
           <Text
             className={mergeClasses(
               styles.value,
-              compact && styles.valueCompact
+              compact && styles.valueCompact,
             )}
           >
             {formatValue(value)}

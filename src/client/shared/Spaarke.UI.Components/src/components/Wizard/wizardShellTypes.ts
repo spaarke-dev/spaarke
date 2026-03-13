@@ -8,14 +8,14 @@
  * wizard dialog — the domain-specific content is injected via renderContent
  * callbacks and IWizardStepConfig arrays.
  */
-import type * as React from 'react';
+import type * as React from "react";
 
 // ---------------------------------------------------------------------------
 // Step status
 // ---------------------------------------------------------------------------
 
 /** Visual status of a wizard step in the sidebar stepper. */
-export type WizardStepStatus = 'pending' | 'active' | 'completed';
+export type WizardStepStatus = "pending" | "active" | "completed";
 
 // ---------------------------------------------------------------------------
 // Step descriptor (runtime state)
@@ -47,11 +47,11 @@ export interface IWizardShellStep {
  * reducer, not here.
  */
 export type WizardShellAction =
-  | { type: 'NEXT_STEP' }
-  | { type: 'PREV_STEP' }
-  | { type: 'GO_TO_STEP'; stepIndex: number }
+  | { type: "NEXT_STEP" }
+  | { type: "PREV_STEP" }
+  | { type: "GO_TO_STEP"; stepIndex: number }
   | {
-      type: 'ADD_DYNAMIC_STEP';
+      type: "ADD_DYNAMIC_STEP";
       /**
        * Configuration for the step to insert. Only `id` and `label` are used
        * by the reducer — the rest of the config is managed by the consumer.
@@ -65,7 +65,7 @@ export type WizardShellAction =
       canonicalOrder?: string[];
     }
   | {
-      type: 'REMOVE_DYNAMIC_STEP';
+      type: "REMOVE_DYNAMIC_STEP";
       /** The `id` of the dynamic step to remove. */
       stepId: string;
     };

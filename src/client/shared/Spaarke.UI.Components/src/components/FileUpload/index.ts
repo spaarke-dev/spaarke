@@ -1,6 +1,6 @@
 // FileUpload - Generic drag-and-drop file upload components
-export { FileUploadZone } from './FileUploadZone';
-export { UploadedFileList } from './UploadedFileList';
+export { FileUploadZone } from "./FileUploadZone";
+export { UploadedFileList } from "./UploadedFileList";
 export type {
   IFileUploadZoneProps,
   IUploadedFileListProps,
@@ -9,4 +9,4 @@ export type {
   IFileValidationConfig,
   UploadedFileType,
   AcceptedMimeType,
-} from './fileUploadTypes';
+} from "./fileUploadTypes";

@@ -22,16 +22,16 @@ import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 // ---------------------------------------------------------------------------
 
 export interface PanelSplitterProps {
-    /** Mouse down handler — start drag operation */
-    onMouseDown: (e: React.MouseEvent) => void;
-    /** Key down handler — keyboard resize */
-    onKeyDown: (e: React.KeyboardEvent) => void;
-    /** Double-click handler — reset to default split */
-    onDoubleClick: () => void;
-    /** Whether the splitter is actively being dragged */
-    isDragging: boolean;
-    /** Current split ratio (0-1) for ARIA aria-valuenow (left panel proportion) */
-    currentRatio: number;
+  /** Mouse down handler — start drag operation */
+  onMouseDown: (e: React.MouseEvent) => void;
+  /** Key down handler — keyboard resize */
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  /** Double-click handler — reset to default split */
+  onDoubleClick: () => void;
+  /** Whether the splitter is actively being dragged */
+  isDragging: boolean;
+  /** Current split ratio (0-1) for ARIA aria-valuenow (left panel proportion) */
+  currentRatio: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,48 +39,48 @@ export interface PanelSplitterProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-    splitter: {
-        width: "4px",
-        cursor: "col-resize",
-        backgroundColor: tokens.colorNeutralStroke1,
-        transitionProperty: "background-color",
-        transitionDuration: "150ms",
-        transitionTimingFunction: "ease",
-        position: "relative",
-        flexShrink: 0,
-        // Focus ring via outline
-        outlineStyle: "none",
-        ":hover": {
-            backgroundColor: tokens.colorBrandBackground,
-        },
-        ":focus-visible": {
-            backgroundColor: tokens.colorBrandBackground,
-            outlineWidth: "2px",
-            outlineStyle: "solid",
-            outlineColor: tokens.colorStrokeFocus2,
-            outlineOffset: "-2px",
-        },
+  splitter: {
+    width: "4px",
+    cursor: "col-resize",
+    backgroundColor: tokens.colorNeutralStroke1,
+    transitionProperty: "background-color",
+    transitionDuration: "150ms",
+    transitionTimingFunction: "ease",
+    position: "relative",
+    flexShrink: 0,
+    // Focus ring via outline
+    outlineStyle: "none",
+    ":hover": {
+      backgroundColor: tokens.colorBrandBackground,
     },
-    splitterDragging: {
-        backgroundColor: tokens.colorBrandBackgroundPressed,
+    ":focus-visible": {
+      backgroundColor: tokens.colorBrandBackground,
+      outlineWidth: "2px",
+      outlineStyle: "solid",
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: "-2px",
     },
-    // Visual grip dots indicator (centered in the splitter)
-    grip: {
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "3px",
-        pointerEvents: "none",
-    },
-    gripDot: {
-        width: "3px",
-        height: "3px",
-        borderRadius: tokens.borderRadiusCircular,
-        backgroundColor: tokens.colorNeutralForeground3,
-    },
+  },
+  splitterDragging: {
+    backgroundColor: tokens.colorBrandBackgroundPressed,
+  },
+  // Visual grip dots indicator (centered in the splitter)
+  grip: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+    pointerEvents: "none",
+  },
+  gripDot: {
+    width: "3px",
+    height: "3px",
+    borderRadius: tokens.borderRadiusCircular,
+    backgroundColor: tokens.colorNeutralForeground3,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -88,40 +88,40 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export function PanelSplitter({
-    onMouseDown,
-    onKeyDown,
-    onDoubleClick,
-    isDragging,
-    currentRatio,
+  onMouseDown,
+  onKeyDown,
+  onDoubleClick,
+  isDragging,
+  currentRatio,
 }: PanelSplitterProps): JSX.Element {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    // Convert ratio (0-1) to integer percentage for ARIA
-    const valueNow = Math.round(currentRatio * 100);
+  // Convert ratio (0-1) to integer percentage for ARIA
+  const valueNow = Math.round(currentRatio * 100);
 
-    return (
-        <div
-            className={mergeClasses(
-                styles.splitter,
-                isDragging && styles.splitterDragging,
-            )}
-            role="separator"
-            aria-orientation="vertical"
-            aria-valuenow={valueNow}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label="Resize panels"
-            tabIndex={0}
-            onMouseDown={onMouseDown}
-            onKeyDown={onKeyDown}
-            onDoubleClick={onDoubleClick}
-        >
-            {/* Visual grip indicator — three dots */}
-            <div className={styles.grip}>
-                <div className={styles.gripDot} />
-                <div className={styles.gripDot} />
-                <div className={styles.gripDot} />
-            </div>
-        </div>
-    );
+  return (
+    <div
+      className={mergeClasses(
+        styles.splitter,
+        isDragging && styles.splitterDragging,
+      )}
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuenow={valueNow}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label="Resize panels"
+      tabIndex={0}
+      onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
+      onDoubleClick={onDoubleClick}
+    >
+      {/* Visual grip indicator — three dots */}
+      <div className={styles.grip}>
+        <div className={styles.gripDot} />
+        <div className={styles.gripDot} />
+        <div className={styles.gripDot} />
+      </div>
+    </div>
+  );
 }

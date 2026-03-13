@@ -46,7 +46,10 @@ export function formatDecimal(value: number): string {
  */
 export function formatCurrency(value: number): string {
   const abs = Math.abs(value);
-  const formatted = abs.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const formatted = abs.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
   return value < 0 ? `-$${formatted}` : `$${formatted}`;
 }
 
@@ -71,7 +74,7 @@ export function formatSignedPercentage(value: number): string {
 export function formatValue(
   value: number | null | undefined,
   format: ValueFormatType,
-  nullDisplay: string = "—"
+  nullDisplay: string = "—",
 ): string {
   if (value === null || value === undefined) return nullDisplay;
 

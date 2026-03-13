@@ -34,38 +34,38 @@ export type ITokenProvider = () => Promise<string>;
  * - ODataDataverseClient: direct OData fetch calls with token auth (Code Pages)
  */
 export interface IDataverseClient {
-    /**
-     * Create a record in Dataverse.
-     *
-     * @param entityLogicalName - Entity logical name (e.g., "sprk_document")
-     * @param data - Record payload object
-     * @returns Created record reference with id
-     */
-    createRecord(
-        entityLogicalName: string,
-        data: Record<string, unknown>
-    ): Promise<DataverseRecordRef>;
+  /**
+   * Create a record in Dataverse.
+   *
+   * @param entityLogicalName - Entity logical name (e.g., "sprk_document")
+   * @param data - Record payload object
+   * @returns Created record reference with id
+   */
+  createRecord(
+    entityLogicalName: string,
+    data: Record<string, unknown>,
+  ): Promise<DataverseRecordRef>;
 
-    /**
-     * Update a record in Dataverse.
-     *
-     * @param entityLogicalName - Entity logical name
-     * @param id - Record GUID
-     * @param data - Fields to update
-     */
-    updateRecord(
-        entityLogicalName: string,
-        id: string,
-        data: Record<string, unknown>
-    ): Promise<void>;
+  /**
+   * Update a record in Dataverse.
+   *
+   * @param entityLogicalName - Entity logical name
+   * @param id - Record GUID
+   * @param data - Fields to update
+   */
+  updateRecord(
+    entityLogicalName: string,
+    id: string,
+    data: Record<string, unknown>,
+  ): Promise<void>;
 }
 
 /**
  * Reference to a Dataverse record (returned from create operations).
  */
 export interface DataverseRecordRef {
-    /** Record GUID */
-    id: string;
+  /** Record GUID */
+  id: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,46 +82,46 @@ export interface DataverseRecordRef {
  * - webUrl    -> sprk_filepath / sprk_sharepointurl
  */
 export interface SpeFileMetadata {
-    /** Graph API Item ID */
-    id: string;
+  /** Graph API Item ID */
+  id: string;
 
-    /** File name */
-    name: string;
+  /** File name */
+  name: string;
 
-    /** Parent folder ID (optional) */
-    parentId?: string;
+  /** Parent folder ID (optional) */
+  parentId?: string;
 
-    /** File size in bytes */
-    size: number;
+  /** File size in bytes */
+  size: number;
 
-    /** Created date/time (ISO 8601) */
-    createdDateTime: string;
+  /** Created date/time (ISO 8601) */
+  createdDateTime: string;
 
-    /** Last modified date/time (ISO 8601) */
-    lastModifiedDateTime: string;
+  /** Last modified date/time (ISO 8601) */
+  lastModifiedDateTime: string;
 
-    /** Version identifier (ETag) */
-    eTag?: string;
+  /** Version identifier (ETag) */
+  eTag?: string;
 
-    /** Is this a folder */
-    isFolder: boolean;
+  /** Is this a folder */
+  isFolder: boolean;
 
-    /** SharePoint web URL (may not be available in all responses) */
-    webUrl?: string;
+  /** SharePoint web URL (may not be available in all responses) */
+  webUrl?: string;
 
-    // Convenience aliases (populated by FileUploadService after upload)
+  // Convenience aliases (populated by FileUploadService after upload)
 
-    /** Alias for id */
-    driveItemId?: string;
+  /** Alias for id */
+  driveItemId?: string;
 
-    /** Alias for name */
-    fileName?: string;
+  /** Alias for name */
+  fileName?: string;
 
-    /** Alias for webUrl */
-    sharePointUrl?: string;
+  /** Alias for webUrl */
+  sharePointUrl?: string;
 
-    /** Alias for size */
-    fileSize?: number;
+  /** Alias for size */
+  fileSize?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,9 +132,9 @@ export interface SpeFileMetadata {
  * Generic service operation result wrapper.
  */
 export interface ServiceResult<T = void> {
-    success: boolean;
-    data?: T;
-    error?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,14 +146,14 @@ export interface ServiceResult<T = void> {
  * API: PUT /api/obo/containers/{containerId}/files/{fileName}
  */
 export interface FileUploadApiRequest {
-    /** File to upload */
-    file: File;
+  /** File to upload */
+  file: File;
 
-    /** Graph API Drive ID / Container ID */
-    driveId: string;
+  /** Graph API Drive ID / Container ID */
+  driveId: string;
 
-    /** File name */
-    fileName: string;
+  /** File name */
+  fileName: string;
 }
 
 /**
@@ -161,11 +161,11 @@ export interface FileUploadApiRequest {
  * API: GET /obo/drives/{driveId}/items/{itemId}/content
  */
 export interface FileDownloadRequest {
-    /** Graph API Drive ID */
-    driveId: string;
+  /** Graph API Drive ID */
+  driveId: string;
 
-    /** Graph API Item ID */
-    itemId: string;
+  /** Graph API Item ID */
+  itemId: string;
 }
 
 /**
@@ -173,11 +173,11 @@ export interface FileDownloadRequest {
  * API: DELETE /obo/drives/{driveId}/items/{itemId}
  */
 export interface FileDeleteRequest {
-    /** Graph API Drive ID */
-    driveId: string;
+  /** Graph API Drive ID */
+  driveId: string;
 
-    /** Graph API Item ID */
-    itemId: string;
+  /** Graph API Item ID */
+  itemId: string;
 }
 
 /**
@@ -185,17 +185,17 @@ export interface FileDeleteRequest {
  * Replace = Delete existing + Upload new.
  */
 export interface FileReplaceRequest {
-    /** New file to upload */
-    file: File;
+  /** New file to upload */
+  file: File;
 
-    /** Graph API Drive ID */
-    driveId: string;
+  /** Graph API Drive ID */
+  driveId: string;
 
-    /** Graph API Item ID of file to replace */
-    itemId: string;
+  /** Graph API Item ID of file to replace */
+  itemId: string;
 
-    /** New file name */
-    fileName: string;
+  /** New file name */
+  fileName: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,14 +206,14 @@ export interface FileReplaceRequest {
  * Request for uploading a single file via FileUploadService.
  */
 export interface FileUploadRequest {
-    /** File to upload */
-    file: File;
+  /** File to upload */
+  file: File;
 
-    /** SPE Container / Drive ID */
-    driveId: string;
+  /** SPE Container / Drive ID */
+  driveId: string;
 
-    /** Optional override for file name */
-    fileName?: string;
+  /** Optional override for file name */
+  fileName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,31 +224,31 @@ export interface FileUploadRequest {
  * Request for uploading multiple files.
  */
 export interface UploadFilesRequest {
-    /** Files to upload */
-    files: File[];
+  /** Files to upload */
+  files: File[];
 
-    /** SharePoint Embedded Container ID (from parent record) */
-    containerId: string;
+  /** SharePoint Embedded Container ID (from parent record) */
+  containerId: string;
 }
 
 /**
  * Progress update for multi-file upload.
  */
 export interface UploadProgress {
-    /** 1-based index of current file */
-    current: number;
+  /** 1-based index of current file */
+  current: number;
 
-    /** Total number of files */
-    total: number;
+  /** Total number of files */
+  total: number;
 
-    /** Name of file currently being processed */
-    currentFileName: string;
+  /** Name of file currently being processed */
+  currentFileName: string;
 
-    /** Current status */
-    status: 'uploading' | 'complete' | 'failed';
+  /** Current status */
+  status: "uploading" | "complete" | "failed";
 
-    /** Error message (when status is 'failed') */
-    error?: string;
+  /** Error message (when status is 'failed') */
+  error?: string;
 }
 
 /**
@@ -258,23 +258,23 @@ export interface UploadProgress {
  * Caller is responsible for creating Dataverse records via DocumentRecordService.
  */
 export interface UploadFilesResult {
-    /** Overall success flag (true if at least one file uploaded) */
-    success: boolean;
+  /** Overall success flag (true if at least one file uploaded) */
+  success: boolean;
 
-    /** Total files attempted */
-    totalFiles: number;
+  /** Total files attempted */
+  totalFiles: number;
 
-    /** Number of successful uploads */
-    successCount: number;
+  /** Number of successful uploads */
+  successCount: number;
 
-    /** Number of failed uploads */
-    failureCount: number;
+  /** Number of failed uploads */
+  failureCount: number;
 
-    /** SPE metadata for successfully uploaded files */
-    uploadedFiles: SpeFileMetadata[];
+  /** SPE metadata for successfully uploaded files */
+  uploadedFiles: SpeFileMetadata[];
 
-    /** Errors for failed uploads */
-    errors: { fileName: string; error: string }[];
+  /** Errors for failed uploads */
+  errors: { fileName: string; error: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -285,54 +285,54 @@ export interface UploadFilesResult {
  * Parent entity context for document creation.
  */
 export interface ParentContext {
-    /** Parent entity logical name (e.g., "sprk_matter") */
-    parentEntityName: string;
+  /** Parent entity logical name (e.g., "sprk_matter") */
+  parentEntityName: string;
 
-    /** Parent record GUID */
-    parentRecordId: string;
+  /** Parent record GUID */
+  parentRecordId: string;
 
-    /** SharePoint Embedded Container ID */
-    containerId: string;
+  /** SharePoint Embedded Container ID */
+  containerId: string;
 
-    /** Parent record display name (e.g., "MAT-2024-001") */
-    parentDisplayName: string;
+  /** Parent record display name (e.g., "MAT-2024-001") */
+  parentDisplayName: string;
 }
 
 /**
  * Form data collected from user input.
  */
 export interface DocumentFormData {
-    /** Document name/title */
-    documentName: string;
+  /** Document name/title */
+  documentName: string;
 
-    /** Optional document description */
-    description?: string;
+  /** Optional document description */
+  description?: string;
 }
 
 /**
  * Result of creating a single Document record in Dataverse.
  */
 export interface CreateResult {
-    /** Success flag */
-    success: boolean;
+  /** Success flag */
+  success: boolean;
 
-    /** File name that was processed */
-    fileName: string;
+  /** File name that was processed */
+  fileName: string;
 
-    /** Created record ID (if successful) */
-    recordId?: string;
+  /** Created record ID (if successful) */
+  recordId?: string;
 
-    /** Document ID (Dataverse GUID, if successful) */
-    documentId?: string;
+  /** Document ID (Dataverse GUID, if successful) */
+  documentId?: string;
 
-    /** SharePoint Embedded drive ID (if successful) */
-    driveId?: string;
+  /** SharePoint Embedded drive ID (if successful) */
+  driveId?: string;
 
-    /** SharePoint Embedded item ID (if successful) */
-    itemId?: string;
+  /** SharePoint Embedded item ID (if successful) */
+  itemId?: string;
 
-    /** Error message (if failed) */
-    error?: string;
+  /** Error message (if failed) */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,30 +343,30 @@ export interface CreateResult {
  * Configuration for a parent entity that supports document uploads.
  */
 export interface EntityDocumentConfig {
-    /** Entity logical name (e.g., "sprk_matter") */
-    entityName: string;
+  /** Entity logical name (e.g., "sprk_matter") */
+  entityName: string;
 
-    /** Lookup field name on Document entity (e.g., "sprk_matter") */
-    lookupFieldName: string;
+  /** Lookup field name on Document entity (e.g., "sprk_matter") */
+  lookupFieldName: string;
 
-    /** Relationship schema name for metadata queries (e.g., "sprk_matter_document") */
-    relationshipSchemaName: string;
+  /** Relationship schema name for metadata queries (e.g., "sprk_matter_document") */
+  relationshipSchemaName: string;
 
-    /**
-     * Hardcoded navigation property name for @odata.bind fallback.
-     * Used when NavMap API is unavailable. CASE-SENSITIVE.
-     * Example: "sprk_Matter" (capital M)
-     */
-    navigationPropertyName?: string;
+  /**
+   * Hardcoded navigation property name for @odata.bind fallback.
+   * Used when NavMap API is unavailable. CASE-SENSITIVE.
+   * Example: "sprk_Matter" (capital M)
+   */
+  navigationPropertyName?: string;
 
-    /** Container ID field name on parent entity */
-    containerIdField: string;
+  /** Container ID field name on parent entity */
+  containerIdField: string;
 
-    /** Display name field on parent entity */
-    displayNameField: string;
+  /** Display name field on parent entity */
+  displayNameField: string;
 
-    /** Entity set name for OData (e.g., "sprk_matters") */
-    entitySetName: string;
+  /** Entity set name for OData (e.g., "sprk_matters") */
+  entitySetName: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,29 +378,29 @@ export interface EntityDocumentConfig {
  * Contains the case-sensitive navigation property name required for @odata.bind.
  */
 export interface LookupNavigationResponse {
-    /** Child entity logical name */
-    childEntity: string;
+  /** Child entity logical name */
+  childEntity: string;
 
-    /** Relationship schema name */
-    relationship: string;
+  /** Relationship schema name */
+  relationship: string;
 
-    /** Lookup attribute logical name (lowercase) */
-    logicalName: string;
+  /** Lookup attribute logical name (lowercase) */
+  logicalName: string;
 
-    /** Lookup attribute schema name */
-    schemaName: string;
+  /** Lookup attribute schema name */
+  schemaName: string;
 
-    /**
-     * Navigation property name for @odata.bind (CASE-SENSITIVE).
-     * Example: "sprk_Matter" (capital M)
-     */
-    navigationPropertyName: string;
+  /**
+   * Navigation property name for @odata.bind (CASE-SENSITIVE).
+   * Example: "sprk_Matter" (capital M)
+   */
+  navigationPropertyName: string;
 
-    /** Target entity logical name (parent) */
-    targetEntity: string;
+  /** Target entity logical name (parent) */
+  targetEntity: string;
 
-    /** Data source: "dataverse", "cache", or "hardcoded" */
-    source: string;
+  /** Data source: "dataverse", "cache", or "hardcoded" */
+  source: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -412,18 +412,22 @@ export interface LookupNavigationResponse {
  * Consumers must provide an implementation (e.g., wrapping console, PCF logger, etc.).
  */
 export interface ILogger {
-    info(source: string, message: string, data?: unknown): void;
-    warn(source: string, message: string, data?: unknown): void;
-    error(source: string, message: string, error?: unknown): void;
-    debug(source: string, message: string, data?: unknown): void;
+  info(source: string, message: string, data?: unknown): void;
+  warn(source: string, message: string, data?: unknown): void;
+  error(source: string, message: string, error?: unknown): void;
+  debug(source: string, message: string, data?: unknown): void;
 }
 
 /**
  * Default console logger implementation.
  */
 export const consoleLogger: ILogger = {
-    info: (source, message, data) => console.log(`[${source}] ${message}`, data ?? ''),
-    warn: (source, message, data) => console.warn(`[${source}] ${message}`, data ?? ''),
-    error: (source, message, error) => console.error(`[${source}] ${message}`, error ?? ''),
-    debug: (source, message, data) => console.debug(`[${source}] ${message}`, data ?? ''),
+  info: (source, message, data) =>
+    console.log(`[${source}] ${message}`, data ?? ""),
+  warn: (source, message, data) =>
+    console.warn(`[${source}] ${message}`, data ?? ""),
+  error: (source, message, error) =>
+    console.error(`[${source}] ${message}`, error ?? ""),
+  debug: (source, message, data) =>
+    console.debug(`[${source}] ${message}`, data ?? ""),
 };

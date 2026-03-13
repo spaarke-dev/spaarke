@@ -7,12 +7,20 @@ import { ViewMode, ScrollBehavior } from "./DatasetTypes";
 /**
  * Custom command action types
  */
-export type CustomCommandActionType = "customapi" | "action" | "function" | "workflow";
+export type CustomCommandActionType =
+  | "customapi"
+  | "action"
+  | "function"
+  | "workflow";
 
 /**
  * Custom command parameter value (supports token interpolation)
  */
-export type CommandParameterValue = string | number | boolean | Record<string, any>;
+export type CommandParameterValue =
+  | string
+  | number
+  | boolean
+  | Record<string, any>;
 
 /**
  * Custom command configuration from JSON
@@ -60,6 +68,8 @@ export interface IConfigurationSchema {
 /**
  * Resolved configuration (after merging entity config with defaults)
  */
-export interface IResolvedConfiguration extends Required<Omit<IEntityConfiguration, "customCommands">> {
+export interface IResolvedConfiguration extends Required<
+  Omit<IEntityConfiguration, "customCommands">
+> {
   customCommands: Record<string, ICustomCommandConfiguration>;
 }

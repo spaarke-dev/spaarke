@@ -19,54 +19,79 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
-import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/react-components";
+import {
+  FluentProvider,
+  webLightTheme,
+  webDarkTheme,
+  Theme,
+} from "@fluentui/react-components";
 import { PlaybookBuilderHost as PlaybookBuilderHostApp } from "./PlaybookBuilderHost";
-import { syncCanvasToNodes, CanvasNode, CanvasEdge } from "./services/playbookNodeSync";
+import {
+  syncCanvasToNodes,
+  CanvasNode,
+  CanvasEdge,
+} from "./services/playbookNodeSync";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = 'spaarke-theme';
-type ThemePreference = 'auto' | 'light' | 'dark';
+const STORAGE_KEY = "spaarke-theme";
+type ThemePreference = "auto" | "light" | "dark";
 
 function getUserThemePreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
+    if (stored === "light" || stored === "dark" || stored === "auto") {
       return stored;
     }
     try {
       const parentStored = window.parent?.localStorage?.getItem(STORAGE_KEY);
-      if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
+      if (
+        parentStored === "light" ||
+        parentStored === "dark" ||
+        parentStored === "auto"
+      ) {
         return parentStored;
       }
-    } catch { /* Cross-origin blocked */ }
-  } catch { /* localStorage not available */ }
-  return 'auto';
+    } catch {
+      /* Cross-origin blocked */
+    }
+  } catch {
+    /* localStorage not available */
+  }
+  return "auto";
 }
 
 function detectDarkModeFromUrl(): boolean | null {
   try {
-    if (window.location.href.includes('themeOption%3Ddarkmode') ||
-        window.location.href.includes('themeOption=darkmode')) {
+    if (
+      window.location.href.includes("themeOption%3Ddarkmode") ||
+      window.location.href.includes("themeOption=darkmode")
+    ) {
       return true;
     }
     try {
       const parentUrl = window.parent?.location?.href;
-      if (parentUrl?.includes('themeOption%3Ddarkmode') ||
-          parentUrl?.includes('themeOption=darkmode')) {
+      if (
+        parentUrl?.includes("themeOption%3Ddarkmode") ||
+        parentUrl?.includes("themeOption=darkmode")
+      ) {
         return true;
       }
-    } catch { /* Cross-origin blocked */ }
-  } catch { /* Error */ }
+    } catch {
+      /* Cross-origin blocked */
+    }
+  } catch {
+    /* Error */
+  }
   return null;
 }
 
 function getResolvedTheme(): Theme {
   const preference = getUserThemePreference();
-  if (preference === 'dark') return webDarkTheme;
-  if (preference === 'light') return webLightTheme;
+  if (preference === "dark") return webDarkTheme;
+  if (preference === "light") return webLightTheme;
 
   // Auto mode - check URL flag first
   const urlDarkMode = detectDarkModeFromUrl();
@@ -75,8 +100,8 @@ function getResolvedTheme(): Theme {
   }
 
   // Fallback to system preference
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
       ? webDarkTheme
       : webLightTheme;
   }
@@ -87,23 +112,24 @@ function getResolvedTheme(): Theme {
 // Logger
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LOG_PREFIX = '[PlaybookBuilderHost]';
+const LOG_PREFIX = "[PlaybookBuilderHost]";
 
 function logInfo(message: string, data?: unknown): void {
-  console.info(`${LOG_PREFIX} ${message}`, data ?? '');
+  console.info(`${LOG_PREFIX} ${message}`, data ?? "");
 }
 
 function logError(message: string, error?: unknown): void {
-  console.error(`${LOG_PREFIX} ${message}`, error ?? '');
+  console.error(`${LOG_PREFIX} ${message}`, error ?? "");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PCF Control Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class PlaybookBuilderHost
-  implements ComponentFramework.StandardControl<IInputs, IOutputs>
-{
+export class PlaybookBuilderHost implements ComponentFramework.StandardControl<
+  IInputs,
+  IOutputs
+> {
   private container: HTMLDivElement | null = null;
   private notifyOutputChanged: () => void;
   private context: ComponentFramework.Context<IInputs> | null = null;
@@ -121,19 +147,19 @@ export class PlaybookBuilderHost
   private fallbackLoadAttempted: boolean = false;
 
   constructor() {
-    logInfo('Constructor called');
+    logInfo("Constructor called");
   }
 
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     _state: ComponentFramework.Dictionary,
-    container: HTMLDivElement
+    container: HTMLDivElement,
   ): void {
     try {
       // Log all bound parameters on init for debugging
       const canvasJsonParam = context.parameters.canvasJson;
-      logInfo('Init - Parameter bindings', {
+      logInfo("Init - Parameter bindings", {
         canvasJson_raw: canvasJsonParam?.raw,
         canvasJson_type: canvasJsonParam?.type,
         canvasJson_formatted: canvasJsonParam?.formatted,
@@ -141,7 +167,7 @@ export class PlaybookBuilderHost
         playbookDescription: context.parameters.playbookDescription?.raw,
         playbookId: context.parameters.playbookId?.raw,
       });
-      logInfo('Init - Setting up container');
+      logInfo("Init - Setting up container");
 
       this.context = context;
       this.notifyOutputChanged = notifyOutputChanged;
@@ -152,10 +178,10 @@ export class PlaybookBuilderHost
 
       // Set container styles
       // Note: Custom Pages provide allocatedHeight/Width, form sections may not
-      this.container.style.display = 'flex';
-      this.container.style.flexDirection = 'column';
-      this.container.style.boxSizing = 'border-box';
-      this.container.style.overflow = 'hidden';
+      this.container.style.display = "flex";
+      this.container.style.flexDirection = "column";
+      this.container.style.boxSizing = "border-box";
+      this.container.style.overflow = "hidden";
 
       // Use allocated dimensions from context (Custom Page provides these)
       this.updateContainerSize(context);
@@ -167,9 +193,9 @@ export class PlaybookBuilderHost
       // Initial render
       this.renderReactTree(context);
 
-      logInfo('Init complete');
+      logInfo("Init complete");
     } catch (error) {
-      logError('Init failed', error);
+      logError("Init failed", error);
       throw error;
     }
   }
@@ -183,7 +209,7 @@ export class PlaybookBuilderHost
 
       this.renderReactTree(context);
     } catch (error) {
-      logError('UpdateView failed', error);
+      logError("UpdateView failed", error);
     }
   }
 
@@ -210,7 +236,7 @@ export class PlaybookBuilderHost
 
   public destroy(): void {
     try {
-      logInfo('Destroy - Unmounting React');
+      logInfo("Destroy - Unmounting React");
 
       this.cleanupThemeListeners();
 
@@ -222,7 +248,7 @@ export class PlaybookBuilderHost
 
       this.context = null;
     } catch (error) {
-      logError('Destroy failed', error);
+      logError("Destroy failed", error);
     }
   }
 
@@ -234,30 +260,32 @@ export class PlaybookBuilderHost
    * Update container size based on allocated dimensions from context.
    * Custom Pages provide allocatedHeight/Width; form sections may not.
    */
-  private updateContainerSize(context: ComponentFramework.Context<IInputs>): void {
+  private updateContainerSize(
+    context: ComponentFramework.Context<IInputs>,
+  ): void {
     if (!this.container) return;
 
     const allocatedWidth = context.mode.allocatedWidth;
     const allocatedHeight = context.mode.allocatedHeight;
 
-    logInfo('Container size update', { allocatedWidth, allocatedHeight });
+    logInfo("Container size update", { allocatedWidth, allocatedHeight });
 
     // Width: use allocated width if available, otherwise 100%
     if (allocatedWidth > 0) {
       this.container.style.width = `${allocatedWidth}px`;
     } else {
-      this.container.style.width = '100%';
+      this.container.style.width = "100%";
     }
 
     // Height: use allocated height if available, otherwise use minHeight fallback
     // Increased height by 30% (800px → 1040px) for better canvas visibility
     if (allocatedHeight > 0) {
       this.container.style.height = `${allocatedHeight}px`;
-      this.container.style.minHeight = ''; // Clear minHeight when explicit height set
+      this.container.style.minHeight = ""; // Clear minHeight when explicit height set
     } else {
       // Fallback for form sections that don't provide allocated height
-      this.container.style.height = '100%';
-      this.container.style.minHeight = '1040px';
+      this.container.style.height = "100%";
+      this.container.style.minHeight = "1040px";
     }
   }
 
@@ -267,17 +295,21 @@ export class PlaybookBuilderHost
    */
   private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
     if (!this.container) {
-      logError('Cannot render - container not initialized');
+      logError("Cannot render - container not initialized");
       return;
     }
 
     try {
       // Try multiple methods to get the record ID
       // Method 1: contextInfo.entityId (standard for model-driven apps)
-      const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string; entityTypeName?: string } }).contextInfo;
+      const contextInfo = (
+        context.mode as unknown as {
+          contextInfo?: { entityId?: string; entityTypeName?: string };
+        }
+      ).contextInfo;
 
       // Method 2: Extract from URL (fallback for model-driven apps)
-      let urlRecordId = '';
+      let urlRecordId = "";
       try {
         const url = window.location.href;
         // Model-driven app URL pattern: ...&id={guid}&...
@@ -285,42 +317,54 @@ export class PlaybookBuilderHost
         if (idMatch) {
           urlRecordId = decodeURIComponent(idMatch[1]);
         }
-      } catch { /* URL parsing error */ }
+      } catch {
+        /* URL parsing error */
+      }
 
       // Method 3: Input parameter (manual binding - fallback)
-      const paramId = context.parameters.playbookId?.raw || '';
+      const paramId = context.parameters.playbookId?.raw || "";
 
       // Use first available ID
       const playbookId = contextInfo?.entityId || urlRecordId || paramId;
 
-      logInfo('Record ID resolution', {
+      logInfo("Record ID resolution", {
         contextInfoEntityId: contextInfo?.entityId,
         urlRecordId,
         paramId,
-        resolved: playbookId
+        resolved: playbookId,
       });
 
       // Get other input parameters
-      const playbookName = context.parameters.playbookName?.raw || '';
-      const playbookDescription = context.parameters.playbookDescription?.raw || '';
-      const boundCanvasJson = context.parameters.canvasJson?.raw || '';
-      const apiBaseUrl = context.parameters.apiBaseUrl?.raw || '';
+      const playbookName = context.parameters.playbookName?.raw || "";
+      const playbookDescription =
+        context.parameters.playbookDescription?.raw || "";
+      const boundCanvasJson = context.parameters.canvasJson?.raw || "";
+      const apiBaseUrl = context.parameters.apiBaseUrl?.raw || "";
 
       // Use bound property if available, otherwise use fallback from WebAPI
-      const canvasJson = boundCanvasJson || this.fallbackCanvasJson || '';
+      const canvasJson = boundCanvasJson || this.fallbackCanvasJson || "";
 
       // If bound property is null and we have a playbook ID, load via WebAPI
-      if (!boundCanvasJson && !this.fallbackCanvasJson && playbookId && !this.fallbackLoadAttempted) {
-        logInfo('Bound canvasJson is null - triggering fallback WebAPI load', { playbookId });
+      if (
+        !boundCanvasJson &&
+        !this.fallbackCanvasJson &&
+        playbookId &&
+        !this.fallbackLoadAttempted
+      ) {
+        logInfo("Bound canvasJson is null - triggering fallback WebAPI load", {
+          playbookId,
+        });
         this.loadCanvasFromDataverse(playbookId);
       }
 
-      logInfo('Rendering with context', {
+      logInfo("Rendering with context", {
         playbookId,
         entityType: contextInfo?.entityTypeName,
         hasCanvasJson: !!canvasJson,
         canvasJsonLength: canvasJson?.length || 0,
-        canvasJsonPreview: canvasJson ? canvasJson.substring(0, 200) : '(empty)',
+        canvasJsonPreview: canvasJson
+          ? canvasJson.substring(0, 200)
+          : "(empty)",
         playbookName,
         hasDescription: !!playbookDescription,
         usingFallback: !boundCanvasJson && !!this.fallbackCanvasJson,
@@ -329,14 +373,22 @@ export class PlaybookBuilderHost
       // React 16 API - ReactDOM.render
       // FluentProvider needs flex styling to pass through the height chain
       // Use a key that changes when fallback canvas loads to force re-initialization
-      const componentKey = this.fallbackCanvasJson ? 'with-fallback' : 'initial';
+      const componentKey = this.fallbackCanvasJson
+        ? "with-fallback"
+        : "initial";
 
       ReactDOM.render(
         React.createElement(
           FluentProvider,
           {
             theme: this.currentTheme,
-            style: { height: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
+            style: {
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+            },
           },
           React.createElement(PlaybookBuilderHostApp, {
             key: componentKey,
@@ -347,12 +399,12 @@ export class PlaybookBuilderHost
             apiBaseUrl,
             onDirtyChange: this.handleDirtyChange.bind(this),
             onSave: this.handleSave.bind(this),
-          })
+          }),
         ),
-        this.container
+        this.container,
       );
     } catch (error) {
-      logError('Render failed', error);
+      logError("Render failed", error);
       throw error;
     }
   }
@@ -368,8 +420,12 @@ export class PlaybookBuilderHost
    * Handle canvas sync from React component.
    * Updates bound field outputs, notifies framework, and auto-saves to Dataverse.
    */
-  private handleSave(canvasJson: string, name: string, description: string): void {
-    logInfo('Canvas synced to bound field', { jsonLength: canvasJson.length });
+  private handleSave(
+    canvasJson: string,
+    name: string,
+    description: string,
+  ): void {
+    logInfo("Canvas synced to bound field", { jsonLength: canvasJson.length });
 
     // Store the updated values for getOutputs() to return
     this.canvasJsonOutput = canvasJson;
@@ -390,34 +446,38 @@ export class PlaybookBuilderHost
    */
   private autoSaveToDataverse(): void {
     if (!this.context) {
-      logInfo('No context available for auto-save');
+      logInfo("No context available for auto-save");
       return;
     }
 
     try {
       // Try multiple methods to get the record ID (same as renderReactTree)
-      const contextInfo = (this.context.mode as unknown as {
-        contextInfo?: { entityId?: string; entityTypeName?: string }
-      }).contextInfo;
+      const contextInfo = (
+        this.context.mode as unknown as {
+          contextInfo?: { entityId?: string; entityTypeName?: string };
+        }
+      ).contextInfo;
 
       // Method 2: Extract from URL
-      let urlRecordId = '';
+      let urlRecordId = "";
       try {
         const url = window.location.href;
         const idMatch = url.match(/[?&]id=([^&]+)/i);
         if (idMatch) {
           urlRecordId = decodeURIComponent(idMatch[1]);
         }
-      } catch { /* URL parsing error */ }
+      } catch {
+        /* URL parsing error */
+      }
 
       // Method 3: Input parameter
-      const paramId = this.context.parameters.playbookId?.raw || '';
+      const paramId = this.context.parameters.playbookId?.raw || "";
 
       // Resolve entity ID
       const entityId = contextInfo?.entityId || urlRecordId || paramId;
-      const entityName = contextInfo?.entityTypeName || 'sprk_analysisplaybook';
+      const entityName = contextInfo?.entityTypeName || "sprk_analysisplaybook";
 
-      logInfo('Auto-save entity resolution', {
+      logInfo("Auto-save entity resolution", {
         contextInfoId: contextInfo?.entityId,
         contextInfoType: contextInfo?.entityTypeName,
         urlRecordId,
@@ -427,49 +487,55 @@ export class PlaybookBuilderHost
       });
 
       if (!entityId) {
-        logError('No entity ID found - cannot auto-save. Check PCF binding configuration.');
+        logError(
+          "No entity ID found - cannot auto-save. Check PCF binding configuration.",
+        );
         return;
       }
 
       // Build the update data using the correct Dataverse field name
       const updateData: Record<string, unknown> = {};
       if (this.canvasJsonOutput !== undefined) {
-        updateData['sprk_canvaslayoutjson'] = this.canvasJsonOutput;
+        updateData["sprk_canvaslayoutjson"] = this.canvasJsonOutput;
       }
 
       if (Object.keys(updateData).length === 0) {
-        logInfo('No canvas data to auto-save');
+        logInfo("No canvas data to auto-save");
         return;
       }
 
-      logInfo('Auto-saving canvas via WebAPI', {
+      logInfo("Auto-saving canvas via WebAPI", {
         entityName,
         entityId,
         jsonLength: this.canvasJsonOutput?.length || 0,
       });
 
       // Use the PCF webAPI to update the record directly
-      logInfo('Calling webAPI.updateRecord', { entityName, entityId, updateDataKeys: Object.keys(updateData) });
+      logInfo("Calling webAPI.updateRecord", {
+        entityName,
+        entityId,
+        updateDataKeys: Object.keys(updateData),
+      });
       this.context.webAPI.updateRecord(entityName, entityId, updateData).then(
         (result: unknown) => {
-          logInfo('Canvas auto-saved successfully', { result });
+          logInfo("Canvas auto-saved successfully", { result });
 
           // After canvas JSON is persisted, sync canvas nodes to sprk_playbooknode records.
           // This ensures the playbook's executable node records stay in sync with the visual design.
           this.syncNodesToDataverse(entityId);
         },
         (error: unknown) => {
-          logError('Canvas auto-save FAILED', {
+          logError("Canvas auto-save FAILED", {
             error,
             errorMessage: (error as { message?: string })?.message,
             entityName,
             entityId,
-            fieldName: 'sprk_canvaslayoutjson',
+            fieldName: "sprk_canvaslayoutjson",
           });
-        }
+        },
       );
     } catch (error) {
-      logError('Failed to auto-save canvas', error);
+      logError("Failed to auto-save canvas", error);
     }
   }
 
@@ -482,53 +548,71 @@ export class PlaybookBuilderHost
 
     try {
       const canvas = JSON.parse(this.canvasJsonOutput);
-      const nodes: CanvasNode[] = (canvas.nodes ?? []).map((n: Record<string, unknown>) => ({
-        id: n.id as string,
-        type: n.type as string,
-        position: n.position as { x: number; y: number },
-        data: (n.data ?? {}) as Record<string, unknown>,
-      }));
-      const edges: CanvasEdge[] = (canvas.edges ?? []).map((e: Record<string, unknown>) => ({
-        id: e.id as string,
-        source: e.source as string,
-        target: e.target as string,
-      }));
+      const nodes: CanvasNode[] = (canvas.nodes ?? []).map(
+        (n: Record<string, unknown>) => ({
+          id: n.id as string,
+          type: n.type as string,
+          position: n.position as { x: number; y: number },
+          data: (n.data ?? {}) as Record<string, unknown>,
+        }),
+      );
+      const edges: CanvasEdge[] = (canvas.edges ?? []).map(
+        (e: Record<string, unknown>) => ({
+          id: e.id as string,
+          source: e.source as string,
+          target: e.target as string,
+        }),
+      );
 
       if (nodes.length === 0) {
-        logInfo('No canvas nodes to sync');
+        logInfo("No canvas nodes to sync");
         return;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const webApi = this.context.webAPI as any;
-      syncCanvasToNodes(webApi, playbookId, nodes, edges).catch((err: unknown) => {
-        logError('Node sync failed', err);
-      });
+      syncCanvasToNodes(webApi, playbookId, nodes, edges).catch(
+        (err: unknown) => {
+          logError("Node sync failed", err);
+        },
+      );
     } catch (err) {
-      logError('Failed to parse canvas for node sync', err);
+      logError("Failed to parse canvas for node sync", err);
     }
   }
 
   private setupThemeListeners(): void {
     // Listen for system theme changes (auto mode)
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      this.themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      this.themeMediaQuery.addEventListener('change', this.handleSystemThemeChange.bind(this));
+    if (typeof window !== "undefined" && window.matchMedia) {
+      this.themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      this.themeMediaQuery.addEventListener(
+        "change",
+        this.handleSystemThemeChange.bind(this),
+      );
     }
 
     // Listen for custom theme change events
-    window.addEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
+    window.addEventListener(
+      "spaarke-theme-change",
+      this.handleThemeChange.bind(this),
+    );
   }
 
   private cleanupThemeListeners(): void {
     if (this.themeMediaQuery) {
-      this.themeMediaQuery.removeEventListener('change', this.handleSystemThemeChange.bind(this));
+      this.themeMediaQuery.removeEventListener(
+        "change",
+        this.handleSystemThemeChange.bind(this),
+      );
     }
-    window.removeEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
+    window.removeEventListener(
+      "spaarke-theme-change",
+      this.handleThemeChange.bind(this),
+    );
   }
 
   private handleSystemThemeChange(): void {
-    if (getUserThemePreference() === 'auto') {
+    if (getUserThemePreference() === "auto") {
       this.currentTheme = getResolvedTheme();
       if (this.context) {
         this.renderReactTree(this.context);
@@ -553,23 +637,29 @@ export class PlaybookBuilderHost
     }
 
     this.fallbackLoadAttempted = true;
-    const entityName = 'sprk_analysisplaybook';
+    const entityName = "sprk_analysisplaybook";
 
-    logInfo('Loading canvas from Dataverse via WebAPI (fallback)', {
+    logInfo("Loading canvas from Dataverse via WebAPI (fallback)", {
       entityId,
       entityName,
     });
 
     // Retrieve the record with the canvas field
     this.context.webAPI
-      .retrieveRecord(entityName, entityId, '?$select=sprk_canvaslayoutjson,sprk_name,sprk_description')
+      .retrieveRecord(
+        entityName,
+        entityId,
+        "?$select=sprk_canvaslayoutjson,sprk_name,sprk_description",
+      )
       .then(
         (record: ComponentFramework.WebApi.Entity) => {
-          const canvasJson = record['sprk_canvaslayoutjson'] as string | null;
-          logInfo('Canvas loaded from Dataverse (fallback)', {
+          const canvasJson = record["sprk_canvaslayoutjson"] as string | null;
+          logInfo("Canvas loaded from Dataverse (fallback)", {
             hasCanvas: !!canvasJson,
             canvasLength: canvasJson?.length || 0,
-            canvasPreview: canvasJson ? canvasJson.substring(0, 200) : '(empty)',
+            canvasPreview: canvasJson
+              ? canvasJson.substring(0, 200)
+              : "(empty)",
           });
 
           if (canvasJson) {
@@ -581,12 +671,12 @@ export class PlaybookBuilderHost
           }
         },
         (error: unknown) => {
-          logError('Failed to load canvas from Dataverse (fallback)', {
+          logError("Failed to load canvas from Dataverse (fallback)", {
             error,
             errorMessage: (error as { message?: string })?.message,
             entityId,
           });
-        }
+        },
       );
   }
 }

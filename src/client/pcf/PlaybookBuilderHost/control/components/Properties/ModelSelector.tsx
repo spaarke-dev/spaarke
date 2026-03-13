@@ -6,8 +6,8 @@
  * Uses Fluent UI v9 Dropdown following ADR-021.
  */
 
-import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import * as React from "react";
+import { useCallback, useMemo } from "react";
 import {
   makeStyles,
   tokens,
@@ -17,33 +17,33 @@ import {
   Option,
   Badge,
   shorthands,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import type {
   DropdownProps,
   SelectionEvents,
   OptionOnSelectData,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   useModelStore,
   useCanvasStore,
   type ModelDeploymentItem,
   type PlaybookNodeData,
-} from '../../stores';
+} from "../../stores";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   optionContent: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXXS,
   },
   optionHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   optionDescription: {
@@ -51,7 +51,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   badge: {
-    ...shorthands.padding('2px', '6px'),
+    ...shorthands.padding("2px", "6px"),
   },
   hint: {
     color: tokens.colorNeutralForeground3,
@@ -60,10 +60,10 @@ const useStyles = makeStyles({
 });
 
 // Badge colors for providers
-const providerBadgeColors: Record<string, 'brand' | 'success' | 'warning'> = {
-  AzureOpenAI: 'brand',
-  OpenAI: 'success',
-  Anthropic: 'warning',
+const providerBadgeColors: Record<string, "brand" | "success" | "warning"> = {
+  AzureOpenAI: "brand",
+  OpenAI: "success",
+  Anthropic: "warning",
 };
 
 interface ModelSelectorProps {
@@ -90,15 +90,15 @@ export const ModelSelector = React.memo(function ModelSelector({
   const chatModels = useMemo(() => getChatModels(), [getChatModels]);
   const selectedModel = useMemo(
     () => (selectedModelId ? getModelById(selectedModelId) : undefined),
-    [selectedModelId, getModelById]
+    [selectedModelId, getModelById],
   );
 
   // Handle model selection change
-  const handleModelChange: DropdownProps['onOptionSelect'] = useCallback(
+  const handleModelChange: DropdownProps["onOptionSelect"] = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       onUpdate(nodeId, { modelDeploymentId: data.optionValue || undefined });
     },
-    [nodeId, onUpdate]
+    [nodeId, onUpdate],
   );
 
   return (
@@ -109,7 +109,7 @@ export const ModelSelector = React.memo(function ModelSelector({
       <Dropdown
         id={`model-selector-${nodeId}`}
         placeholder="Select a model..."
-        value={selectedModel?.name || 'Auto (recommended)'}
+        value={selectedModel?.name || "Auto (recommended)"}
         selectedOptions={selectedModelId ? [selectedModelId] : []}
         onOptionSelect={handleModelChange}
         size="small"
@@ -129,7 +129,7 @@ export const ModelSelector = React.memo(function ModelSelector({
                 <span>{model.name}</span>
                 <Badge
                   appearance="tint"
-                  color={providerBadgeColors[model.provider] || 'brand'}
+                  color={providerBadgeColors[model.provider] || "brand"}
                   size="small"
                   className={styles.badge}
                 >
@@ -148,7 +148,7 @@ export const ModelSelector = React.memo(function ModelSelector({
       <Text className={styles.hint}>
         {selectedModel
           ? `Context: ${(selectedModel.contextWindow / 1000).toFixed(0)}k tokens`
-          : 'Automatically selects the best model for this operation'}
+          : "Automatically selects the best model for this operation"}
       </Text>
     </div>
   );

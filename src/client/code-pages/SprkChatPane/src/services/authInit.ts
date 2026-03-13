@@ -17,10 +17,10 @@
  */
 
 import {
-    initAuth,
-    getAuthProvider,
-    authenticatedFetch,
-    AuthError,
+  initAuth,
+  getAuthProvider,
+  authenticatedFetch,
+  AuthError,
 } from "@spaarke/auth";
 import type { SpaarkeAuthProvider } from "@spaarke/auth";
 
@@ -37,8 +37,8 @@ export type { SpaarkeAuthProvider };
  * @returns The initial access token string
  */
 export async function initializeAuth(): Promise<string> {
-    const provider = await initAuth({ requireXrm: true });
-    return provider.getAccessToken();
+  const provider = await initAuth({ requireXrm: true });
+  return provider.getAccessToken();
 }
 
 /**
@@ -46,7 +46,7 @@ export async function initializeAuth(): Promise<string> {
  * Delegates to the shared auth provider.
  */
 export async function getAccessToken(): Promise<string> {
-    return getAuthProvider().getAccessToken();
+  return getAuthProvider().getAccessToken();
 }
 
 /**
@@ -54,7 +54,7 @@ export async function getAccessToken(): Promise<string> {
  * Call on 401 responses to force re-acquisition.
  */
 export function clearTokenCache(): void {
-    getAuthProvider().clearCache();
+  getAuthProvider().clearCache();
 }
 
 /**
@@ -62,15 +62,18 @@ export function clearTokenCache(): void {
  * Performs frame-walk to check window, parent, and top frames.
  */
 export function isXrmAvailable(): boolean {
-    if (typeof window === "undefined") return false;
-    try {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-        return !!xrm?.Utility?.getGlobalContext;
-    } catch {
-        return false;
-    }
+  if (typeof window === "undefined") return false;
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const xrm =
+      (window as any).Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    return !!xrm?.Utility?.getGlobalContext;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -80,24 +83,35 @@ export function isXrmAvailable(): boolean {
  * @throws AuthError if Xrm is not available or getClientUrl() returns empty
  */
 export function getClientUrl(): string {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const frames: Window[] = [window];
-    try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const frames: Window[] = [window];
+  try {
+    if (window.parent && window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent)
+      frames.push(window.top!);
+  } catch {
+    /* cross-origin */
+  }
 
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm;
-            if (xrm?.Utility?.getGlobalContext) {
-                const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
-                if (clientUrl) return clientUrl;
-            }
-        } catch { /* cross-origin */ }
+  for (const frame of frames) {
+    try {
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getGlobalContext) {
+        const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
+        if (clientUrl) return clientUrl;
+      }
+    } catch {
+      /* cross-origin */
     }
-    /* eslint-enable @typescript-eslint/no-explicit-any */
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
-    throw new AuthError(
-        "Xrm SDK is not available. This page must be opened from within Dataverse.",
-        "xrm_required",
-    );
+  throw new AuthError(
+    "Xrm SDK is not available. This page must be opened from within Dataverse.",
+    "xrm_required",
+  );
 }

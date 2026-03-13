@@ -84,7 +84,9 @@ export interface IFilterState {
  * @param interaction - The drill interaction to convert
  * @returns FetchXML condition element as string
  */
-export function drillInteractionToFetchXml(interaction: DrillInteraction): string {
+export function drillInteractionToFetchXml(
+  interaction: DrillInteraction,
+): string {
   const { field, operator, value } = interaction;
 
   switch (operator) {

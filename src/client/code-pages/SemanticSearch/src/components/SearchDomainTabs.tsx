@@ -12,16 +12,12 @@
  */
 
 import { useCallback } from "react";
+import { makeStyles, tokens, ToggleButton } from "@fluentui/react-components";
 import {
-    makeStyles,
-    tokens,
-    ToggleButton,
-} from "@fluentui/react-components";
-import {
-    DocumentMultipleRegular,
-    BriefcaseRegular,
-    TaskListSquareAddRegular,
-    ReceiptRegular,
+  DocumentMultipleRegular,
+  BriefcaseRegular,
+  TaskListSquareAddRegular,
+  ReceiptRegular,
 } from "@fluentui/react-icons";
 import type { SearchDomain } from "../types";
 
@@ -30,14 +26,14 @@ import type { SearchDomain } from "../types";
 // ---------------------------------------------------------------------------
 
 export interface SearchDomainTabsProps {
-    /** Currently active search domain */
-    activeDomain: SearchDomain;
-    /** Callback when the user switches domain tabs */
-    onDomainChange: (domain: SearchDomain) => void;
-    /** Current search query (forwarded to onSearch on tab change) */
-    query: string;
-    /** Callback to trigger a new search after domain change */
-    onSearch: (query: string, domain: SearchDomain) => void;
+  /** Currently active search domain */
+  activeDomain: SearchDomain;
+  /** Callback when the user switches domain tabs */
+  onDomainChange: (domain: SearchDomain) => void;
+  /** Current search query (forwarded to onSearch on tab change) */
+  query: string;
+  /** Callback to trigger a new search after domain change */
+  onSearch: (query: string, domain: SearchDomain) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,16 +41,16 @@ export interface SearchDomainTabsProps {
 // ---------------------------------------------------------------------------
 
 interface DomainTabConfig {
-    id: SearchDomain;
-    label: string;
-    icon: React.ReactElement;
+  id: SearchDomain;
+  label: string;
+  icon: React.ReactElement;
 }
 
 const DOMAIN_TABS: DomainTabConfig[] = [
-    { id: "documents", label: "Documents", icon: <DocumentMultipleRegular /> },
-    { id: "matters", label: "Matters", icon: <BriefcaseRegular /> },
-    { id: "projects", label: "Projects", icon: <TaskListSquareAddRegular /> },
-    { id: "invoices", label: "Invoices", icon: <ReceiptRegular /> },
+  { id: "documents", label: "Documents", icon: <DocumentMultipleRegular /> },
+  { id: "matters", label: "Matters", icon: <BriefcaseRegular /> },
+  { id: "projects", label: "Projects", icon: <TaskListSquareAddRegular /> },
+  { id: "invoices", label: "Invoices", icon: <ReceiptRegular /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -62,14 +58,14 @@ const DOMAIN_TABS: DomainTabConfig[] = [
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-    grid: {
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: tokens.spacingHorizontalXS,
-    },
-    button: {
-        justifyContent: "flex-start",
-    },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: tokens.spacingHorizontalXS,
+  },
+  button: {
+    justifyContent: "flex-start",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -77,39 +73,43 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SearchDomainTabs: React.FC<SearchDomainTabsProps> = ({
-    activeDomain,
-    onDomainChange,
-    query,
-    onSearch,
+  activeDomain,
+  onDomainChange,
+  query,
+  onSearch,
 }) => {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    const handleClick = useCallback(
-        (domain: SearchDomain) => () => {
-            onDomainChange(domain);
-            onSearch(query, domain);
-        },
-        [onDomainChange, onSearch, query],
-    );
+  const handleClick = useCallback(
+    (domain: SearchDomain) => () => {
+      onDomainChange(domain);
+      onSearch(query, domain);
+    },
+    [onDomainChange, onSearch, query],
+  );
 
-    return (
-        <div className={styles.grid} role="tablist" aria-label="Search domain selector">
-            {DOMAIN_TABS.map((tab) => (
-                <ToggleButton
-                    key={tab.id}
-                    className={styles.button}
-                    checked={activeDomain === tab.id}
-                    onClick={handleClick(tab.id)}
-                    icon={tab.icon}
-                    size="small"
-                    appearance={activeDomain === tab.id ? "primary" : "subtle"}
-                    aria-label={`Search ${tab.label}`}
-                >
-                    {tab.label}
-                </ToggleButton>
-            ))}
-        </div>
-    );
+  return (
+    <div
+      className={styles.grid}
+      role="tablist"
+      aria-label="Search domain selector"
+    >
+      {DOMAIN_TABS.map((tab) => (
+        <ToggleButton
+          key={tab.id}
+          className={styles.button}
+          checked={activeDomain === tab.id}
+          onClick={handleClick(tab.id)}
+          icon={tab.icon}
+          size="small"
+          appearance={activeDomain === tab.id ? "primary" : "subtle"}
+          aria-label={`Search ${tab.label}`}
+        >
+          {tab.label}
+        </ToggleButton>
+      ))}
+    </div>
+  );
 };
 
 export default SearchDomainTabs;

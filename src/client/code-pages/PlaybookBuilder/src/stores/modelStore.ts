@@ -20,16 +20,16 @@ const LOG_PREFIX = "[PlaybookBuilder:ModelStore]";
 // ---------------------------------------------------------------------------
 
 function mapModelDeployment(record: DataverseRecord): AiModelDeployment {
-    return {
-        id: (record["sprk_aimodeldeploymentid"] as string) ?? "",
-        name: (record["sprk_name"] as string) ?? "",
-        provider: (record["sprk_provider"] as string) ?? "",
-        capability: (record["sprk_capability"] as string) ?? "",
-        modelId: (record["sprk_modelid"] as string) ?? "",
-        contextWindow: (record["sprk_contextwindow"] as number) ?? 0,
-        isActive: (record["sprk_isactive"] as boolean) ?? false,
-        description: undefined,
-    };
+  return {
+    id: (record["sprk_aimodeldeploymentid"] as string) ?? "",
+    name: (record["sprk_name"] as string) ?? "",
+    provider: (record["sprk_provider"] as string) ?? "",
+    capability: (record["sprk_capability"] as string) ?? "",
+    modelId: (record["sprk_modelid"] as string) ?? "",
+    contextWindow: (record["sprk_contextwindow"] as number) ?? 0,
+    isActive: (record["sprk_isactive"] as boolean) ?? false,
+    description: undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -37,24 +37,24 @@ function mapModelDeployment(record: DataverseRecord): AiModelDeployment {
 // ---------------------------------------------------------------------------
 
 interface ModelStoreState {
-    // Data
-    models: AiModelDeployment[];
+  // Data
+  models: AiModelDeployment[];
 
-    // Loading state
-    isLoading: boolean;
+  // Loading state
+  isLoading: boolean;
 
-    // Error state
-    error: string | null;
+  // Error state
+  error: string | null;
 
-    // Actions
-    loadModelDeployments: () => Promise<void>;
+  // Actions
+  loadModelDeployments: () => Promise<void>;
 
-    // Selectors
-    getActiveModels: () => AiModelDeployment[];
-    getModelsByCapability: (capability: AiCapability) => AiModelDeployment[];
-    getChatModels: () => AiModelDeployment[];
-    getModelById: (id: string) => AiModelDeployment | undefined;
-    getDefaultModel: () => AiModelDeployment | undefined;
+  // Selectors
+  getActiveModels: () => AiModelDeployment[];
+  getModelsByCapability: (capability: AiCapability) => AiModelDeployment[];
+  getChatModels: () => AiModelDeployment[];
+  getModelById: (id: string) => AiModelDeployment | undefined;
+  getDefaultModel: () => AiModelDeployment | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,54 +62,59 @@ interface ModelStoreState {
 // ---------------------------------------------------------------------------
 
 export const useModelStore = create<ModelStoreState>()((set, get) => ({
-    // Initial data — empty, no mock data
-    models: [],
+  // Initial data — empty, no mock data
+  models: [],
 
-    // Loading state
-    isLoading: false,
+  // Loading state
+  isLoading: false,
 
-    // Error state
-    error: null,
+  // Error state
+  error: null,
 
-    // ----- Load Model Deployments from sprk_aimodeldeployments -----
-    loadModelDeployments: async () => {
-        set({ isLoading: true, error: null });
-        try {
-            const result = await retrieveMultipleRecords(
-                "sprk_aimodeldeployments",
-                "$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive&$filter=statecode eq 0&$orderby=sprk_name",
-            );
-            const models = result.entities.map(mapModelDeployment);
-            set({ models, isLoading: false });
-            console.info(`${LOG_PREFIX} Loaded ${models.length} model deployments from Dataverse`);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to load model deployments";
-            console.error(`${LOG_PREFIX} ${message}`, err);
-            set({ isLoading: false, error: message });
-        }
-    },
+  // ----- Load Model Deployments from sprk_aimodeldeployments -----
+  loadModelDeployments: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await retrieveMultipleRecords(
+        "sprk_aimodeldeployments",
+        "$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive&$filter=statecode eq 0&$orderby=sprk_name",
+      );
+      const models = result.entities.map(mapModelDeployment);
+      set({ models, isLoading: false });
+      console.info(
+        `${LOG_PREFIX} Loaded ${models.length} model deployments from Dataverse`,
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load model deployments";
+      console.error(`${LOG_PREFIX} ${message}`, err);
+      set({ isLoading: false, error: message });
+    }
+  },
 
-    // ----- Selectors -----
+  // ----- Selectors -----
 
-    getActiveModels: (): AiModelDeployment[] => {
-        return get().models.filter((m) => m.isActive);
-    },
+  getActiveModels: (): AiModelDeployment[] => {
+    return get().models.filter((m) => m.isActive);
+  },
 
-    getModelsByCapability: (capability: AiCapability): AiModelDeployment[] => {
-        return get().models.filter((m) => m.isActive && m.capability === capability);
-    },
+  getModelsByCapability: (capability: AiCapability): AiModelDeployment[] => {
+    return get().models.filter(
+      (m) => m.isActive && m.capability === capability,
+    );
+  },
 
-    getChatModels: (): AiModelDeployment[] => {
-        return get().models.filter((m) => m.isActive && m.capability === "Chat");
-    },
+  getChatModels: (): AiModelDeployment[] => {
+    return get().models.filter((m) => m.isActive && m.capability === "Chat");
+  },
 
-    getModelById: (id: string): AiModelDeployment | undefined => {
-        return get().models.find((m) => m.id === id);
-    },
+  getModelById: (id: string): AiModelDeployment | undefined => {
+    return get().models.find((m) => m.id === id);
+  },
 
-    getDefaultModel: (): AiModelDeployment | undefined => {
-        const chatModels = get().getChatModels();
-        // Return the first active chat model as default
-        return chatModels.length > 0 ? chatModels[0] : undefined;
-    },
+  getDefaultModel: (): AiModelDeployment | undefined => {
+    const chatModels = get().getChatModels();
+    // Return the first active chat model as default
+    return chatModels.length > 0 ? chatModels[0] : undefined;
+  },
 }));

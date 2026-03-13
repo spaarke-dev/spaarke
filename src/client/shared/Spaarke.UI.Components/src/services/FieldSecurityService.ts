@@ -19,7 +19,7 @@ export class FieldSecurityService {
   static async getFieldSecurityPermissions(
     webAPI: ComponentFramework.WebApi,
     entityLogicalName: string,
-    fieldNames: string[]
+    fieldNames: string[],
   ): Promise<Map<string, IFieldSecurity>> {
     const fieldSecurityMap = new Map<string, IFieldSecurity>();
 
@@ -28,11 +28,18 @@ export class FieldSecurityService {
       const userId = await this.getCurrentUserId(webAPI);
 
       // Step 2: Query field security profiles for the user
-      const userProfiles = await this.getUserFieldSecurityProfiles(webAPI, userId);
+      const userProfiles = await this.getUserFieldSecurityProfiles(
+        webAPI,
+        userId,
+      );
 
       if (userProfiles.length === 0) {
         // User has no field security profiles - all secured fields are inaccessible
-        return await this.getFieldSecurityMetadata(webAPI, entityLogicalName, fieldNames);
+        return await this.getFieldSecurityMetadata(
+          webAPI,
+          entityLogicalName,
+          fieldNames,
+        );
       }
 
       // Step 3: Query field permissions for each field
@@ -41,7 +48,7 @@ export class FieldSecurityService {
           webAPI,
           entityLogicalName,
           fieldName,
-          userProfiles
+          userProfiles,
         );
         fieldSecurityMap.set(fieldName, fieldSecurity);
       }
@@ -51,15 +58,15 @@ export class FieldSecurityService {
       console.error("Error retrieving field security permissions:", error);
 
       // Default: assume all fields are readable but not updateable
-      fieldNames.forEach(fieldName => {
+      fieldNames.forEach((fieldName) => {
         fieldSecurityMap.set(fieldName, {
           fieldName,
           isSecured: false,
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       });
 
@@ -70,10 +77,12 @@ export class FieldSecurityService {
   /**
    * Get current user ID from usersettings
    */
-  private static async getCurrentUserId(webAPI: ComponentFramework.WebApi): Promise<string> {
+  private static async getCurrentUserId(
+    webAPI: ComponentFramework.WebApi,
+  ): Promise<string> {
     const userSettings = await webAPI.retrieveMultipleRecords(
       "usersettings",
-      "?$select=systemuserid&$top=1"
+      "?$select=systemuserid&$top=1",
     );
 
     if (userSettings.entities && userSettings.entities.length > 0) {
@@ -88,16 +97,16 @@ export class FieldSecurityService {
    */
   private static async getUserFieldSecurityProfiles(
     webAPI: ComponentFramework.WebApi,
-    userId: string
+    userId: string,
   ): Promise<string[]> {
     try {
       // Query systemuserprofiles association
       const response = await webAPI.retrieveMultipleRecords(
         "systemuserprofiles",
-        `?$select=fieldsecurityprofileid&$filter=systemuserid eq ${userId}`
+        `?$select=fieldsecurityprofileid&$filter=systemuserid eq ${userId}`,
       );
 
-      return response.entities.map(e => e.fieldsecurityprofileid);
+      return response.entities.map((e) => e.fieldsecurityprofileid);
     } catch (error) {
       console.warn("Could not retrieve user field security profiles:", error);
       return [];
@@ -110,17 +119,19 @@ export class FieldSecurityService {
   private static async getFieldSecurityMetadata(
     webAPI: ComponentFramework.WebApi,
     entityLogicalName: string,
-    fieldNames: string[]
+    fieldNames: string[],
   ): Promise<Map<string, IFieldSecurity>> {
     const fieldSecurityMap = new Map<string, IFieldSecurity>();
 
     try {
       // Query attribute metadata to check IsSecured property
-      const filter = fieldNames.map(f => `LogicalName eq '${f}'`).join(" or ");
+      const filter = fieldNames
+        .map((f) => `LogicalName eq '${f}'`)
+        .join(" or ");
 
       const attributes = await webAPI.retrieveMultipleRecords(
         "attributedefinition",
-        `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and (${filter})`
+        `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and (${filter})`,
       );
 
       attributes.entities.forEach((attr: any) => {
@@ -131,13 +142,13 @@ export class FieldSecurityService {
           permissions: {
             canRead: !isSecured, // If secured and no profile, cannot read
             canUpdate: !isSecured,
-            canCreate: !isSecured
-          }
+            canCreate: !isSecured,
+          },
         });
       });
 
       // For fields not found in metadata, assume not secured
-      fieldNames.forEach(fieldName => {
+      fieldNames.forEach((fieldName) => {
         if (!fieldSecurityMap.has(fieldName)) {
           fieldSecurityMap.set(fieldName, {
             fieldName,
@@ -145,8 +156,8 @@ export class FieldSecurityService {
             permissions: {
               canRead: true,
               canUpdate: true,
-              canCreate: true
-            }
+              canCreate: true,
+            },
           });
         }
       });
@@ -156,15 +167,15 @@ export class FieldSecurityService {
       console.warn("Could not retrieve field security metadata:", error);
 
       // Default: all fields accessible
-      fieldNames.forEach(fieldName => {
+      fieldNames.forEach((fieldName) => {
         fieldSecurityMap.set(fieldName, {
           fieldName,
           isSecured: false,
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       });
 
@@ -179,16 +190,19 @@ export class FieldSecurityService {
     webAPI: ComponentFramework.WebApi,
     entityLogicalName: string,
     fieldName: string,
-    profileIds: string[]
+    profileIds: string[],
   ): Promise<IFieldSecurity> {
     try {
       // Step 1: Check if field is secured
       const attributeMetadata = await webAPI.retrieveMultipleRecords(
         "attributedefinition",
-        `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and LogicalName eq '${fieldName}'`
+        `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and LogicalName eq '${fieldName}'`,
       );
 
-      if (!attributeMetadata.entities || attributeMetadata.entities.length === 0) {
+      if (
+        !attributeMetadata.entities ||
+        attributeMetadata.entities.length === 0
+      ) {
         // Field not found - assume not secured
         return {
           fieldName,
@@ -196,8 +210,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         };
       }
 
@@ -211,18 +225,20 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         };
       }
 
       // Step 2: Query field permissions from fieldsecurityprofile
       const attributeId = attributeMetadata.entities[0].metadataid;
-      const profileFilter = profileIds.map(id => `_fieldsecurityprofileid_value eq ${id}`).join(" or ");
+      const profileFilter = profileIds
+        .map((id) => `_fieldsecurityprofileid_value eq ${id}`)
+        .join(" or ");
 
       const permissions = await webAPI.retrieveMultipleRecords(
         "fieldpermission",
-        `?$select=canread,canupdate,cancreate,canreadunmasked&$filter=_attributeid_value eq ${attributeId} and (${profileFilter})`
+        `?$select=canread,canupdate,cancreate,canreadunmasked&$filter=_attributeid_value eq ${attributeId} and (${profileFilter})`,
       );
 
       // Aggregate permissions across all profiles (OR logic - if any profile grants, user has permission)
@@ -241,7 +257,8 @@ export class FieldSecurityService {
         if (perm.cancreate === 4 || perm.cancreate === true) canCreate = true;
 
         // Check canreadunmasked: 1 (One Record) or 3 (All Records) means unmasked allowed
-        if (perm.canreadunmasked === 1 || perm.canreadunmasked === 3) canReadUnmasked = true;
+        if (perm.canreadunmasked === 1 || perm.canreadunmasked === 3)
+          canReadUnmasked = true;
       });
 
       return {
@@ -251,11 +268,14 @@ export class FieldSecurityService {
           canRead,
           canUpdate,
           canCreate,
-          canReadUnmasked
-        }
+          canReadUnmasked,
+        },
       };
     } catch (error) {
-      console.warn(`Could not retrieve field permissions for ${fieldName}:`, error);
+      console.warn(
+        `Could not retrieve field permissions for ${fieldName}:`,
+        error,
+      );
 
       // Default to no access for secured fields on error
       return {
@@ -264,8 +284,8 @@ export class FieldSecurityService {
         permissions: {
           canRead: false,
           canUpdate: false,
-          canCreate: false
-        }
+          canCreate: false,
+        },
       };
     }
   }
@@ -275,12 +295,12 @@ export class FieldSecurityService {
    * This is the preferred method when available
    */
   static getFieldSecurityFromDataset(
-    dataset: ComponentFramework.PropertyTypes.DataSet
+    dataset: ComponentFramework.PropertyTypes.DataSet,
   ): Map<string, IFieldSecurity> {
     const fieldSecurityMap = new Map<string, IFieldSecurity>();
 
     // PCF dataset columns have security information
-    dataset.columns.forEach(column => {
+    dataset.columns.forEach((column) => {
       const security = (column as any).security;
 
       if (security) {
@@ -290,8 +310,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: security.readable !== false,
             canUpdate: security.editable !== false,
-            canCreate: security.editable !== false
-          }
+            canCreate: security.editable !== false,
+          },
         });
       } else {
         // No security metadata - assume accessible
@@ -301,8 +321,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       }
     });

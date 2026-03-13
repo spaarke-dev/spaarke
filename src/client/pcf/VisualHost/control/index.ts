@@ -15,9 +15,10 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { logger } from "./utils/logger";
 
-export class VisualHost
-  implements ComponentFramework.StandardControl<IInputs, IOutputs>
-{
+export class VisualHost implements ComponentFramework.StandardControl<
+  IInputs,
+  IOutputs
+> {
   private container: HTMLDivElement | null = null;
   private notifyOutputChanged: () => void;
   private _cleanupThemeListener: (() => void) | null = null;
@@ -31,7 +32,7 @@ export class VisualHost
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement
+    container: HTMLDivElement,
   ): void {
     try {
       logger.info("VisualHost", "Init - Setting up container");
@@ -132,10 +133,10 @@ export class VisualHost
             React.createElement(VisualHostRoot, {
               context,
               notifyOutputChanged: this.notifyOutputChanged,
-            })
-          )
+            }),
+          ),
         ),
-        this.container
+        this.container,
       );
     } catch (error) {
       logger.error("VisualHost", "Render failed", error);

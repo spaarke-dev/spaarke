@@ -15,7 +15,8 @@ const meta: Meta<typeof LineChart> = {
     layout: "padded",
     docs: {
       description: {
-        component: "LineChart displays trend data as line or area chart with drill-through support.",
+        component:
+          "LineChart displays trend data as line or area chart with drill-through support.",
       },
     },
   },
@@ -75,7 +76,9 @@ export const EmptyData: Story = {
 
 export const Comparison: Story = {
   render: () => (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+    <div
+      style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}
+    >
       <LineChart
         data={monthlyData}
         title="Line Variant"

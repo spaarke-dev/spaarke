@@ -51,8 +51,8 @@ import { useThemeDetection } from "./hooks/useThemeDetection";
 const rawUrlParams = new URLSearchParams(window.location.search);
 const dataEnvelope = rawUrlParams.get("data");
 const appParams = dataEnvelope
-    ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-    : rawUrlParams;
+  ? new URLSearchParams(decodeURIComponent(dataEnvelope))
+  : rawUrlParams;
 
 /**
  * Resolve analysisId from available sources:
@@ -62,34 +62,47 @@ const appParams = dataEnvelope
  *   3. Parent Xrm form context (fallback for embedded without pass-through)
  */
 function resolveAnalysisId(): string {
-    // Source 1: Explicit analysisId (navigateTo)
-    const explicit = appParams.get("analysisId");
-    if (explicit) return explicit;
+  // Source 1: Explicit analysisId (navigateTo)
+  const explicit = appParams.get("analysisId");
+  if (explicit) return explicit;
 
-    // Source 2: Dataverse "id" param (form web resource pass-through)
-    const dvId = rawUrlParams.get("id");
-    if (dvId) return dvId.replace(/[{}]/g, "").toLowerCase();
+  // Source 2: Dataverse "id" param (form web resource pass-through)
+  const dvId = rawUrlParams.get("id");
+  if (dvId) return dvId.replace(/[{}]/g, "").toLowerCase();
 
-    // Source 3: Parent Xrm form context (embedded iframe)
+  // Source 3: Parent Xrm form context (embedded iframe)
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const frames: Window[] = [];
     try {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const frames: Window[] = [];
-        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+      if (window.parent && window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window && window.top !== window.parent)
+        frames.push(window.top!);
+    } catch {
+      /* cross-origin */
+    }
 
-        for (const frame of frames) {
-            try {
-                const xrm = (frame as any).Xrm;
-                if (xrm?.Page?.data?.entity) {
-                    const id = xrm.Page.data.entity.getId();
-                    if (id) return id.replace(/[{}]/g, "").toLowerCase();
-                }
-            } catch { /* unavailable */ }
+    for (const frame of frames) {
+      try {
+        const xrm = (frame as any).Xrm;
+        if (xrm?.Page?.data?.entity) {
+          const id = xrm.Page.data.entity.getId();
+          if (id) return id.replace(/[{}]/g, "").toLowerCase();
         }
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-    } catch { /* frame access error */ }
+      } catch {
+        /* unavailable */
+      }
+    }
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+  } catch {
+    /* frame access error */
+  }
 
-    return "";
+  return "";
 }
 
 /**
@@ -101,33 +114,48 @@ function resolveAnalysisId(): string {
  * Web API returns it as _sprk_documentid_value.
  */
 function resolveDocumentId(): string {
-    const explicit = appParams.get("documentId");
-    if (explicit) return explicit;
+  const explicit = appParams.get("documentId");
+  if (explicit) return explicit;
 
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const frames: Window[] = [];
     try {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const frames: Window[] = [];
-        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+      if (window.parent && window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window && window.top !== window.parent)
+        frames.push(window.top!);
+    } catch {
+      /* cross-origin */
+    }
 
-        for (const frame of frames) {
-            try {
-                const xrm = (frame as any).Xrm;
-                // Try sprk_documentid (correct field name on sprk_analysis entity)
-                const attr = xrm?.Page?.getAttribute?.("sprk_documentid");
-                if (attr) {
-                    const val = attr.getValue();
-                    if (Array.isArray(val) && val.length > 0 && val[0].id) {
-                        return val[0].id.replace(/[{}]/g, "").toLowerCase();
-                    }
-                }
-            } catch { /* unavailable */ }
+    for (const frame of frames) {
+      try {
+        const xrm = (frame as any).Xrm;
+        // Try sprk_documentid (correct field name on sprk_analysis entity)
+        const attr = xrm?.Page?.getAttribute?.("sprk_documentid");
+        if (attr) {
+          const val = attr.getValue();
+          if (Array.isArray(val) && val.length > 0 && val[0].id) {
+            return val[0].id.replace(/[{}]/g, "").toLowerCase();
+          }
         }
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-    } catch { /* frame access error */ }
+      } catch {
+        /* unavailable */
+      }
+    }
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+  } catch {
+    /* frame access error */
+  }
 
-    console.warn("[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context");
-    return "";
+  console.warn(
+    "[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context",
+  );
+  return "";
 }
 
 /**
@@ -136,26 +164,40 @@ function resolveDocumentId(): string {
  *   2. Xrm organizationSettings.tenantId (frame-walk)
  */
 function resolveTenantId(): string {
-    const explicit = appParams.get("tenantId");
-    if (explicit) return explicit;
+  const explicit = appParams.get("tenantId");
+  if (explicit) return explicit;
 
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const frames: Window[] = [window];
     try {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const frames: Window[] = [window];
-        try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-        try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+      if (window.parent && window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window && window.top !== window.parent)
+        frames.push(window.top!);
+    } catch {
+      /* cross-origin */
+    }
 
-        for (const frame of frames) {
-            try {
-                const xrm = (frame as any).Xrm;
-                const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
-                if (tid) return tid.replace(/[{}]/g, "").toLowerCase();
-            } catch { /* unavailable */ }
-        }
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-    } catch { /* frame access error */ }
+    for (const frame of frames) {
+      try {
+        const xrm = (frame as any).Xrm;
+        const tid =
+          xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+        if (tid) return tid.replace(/[{}]/g, "").toLowerCase();
+      } catch {
+        /* unavailable */
+      }
+    }
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+  } catch {
+    /* frame access error */
+  }
 
-    return "";
+  return "";
 }
 
 const analysisId = resolveAnalysisId();
@@ -175,29 +217,29 @@ const tenantId = resolveTenantId();
  * prevent a white flash when the page loads in dark mode.
  */
 function ThemeRoot(): JSX.Element {
-    const { theme } = useThemeDetection(appParams);
+  const { theme } = useThemeDetection(appParams);
 
-    // Sync body background with resolved theme to prevent white flash in dark mode.
-    // Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),
-    // NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
-    useEffect(() => {
-        const bgColor = (theme as Record<string, string>).colorNeutralBackground1;
-        if (bgColor) {
-            document.body.style.backgroundColor = bgColor;
-        }
-    }, [theme]);
+  // Sync body background with resolved theme to prevent white flash in dark mode.
+  // Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),
+  // NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
+  useEffect(() => {
+    const bgColor = (theme as Record<string, string>).colorNeutralBackground1;
+    if (bgColor) {
+      document.body.style.backgroundColor = bgColor;
+    }
+  }, [theme]);
 
-    return (
-        <FluentProvider theme={theme} style={{ height: "100%" }}>
-            <AuthProvider>
-                <App
-                    analysisId={analysisId}
-                    documentId={documentId}
-                    tenantId={tenantId}
-                />
-            </AuthProvider>
-        </FluentProvider>
-    );
+  return (
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+      <AuthProvider>
+        <App
+          analysisId={analysisId}
+          documentId={documentId}
+          tenantId={tenantId}
+        />
+      </AuthProvider>
+    </FluentProvider>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +247,7 @@ function ThemeRoot(): JSX.Element {
 // ---------------------------------------------------------------------------
 
 const container = document.getElementById("root");
-if (!container) throw new Error("[AnalysisWorkspace] Root container #root not found in DOM.");
+if (!container)
+  throw new Error("[AnalysisWorkspace] Root container #root not found in DOM.");
 
 createRoot(container).render(<ThemeRoot />);

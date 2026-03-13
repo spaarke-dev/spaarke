@@ -5,12 +5,12 @@
  */
 
 export function useDocumentHistory(_editorRef: unknown) {
-    return {
-        undo: jest.fn(),
-        redo: jest.fn(),
-        pushVersion: jest.fn(),
-        canUndo: false,
-        canRedo: false,
-        historyLength: 0,
-    };
+  return {
+    undo: jest.fn(),
+    redo: jest.fn(),
+    pushVersion: jest.fn(),
+    canUndo: false,
+    canRedo: false,
+    historyLength: 0,
+  };
 }

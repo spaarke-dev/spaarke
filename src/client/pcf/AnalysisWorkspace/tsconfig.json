@@ -7,10 +7,7 @@
     "paths": {
       "@spaarke/ui-components": ["node_modules/@spaarke/ui-components/dist"]
     },
-    "typeRoots": [
-      "node_modules/@types",
-      "../node_modules/@types"
-    ],
+    "typeRoots": ["node_modules/@types", "../node_modules/@types"],
     "types": [
       "jest",
       "node",
@@ -30,11 +27,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": [
-    "control/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "out"
-  ]
+  "include": ["control/**/*"],
+  "exclude": ["node_modules", "out"]
 }

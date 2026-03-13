@@ -42,7 +42,7 @@ export class FetchXmlService {
   async executeFetchXml<T extends Record<string, unknown>>(
     entityLogicalName: string,
     fetchXml: string,
-    options: IFetchXmlOptions = {}
+    options: IFetchXmlOptions = {},
   ): Promise<IFetchXmlResult<T>> {
     const {
       pageSize = 50,
@@ -57,7 +57,7 @@ export class FetchXmlService {
       fetchXml,
       pageSize,
       pageNumber,
-      pagingCookie
+      pagingCookie,
     );
 
     // Apply count attribute if total count requested
@@ -69,7 +69,7 @@ export class FetchXmlService {
       // Use Xrm.WebApi.retrieveMultipleRecords with FetchXML
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
         entityLogicalName,
-        `?fetchXml=${encodeURIComponent(paginatedFetchXml)}`
+        `?fetchXml=${encodeURIComponent(paginatedFetchXml)}`,
       );
 
       const entities = (result.entities || []) as T[];
@@ -111,7 +111,10 @@ export class FetchXmlService {
       // Check for parse errors
       const parseError = doc.querySelector("parsererror");
       if (parseError) {
-        console.error("[FetchXmlService] Layout XML parse error:", parseError.textContent);
+        console.error(
+          "[FetchXmlService] Layout XML parse error:",
+          parseError.textContent,
+        );
         return [];
       }
 
@@ -148,7 +151,10 @@ export class FetchXmlService {
    * @returns Modified FetchXML with merged filters
    */
   mergeFetchXmlFilter(fetchXml: string, filterGroup: IFilterGroup): string {
-    if (!fetchXml || !filterGroup.conditions.length && !filterGroup.filters?.length) {
+    if (
+      !fetchXml ||
+      (!filterGroup.conditions.length && !filterGroup.filters?.length)
+    ) {
       return fetchXml;
     }
 
@@ -246,7 +252,7 @@ export class FetchXmlService {
     fetchXml: string,
     pageSize: number,
     pageNumber: number,
-    pagingCookie?: string
+    pagingCookie?: string,
   ): string {
     try {
       const parser = new DOMParser();
@@ -316,13 +322,19 @@ export class FetchXmlService {
   /**
    * Build condition XML element
    */
-  private buildConditionXml(doc: Document, condition: IFilterCondition): Element {
+  private buildConditionXml(
+    doc: Document,
+    condition: IFilterCondition,
+  ): Element {
     const conditionElement = doc.createElement("condition");
     conditionElement.setAttribute("attribute", condition.attribute);
     conditionElement.setAttribute("operator", condition.operator);
 
     if (condition.value !== undefined && condition.value !== null) {
-      conditionElement.setAttribute("value", this.formatConditionValue(condition.value));
+      conditionElement.setAttribute(
+        "value",
+        this.formatConditionValue(condition.value),
+      );
     }
 
     // Handle 'in' operator with multiple values
@@ -340,7 +352,9 @@ export class FetchXmlService {
   /**
    * Format condition value for FetchXML
    */
-  private formatConditionValue(value: string | number | boolean | Date): string {
+  private formatConditionValue(
+    value: string | number | boolean | Date,
+  ): string {
     if (value instanceof Date) {
       return value.toISOString();
     }

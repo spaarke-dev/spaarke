@@ -22,13 +22,7 @@ import {
   Wrench24Regular,
 } from "@fluentui/react-icons";
 import { ScopeList } from "./ScopeList";
-import type {
-  IAction,
-  ISkill,
-  IKnowledge,
-  ITool,
-  ScopeTabId,
-} from "./types";
+import type { IAction, ISkill, IKnowledge, ITool, ScopeTabId } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -140,7 +134,7 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
     (_event: unknown, data: { value: unknown }) => {
       setActiveTab(data.value as ScopeTabId);
     },
-    []
+    [],
   );
 
   /** Get the selection count for a given tab. */

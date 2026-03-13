@@ -4,55 +4,55 @@
  * Shows node configuration when selected, or empty state otherwise.
  */
 
-import * as React from 'react';
+import * as React from "react";
 import {
   makeStyles,
   tokens,
   Text,
   shorthands,
-} from '@fluentui/react-components';
-import { Settings20Regular } from '@fluentui/react-icons';
-import { useCanvasStore } from '../../stores';
-import { NodePropertiesForm } from './NodePropertiesForm';
+} from "@fluentui/react-components";
+import { Settings20Regular } from "@fluentui/react-icons";
+import { useCanvasStore } from "../../stores";
+import { NodePropertiesForm } from "./NodePropertiesForm";
 
 const useStyles = makeStyles({
   panel: {
-    width: '300px',
-    height: '100%',
+    width: "300px",
+    height: "100%",
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke1),
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.overflow('hidden'),
+    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke1),
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.overflow("hidden"),
   },
   header: {
     ...shorthands.padding(tokens.spacingVerticalM),
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   headerTitle: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   content: {
     flex: 1,
-    ...shorthands.overflow('auto'),
+    ...shorthands.overflow("auto"),
     ...shorthands.padding(tokens.spacingVerticalM),
   },
   emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+    textAlign: "center",
     ...shorthands.padding(tokens.spacingHorizontalL),
   },
   emptyIcon: {
-    fontSize: '48px',
+    fontSize: "48px",
     color: tokens.colorNeutralForeground4,
   },
 });

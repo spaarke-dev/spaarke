@@ -47,8 +47,8 @@ import { detectTheme, setupThemeListener } from "./ThemeProvider";
 const rawUrlParams = new URLSearchParams(window.location.search);
 const dataEnvelope = rawUrlParams.get("data");
 const appParams = dataEnvelope
-    ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-    : rawUrlParams;
+  ? new URLSearchParams(decodeURIComponent(dataEnvelope))
+  : rawUrlParams;
 
 const entityType = appParams.get("entityType") ?? "";
 const entityId = appParams.get("entityId") ?? "";
@@ -61,29 +61,29 @@ const sessionId = appParams.get("sessionId") ?? "";
 
 // Resolve BFF API base URL: URL param > Xrm global context > fallback
 function resolveApiBaseUrl(): string {
-    // Check URL param first
-    const urlApi = appParams.get("apiBaseUrl");
-    if (urlApi) return urlApi;
+  // Check URL param first
+  const urlApi = appParams.get("apiBaseUrl");
+  if (urlApi) return urlApi;
 
-    // Try Xrm global context for Dataverse environment URL
-    try {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
-        if (xrm?.Utility?.getGlobalContext) {
-            const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
-            if (clientUrl) {
-                // The BFF API URL is not the Dataverse URL itself but we
-                // return the known dev endpoint; in production this would be
-                // read from a Dataverse environment variable or configuration.
-            }
-        }
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-    } catch {
-        /* cross-origin or unavailable */
+  // Try Xrm global context for Dataverse environment URL
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
+    if (xrm?.Utility?.getGlobalContext) {
+      const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
+      if (clientUrl) {
+        // The BFF API URL is not the Dataverse URL itself but we
+        // return the known dev endpoint; in production this would be
+        // read from a Dataverse environment variable or configuration.
+      }
     }
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+  } catch {
+    /* cross-origin or unavailable */
+  }
 
-    // Default to the known dev BFF API endpoint
-    return "https://spe-api-dev-67e2xz.azurewebsites.net";
+  // Default to the known dev BFF API endpoint
+  return "https://spe-api-dev-67e2xz.azurewebsites.net";
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
@@ -104,7 +104,7 @@ let theme = detectTheme(appParams);
 // NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
 const bgColor = (theme as Record<string, string>).colorNeutralBackground1;
 if (bgColor) {
-    document.body.style.backgroundColor = bgColor;
+  document.body.style.backgroundColor = bgColor;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,22 +112,23 @@ if (bgColor) {
 // ---------------------------------------------------------------------------
 
 const container = document.getElementById("root");
-if (!container) throw new Error("[SprkChatPane] Root container #root not found in DOM.");
+if (!container)
+  throw new Error("[SprkChatPane] Root container #root not found in DOM.");
 
 const root = createRoot(container);
 
 function renderApp(): void {
-    root.render(
-        <FluentProvider theme={theme} style={{ height: "100%" }}>
-            <App
-                entityType={entityType}
-                entityId={entityId}
-                playbookId={playbookId}
-                sessionId={sessionId}
-                apiBaseUrl={apiBaseUrl}
-            />
-        </FluentProvider>
-    );
+  root.render(
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+      <App
+        entityType={entityType}
+        entityId={entityId}
+        playbookId={playbookId}
+        sessionId={sessionId}
+        apiBaseUrl={apiBaseUrl}
+      />
+    </FluentProvider>,
+  );
 }
 
 // Initial render
@@ -138,10 +139,10 @@ renderApp();
 // ---------------------------------------------------------------------------
 
 setupThemeListener(() => {
-    theme = detectTheme(appParams);
-    const updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
-    if (updatedBg) {
-        document.body.style.backgroundColor = updatedBg;
-    }
-    renderApp();
+  theme = detectTheme(appParams);
+  const updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
+  if (updatedBg) {
+    document.body.style.backgroundColor = updatedBg;
+  }
+  renderApp();
 });

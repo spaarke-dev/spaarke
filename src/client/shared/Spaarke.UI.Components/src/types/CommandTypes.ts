@@ -72,7 +72,7 @@ export enum AccessRights {
   CreateAccess = 16,
   DeleteAccess = 32,
   ShareAccess = 64,
-  AssignAccess = 128
+  AssignAccess = 128,
 }
 
 /**

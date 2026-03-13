@@ -109,7 +109,7 @@ function getTokenSetColors(tokenSet: ColorTokenSet): IGaugeColorTokens {
  */
 function resolveGaugeColor(
   dp: IAggregatedDataPoint,
-  config?: ICardConfig
+  config?: ICardConfig,
 ): IGaugeColorTokens {
   if (!config) {
     return { arcColor: tokens.colorBrandBackground };
@@ -163,7 +163,7 @@ function polarToCartesian(
   cx: number,
   cy: number,
   radius: number,
-  angleDegrees: number
+  angleDegrees: number,
 ): { x: number; y: number } {
   const angleRad = (angleDegrees * Math.PI) / 180;
   return {
@@ -182,7 +182,7 @@ function describeArc(
   cy: number,
   radius: number,
   startAngleDeg: number,
-  endAngleDeg: number
+  endAngleDeg: number,
 ): string {
   const start = polarToCartesian(cx, cy, radius, startAngleDeg);
   const end = polarToCartesian(cx, cy, radius, endAngleDeg);
@@ -194,8 +194,17 @@ function describeArc(
   // sweep-flag = 1 means clockwise in SVG (y-axis down), which draws
   // the arc UPWARD from left to right — correct for a gauge semicircle.
   return [
-    "M", start.x, start.y,
-    "A", radius, radius, 0, largeArcFlag, 1, end.x, end.y,
+    "M",
+    start.x,
+    start.y,
+    "A",
+    radius,
+    radius,
+    0,
+    largeArcFlag,
+    1,
+    end.x,
+    end.y,
   ].join(" ");
 }
 
@@ -206,7 +215,7 @@ function describeArc(
  */
 function sortDataPoints(
   points: IAggregatedDataPoint[],
-  sortBy: string
+  sortBy: string,
 ): IAggregatedDataPoint[] {
   const sorted = [...points];
   switch (sortBy) {
@@ -303,9 +312,14 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
   const dp = dataPoint;
 
   // Resolve display format
-  const effectiveFormat = dp.valueFormat ?? config?.valueFormat ?? "shortNumber";
+  const effectiveFormat =
+    dp.valueFormat ?? config?.valueFormat ?? "shortNumber";
   const effectiveNullDisplay = config?.nullDisplay ?? "\u2014";
-  const formattedValue = formatValue(dp.value, effectiveFormat, effectiveNullDisplay);
+  const formattedValue = formatValue(
+    dp.value,
+    effectiveFormat,
+    effectiveNullDisplay,
+  );
 
   // Resolve color
   const colorTokens = resolveGaugeColor(dp, config);
@@ -324,15 +338,24 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
 
   // Background arc path (always full semicircle)
   const bgArcPath = describeArc(
-    ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS,
-    bgStartAngle, bgEndAngle
+    ARC_CENTER_X,
+    ARC_CENTER_Y,
+    ARC_RADIUS,
+    bgStartAngle,
+    bgEndAngle,
   );
 
   // Foreground arc path (partial, proportional to value)
   // Only render if there is measurable fill
   const hasFill = fillFraction > 0.005;
   const fgArcPath = hasFill
-    ? describeArc(ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS, fgStartAngle, fgEndAngle)
+    ? describeArc(
+        ARC_CENTER_X,
+        ARC_CENTER_Y,
+        ARC_RADIUS,
+        fgStartAngle,
+        fgEndAngle,
+      )
     : "";
 
   // Endpoint dot position (at the end of the foreground arc)
@@ -341,7 +364,8 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
     : null;
 
   // Value text position (centered in the semicircle)
-  const valueFontSize = formattedValue.length <= 2 ? 28 : formattedValue.length <= 4 ? 22 : 18;
+  const valueFontSize =
+    formattedValue.length <= 2 ? 28 : formattedValue.length <= 4 ? 22 : 18;
 
   return (
     <div
@@ -449,9 +473,7 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
   if (count === 0) {
     return (
       <div className={styles.wrapper} style={wrapperStyle}>
-        {showTitle && title && (
-          <Text className={styles.title}>{title}</Text>
-        )}
+        {showTitle && title && <Text className={styles.title}>{title}</Text>}
         <div className={styles.noDataWrapper}>
           <Text className={styles.noDataText}>Not yet assessed</Text>
         </div>
@@ -470,9 +492,7 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
 
   return (
     <div className={styles.wrapper} style={wrapperStyle}>
-      {showTitle && title && (
-        <Text className={styles.title}>{title}</Text>
-      )}
+      {showTitle && title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.grid} style={gridStyle}>
         {sortedPoints.map((dp, idx) => (
           <SingleGauge

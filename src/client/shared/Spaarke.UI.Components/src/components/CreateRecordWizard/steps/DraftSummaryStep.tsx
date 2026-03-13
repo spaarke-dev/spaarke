@@ -7,7 +7,7 @@
  *
  * @see CreateRecordWizard — wires the fetchAiSummary callback from config
  */
-import * as React from 'react';
+import * as React from "react";
 import {
   Card,
   CardHeader,
@@ -17,14 +17,11 @@ import {
   Badge,
   makeStyles,
   tokens,
-} from '@fluentui/react-components';
-import {
-  SparkleRegular,
-  WarningRegular,
-} from '@fluentui/react-icons';
-import { RecipientField } from './RecipientField';
-import type { IRecipientItem } from '../types';
-import type { ILookupItem } from '../../../types/LookupTypes';
+} from "@fluentui/react-components";
+import { SparkleRegular, WarningRegular } from "@fluentui/react-icons";
+import { RecipientField } from "./RecipientField";
+import type { IRecipientItem } from "../types";
+import type { ILookupItem } from "../../../types/LookupTypes";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -58,19 +55,19 @@ export interface IDraftSummaryStepProps {
 
 const useStyles = makeStyles({
   root: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalL,
   },
   headerRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: tokens.spacingHorizontalM,
   },
   headerText: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   stepTitle: { color: tokens.colorNeutralForeground1 },
@@ -80,14 +77,14 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXS,
   },
   summaryCard: {
-    borderTopWidth: '1px',
-    borderRightWidth: '1px',
-    borderBottomWidth: '1px',
-    borderLeftWidth: '1px',
-    borderTopStyle: 'solid',
-    borderRightStyle: 'solid',
-    borderBottomStyle: 'solid',
-    borderLeftStyle: 'solid',
+    borderTopWidth: "1px",
+    borderRightWidth: "1px",
+    borderBottomWidth: "1px",
+    borderLeftWidth: "1px",
+    borderTopStyle: "solid",
+    borderRightStyle: "solid",
+    borderBottomStyle: "solid",
+    borderLeftStyle: "solid",
     borderTopColor: tokens.colorBrandStroke2,
     borderRightColor: tokens.colorBrandStroke2,
     borderBottomColor: tokens.colorBrandStroke2,
@@ -98,29 +95,29 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXS,
   },
   summaryHeaderInner: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorBrandForeground2,
   },
   summaryHeaderText: { color: tokens.colorBrandForeground2 },
   summaryLoading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '80px',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "80px",
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground3,
   },
   summaryUnavailable: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground3,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
-  summaryTextarea: { width: '100%' },
+  summaryTextarea: { width: "100%" },
 });
 
 // ---------------------------------------------------------------------------
@@ -140,36 +137,36 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
   const styles = useStyles();
 
   const [summaryStatus, setSummaryStatus] = React.useState<
-    'idle' | 'loading' | 'loaded' | 'error'
-  >('idle');
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
   const hasFetchedRef = React.useRef(false);
 
   React.useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
 
-    if (summaryText !== '') {
-      setSummaryStatus('loaded');
+    if (summaryText !== "") {
+      setSummaryStatus("loaded");
       return;
     }
 
     if (!fetchAiSummary) {
-      setSummaryStatus('loaded');
+      setSummaryStatus("loaded");
       return;
     }
 
     let cancelled = false;
-    setSummaryStatus('loading');
+    setSummaryStatus("loading");
 
     fetchAiSummary()
       .then((result) => {
         if (cancelled) return;
         onSummaryChange(result.summary);
-        setSummaryStatus('loaded');
+        setSummaryStatus("loaded");
       })
       .catch(() => {
         if (cancelled) return;
-        setSummaryStatus('error');
+        setSummaryStatus("error");
       });
 
     return () => {
@@ -181,7 +178,12 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
     <div className={styles.root}>
       <div className={styles.headerRow}>
         <div className={styles.headerText}>
-          <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+          <Text
+            as="h2"
+            size={500}
+            weight="semibold"
+            className={styles.stepTitle}
+          >
             Draft Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
@@ -189,7 +191,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
             email addresses for distribution.
           </Text>
         </div>
-        {summaryStatus === 'loaded' && fetchAiSummary && (
+        {summaryStatus === "loaded" && fetchAiSummary && (
           <Badge
             className={styles.aiBadge}
             appearance="tint"
@@ -207,21 +209,25 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
           header={
             <div className={styles.summaryHeaderInner}>
               <SparkleRegular aria-hidden="true" fontSize={16} />
-              <Text size={200} weight="semibold" className={styles.summaryHeaderText}>
+              <Text
+                size={200}
+                weight="semibold"
+                className={styles.summaryHeaderText}
+              >
                 AI Draft Summary
               </Text>
             </div>
           }
         />
 
-        {summaryStatus === 'loading' && (
+        {summaryStatus === "loading" && (
           <div className={styles.summaryLoading}>
             <Spinner size="tiny" />
             <Text size={200}>Generating summary&hellip;</Text>
           </div>
         )}
 
-        {summaryStatus === 'error' && (
+        {summaryStatus === "error" && (
           <div className={styles.summaryUnavailable}>
             <WarningRegular aria-hidden="true" fontSize={16} />
             <Text size={200}>
@@ -230,7 +236,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
           </div>
         )}
 
-        {(summaryStatus === 'loaded' || summaryStatus === 'error') && (
+        {(summaryStatus === "loaded" || summaryStatus === "error") && (
           <Textarea
             className={styles.summaryTextarea}
             value={summaryText}

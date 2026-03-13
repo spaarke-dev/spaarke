@@ -1,18 +1,23 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-components';
-import { authService } from '@shared/services';
-import type { IHostAdapter, IHostContext } from '@shared/adapters';
-import { useTheme } from './hooks/useTheme';
-import { useOfficeTheme } from './hooks';
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  FluentProvider,
+  Spinner,
+  makeStyles,
+  tokens,
+} from "@fluentui/react-components";
+import { authService } from "@shared/services";
+import type { IHostAdapter, IHostContext } from "@shared/adapters";
+import { useTheme } from "./hooks/useTheme";
+import { useOfficeTheme } from "./hooks";
 import {
   TaskPaneShell,
   type NavigationTab,
   type HostType,
-} from './components/TaskPaneShell';
-import { SaveView } from './components/views/SaveView';
-import { ShareView } from './components/views/ShareView';
-import { StatusView } from './components/views/StatusView';
-import { SignInView } from './components/views/SignInView';
+} from "./components/TaskPaneShell";
+import { SaveView } from "./components/views/SaveView";
+import { ShareView } from "./components/views/ShareView";
+import { StatusView } from "./components/views/StatusView";
+import { SignInView } from "./components/views/SignInView";
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -30,11 +35,11 @@ import { SignInView } from './components/views/SignInView';
 
 const useStyles = makeStyles({
   loadingContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    width: '100%',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    width: "100%",
     backgroundColor: tokens.colorNeutralBackground1,
   },
 });
@@ -57,10 +62,10 @@ export interface AppProps {
 export const App: React.FC<AppProps> = ({
   hostAdapter,
   title,
-  initialTab = 'save',
-  version = '1.0.1',
+  initialTab = "save",
+  version = "1.0.1",
   buildDate,
-  showErrorDetails = process.env.NODE_ENV === 'development',
+  showErrorDetails = process.env.NODE_ENV === "development",
 }) => {
   const styles = useStyles();
 
@@ -81,14 +86,16 @@ export const App: React.FC<AppProps> = ({
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   // Connection status
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    "connected" | "disconnected" | "connecting"
+  >("connecting");
 
   // Initialize the application
   const initializeApp = useCallback(async () => {
     try {
       setIsInitializing(true);
       setError(null);
-      setConnectionStatus('connecting');
+      setConnectionStatus("connecting");
 
       // Initialize host adapter (may already be initialized in index.tsx)
       if (!hostAdapter.isInitialized()) {
@@ -103,7 +110,7 @@ export const App: React.FC<AppProps> = ({
       const context: IHostContext = {
         itemId,
         itemType,
-        displayName: subject || 'No Subject',
+        displayName: subject || "No Subject",
         metadata: {
           hostType: hostAdapter.getHostType(),
         },
@@ -112,12 +119,12 @@ export const App: React.FC<AppProps> = ({
 
       // Check authentication status
       setIsAuthenticated(authService.isAuthenticated());
-      setConnectionStatus('connected');
+      setConnectionStatus("connected");
 
       setIsInitializing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to initialize');
-      setConnectionStatus('disconnected');
+      setError(err instanceof Error ? err.message : "Failed to initialize");
+      setConnectionStatus("disconnected");
       setIsInitializing(false);
     }
   }, [hostAdapter]);
@@ -133,7 +140,7 @@ export const App: React.FC<AppProps> = ({
       await authService.signIn();
       setIsAuthenticated(authService.isAuthenticated());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed');
+      setError(err instanceof Error ? err.message : "Sign in failed");
     }
   };
 
@@ -141,7 +148,7 @@ export const App: React.FC<AppProps> = ({
   const handleSignOut = async () => {
     await authService.signOut();
     setIsAuthenticated(false);
-    setCurrentTab('save'); // Reset to default tab
+    setCurrentTab("save"); // Reset to default tab
   };
 
   // Save handler (placeholder - will connect to API in later tasks)
@@ -158,9 +165,9 @@ export const App: React.FC<AppProps> = ({
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      setSaveSuccess('Document saved successfully to Spaarke');
+      setSaveSuccess("Document saved successfully to Spaarke");
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed');
+      setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setIsSaving(false);
     }
@@ -169,18 +176,19 @@ export const App: React.FC<AppProps> = ({
   // Settings handler (placeholder)
   const handleSettings = () => {
     // Will open settings dialog in later tasks
-    console.log('Settings clicked');
+    console.log("Settings clicked");
   };
 
   // Error handler for error boundary
   const handleError = (boundaryError: Error, errorInfo: React.ErrorInfo) => {
-    console.error('App error boundary caught:', boundaryError, errorInfo);
+    console.error("App error boundary caught:", boundaryError, errorInfo);
     // Could send to telemetry service here
   };
 
   // Determine title and host type
-  const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
-  const displayTitle = title || 'Spaarke Add-in';
+  const hostType: HostType =
+    hostAdapter.getHostType() === "outlook" ? "outlook" : "word";
+  const displayTitle = title || "Spaarke Add-in";
 
   // Get user info
   const account = authService.getAccount();
@@ -244,56 +252,62 @@ export const App: React.FC<AppProps> = ({
         onError={handleError}
       >
         {/* Tab Content */}
-        {currentTab === 'save' && (
+        {currentTab === "save" && (
           <SaveView
             hostAdapter={hostAdapter}
             getAccessToken={async () => {
-              const token = await authService.getAccessToken(['user_impersonation']);
-              return token || '';
+              const token = await authService.getAccessToken([
+                "user_impersonation",
+              ]);
+              return token || "";
             }}
-            apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net'}
+            apiBaseUrl={
+              process.env.BFF_API_BASE_URL ||
+              "https://spe-api-dev-67e2xz.azurewebsites.net"
+            }
             onComplete={(docId, docUrl) => {
-              console.log('Save complete:', docId, docUrl);
+              console.log("Save complete:", docId, docUrl);
             }}
             onQuickCreate={(entityType, searchQuery) => {
               // Quick Create - opens Dataverse form in new window
-              const baseUrl = 'https://spaarkedev1.crm.dynamics.com';
+              const baseUrl = "https://spaarkedev1.crm.dynamics.com";
               const entityMap: Record<string, string> = {
-                Matter: 'sprk_matter',
-                Project: 'sprk_project',
-                Account: 'account',
-                Contact: 'contact',
-                Invoice: 'invoice',
+                Matter: "sprk_matter",
+                Project: "sprk_project",
+                Account: "account",
+                Contact: "contact",
+                Invoice: "invoice",
               };
-              const logicalName = entityMap[entityType] || entityType.toLowerCase();
+              const logicalName =
+                entityMap[entityType] || entityType.toLowerCase();
               // Open quick create form in Dataverse
               const createUrl = `${baseUrl}/main.aspx?etn=${logicalName}&pagetype=entityrecord&cmdbar=false&navbar=off`;
-              window.open(createUrl, '_blank', 'width=600,height=700');
-              console.log('Quick create:', entityType, searchQuery);
+              window.open(createUrl, "_blank", "width=600,height=700");
+              console.log("Quick create:", entityType, searchQuery);
             }}
           />
         )}
 
-        {currentTab === 'share' && (
+        {currentTab === "share" && (
           <ShareView
             onSearch={async (query) => {
               // Placeholder - will connect to API in later tasks
-              console.log('Search:', query);
+              console.log("Search:", query);
               return [];
             }}
             onGenerateLink={async (docId, permissions) => {
               // Placeholder - will connect to API in later tasks
-              console.log('Generate link:', docId, permissions);
+              console.log("Generate link:", docId, permissions);
               return `https://spaarke.com/share/${docId}`;
             }}
             onInsertLink={async (link) => {
               // Placeholder - will use host adapter in later tasks
-              console.log('Insert link:', link);
+              console.log("Insert link:", link);
             }}
           />
         )}
 
-        {currentTab === 'search' && (
+        {currentTab === "search" && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - shows document search in later tasks
@@ -303,7 +317,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {currentTab === 'recent' && (
+        {currentTab === "recent" && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - will connect to API in later tasks

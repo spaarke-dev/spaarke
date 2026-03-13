@@ -3,11 +3,11 @@
  */
 
 export {
-    resolveTheme,
-    setupThemeListener,
-    getUserThemePreference,
-    setUserThemePreference,
-    getEffectiveDarkMode,
+  resolveTheme,
+  setupThemeListener,
+  getUserThemePreference,
+  setUserThemePreference,
+  getEffectiveDarkMode,
 } from "./ThemeService";
 
 export { SemanticSearchApiService } from "./SemanticSearchApiService";

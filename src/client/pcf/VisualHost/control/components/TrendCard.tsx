@@ -137,11 +137,11 @@ const getTrendLabel = (dir: TrendDirection): string => {
  * Simple SVG sparkline component
  * Renders a mini line chart from an array of values
  */
-const Sparkline: React.FC<{ data: number[]; width?: number; height?: number }> = ({
-  data,
-  width = 200,
-  height = 40,
-}) => {
+const Sparkline: React.FC<{
+  data: number[];
+  width?: number;
+  height?: number;
+}> = ({ data, width = 200, height = 40 }) => {
   if (data.length < 2) return null;
 
   const padding = 4;
@@ -267,7 +267,9 @@ export const TrendCard: React.FC<ITrendCardProps> = ({
         </div>
       ) : (
         <div className={styles.sparklineNoData}>
-          {trendData.length === 1 ? "Need 2+ data points for sparkline" : "No trend data"}
+          {trendData.length === 1
+            ? "Need 2+ data points for sparkline"
+            : "No trend data"}
         </div>
       )}
     </Card>

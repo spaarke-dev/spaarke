@@ -84,10 +84,14 @@ const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({
   };
 
   const visualTypeName = VisualType[definition.sprk_visualtype];
-  const aggregationTypeName = AggregationType[definition.sprk_aggregationtype || 0];
+  const aggregationTypeName =
+    AggregationType[definition.sprk_aggregationtype || 0];
 
   return (
-    <Card onClick={handleClick} style={{ cursor: onDrillInteraction ? "pointer" : "default" }}>
+    <Card
+      onClick={handleClick}
+      style={{ cursor: onDrillInteraction ? "pointer" : "default" }}
+    >
       <CardHeader
         header={<Text weight="semibold">{definition.sprk_name}</Text>}
         description={<Text size={200}>{definition.sprk_description}</Text>}
@@ -200,7 +204,14 @@ export const AllVisualTypes: Story = {
     ];
 
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem", padding: "1rem" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: "1rem",
+          padding: "1rem",
+        }}
+      >
         {visualTypes.map((visualType) => (
           <ChartPlaceholder
             key={visualType}

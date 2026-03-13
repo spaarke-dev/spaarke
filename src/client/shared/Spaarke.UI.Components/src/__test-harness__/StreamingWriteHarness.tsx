@@ -40,21 +40,21 @@
 import * as React from "react";
 import { useState, useRef, useMemo, useCallback } from "react";
 import {
-    Button,
-    Text,
-    Badge,
-    makeStyles,
-    tokens,
-    Card,
-    CardHeader,
-    Divider,
-    Textarea,
-    type TextareaOnChangeData,
+  Button,
+  Text,
+  Badge,
+  makeStyles,
+  tokens,
+  Card,
+  CardHeader,
+  Divider,
+  Textarea,
+  type TextareaOnChangeData,
 } from "@fluentui/react-components";
 import {
-    Play20Regular,
-    Stop20Regular,
-    Delete20Regular,
+  Play20Regular,
+  Stop20Regular,
+  Delete20Regular,
 } from "@fluentui/react-icons";
 
 import { SprkChatBridge } from "../services/SprkChatBridge";
@@ -67,49 +67,49 @@ import { useDocumentStreamConsumer } from "../components/RichTextEditor/hooks/us
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-    root: {
-        display: "flex",
-        flexDirection: "column",
-        gap: "16px",
-        padding: "24px",
-        maxWidth: "960px",
-        margin: "0 auto",
-    },
-    header: {
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-    },
-    controls: {
-        display: "flex",
-        gap: "8px",
-        alignItems: "center",
-        flexWrap: "wrap",
-    },
-    status: {
-        display: "flex",
-        gap: "12px",
-        alignItems: "center",
-    },
-    latencyLog: {
-        fontFamily: "monospace",
-        fontSize: tokens.fontSizeBase200,
-        maxHeight: "160px",
-        overflow: "auto",
-        padding: "8px",
-        backgroundColor: tokens.colorNeutralBackground3,
-        borderRadius: tokens.borderRadiusMedium,
-        whiteSpace: "pre-wrap",
-    },
-    editorSection: {
-        border: `1px solid ${tokens.colorNeutralStroke1}`,
-        borderRadius: tokens.borderRadiusMedium,
-        padding: "12px",
-    },
-    textArea: {
-        width: "100%",
-        minHeight: "80px",
-    },
+  root: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    padding: "24px",
+    maxWidth: "960px",
+    margin: "0 auto",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  controls: {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  status: {
+    display: "flex",
+    gap: "12px",
+    alignItems: "center",
+  },
+  latencyLog: {
+    fontFamily: "monospace",
+    fontSize: tokens.fontSizeBase200,
+    maxHeight: "160px",
+    overflow: "auto",
+    padding: "8px",
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    whiteSpace: "pre-wrap",
+  },
+  editorSection: {
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: "12px",
+  },
+  textArea: {
+    width: "100%",
+    minHeight: "80px",
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,319 +137,306 @@ Third, the encryption standards meet industry benchmarks for data at rest and in
  * @deprecated Use streaming-e2e.test.ts for automated validation.
  */
 export function StreamingWriteHarness(): React.ReactElement {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    // Bridge: use a unique context so this harness doesn't interfere with production
-    const bridgeContext = useMemo(() => `harness-${Date.now()}`, []);
-    const producerBridge = useMemo(
-        () => new SprkChatBridge({ context: bridgeContext }),
-        [bridgeContext]
-    );
-    const consumerBridge = useMemo(
-        () => new SprkChatBridge({ context: bridgeContext }),
-        [bridgeContext]
-    );
+  // Bridge: use a unique context so this harness doesn't interfere with production
+  const bridgeContext = useMemo(() => `harness-${Date.now()}`, []);
+  const producerBridge = useMemo(
+    () => new SprkChatBridge({ context: bridgeContext }),
+    [bridgeContext],
+  );
+  const consumerBridge = useMemo(
+    () => new SprkChatBridge({ context: bridgeContext }),
+    [bridgeContext],
+  );
 
-    // Editor ref
-    const editorRef = useRef<RichTextEditorRef>(null);
+  // Editor ref
+  const editorRef = useRef<RichTextEditorRef>(null);
 
-    // Mock content
-    const [mockText, setMockText] = useState(DEFAULT_MOCK_TEXT);
+  // Mock content
+  const [mockText, setMockText] = useState(DEFAULT_MOCK_TEXT);
 
-    // Latency tracking
-    const [latencyLog, setLatencyLog] = useState<string[]>([]);
-    const tokenStartTimesRef = useRef<Map<number, number>>(new Map());
+  // Latency tracking
+  const [latencyLog, setLatencyLog] = useState<string[]>([]);
+  const tokenStartTimesRef = useRef<Map<number, number>>(new Map());
 
-    // Consumer hook — wires bridge events to editor ref
-    const { isStreaming, operationId, tokenCount } = useDocumentStreamConsumer({
-        bridge: consumerBridge,
-        editorRef,
-        onStreamStart: (opId: string) => {
-            setLatencyLog((prev) => [
-                ...prev,
-                `[${new Date().toISOString()}] Stream started: ${opId}`,
-            ]);
-        },
-        onStreamEnd: (opId: string, cancelled: boolean) => {
-            setLatencyLog((prev) => [
-                ...prev,
-                `[${new Date().toISOString()}] Stream ended: ${opId} (cancelled=${cancelled})`,
-            ]);
+  // Consumer hook — wires bridge events to editor ref
+  const { isStreaming, operationId, tokenCount } = useDocumentStreamConsumer({
+    bridge: consumerBridge,
+    editorRef,
+    onStreamStart: (opId: string) => {
+      setLatencyLog((prev) => [
+        ...prev,
+        `[${new Date().toISOString()}] Stream started: ${opId}`,
+      ]);
+    },
+    onStreamEnd: (opId: string, cancelled: boolean) => {
+      setLatencyLog((prev) => [
+        ...prev,
+        `[${new Date().toISOString()}] Stream ended: ${opId} (cancelled=${cancelled})`,
+      ]);
 
-            // Report latency summary
-            const times = tokenStartTimesRef.current;
-            if (times.size > 0) {
-                const latencies: number[] = [];
-                let prevTime = 0;
-                const sorted = Array.from(times.entries()).sort((a, b) => a[0] - b[0]);
-                for (const [idx, time] of sorted) {
-                    if (idx > 0 && prevTime > 0) {
-                        latencies.push(time - prevTime);
-                    }
-                    prevTime = time;
-                }
-                if (latencies.length > 0) {
-                    const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-                    const max = Math.max(...latencies);
-                    const p95Idx = Math.floor(latencies.length * 0.95);
-                    const sortedLatencies = [...latencies].sort((a, b) => a - b);
-                    const p95 = sortedLatencies[p95Idx] ?? max;
-                    setLatencyLog((prev) => [
-                        ...prev,
-                        `  Latency: avg=${avg.toFixed(1)}ms, p95=${p95.toFixed(1)}ms, max=${max.toFixed(1)}ms (${latencies.length} intervals)`,
-                        `  NFR-01 target: <100ms per token — ${p95 < 100 ? "PASS" : "FAIL"}`,
-                    ]);
-                }
-                tokenStartTimesRef.current.clear();
-            }
-        },
-        onTokenReceived: (index: number, timestamp: number) => {
-            tokenStartTimesRef.current.set(index, timestamp);
-        },
+      // Report latency summary
+      const times = tokenStartTimesRef.current;
+      if (times.size > 0) {
+        const latencies: number[] = [];
+        let prevTime = 0;
+        const sorted = Array.from(times.entries()).sort((a, b) => a[0] - b[0]);
+        for (const [idx, time] of sorted) {
+          if (idx > 0 && prevTime > 0) {
+            latencies.push(time - prevTime);
+          }
+          prevTime = time;
+        }
+        if (latencies.length > 0) {
+          const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+          const max = Math.max(...latencies);
+          const p95Idx = Math.floor(latencies.length * 0.95);
+          const sortedLatencies = [...latencies].sort((a, b) => a - b);
+          const p95 = sortedLatencies[p95Idx] ?? max;
+          setLatencyLog((prev) => [
+            ...prev,
+            `  Latency: avg=${avg.toFixed(1)}ms, p95=${p95.toFixed(1)}ms, max=${max.toFixed(1)}ms (${latencies.length} intervals)`,
+            `  NFR-01 target: <100ms per token — ${p95 < 100 ? "PASS" : "FAIL"}`,
+          ]);
+        }
+        tokenStartTimesRef.current.clear();
+      }
+    },
+    onTokenReceived: (index: number, timestamp: number) => {
+      tokenStartTimesRef.current.set(index, timestamp);
+    },
+  });
+
+  // Streaming control ref for cancellation
+  const streamTimerRef = useRef<number | null>(null);
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Mock SSE emitter (producer side)
+  // ─────────────────────────────────────────────────────────────────────
+
+  const startMockStream = useCallback(() => {
+    if (isStreaming) {
+      return;
+    }
+
+    const opId = `op-${Date.now()}`;
+    const textToStream = mockText;
+
+    // Tokenize: split into individual characters (simulates per-token SSE)
+    // In production, tokens are typically 1-4 words. Character-by-character
+    // is a worst-case scenario for latency testing.
+    const tokens = textToStream.split("");
+
+    setLatencyLog((prev) => [
+      ...prev,
+      `\n--- New Stream ---`,
+      `[${new Date().toISOString()}] Emitting ${tokens.length} tokens via bridge`,
+    ]);
+
+    // Emit document_stream_start
+    producerBridge.emit("document_stream_start", {
+      operationId: opId,
+      targetPosition: "end",
+      operationType: "insert",
     });
 
-    // Streaming control ref for cancellation
-    const streamTimerRef = useRef<number | null>(null);
+    // Emit tokens with a realistic interval (~20ms per token, ~50 tokens/sec)
+    let index = 0;
+    const interval = 20;
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Mock SSE emitter (producer side)
-    // ─────────────────────────────────────────────────────────────────────
-
-    const startMockStream = useCallback(() => {
-        if (isStreaming) {
-            return;
-        }
-
-        const opId = `op-${Date.now()}`;
-        const textToStream = mockText;
-
-        // Tokenize: split into individual characters (simulates per-token SSE)
-        // In production, tokens are typically 1-4 words. Character-by-character
-        // is a worst-case scenario for latency testing.
-        const tokens = textToStream.split("");
-
-        setLatencyLog((prev) => [
-            ...prev,
-            `\n--- New Stream ---`,
-            `[${new Date().toISOString()}] Emitting ${tokens.length} tokens via bridge`,
-        ]);
-
-        // Emit document_stream_start
-        producerBridge.emit("document_stream_start", {
-            operationId: opId,
-            targetPosition: "end",
-            operationType: "insert",
+    const emitNextToken = (): void => {
+      if (index >= tokens.length) {
+        // Emit document_stream_end
+        producerBridge.emit("document_stream_end", {
+          operationId: opId,
+          cancelled: false,
+          totalTokens: tokens.length,
         });
+        streamTimerRef.current = null;
+        return;
+      }
 
-        // Emit tokens with a realistic interval (~20ms per token, ~50 tokens/sec)
-        let index = 0;
-        const interval = 20;
+      producerBridge.emit("document_stream_token", {
+        operationId: opId,
+        token: tokens[index],
+        index,
+      });
+      index++;
 
-        const emitNextToken = (): void => {
-            if (index >= tokens.length) {
-                // Emit document_stream_end
-                producerBridge.emit("document_stream_end", {
-                    operationId: opId,
-                    cancelled: false,
-                    totalTokens: tokens.length,
-                });
-                streamTimerRef.current = null;
-                return;
-            }
+      streamTimerRef.current = window.setTimeout(emitNextToken, interval);
+    };
 
-            producerBridge.emit("document_stream_token", {
-                operationId: opId,
-                token: tokens[index],
-                index,
-            });
-            index++;
+    streamTimerRef.current = window.setTimeout(emitNextToken, interval);
+  }, [isStreaming, mockText, producerBridge]);
 
-            streamTimerRef.current = window.setTimeout(emitNextToken, interval);
-        };
+  const cancelMockStream = useCallback(() => {
+    if (streamTimerRef.current !== null) {
+      clearTimeout(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
 
-        streamTimerRef.current = window.setTimeout(emitNextToken, interval);
-    }, [isStreaming, mockText, producerBridge]);
+    if (operationId) {
+      producerBridge.emit("document_stream_end", {
+        operationId,
+        cancelled: true,
+        totalTokens: tokenCount,
+      });
+    }
+  }, [operationId, tokenCount, producerBridge]);
 
-    const cancelMockStream = useCallback(() => {
-        if (streamTimerRef.current !== null) {
-            clearTimeout(streamTimerRef.current);
-            streamTimerRef.current = null;
-        }
+  const clearEditor = useCallback(() => {
+    editorRef.current?.clear();
+    setLatencyLog([]);
+  }, []);
 
-        if (operationId) {
-            producerBridge.emit("document_stream_end", {
-                operationId,
-                cancelled: true,
-                totalTokens: tokenCount,
-            });
-        }
-    }, [operationId, tokenCount, producerBridge]);
+  const handleEditorChange = useCallback(() => {
+    // No-op for the harness — we only care about streaming writes
+  }, []);
 
-    const clearEditor = useCallback(() => {
-        editorRef.current?.clear();
-        setLatencyLog([]);
-    }, []);
+  const handleMockTextChange = useCallback(
+    (
+      _ev: React.ChangeEvent<HTMLTextAreaElement>,
+      data: TextareaOnChangeData,
+    ) => {
+      setMockText(data.value);
+    },
+    [],
+  );
 
-    const handleEditorChange = useCallback(() => {
-        // No-op for the harness — we only care about streaming writes
-    }, []);
+  // ─────────────────────────────────────────────────────────────────────
+  // Cleanup on unmount
+  // ─────────────────────────────────────────────────────────────────────
 
-    const handleMockTextChange = useCallback(
-        (_ev: React.ChangeEvent<HTMLTextAreaElement>, data: TextareaOnChangeData) => {
-            setMockText(data.value);
-        },
-        []
-    );
+  React.useEffect(() => {
+    return () => {
+      if (streamTimerRef.current !== null) {
+        clearTimeout(streamTimerRef.current);
+      }
+      producerBridge.disconnect();
+      consumerBridge.disconnect();
+    };
+  }, [producerBridge, consumerBridge]);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Cleanup on unmount
-    // ─────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────
 
-    React.useEffect(() => {
-        return () => {
-            if (streamTimerRef.current !== null) {
-                clearTimeout(streamTimerRef.current);
-            }
-            producerBridge.disconnect();
-            consumerBridge.disconnect();
-        };
-    }, [producerBridge, consumerBridge]);
+  return (
+    <div className={styles.root}>
+      {/* Header */}
+      <div className={styles.header}>
+        <Text size={600} weight="semibold">
+          Streaming Write Harness
+        </Text>
+        <Badge appearance="filled" color="important" size="small">
+          Test Only
+        </Badge>
+      </div>
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Render
-    // ─────────────────────────────────────────────────────────────────────
+      <Text size={300}>
+        Validates the full E2E streaming write pipeline: Mock SSE events →
+        SprkChatBridge (BroadcastChannel) → useDocumentStreamConsumer →
+        RichTextEditor StreamingInsertPlugin. Not production code.
+      </Text>
 
-    return (
-        <div className={styles.root}>
-            {/* Header */}
-            <div className={styles.header}>
-                <Text size={600} weight="semibold">
-                    Streaming Write Harness
-                </Text>
-                <Badge
-                    appearance="filled"
-                    color="important"
-                    size="small"
-                >
-                    Test Only
-                </Badge>
-            </div>
+      <Divider />
 
-            <Text size={300}>
-                Validates the full E2E streaming write pipeline: Mock SSE events
-                → SprkChatBridge (BroadcastChannel) → useDocumentStreamConsumer
-                → RichTextEditor StreamingInsertPlugin. Not production code.
+      {/* Mock Content Input */}
+      <Card>
+        <CardHeader
+          header={<Text weight="semibold">Mock SSE Content</Text>}
+          description="Text to stream into the editor (each character = 1 token)"
+        />
+        <Textarea
+          className={styles.textArea}
+          value={mockText}
+          onChange={handleMockTextChange}
+          disabled={isStreaming}
+          resize="vertical"
+        />
+      </Card>
+
+      {/* Controls */}
+      <div className={styles.controls}>
+        <Button
+          appearance="primary"
+          icon={<Play20Regular />}
+          onClick={startMockStream}
+          disabled={isStreaming}
+        >
+          Start Streaming
+        </Button>
+        <Button
+          appearance="secondary"
+          icon={<Stop20Regular />}
+          onClick={cancelMockStream}
+          disabled={!isStreaming}
+        >
+          Cancel
+        </Button>
+        <Button
+          appearance="subtle"
+          icon={<Delete20Regular />}
+          onClick={clearEditor}
+          disabled={isStreaming}
+        >
+          Clear
+        </Button>
+
+        <Divider vertical style={{ height: "24px" }} />
+
+        <div className={styles.status}>
+          <Badge
+            appearance="filled"
+            color={isStreaming ? "success" : "informative"}
+          >
+            {isStreaming ? "Streaming" : "Idle"}
+          </Badge>
+          {operationId && (
+            <Text size={200}>
+              Op: {operationId} | Tokens: {tokenCount}
             </Text>
+          )}
+        </div>
+      </div>
 
-            <Divider />
+      <Divider />
 
-            {/* Mock Content Input */}
-            <Card>
-                <CardHeader
-                    header={
-                        <Text weight="semibold">Mock SSE Content</Text>
-                    }
-                    description="Text to stream into the editor (each character = 1 token)"
-                />
-                <Textarea
-                    className={styles.textArea}
-                    value={mockText}
-                    onChange={handleMockTextChange}
-                    disabled={isStreaming}
-                    resize="vertical"
-                />
-            </Card>
+      {/* Editor (Consumer Side) */}
+      <div className={styles.editorSection}>
+        <Text weight="semibold" size={300}>
+          RichTextEditor (Consumer — receives bridge events)
+        </Text>
+        <div style={{ marginTop: "8px" }}>
+          <RichTextEditor
+            ref={editorRef}
+            value=""
+            onChange={handleEditorChange}
+            placeholder="Streaming content will appear here..."
+            minHeight={200}
+            maxHeight={400}
+          />
+        </div>
+      </div>
 
-            {/* Controls */}
-            <div className={styles.controls}>
-                <Button
-                    appearance="primary"
-                    icon={<Play20Regular />}
-                    onClick={startMockStream}
-                    disabled={isStreaming}
-                >
-                    Start Streaming
-                </Button>
-                <Button
-                    appearance="secondary"
-                    icon={<Stop20Regular />}
-                    onClick={cancelMockStream}
-                    disabled={!isStreaming}
-                >
-                    Cancel
-                </Button>
-                <Button
-                    appearance="subtle"
-                    icon={<Delete20Regular />}
-                    onClick={clearEditor}
-                    disabled={isStreaming}
-                >
-                    Clear
-                </Button>
+      {/* Latency Log */}
+      {latencyLog.length > 0 && (
+        <Card>
+          <CardHeader header={<Text weight="semibold">Latency Log</Text>} />
+          <div className={styles.latencyLog}>{latencyLog.join("\n")}</div>
+        </Card>
+      )}
 
-                <Divider vertical style={{ height: "24px" }} />
-
-                <div className={styles.status}>
-                    <Badge
-                        appearance="filled"
-                        color={isStreaming ? "success" : "informative"}
-                    >
-                        {isStreaming ? "Streaming" : "Idle"}
-                    </Badge>
-                    {operationId && (
-                        <Text size={200}>
-                            Op: {operationId} | Tokens: {tokenCount}
-                        </Text>
-                    )}
-                </div>
-            </div>
-
-            <Divider />
-
-            {/* Editor (Consumer Side) */}
-            <div className={styles.editorSection}>
-                <Text weight="semibold" size={300}>
-                    RichTextEditor (Consumer — receives bridge events)
-                </Text>
-                <div style={{ marginTop: "8px" }}>
-                    <RichTextEditor
-                        ref={editorRef}
-                        value=""
-                        onChange={handleEditorChange}
-                        placeholder="Streaming content will appear here..."
-                        minHeight={200}
-                        maxHeight={400}
-                    />
-                </div>
-            </div>
-
-            {/* Latency Log */}
-            {latencyLog.length > 0 && (
-                <Card>
-                    <CardHeader
-                        header={
-                            <Text weight="semibold">Latency Log</Text>
-                        }
-                    />
-                    <div className={styles.latencyLog}>
-                        {latencyLog.join("\n")}
-                    </div>
-                </Card>
-            )}
-
-            {/* Architecture Diagram */}
-            <Card>
-                <CardHeader
-                    header={
-                        <Text weight="semibold">Data Flow</Text>
-                    }
-                />
-                <Text
-                    size={200}
-                    font="monospace"
-                    style={{ whiteSpace: "pre", padding: "8px" }}
-                >
-{`  [Mock SSE Emitter]
+      {/* Architecture Diagram */}
+      <Card>
+        <CardHeader header={<Text weight="semibold">Data Flow</Text>} />
+        <Text
+          size={200}
+          font="monospace"
+          style={{ whiteSpace: "pre", padding: "8px" }}
+        >
+          {`  [Mock SSE Emitter]
         |
         v
   producerBridge.emit("document_stream_*")
@@ -465,10 +452,10 @@ export function StreamingWriteHarness(): React.ReactElement {
   editorRef.beginStreamingInsert()
   editorRef.appendStreamToken()
   editorRef.endStreamingInsert()`}
-                </Text>
-            </Card>
-        </div>
-    );
+        </Text>
+      </Card>
+    </div>
+  );
 }
 
 export default StreamingWriteHarness;

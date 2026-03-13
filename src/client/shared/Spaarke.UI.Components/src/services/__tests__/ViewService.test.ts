@@ -12,9 +12,15 @@ const createMockXrm = (): XrmContext => ({
   WebApi: {
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     retrieveRecord: jest.fn().mockResolvedValue({}),
-    createRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    updateRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
-    deleteRecord: jest.fn().mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    createRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    updateRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
+    deleteRecord: jest
+      .fn()
+      .mockResolvedValue({ id: "mock-id", entityType: "mock" }),
   },
 });
 
@@ -54,7 +60,9 @@ describe("ViewService", () => {
     ];
 
     it("should fetch saved queries for an entity", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockSavedQueries,
       });
 
@@ -65,12 +73,14 @@ describe("ViewService", () => {
       expect(views[0].viewType).toBe("savedquery");
       expect(mockXrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledWith(
         "savedquery",
-        expect.stringContaining("returnedtypecode eq 'account'")
+        expect.stringContaining("returnedtypecode eq 'account'"),
       );
     });
 
     it("should sort views by sortOrder", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockSavedQueries,
       });
 
@@ -81,7 +91,9 @@ describe("ViewService", () => {
     });
 
     it("should parse layout XML into columns", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockSavedQueries,
       });
 
@@ -130,9 +142,9 @@ describe("ViewService", () => {
     });
 
     it("should handle API errors gracefully", async () => {
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValueOnce(
-        new Error("API Error")
-      );
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockRejectedValueOnce(new Error("API Error"));
 
       const views = await service.getViews("account");
 
@@ -163,7 +175,9 @@ describe("ViewService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockViews,
       });
 
@@ -187,7 +201,9 @@ describe("ViewService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockViews,
       });
 
@@ -212,7 +228,9 @@ describe("ViewService", () => {
         },
       ];
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: mockViews,
       });
 
@@ -239,10 +257,14 @@ describe("ViewService", () => {
         querytype: 0,
       };
 
-      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+      (
+        mockXrm.WebApi.retrieveMultipleRecords as jest.Mock
+      ).mockResolvedValueOnce({
         entities: [],
       });
-      (mockXrm.WebApi.retrieveRecord as jest.Mock).mockResolvedValueOnce(mockView);
+      (mockXrm.WebApi.retrieveRecord as jest.Mock).mockResolvedValueOnce(
+        mockView,
+      );
 
       const view = await service.getViewById("view-1", "account");
 
@@ -251,7 +273,7 @@ describe("ViewService", () => {
       expect(mockXrm.WebApi.retrieveRecord).toHaveBeenCalledWith(
         "savedquery",
         "view-1",
-        expect.any(String)
+        expect.any(String),
       );
     });
   });

@@ -18,23 +18,20 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Has no target handle (nothing connects into it) and one source handle.
  */
 export const StartNode = React.memo(function StartNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<Play20Regular />}
-            typeLabel="Start"
-            targetHandleCount={0}
-        >
-            <Text
-                size={100}
-                style={{ color: tokens.colorNeutralForeground3 }}
-            >
-                Workflow entry point
-            </Text>
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<Play20Regular />}
+      typeLabel="Start"
+      targetHandleCount={0}
+    >
+      <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+        Workflow entry point
+      </Text>
+    </BaseNode>
+  );
 });

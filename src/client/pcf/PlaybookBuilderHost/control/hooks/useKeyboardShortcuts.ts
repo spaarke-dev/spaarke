@@ -11,7 +11,7 @@
  * Task 053: Implement keyboard shortcuts
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -51,7 +51,9 @@ export interface UseKeyboardShortcutsReturn {
   /** Manually unregister a shortcut */
   unregisterShortcut: (key: string, ctrlOrCmd?: boolean) => void;
   /** Get formatted shortcut string (e.g., "⌘K" or "Ctrl+K") */
-  formatShortcut: (config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>) => string;
+  formatShortcut: (
+    config: Pick<KeyboardShortcutConfig, "key" | "ctrlOrCmd" | "shift" | "alt">,
+  ) => string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +64,10 @@ export interface UseKeyboardShortcutsReturn {
  * Detect if running on Mac OS
  */
 const isMac = (): boolean => {
-  return typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  return (
+    typeof navigator !== "undefined" &&
+    /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  );
 };
 
 /**
@@ -76,30 +81,30 @@ const matchesCtrlOrCmd = (event: KeyboardEvent): boolean => {
  * Format a shortcut for display
  */
 const formatShortcutDisplay = (
-  config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>
+  config: Pick<KeyboardShortcutConfig, "key" | "ctrlOrCmd" | "shift" | "alt">,
 ): string => {
   const parts: string[] = [];
   const mac = isMac();
 
   if (config.ctrlOrCmd) {
-    parts.push(mac ? '⌘' : 'Ctrl');
+    parts.push(mac ? "⌘" : "Ctrl");
   }
   if (config.alt) {
-    parts.push(mac ? '⌥' : 'Alt');
+    parts.push(mac ? "⌥" : "Alt");
   }
   if (config.shift) {
-    parts.push(mac ? '⇧' : 'Shift');
+    parts.push(mac ? "⇧" : "Shift");
   }
 
   // Format the key
   let keyDisplay = config.key.toUpperCase();
-  if (config.key === 'Escape') keyDisplay = mac ? 'Esc' : 'Esc';
-  if (config.key === 'Enter') keyDisplay = mac ? '↵' : 'Enter';
-  if (config.key === ' ') keyDisplay = 'Space';
+  if (config.key === "Escape") keyDisplay = mac ? "Esc" : "Esc";
+  if (config.key === "Enter") keyDisplay = mac ? "↵" : "Enter";
+  if (config.key === " ") keyDisplay = "Space";
 
   parts.push(keyDisplay);
 
-  return mac ? parts.join('') : parts.join('+');
+  return mac ? parts.join("") : parts.join("+");
 };
 
 /**
@@ -108,7 +113,11 @@ const formatShortcutDisplay = (
 const isInputElement = (element: Element | null): boolean => {
   if (!element) return false;
   const tagName = element.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || (element as HTMLElement).isContentEditable;
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    (element as HTMLElement).isContentEditable
+  );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,21 +125,26 @@ const isInputElement = (element: Element | null): boolean => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const useKeyboardShortcuts = (
-  options: UseKeyboardShortcutsOptions
+  options: UseKeyboardShortcutsOptions,
 ): UseKeyboardShortcutsReturn => {
   const { shortcuts, disabled = false } = options;
   const shortcutsRef = useRef<Map<string, KeyboardShortcutConfig>>(new Map());
 
   // Generate a unique key for a shortcut
   const getShortcutKey = useCallback(
-    (config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>): string => {
+    (
+      config: Pick<
+        KeyboardShortcutConfig,
+        "key" | "ctrlOrCmd" | "shift" | "alt"
+      >,
+    ): string => {
       const parts = [config.key.toLowerCase()];
-      if (config.ctrlOrCmd) parts.unshift('ctrlOrCmd');
-      if (config.shift) parts.unshift('shift');
-      if (config.alt) parts.unshift('alt');
-      return parts.join('+');
+      if (config.ctrlOrCmd) parts.unshift("ctrlOrCmd");
+      if (config.shift) parts.unshift("shift");
+      if (config.alt) parts.unshift("alt");
+      return parts.join("+");
     },
-    []
+    [],
   );
 
   // Register initial shortcuts
@@ -171,7 +185,7 @@ export const useKeyboardShortcuts = (
         // Skip if focused on input and no ctrlOrCmd (let normal typing work)
         if (!config.ctrlOrCmd && isInputElement(event.target as Element)) {
           // Allow Escape to work in inputs
-          if (config.key.toLowerCase() !== 'escape') continue;
+          if (config.key.toLowerCase() !== "escape") continue;
         }
 
         // Trigger the handler
@@ -183,8 +197,8 @@ export const useKeyboardShortcuts = (
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [disabled]);
 
   // Manual registration
@@ -194,7 +208,7 @@ export const useKeyboardShortcuts = (
       shortcutsRef.current.set(key, config);
       return () => shortcutsRef.current.delete(key);
     },
-    [getShortcutKey]
+    [getShortcutKey],
   );
 
   // Manual unregistration
@@ -203,15 +217,20 @@ export const useKeyboardShortcuts = (
       const shortcutKey = getShortcutKey({ key, ctrlOrCmd });
       shortcutsRef.current.delete(shortcutKey);
     },
-    [getShortcutKey]
+    [getShortcutKey],
   );
 
   // Format shortcut for display
   const formatShortcut = useCallback(
-    (config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>): string => {
+    (
+      config: Pick<
+        KeyboardShortcutConfig,
+        "key" | "ctrlOrCmd" | "shift" | "alt"
+      >,
+    ): string => {
       return formatShortcutDisplay(config);
     },
-    []
+    [],
   );
 
   return {
@@ -235,16 +254,16 @@ export const createAiAssistantShortcuts = (handlers: {
 }): KeyboardShortcutConfig[] => {
   return [
     {
-      key: 'k',
+      key: "k",
       ctrlOrCmd: true,
       handler: handlers.onToggleModal,
-      description: 'Toggle AI Assistant',
+      description: "Toggle AI Assistant",
       preventDefault: true,
     },
     {
-      key: 'Escape',
+      key: "Escape",
       handler: handlers.onCloseModal,
-      description: 'Close AI Assistant',
+      description: "Close AI Assistant",
       preventDefault: false, // Let inputs handle Escape too
     },
   ];

@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo } from 'react';
+import React, { Component, ErrorInfo } from "react";
 import {
   makeStyles,
   tokens,
@@ -7,8 +7,8 @@ import {
   Body1,
   Card,
   CardHeader,
-} from '@fluentui/react-components';
-import { ErrorCircleRegular, ArrowResetRegular } from '@fluentui/react-icons';
+} from "@fluentui/react-components";
+import { ErrorCircleRegular, ArrowResetRegular } from "@fluentui/react-icons";
 
 /**
  * ErrorBoundary - React error boundary for Office Add-in task pane.
@@ -21,27 +21,27 @@ import { ErrorCircleRegular, ArrowResetRegular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
     padding: tokens.spacingVerticalXL,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
   },
   card: {
-    maxWidth: '400px',
-    width: '100%',
+    maxWidth: "400px",
+    width: "100%",
   },
   icon: {
-    fontSize: '48px',
+    fontSize: "48px",
     color: tokens.colorPaletteRedForeground1,
     marginBottom: tokens.spacingVerticalM,
   },
   content: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   errorDetails: {
@@ -50,13 +50,13 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
-    overflow: 'auto',
-    maxHeight: '150px',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+    overflow: "auto",
+    maxHeight: "150px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
   },
   actions: {
-    display: 'flex',
+    display: "flex",
     gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
@@ -108,14 +108,19 @@ const ErrorFallback: React.FC<{
 
           {showDetails && error && (
             <details>
-              <summary style={{ cursor: 'pointer', color: tokens.colorNeutralForeground3 }}>
+              <summary
+                style={{
+                  cursor: "pointer",
+                  color: tokens.colorNeutralForeground3,
+                }}
+              >
                 Error details
               </summary>
               <div className={styles.errorDetails}>
                 <strong>{error.name}:</strong> {error.message}
                 {errorInfo?.componentStack && (
                   <>
-                    {'\n\nComponent Stack:\n'}
+                    {"\n\nComponent Stack:\n"}
                     {errorInfo.componentStack}
                   </>
                 )}
@@ -167,7 +172,7 @@ export class ErrorBoundary extends Component<
     this.setState({ errorInfo });
 
     // Log error for debugging
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
 
     // Call onError callback if provided
     if (this.props.onError) {
@@ -215,7 +220,7 @@ export class ErrorBoundary extends Component<
  */
 export const withErrorBoundary = <P extends object>(
   WrappedComponent: React.ComponentType<P>,
-  errorBoundaryProps?: Omit<ErrorBoundaryProps, 'children'>
+  errorBoundaryProps?: Omit<ErrorBoundaryProps, "children">,
 ): React.FC<P> => {
   const WithErrorBoundary: React.FC<P> = (props) => (
     <ErrorBoundary {...errorBoundaryProps}>
@@ -224,7 +229,7 @@ export const withErrorBoundary = <P extends object>(
   );
 
   WithErrorBoundary.displayName = `withErrorBoundary(${
-    WrappedComponent.displayName || WrappedComponent.name || 'Component'
+    WrappedComponent.displayName || WrappedComponent.name || "Component"
   })`;
 
   return WithErrorBoundary;

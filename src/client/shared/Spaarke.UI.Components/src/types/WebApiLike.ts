@@ -67,7 +67,7 @@ export interface IWebApiLike {
   retrieveRecord(
     entityType: string,
     id: string,
-    options?: string
+    options?: string,
   ): Promise<Record<string, unknown>>;
 
   /**
@@ -81,7 +81,7 @@ export interface IWebApiLike {
   retrieveMultipleRecords(
     entityType: string,
     options?: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ): Promise<IWebApiRetrieveMultipleResponse>;
 }
 
@@ -101,7 +101,7 @@ export interface IWebApiWithCreate extends IWebApiLike {
    */
   createRecord(
     entityType: string,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
   ): Promise<{ id: string }>;
 }
 
@@ -122,12 +122,12 @@ export function createWebApiFromXrm(xrmWebApi: {
   retrieveRecord: (
     entityType: string,
     id: string,
-    options?: string
+    options?: string,
   ) => Promise<Record<string, unknown>>;
   retrieveMultipleRecords: (
     entityType: string,
     options?: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ) => Promise<IWebApiRetrieveMultipleResponse>;
 }): IWebApiLike {
   return {

@@ -5,8 +5,8 @@
  * Used for custom edge rendering (condition branches, etc.).
  */
 
-import type { EdgeTypes } from 'react-flow-renderer';
-import { TrueBranchEdge, FalseBranchEdge } from './ConditionEdge';
+import type { EdgeTypes } from "react-flow-renderer";
+import { TrueBranchEdge, FalseBranchEdge } from "./ConditionEdge";
 
 /**
  * Edge type registry for React Flow.
@@ -21,7 +21,7 @@ export const edgeTypes: EdgeTypes = {
  * Edge type constants for type-safe usage.
  */
 export const EDGE_TYPES = {
-  TRUE_BRANCH: 'trueBranch',
-  FALSE_BRANCH: 'falseBranch',
-  DEFAULT: 'smoothstep',
+  TRUE_BRANCH: "trueBranch",
+  FALSE_BRANCH: "falseBranch",
+  DEFAULT: "smoothstep",
 } as const;

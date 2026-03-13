@@ -100,9 +100,7 @@ export const msalConfig: Configuration = {
  * - Scope: user_impersonation
  */
 export const loginRequest = {
-  scopes: [
-    "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"
-  ],
+  scopes: ["api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"],
   loginHint: undefined as string | undefined,
 };
 
@@ -114,7 +112,8 @@ export const loginRequest = {
  * Validate MSAL configuration before initialization
  */
 export function validateMsalConfig(): void {
-  const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const guidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   if (!CLIENT_ID || !guidRegex.test(CLIENT_ID)) {
     throw new Error(`[MSAL Config] Invalid CLIENT_ID: "${CLIENT_ID}"`);
@@ -124,7 +123,10 @@ export function validateMsalConfig(): void {
     throw new Error(`[MSAL Config] Invalid TENANT_ID: "${TENANT_ID}"`);
   }
 
-  if (!REDIRECT_URI.startsWith("https://") || !REDIRECT_URI.includes(".dynamics.com")) {
+  if (
+    !REDIRECT_URI.startsWith("https://") ||
+    !REDIRECT_URI.includes(".dynamics.com")
+  ) {
     throw new Error(`[MSAL Config] Invalid REDIRECT_URI: "${REDIRECT_URI}"`);
   }
 

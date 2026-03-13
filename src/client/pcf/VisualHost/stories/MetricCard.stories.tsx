@@ -218,7 +218,11 @@ export const MetricGrid: Story = {
         }}
       >
         {metrics.map((metric, index) => (
-          <MetricCard key={index} {...metric} onDrillInteraction={handleDrill} />
+          <MetricCard
+            key={index}
+            {...metric}
+            onDrillInteraction={handleDrill}
+          />
         ))}
       </div>
     );
@@ -229,10 +233,34 @@ export const MetricGrid: Story = {
 export const DashboardRow: Story = {
   render: () => {
     const metrics: IMetricCardProps[] = [
-      { value: 142, label: "New", compact: true, drillField: "status", drillValue: "new" },
-      { value: 87, label: "In Progress", compact: true, drillField: "status", drillValue: "inprogress" },
-      { value: 234, label: "Resolved", compact: true, drillField: "status", drillValue: "resolved" },
-      { value: 12, label: "Escalated", compact: true, drillField: "status", drillValue: "escalated" },
+      {
+        value: 142,
+        label: "New",
+        compact: true,
+        drillField: "status",
+        drillValue: "new",
+      },
+      {
+        value: 87,
+        label: "In Progress",
+        compact: true,
+        drillField: "status",
+        drillValue: "inprogress",
+      },
+      {
+        value: 234,
+        label: "Resolved",
+        compact: true,
+        drillField: "status",
+        drillValue: "resolved",
+      },
+      {
+        value: 12,
+        label: "Escalated",
+        compact: true,
+        drillField: "status",
+        drillValue: "escalated",
+      },
     ];
 
     return (
@@ -245,7 +273,11 @@ export const DashboardRow: Story = {
         }}
       >
         {metrics.map((metric, index) => (
-          <MetricCard key={index} {...metric} onDrillInteraction={handleDrill} />
+          <MetricCard
+            key={index}
+            {...metric}
+            onDrillInteraction={handleDrill}
+          />
         ))}
       </div>
     );

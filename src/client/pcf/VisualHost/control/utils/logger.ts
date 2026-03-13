@@ -22,7 +22,7 @@ const isDebugEnabled =
 function formatMessage(
   level: LogLevel,
   component: string,
-  message: string
+  message: string,
 ): string {
   return `${LOG_PREFIX} [${component}] ${message}`;
 }

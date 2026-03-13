@@ -7,12 +7,15 @@
  */
 
 // Components
-export { WizardShell } from './WizardShell';
-export { WizardStepper } from './WizardStepper';
-export { WizardSuccessScreen } from './WizardSuccessScreen';
+export { WizardShell } from "./WizardShell";
+export { WizardStepper } from "./WizardStepper";
+export { WizardSuccessScreen } from "./WizardSuccessScreen";
 
 // Reducer and initializer
-export { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
+export {
+  wizardShellReducer,
+  buildInitialShellState,
+} from "./wizardShellReducer";
 
 // Types
 export type {
@@ -24,7 +27,7 @@ export type {
   IWizardShellHandle,
   IWizardSuccessConfig,
   IWizardShellProps,
-} from './wizardShellTypes';
+} from "./wizardShellTypes";
 
 // WizardStepper props type
-export type { IWizardStepperProps } from './WizardStepper';
+export type { IWizardStepperProps } from "./WizardStepper";

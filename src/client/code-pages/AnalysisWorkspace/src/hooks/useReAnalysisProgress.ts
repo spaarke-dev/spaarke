@@ -38,29 +38,29 @@ import type { SprkChatBridge } from "@spaarke/ui-components/services/SprkChatBri
 // ---------------------------------------------------------------------------
 
 export interface UseReAnalysisProgressOptions {
-    /**
-     * SprkChatBridge instance to subscribe to events on.
-     * Typically obtained from the bridge created in App.tsx or DocumentStreamBridge.
-     * When null, subscriptions are skipped.
-     */
-    bridge: SprkChatBridge | null;
+  /**
+   * SprkChatBridge instance to subscribe to events on.
+   * Typically obtained from the bridge created in App.tsx or DocumentStreamBridge.
+   * When null, subscriptions are skipped.
+   */
+  bridge: SprkChatBridge | null;
 
-    /**
-     * Whether the hook should be active.
-     * Set to false to disable all subscriptions (e.g., when not authenticated).
-     */
-    enabled?: boolean;
+  /**
+   * Whether the hook should be active.
+   * Set to false to disable all subscriptions (e.g., when not authenticated).
+   */
+  enabled?: boolean;
 }
 
 export interface UseReAnalysisProgressResult {
-    /** Whether the re-analysis progress overlay should be visible */
-    isAnalyzing: boolean;
-    /** Progress percentage (0-100) */
-    percent: number;
-    /** Human-readable status message */
-    message: string;
-    /** Manually dismiss the overlay (e.g., on error or user cancellation) */
-    dismiss: () => void;
+  /** Whether the re-analysis progress overlay should be visible */
+  isAnalyzing: boolean;
+  /** Progress percentage (0-100) */
+  percent: number;
+  /** Human-readable status message */
+  message: string;
+  /** Manually dismiss the overlay (e.g., on error or user cancellation) */
+  dismiss: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,100 +79,94 @@ const STALE_TIMEOUT_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 export function useReAnalysisProgress(
-    options: UseReAnalysisProgressOptions,
+  options: UseReAnalysisProgressOptions,
 ): UseReAnalysisProgressResult {
-    const { bridge, enabled = true } = options;
+  const { bridge, enabled = true } = options;
 
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [percent, setPercent] = useState(0);
-    const [message, setMessage] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [percent, setPercent] = useState(0);
+  const [message, setMessage] = useState("");
 
-    // Ref to track the stale-timeout timer so we can clear it on updates
-    const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref to track the stale-timeout timer so we can clear it on updates
+  const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
 
-    const clearStaleTimer = useCallback(() => {
-        if (staleTimerRef.current !== null) {
-            clearTimeout(staleTimerRef.current);
-            staleTimerRef.current = null;
-        }
-    }, []);
+  const clearStaleTimer = useCallback(() => {
+    if (staleTimerRef.current !== null) {
+      clearTimeout(staleTimerRef.current);
+      staleTimerRef.current = null;
+    }
+  }, []);
 
-    const resetStaleTimer = useCallback(() => {
-        clearStaleTimer();
-        staleTimerRef.current = setTimeout(() => {
-            // Auto-dismiss if no events received for STALE_TIMEOUT_MS
-            setIsAnalyzing(false);
-            setPercent(0);
-            setMessage("");
-        }, STALE_TIMEOUT_MS);
-    }, [clearStaleTimer]);
+  const resetStaleTimer = useCallback(() => {
+    clearStaleTimer();
+    staleTimerRef.current = setTimeout(() => {
+      // Auto-dismiss if no events received for STALE_TIMEOUT_MS
+      setIsAnalyzing(false);
+      setPercent(0);
+      setMessage("");
+    }, STALE_TIMEOUT_MS);
+  }, [clearStaleTimer]);
 
-    const dismiss = useCallback(() => {
-        clearStaleTimer();
-        setIsAnalyzing(false);
-        setPercent(0);
-        setMessage("");
-    }, [clearStaleTimer]);
+  const dismiss = useCallback(() => {
+    clearStaleTimer();
+    setIsAnalyzing(false);
+    setPercent(0);
+    setMessage("");
+  }, [clearStaleTimer]);
 
-    // -----------------------------------------------------------------------
-    // Subscribe to bridge events
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Subscribe to bridge events
+  // -----------------------------------------------------------------------
 
-    useEffect(() => {
-        if (!bridge || !enabled) {
-            return;
-        }
+  useEffect(() => {
+    if (!bridge || !enabled) {
+      return;
+    }
 
-        // Subscribe to reanalysis_progress events
-        const unsubProgress = bridge.subscribe(
-            "reanalysis_progress",
-            (payload) => {
-                // Show overlay on first progress event (handles "progress without start")
-                setIsAnalyzing(true);
-                setPercent(payload.percent);
-                setMessage(payload.message);
+    // Subscribe to reanalysis_progress events
+    const unsubProgress = bridge.subscribe("reanalysis_progress", (payload) => {
+      // Show overlay on first progress event (handles "progress without start")
+      setIsAnalyzing(true);
+      setPercent(payload.percent);
+      setMessage(payload.message);
 
-                // Reset stale timer on each progress update
-                resetStaleTimer();
-            },
-        );
+      // Reset stale timer on each progress update
+      resetStaleTimer();
+    });
 
-        // Subscribe to document_replaced events to dismiss overlay
-        // The actual content replacement is handled by useDocumentStreaming.
-        // This subscription only manages the overlay visibility.
-        const unsubReplaced = bridge.subscribe(
-            "document_replaced",
-            () => {
-                // Document has been replaced — dismiss the progress overlay
-                clearStaleTimer();
-                setIsAnalyzing(false);
-                setPercent(100);
-                setMessage("");
-            },
-        );
+    // Subscribe to document_replaced events to dismiss overlay
+    // The actual content replacement is handled by useDocumentStreaming.
+    // This subscription only manages the overlay visibility.
+    const unsubReplaced = bridge.subscribe("document_replaced", () => {
+      // Document has been replaced — dismiss the progress overlay
+      clearStaleTimer();
+      setIsAnalyzing(false);
+      setPercent(100);
+      setMessage("");
+    });
 
-        return () => {
-            unsubProgress();
-            unsubReplaced();
-            clearStaleTimer();
-        };
-    }, [bridge, enabled, resetStaleTimer, clearStaleTimer]);
-
-    // Clean up stale timer on unmount
-    useEffect(() => {
-        return () => {
-            clearStaleTimer();
-        };
-    }, [clearStaleTimer]);
-
-    return {
-        isAnalyzing,
-        percent,
-        message,
-        dismiss,
+    return () => {
+      unsubProgress();
+      unsubReplaced();
+      clearStaleTimer();
     };
+  }, [bridge, enabled, resetStaleTimer, clearStaleTimer]);
+
+  // Clean up stale timer on unmount
+  useEffect(() => {
+    return () => {
+      clearStaleTimer();
+    };
+  }, [clearStaleTimer]);
+
+  return {
+    isAnalyzing,
+    percent,
+    message,
+    dismiss,
+  };
 }

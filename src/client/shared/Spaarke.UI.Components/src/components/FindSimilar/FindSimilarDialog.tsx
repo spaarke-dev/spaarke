@@ -11,7 +11,7 @@
  *   - IFilePreviewServices for the document preview dialog
  *   - onNavigateToEntity for Dataverse record navigation
  */
-import * as React from 'react';
+import * as React from "react";
 import {
   Button,
   MessageBar,
@@ -19,28 +19,31 @@ import {
   Text,
   makeStyles,
   tokens,
-} from '@fluentui/react-components';
-import { CheckmarkCircleFilled } from '@fluentui/react-icons';
+} from "@fluentui/react-components";
+import { CheckmarkCircleFilled } from "@fluentui/react-icons";
 
-import { WizardShell } from '../Wizard/WizardShell';
+import { WizardShell } from "../Wizard/WizardShell";
 import type {
   IWizardStepConfig,
   IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+} from "../Wizard/wizardShellTypes";
 
-import { FileUploadZone } from '../FileUpload/FileUploadZone';
-import { UploadedFileList } from '../FileUpload/UploadedFileList';
-import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
+import { FileUploadZone } from "../FileUpload/FileUploadZone";
+import { UploadedFileList } from "../FileUpload/UploadedFileList";
+import type {
+  IUploadedFile,
+  IFileValidationError,
+} from "../FileUpload/fileUploadTypes";
 
-import { FindSimilarResultsStep } from './FindSimilarResultsStep';
-import { runFindSimilar } from './findSimilarService';
+import { FindSimilarResultsStep } from "./FindSimilarResultsStep";
+import { runFindSimilar } from "./findSimilarService";
 import type {
   IFindSimilarResults,
   FindSimilarStatus,
   IFindSimilarServiceConfig,
   INavigationMessage,
-} from './findSimilarTypes';
-import type { IFilePreviewServices } from '../FilePreview/filePreviewTypes';
+} from "./findSimilarTypes";
+import type { IFilePreviewServices } from "../FilePreview/filePreviewTypes";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -67,15 +70,15 @@ interface IFileState {
 }
 
 type FileAction =
-  | { type: 'ADD_FILES'; files: IUploadedFile[] }
-  | { type: 'REMOVE_FILE'; fileId: string }
-  | { type: 'SET_VALIDATION_ERRORS'; errors: IFileValidationError[] }
-  | { type: 'CLEAR_VALIDATION_ERRORS' }
-  | { type: 'RESET' };
+  | { type: "ADD_FILES"; files: IUploadedFile[] }
+  | { type: "REMOVE_FILE"; fileId: string }
+  | { type: "SET_VALIDATION_ERRORS"; errors: IFileValidationError[] }
+  | { type: "CLEAR_VALIDATION_ERRORS" }
+  | { type: "RESET" };
 
 function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
-    case 'ADD_FILES': {
+    case "ADD_FILES": {
       const existing = new Set(
         state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`),
       );
@@ -88,16 +91,18 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
         validationErrors: [],
       };
     }
-    case 'REMOVE_FILE':
+    case "REMOVE_FILE":
       return {
         ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
+        uploadedFiles: state.uploadedFiles.filter(
+          (f) => f.id !== action.fileId,
+        ),
       };
-    case 'SET_VALIDATION_ERRORS':
+    case "SET_VALIDATION_ERRORS":
       return { ...state, validationErrors: action.errors };
-    case 'CLEAR_VALIDATION_ERRORS':
+    case "CLEAR_VALIDATION_ERRORS":
       return { ...state, validationErrors: [] };
-    case 'RESET':
+    case "RESET":
       return { uploadedFiles: [], validationErrors: [] };
     default:
       return state;
@@ -110,12 +115,12 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
 
 const useStyles = makeStyles({
   stepTitle: {
-    display: 'block',
+    display: "block",
     color: tokens.colorNeutralForeground1,
     marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
-    display: 'block',
+    display: "block",
     color: tokens.colorNeutralForeground3,
     marginBottom: tokens.spacingVerticalM,
   },
@@ -144,16 +149,18 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
   });
 
   // -- Search state --
-  const [searchStatus, setSearchStatus] = React.useState<FindSimilarStatus>('idle');
-  const [searchResults, setSearchResults] = React.useState<IFindSimilarResults | null>(null);
+  const [searchStatus, setSearchStatus] =
+    React.useState<FindSimilarStatus>("idle");
+  const [searchResults, setSearchResults] =
+    React.useState<IFindSimilarResults | null>(null);
   const [searchError, setSearchError] = React.useState<string | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   // -- Reset on open --
   React.useEffect(() => {
     if (open) {
-      fileDispatch({ type: 'RESET' });
-      setSearchStatus('idle');
+      fileDispatch({ type: "RESET" });
+      setSearchStatus("idle");
       setSearchResults(null);
       setSearchError(null);
     }
@@ -164,19 +171,20 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
 
   // -- File handlers --
   const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
+    (files: IUploadedFile[]) => fileDispatch({ type: "ADD_FILES", files }),
     [],
   );
   const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) => fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
+    (errors: IFileValidationError[]) =>
+      fileDispatch({ type: "SET_VALIDATION_ERRORS", errors }),
     [],
   );
   const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
+    (fileId: string) => fileDispatch({ type: "REMOVE_FILE", fileId }),
     [],
   );
   const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
+    () => fileDispatch({ type: "CLEAR_VALIDATION_ERRORS" }),
     [],
   );
 
@@ -188,20 +196,25 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setSearchStatus('loading');
+    setSearchStatus("loading");
     setSearchError(null);
 
     try {
-      const result = await runFindSimilar(fileState.uploadedFiles, serviceConfig, controller.signal);
+      const result = await runFindSimilar(
+        fileState.uploadedFiles,
+        serviceConfig,
+        controller.signal,
+      );
       if (!controller.signal.aborted) {
         setSearchResults(result);
-        setSearchStatus('success');
+        setSearchStatus("success");
       }
     } catch (err: unknown) {
       if (!controller.signal.aborted) {
-        const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+        const message =
+          err instanceof Error ? err.message : "An unknown error occurred.";
         setSearchError(message);
-        setSearchStatus('error');
+        setSearchStatus("error");
       }
     }
   }, [fileState.uploadedFiles, serviceConfig]);
@@ -212,40 +225,48 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
   // Reset search flag when files change
   React.useEffect(() => {
     searchAttemptedRef.current = false;
-    setSearchStatus('idle');
+    setSearchStatus("idle");
     setSearchResults(null);
     setSearchError(null);
   }, [fileState.uploadedFiles.length]);
 
   // -- handleFinish --
-  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
-    const currentResults = searchResults;
-    const totalFound = currentResults
-      ? currentResults.documentsTotalCount + currentResults.mattersTotalCount + currentResults.projectsTotalCount
-      : 0;
+  const handleFinish =
+    React.useCallback(async (): Promise<IWizardSuccessConfig> => {
+      const currentResults = searchResults;
+      const totalFound = currentResults
+        ? currentResults.documentsTotalCount +
+          currentResults.mattersTotalCount +
+          currentResults.projectsTotalCount
+        : 0;
 
-    console.info('[FindSimilarDialog] Finish with', totalFound, 'total results');
+      console.info(
+        "[FindSimilarDialog] Finish with",
+        totalFound,
+        "total results",
+      );
 
-    return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
-      title: 'Search Complete',
-      body: (
-        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Found {totalFound} similar item{totalFound !== 1 ? 's' : ''} across documents, matters, and projects.
-        </Text>
-      ),
-      actions: (
-        <Button appearance="secondary" onClick={onClose}>
-          Close
-        </Button>
-      ),
-    };
-  }, [searchResults, onClose]);
+      return {
+        icon: (
+          <CheckmarkCircleFilled
+            fontSize={64}
+            style={{ color: tokens.colorPaletteGreenForeground1 }}
+          />
+        ),
+        title: "Search Complete",
+        body: (
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            Found {totalFound} similar item{totalFound !== 1 ? "s" : ""} across
+            documents, matters, and projects.
+          </Text>
+        ),
+        actions: (
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+        ),
+      };
+    }, [searchResults, onClose]);
 
   // -- Step configurations --
 
@@ -253,18 +274,23 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
     () => [
       // Step 0: Upload file(s)
       {
-        id: 'upload-files',
-        label: 'Upload file(s)',
+        id: "upload-files",
+        label: "Upload file(s)",
         canAdvance: () => fileState.uploadedFiles.length > 0,
         renderContent: () => (
           <>
             <div>
-              <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+              <Text
+                as="h2"
+                size={500}
+                weight="semibold"
+                className={styles.stepTitle}
+              >
                 Upload file(s)
               </Text>
               <Text size={200} className={styles.stepSubtitle}>
-                Upload one or more documents. The AI will extract text and search for
-                similar documents, matters, and projects.
+                Upload one or more documents. The AI will extract text and
+                search for similar documents, matters, and projects.
               </Text>
             </div>
 
@@ -301,13 +327,14 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
 
       // Step 1: Results
       {
-        id: 'results',
-        label: 'Results',
-        canAdvance: () => searchStatus === 'success' && searchResults !== null,
-        isEarlyFinish: () => searchStatus === 'success' && searchResults !== null,
+        id: "results",
+        label: "Results",
+        canAdvance: () => searchStatus === "success" && searchResults !== null,
+        isEarlyFinish: () =>
+          searchStatus === "success" && searchResults !== null,
         renderContent: () => {
           // Auto-trigger search on first render of this step
-          if (!searchAttemptedRef.current && searchStatus === 'idle') {
+          if (!searchAttemptedRef.current && searchStatus === "idle") {
             searchAttemptedRef.current = true;
             Promise.resolve().then(() => runSearch());
           }

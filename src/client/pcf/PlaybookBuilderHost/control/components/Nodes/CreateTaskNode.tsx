@@ -2,11 +2,11 @@
  * Create Task Node - creates a Dataverse task record.
  */
 
-import * as React from 'react';
-import { Text, tokens } from '@fluentui/react-components';
-import { TaskListSquareLtr20Regular } from '@fluentui/react-icons';
-import { BaseNode } from './BaseNode';
-import type { PlaybookNodeData } from '../../stores';
+import * as React from "react";
+import { Text, tokens } from "@fluentui/react-components";
+import { TaskListSquareLtr20Regular } from "@fluentui/react-icons";
+import { BaseNode } from "./BaseNode";
+import type { PlaybookNodeData } from "../../stores";
 
 interface CreateTaskNodeProps {
   data: PlaybookNodeData;

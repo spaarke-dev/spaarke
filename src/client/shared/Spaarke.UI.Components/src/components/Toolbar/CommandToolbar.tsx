@@ -17,7 +17,7 @@ import {
   Tooltip,
   makeStyles,
   tokens,
-  Spinner
+  Spinner,
 } from "@fluentui/react-components";
 import { MoreHorizontal20Regular } from "@fluentui/react-icons";
 import { ICommand, ICommandContext } from "../../types/CommandTypes";
@@ -41,67 +41,73 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    minHeight: "44px"
+    minHeight: "44px",
   },
   toolbarCompact: {
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
-    minHeight: "36px"
+    minHeight: "36px",
   },
   shortcut: {
     marginLeft: tokens.spacingHorizontalM,
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3
-  }
+    color: tokens.colorNeutralForeground3,
+  },
 });
 
 export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
   const styles = useStyles();
-  const [executingCommand, setExecutingCommand] = React.useState<string | null>(null);
+  const [executingCommand, setExecutingCommand] = React.useState<string | null>(
+    null,
+  );
 
   // Group commands
-  const { primaryCommands, secondaryCommands, overflowCommands } = React.useMemo(() => {
-    const primary: ICommand[] = [];
-    const secondary: ICommand[] = [];
-    const overflow: ICommand[] = [];
+  const { primaryCommands, secondaryCommands, overflowCommands } =
+    React.useMemo(() => {
+      const primary: ICommand[] = [];
+      const secondary: ICommand[] = [];
+      const overflow: ICommand[] = [];
 
-    props.commands.forEach((cmd) => {
-      const group = cmd.group ?? "primary";
-      if (group === "primary") primary.push(cmd);
-      else if (group === "secondary") secondary.push(cmd);
-      else overflow.push(cmd);
-    });
+      props.commands.forEach((cmd) => {
+        const group = cmd.group ?? "primary";
+        if (group === "primary") primary.push(cmd);
+        else if (group === "secondary") secondary.push(cmd);
+        else overflow.push(cmd);
+      });
 
-    // Auto-overflow: If >8 commands total, move secondary to overflow
-    const showOverflow = props.showOverflow ?? true;
-    if (showOverflow && primary.length + secondary.length > 8) {
-      overflow.unshift(...secondary);
-      secondary.length = 0;
-    }
+      // Auto-overflow: If >8 commands total, move secondary to overflow
+      const showOverflow = props.showOverflow ?? true;
+      if (showOverflow && primary.length + secondary.length > 8) {
+        overflow.unshift(...secondary);
+        secondary.length = 0;
+      }
 
-    return {
-      primaryCommands: primary,
-      secondaryCommands: secondary,
-      overflowCommands: overflow
-    };
-  }, [props.commands, props.showOverflow]);
+      return {
+        primaryCommands: primary,
+        secondaryCommands: secondary,
+        overflowCommands: overflow,
+      };
+    }, [props.commands, props.showOverflow]);
 
   // Execute command
-  const handleCommandClick = React.useCallback(async (command: ICommand) => {
-    setExecutingCommand(command.key);
+  const handleCommandClick = React.useCallback(
+    async (command: ICommand) => {
+      setExecutingCommand(command.key);
 
-    try {
-      await CommandExecutor.execute(command, props.context);
+      try {
+        await CommandExecutor.execute(command, props.context);
 
-      if (props.onCommandExecuted) {
-        props.onCommandExecuted(command.key);
+        if (props.onCommandExecuted) {
+          props.onCommandExecuted(command.key);
+        }
+      } catch (error) {
+        console.error(`Command ${command.key} failed`, error);
+      } finally {
+        setExecutingCommand(null);
       }
-    } catch (error) {
-      console.error(`Command ${command.key} failed`, error);
-    } finally {
-      setExecutingCommand(null);
-    }
-  }, [props]);
+    },
+    [props],
+  );
 
   // Render command button
   const renderCommandButton = (command: ICommand) => {
@@ -135,7 +141,11 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
       );
 
       return (
-        <Tooltip key={command.key} content={tooltipContent} relationship="description">
+        <Tooltip
+          key={command.key}
+          content={tooltipContent}
+          relationship="description"
+        >
           {button}
         </Tooltip>
       );
@@ -161,7 +171,10 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
         <MenuPopover>
           <MenuList>
             {overflowCommands.map((command) => {
-              const canExecute = CommandExecutor.canExecute(command, props.context);
+              const canExecute = CommandExecutor.canExecute(
+                command,
+                props.context,
+              );
               const isExecuting = executingCommand === command.key;
 
               return (
@@ -217,9 +230,7 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
           {(primaryCommands.length > 0 || secondaryCommands.length > 0) && (
             <ToolbarDivider />
           )}
-          <ToolbarGroup>
-            {renderOverflowMenu()}
-          </ToolbarGroup>
+          <ToolbarGroup>{renderOverflowMenu()}</ToolbarGroup>
         </>
       )}
     </Toolbar>

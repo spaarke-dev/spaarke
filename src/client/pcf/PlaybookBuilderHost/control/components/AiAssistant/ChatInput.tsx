@@ -14,19 +14,19 @@
  * @version 1.1.0
  */
 
-import * as React from 'react';
-import { useCallback, useState, useRef, useEffect } from 'react';
+import * as React from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
 import {
   Textarea,
   Button,
   makeStyles,
   tokens,
   shorthands,
-} from '@fluentui/react-components';
-import { Send20Regular } from '@fluentui/react-icons';
-import { useAiAssistantStore } from '../../stores/aiAssistantStore';
-import { CommandPalette } from './CommandPalette';
-import { parseSlashCommand, findCommand, type SlashCommand } from './commands';
+} from "@fluentui/react-components";
+import { Send20Regular } from "@fluentui/react-icons";
+import { useAiAssistantStore } from "../../stores/aiAssistantStore";
+import { CommandPalette } from "./CommandPalette";
+import { parseSlashCommand, findCommand, type SlashCommand } from "./commands";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -34,32 +34,32 @@ import { parseSlashCommand, findCommand, type SlashCommand } from './commands';
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
   },
   inputRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-end",
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
   textareaWrapper: {
     flex: 1,
-    display: 'flex',
-    position: 'relative',
+    display: "flex",
+    position: "relative",
   },
   textarea: {
-    width: '100%',
-    minHeight: '40px',
-    maxHeight: '120px',
-    resize: 'none',
+    width: "100%",
+    minHeight: "40px",
+    maxHeight: "120px",
+    resize: "none",
   },
   sendButton: {
-    minWidth: '40px',
-    height: '40px',
+    minWidth: "40px",
+    height: "40px",
   },
   sendButtonDisabled: {
     backgroundColor: tokens.colorNeutralBackgroundDisabled,
@@ -68,7 +68,11 @@ const useStyles = makeStyles({
   hint: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    ...shorthands.padding('0', tokens.spacingHorizontalM, tokens.spacingVerticalXS),
+    ...shorthands.padding(
+      "0",
+      tokens.spacingHorizontalM,
+      tokens.spacingVerticalXS,
+    ),
   },
 });
 
@@ -93,14 +97,14 @@ export interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
-  placeholder = 'Type a message or / for commands...',
+  placeholder = "Type a message or / for commands...",
   maxLength = 2000,
   disabled = false,
 }) => {
   const styles = useStyles();
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [showPalette, setShowPalette] = useState(false);
-  const [commandFilter, setCommandFilter] = useState('');
+  const [commandFilter, setCommandFilter] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Store state - only need isStreaming here
@@ -112,8 +116,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // Check if current input starts with a slash command
   const checkForSlashCommand = useCallback((value: string) => {
     // Show palette when input starts with '/' and nothing else or partial command
-    if (value.startsWith('/')) {
-      const spaceIndex = value.indexOf(' ');
+    if (value.startsWith("/")) {
+      const spaceIndex = value.indexOf(" ");
       // If there's no space, we're still typing the command name
       if (spaceIndex === -1) {
         setShowPalette(true);
@@ -122,7 +126,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       }
     }
     setShowPalette(false);
-    setCommandFilter('');
+    setCommandFilter("");
     return false;
   }, []);
 
@@ -160,38 +164,41 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
 
     // Clear input and palette
-    setMessage('');
+    setMessage("");
     setShowPalette(false);
-    setCommandFilter('');
+    setCommandFilter("");
   }, [message, isDisabled, onSendMessage]);
 
   // Handle command selection from palette
-  const handleCommandSelect = useCallback((command: SlashCommand, _args: string) => {
-    // Build the command text
-    const commandText = `/${command.name}`;
-    // If command expects arguments, just insert and let user complete
-    if (command.argsHint) {
-      setMessage(commandText + ' ');
-      setShowPalette(false);
-      setCommandFilter('');
-      // Focus textarea
-      textareaRef.current?.focus();
-    } else {
-      // No args needed - execute immediately
-      const result = command.execute('');
-      if (result && onSendMessage) {
-        onSendMessage(result);
+  const handleCommandSelect = useCallback(
+    (command: SlashCommand, _args: string) => {
+      // Build the command text
+      const commandText = `/${command.name}`;
+      // If command expects arguments, just insert and let user complete
+      if (command.argsHint) {
+        setMessage(commandText + " ");
+        setShowPalette(false);
+        setCommandFilter("");
+        // Focus textarea
+        textareaRef.current?.focus();
+      } else {
+        // No args needed - execute immediately
+        const result = command.execute("");
+        if (result && onSendMessage) {
+          onSendMessage(result);
+        }
+        setMessage("");
+        setShowPalette(false);
+        setCommandFilter("");
       }
-      setMessage('');
-      setShowPalette(false);
-      setCommandFilter('');
-    }
-  }, [onSendMessage]);
+    },
+    [onSendMessage],
+  );
 
   // Handle palette close
   const handlePaletteClose = useCallback(() => {
     setShowPalette(false);
-    setCommandFilter('');
+    setCommandFilter("");
   }, []);
 
   // Handle key press
@@ -199,37 +206,34 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // If palette is open, let it handle navigation keys
       if (showPalette) {
-        if (['ArrowUp', 'ArrowDown', 'Tab', 'Escape'].includes(e.key)) {
+        if (["ArrowUp", "ArrowDown", "Tab", "Escape"].includes(e.key)) {
           // These will be handled by CommandPalette
           return;
         }
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === "Enter" && !e.shiftKey) {
           // Let palette handle Enter for command selection
           return;
         }
       }
 
       // Normal behavior
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend, showPalette]
+    [handleSend, showPalette],
   );
 
   // Handle text change
   const handleChange = useCallback(
-    (
-      _: React.ChangeEvent<HTMLTextAreaElement>,
-      data: { value: string }
-    ) => {
+    (_: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
       if (data.value.length <= maxLength) {
         setMessage(data.value);
         checkForSlashCommand(data.value);
       }
     },
-    [maxLength, checkForSlashCommand]
+    [maxLength, checkForSlashCommand],
   );
 
   // Handle send button click
@@ -242,16 +246,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const handleClickOutside = (e: MouseEvent) => {
       if (showPalette) {
         const target = e.target as HTMLElement;
-        if (!target.closest('[data-command-palette]') &&
-            !target.closest('textarea')) {
+        if (
+          !target.closest("[data-command-palette]") &&
+          !target.closest("textarea")
+        ) {
           setShowPalette(false);
-          setCommandFilter('');
+          setCommandFilter("");
         }
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showPalette]);
 
   // Check if send button should be disabled
@@ -291,7 +297,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           disabled={isSendDisabled}
           className={styles.sendButton}
           aria-label="Send message"
-          title={isStreaming ? 'Wait for response' : 'Send message'}
+          title={isStreaming ? "Wait for response" : "Send message"}
         />
       </div>
 

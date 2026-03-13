@@ -12,8 +12,8 @@
  * }
  */
 
-import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import * as React from "react";
+import { useCallback, useMemo } from "react";
 import {
   makeStyles,
   tokens,
@@ -24,34 +24,34 @@ import {
   Option,
   shorthands,
   Divider,
-} from '@fluentui/react-components';
-import type { DropdownProps } from '@fluentui/react-components';
+} from "@fluentui/react-components";
+import type { DropdownProps } from "@fluentui/react-components";
 import {
   ArrowSplit20Regular,
   Checkmark20Regular,
   Dismiss20Regular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   section: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorNeutralForeground2,
   },
   field: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -59,35 +59,35 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   branchRow: {
-    display: 'flex',
+    display: "flex",
     gap: tokens.spacingHorizontalS,
   },
   branchField: {
     flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   trueBranchLabel: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorPaletteGreenForeground1,
   },
   falseBranchLabel: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorPaletteRedForeground1,
   },
   operatorRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr auto 1fr',
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
     gap: tokens.spacingHorizontalS,
-    alignItems: 'end',
+    alignItems: "end",
   },
   operatorDropdown: {
-    minWidth: '100px',
+    minWidth: "100px",
   },
 });
 
@@ -96,19 +96,19 @@ const useStyles = makeStyles({
  * Maps to ConditionNodeExecutor operators in the backend.
  */
 const OPERATORS = [
-  { value: 'eq', label: 'equals (==)' },
-  { value: 'ne', label: 'not equals (!=)' },
-  { value: 'gt', label: 'greater than (>)' },
-  { value: 'lt', label: 'less than (<)' },
-  { value: 'gte', label: 'greater or equal (>=)' },
-  { value: 'lte', label: 'less or equal (<=)' },
-  { value: 'contains', label: 'contains' },
-  { value: 'startsWith', label: 'starts with' },
-  { value: 'endsWith', label: 'ends with' },
-  { value: 'exists', label: 'exists (not null)' },
+  { value: "eq", label: "equals (==)" },
+  { value: "ne", label: "not equals (!=)" },
+  { value: "gt", label: "greater than (>)" },
+  { value: "lt", label: "less than (<)" },
+  { value: "gte", label: "greater or equal (>=)" },
+  { value: "lte", label: "less or equal (<=)" },
+  { value: "contains", label: "contains" },
+  { value: "startsWith", label: "starts with" },
+  { value: "endsWith", label: "ends with" },
+  { value: "exists", label: "exists (not null)" },
 ] as const;
 
-type OperatorType = (typeof OPERATORS)[number]['value'];
+type OperatorType = (typeof OPERATORS)[number]["value"];
 
 /**
  * Parsed condition expression structure.
@@ -128,12 +128,12 @@ interface ConditionExpression {
  */
 const DEFAULT_CONDITION: ConditionExpression = {
   condition: {
-    operator: 'eq',
-    left: '',
-    right: '',
+    operator: "eq",
+    left: "",
+    right: "",
   },
-  trueBranch: 'truePath',
-  falseBranch: 'falsePath',
+  trueBranch: "truePath",
+  falseBranch: "falsePath",
 };
 
 interface ConditionEditorProps {
@@ -155,27 +155,27 @@ function parseCondition(json: string): ConditionExpression {
   try {
     const parsed = JSON.parse(json);
     // Handle both new format (with condition object) and legacy format
-    if (parsed.condition && typeof parsed.condition === 'object') {
+    if (parsed.condition && typeof parsed.condition === "object") {
       return {
         condition: {
-          operator: parsed.condition.operator || 'eq',
-          left: parsed.condition.left || '',
-          right: parsed.condition.right ?? '',
+          operator: parsed.condition.operator || "eq",
+          left: parsed.condition.left || "",
+          right: parsed.condition.right ?? "",
         },
-        trueBranch: parsed.trueBranch || 'truePath',
-        falseBranch: parsed.falseBranch || 'falsePath',
+        trueBranch: parsed.trueBranch || "truePath",
+        falseBranch: parsed.falseBranch || "falsePath",
       };
     }
     // Legacy format: { field, operator, value }
     if (parsed.field !== undefined) {
       return {
         condition: {
-          operator: mapLegacyOperator(parsed.operator || 'equals'),
+          operator: mapLegacyOperator(parsed.operator || "equals"),
           left: `{{${parsed.field}}}`,
-          right: parsed.value ?? '',
+          right: parsed.value ?? "",
         },
-        trueBranch: 'truePath',
-        falseBranch: 'falsePath',
+        trueBranch: "truePath",
+        falseBranch: "falsePath",
       };
     }
     return DEFAULT_CONDITION;
@@ -189,15 +189,15 @@ function parseCondition(json: string): ConditionExpression {
  */
 function mapLegacyOperator(op: string): OperatorType {
   const mapping: Record<string, OperatorType> = {
-    equals: 'eq',
-    '==': 'eq',
-    '!=': 'ne',
-    '>': 'gt',
-    '<': 'lt',
-    '>=': 'gte',
-    '<=': 'lte',
+    equals: "eq",
+    "==": "eq",
+    "!=": "ne",
+    ">": "gt",
+    "<": "lt",
+    ">=": "gte",
+    "<=": "lte",
   };
-  return mapping[op] || 'eq';
+  return mapping[op] || "eq";
 }
 
 /**
@@ -217,7 +217,10 @@ export const ConditionEditor = React.memo(function ConditionEditor({
   const styles = useStyles();
 
   // Parse current condition
-  const condition = useMemo(() => parseCondition(conditionJson), [conditionJson]);
+  const condition = useMemo(
+    () => parseCondition(conditionJson),
+    [conditionJson],
+  );
 
   // Handlers for updating condition fields
   const handleLeftChange = useCallback(
@@ -228,7 +231,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
       };
       onChange(serializeCondition(updated));
     },
-    [condition, onChange]
+    [condition, onChange],
   );
 
   const handleRightChange = useCallback(
@@ -239,21 +242,21 @@ export const ConditionEditor = React.memo(function ConditionEditor({
       };
       onChange(serializeCondition(updated));
     },
-    [condition, onChange]
+    [condition, onChange],
   );
 
-  const handleOperatorChange: DropdownProps['onOptionSelect'] = useCallback(
+  const handleOperatorChange: DropdownProps["onOptionSelect"] = useCallback(
     (_e, data) => {
       const updated: ConditionExpression = {
         ...condition,
         condition: {
           ...condition.condition,
-          operator: (data.optionValue as OperatorType) || 'eq',
+          operator: (data.optionValue as OperatorType) || "eq",
         },
       };
       onChange(serializeCondition(updated));
     },
-    [condition, onChange]
+    [condition, onChange],
   );
 
   const handleTrueBranchChange = useCallback(
@@ -264,7 +267,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
       };
       onChange(serializeCondition(updated));
     },
-    [condition, onChange]
+    [condition, onChange],
   );
 
   const handleFalseBranchChange = useCallback(
@@ -275,15 +278,15 @@ export const ConditionEditor = React.memo(function ConditionEditor({
       };
       onChange(serializeCondition(updated));
     },
-    [condition, onChange]
+    [condition, onChange],
   );
 
   // Check if operator needs right operand
-  const needsRightOperand = condition.condition.operator !== 'exists';
+  const needsRightOperand = condition.condition.operator !== "exists";
 
   // Find selected operator label
   const selectedOperator = OPERATORS.find(
-    (op) => op.value === condition.condition.operator
+    (op) => op.value === condition.condition.operator,
   );
 
   return (
@@ -310,7 +313,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
             placeholder="{{node.output.field}}"
           />
           <Text className={styles.fieldHint}>
-            Use {'{{variableName}}'} for template variables
+            Use {"{{variableName}}"} for template variables
           </Text>
         </div>
 
@@ -323,7 +326,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
             id="condition-operator"
             size="small"
             className={styles.operatorDropdown}
-            value={selectedOperator?.label || 'equals (==)'}
+            value={selectedOperator?.label || "equals (==)"}
             selectedOptions={[condition.condition.operator]}
             onOptionSelect={handleOperatorChange}
           >
@@ -344,7 +347,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
             <Input
               id="condition-right"
               size="small"
-              value={condition.condition.right || ''}
+              value={condition.condition.right || ""}
               onChange={handleRightChange}
               placeholder="value or {{variable}}"
             />

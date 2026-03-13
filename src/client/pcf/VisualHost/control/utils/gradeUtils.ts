@@ -33,9 +33,9 @@ export interface IGradeColorTokens {
 // ============= Constants =============
 
 export const DEFAULT_COLOR_RULES: IColorRule[] = [
-  { range: [0.85, 1.00], color: "blue" },
-  { range: [0.70, 0.84], color: "yellow" },
-  { range: [0.00, 0.69], color: "red" },
+  { range: [0.85, 1.0], color: "blue" },
+  { range: [0.7, 0.84], color: "yellow" },
+  { range: [0.0, 0.69], color: "red" },
 ];
 
 // ============= Grade Conversion =============
@@ -43,13 +43,13 @@ export const DEFAULT_COLOR_RULES: IColorRule[] = [
 export function gradeValueToLetter(value: number | null): string {
   if (value === null || value === undefined) return "N/A";
   const clamped = Math.max(0, Math.min(1, value));
-  if (clamped >= 1.00) return "A+";
+  if (clamped >= 1.0) return "A+";
   if (clamped >= 0.95) return "A";
-  if (clamped >= 0.90) return "B+";
+  if (clamped >= 0.9) return "B+";
   if (clamped >= 0.85) return "B";
-  if (clamped >= 0.80) return "C+";
+  if (clamped >= 0.8) return "C+";
   if (clamped >= 0.75) return "C";
-  if (clamped >= 0.70) return "D+";
+  if (clamped >= 0.7) return "D+";
   if (clamped >= 0.65) return "D";
   return "F";
 }
@@ -63,7 +63,7 @@ export function gradeValueToPercent(value: number | null): string {
 
 export function resolveGradeColorScheme(
   gradeValue: number | null,
-  colorRules?: IColorRule[]
+  colorRules?: IColorRule[],
 ): GradeColorScheme {
   if (gradeValue === null || gradeValue === undefined) return "neutral";
   const rules = colorRules || DEFAULT_COLOR_RULES;
@@ -74,7 +74,9 @@ export function resolveGradeColorScheme(
   return "red";
 }
 
-export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens {
+export function getGradeColorTokens(
+  scheme: GradeColorScheme,
+): IGradeColorTokens {
   switch (scheme) {
     case "blue":
       return {
@@ -121,7 +123,7 @@ export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens
 export function resolveContextTemplate(
   template: string,
   gradeValue: number | null,
-  areaName: string
+  areaName: string,
 ): string {
   if (gradeValue === null || gradeValue === undefined) {
     return `No grade data available for ${areaName}`;
@@ -133,7 +135,10 @@ export function resolveContextTemplate(
 
 // ============= Icon Resolution =============
 
-const AREA_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+const AREA_ICON_MAP: Record<
+  string,
+  React.ComponentType<{ className?: string }>
+> = {
   guidelines: GavelRegular,
   budget: MoneyRegular,
   outcomes: TargetRegular,
@@ -142,7 +147,7 @@ const AREA_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>>
 const DEFAULT_ICON = QuestionCircleRegular;
 
 export function resolveAreaIcon(
-  areaIcon: string
+  areaIcon: string,
 ): React.ComponentType<{ className?: string }> {
   const normalized = areaIcon.toLowerCase().trim();
   return AREA_ICON_MAP[normalized] || DEFAULT_ICON;

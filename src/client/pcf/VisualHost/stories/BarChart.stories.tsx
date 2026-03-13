@@ -138,7 +138,12 @@ export const WithLegend: Story = {
 export const CustomColors: Story = {
   args: {
     data: [
-      { label: "Critical", value: 12, fieldValue: "critical", color: "#D13438" },
+      {
+        label: "Critical",
+        value: 12,
+        fieldValue: "critical",
+        color: "#D13438",
+      },
       { label: "High", value: 28, fieldValue: "high", color: "#FF8C00" },
       { label: "Medium", value: 45, fieldValue: "medium", color: "#FFB900" },
       { label: "Low", value: 67, fieldValue: "low", color: "#107C10" },
@@ -202,7 +207,9 @@ export const LargeDataset: Story = {
 // Side by side comparison
 export const Comparison: Story = {
   render: () => (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+    <div
+      style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}
+    >
       <BarChart
         data={statusData}
         title="Vertical"

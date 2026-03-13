@@ -24,7 +24,7 @@ describe("ViewToolbar", () => {
       renderWithProvider(
         <ViewToolbar>
           <span data-testid="view-selector">View Selector</span>
-        </ViewToolbar>
+        </ViewToolbar>,
       );
 
       expect(screen.getByTestId("view-selector")).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe("ViewToolbar", () => {
 
     it("should render record count when provided", () => {
       renderWithProvider(
-        <ViewToolbar viewName="Active Records" recordCount={42} />
+        <ViewToolbar viewName="Active Records" recordCount={42} />,
       );
 
       expect(screen.getByText("(42 records)")).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe("ViewToolbar", () => {
 
     it("should use singular 'record' for count of 1", () => {
       renderWithProvider(
-        <ViewToolbar viewName="Active Records" recordCount={1} />
+        <ViewToolbar viewName="Active Records" recordCount={1} />,
       );
 
       expect(screen.getByText("(1 record)")).toBeInTheDocument();
@@ -54,7 +54,7 @@ describe("ViewToolbar", () => {
 
     it("should format large record counts with locale", () => {
       renderWithProvider(
-        <ViewToolbar viewName="Active Records" recordCount={1234567} />
+        <ViewToolbar viewName="Active Records" recordCount={1234567} />,
       );
 
       // Number should be formatted with commas
@@ -78,7 +78,11 @@ describe("ViewToolbar", () => {
     it("should call onEditFilters when button is clicked", () => {
       const onEditFilters = jest.fn();
       renderWithProvider(
-        <ViewToolbar viewName="Test" showEditFilters onEditFilters={onEditFilters} />
+        <ViewToolbar
+          viewName="Test"
+          showEditFilters
+          onEditFilters={onEditFilters}
+        />,
       );
 
       fireEvent.click(screen.getByLabelText("Edit filters"));
@@ -103,7 +107,11 @@ describe("ViewToolbar", () => {
     it("should call onEditColumns when button is clicked", () => {
       const onEditColumns = jest.fn();
       renderWithProvider(
-        <ViewToolbar viewName="Test" showEditColumns onEditColumns={onEditColumns} />
+        <ViewToolbar
+          viewName="Test"
+          showEditColumns
+          onEditColumns={onEditColumns}
+        />,
       );
 
       fireEvent.click(screen.getByLabelText("Edit columns"));
@@ -116,7 +124,7 @@ describe("ViewToolbar", () => {
     it("should call onViewClick when view name button is clicked", () => {
       const onViewClick = jest.fn();
       renderWithProvider(
-        <ViewToolbar viewName="Active Records" onViewClick={onViewClick} />
+        <ViewToolbar viewName="Active Records" onViewClick={onViewClick} />,
       );
 
       fireEvent.click(screen.getByLabelText("Change view"));
@@ -129,7 +137,7 @@ describe("ViewToolbar", () => {
 
       expect(screen.getByLabelText("Change view")).toHaveAttribute(
         "aria-haspopup",
-        "listbox"
+        "listbox",
       );
     });
   });
@@ -137,12 +145,7 @@ describe("ViewToolbar", () => {
   describe("compact mode", () => {
     it("should hide button labels in compact mode", () => {
       renderWithProvider(
-        <ViewToolbar
-          viewName="Test"
-          showEditFilters
-          showEditColumns
-          compact
-        />
+        <ViewToolbar viewName="Test" showEditFilters showEditColumns compact />,
       );
 
       // Buttons should be present but without text labels
@@ -157,7 +160,7 @@ describe("ViewToolbar", () => {
   describe("both buttons", () => {
     it("should render both buttons when both are enabled", () => {
       renderWithProvider(
-        <ViewToolbar viewName="Test" showEditFilters showEditColumns />
+        <ViewToolbar viewName="Test" showEditFilters showEditColumns />,
       );
 
       expect(screen.getByLabelText("Edit filters")).toBeInTheDocument();
@@ -170,7 +173,7 @@ describe("ViewToolbar", () => {
       renderWithProvider(
         <ViewToolbar recordCount={100}>
           <span data-testid="view-selector">Custom Selector</span>
-        </ViewToolbar>
+        </ViewToolbar>,
       );
 
       expect(screen.getByTestId("view-selector")).toBeInTheDocument();
@@ -190,7 +193,7 @@ describe("ViewToolbar", () => {
 
       expect(container.querySelector('[role="toolbar"]')).toHaveAttribute(
         "aria-label",
-        "View toolbar"
+        "View toolbar",
       );
     });
   });

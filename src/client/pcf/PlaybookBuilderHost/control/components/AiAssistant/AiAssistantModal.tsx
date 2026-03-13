@@ -10,8 +10,8 @@
  * @version 1.0.0
  */
 
-import * as React from 'react';
-import { useCallback, useState, useRef, useEffect } from 'react';
+import * as React from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
 import {
   Button,
   Text,
@@ -22,18 +22,18 @@ import {
   tokens,
   shorthands,
   mergeClasses,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   Dismiss20Regular,
   Bot20Regular,
   SubtractCircle20Regular,
   Settings20Regular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 import {
   useAiAssistantStore,
   AI_MODEL_OPTIONS,
   type AiModelSelection,
-} from '../../stores/aiAssistantStore';
+} from "../../stores/aiAssistantStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -73,36 +73,36 @@ export interface AiAssistantModalProps {
 const useStyles = makeStyles({
   // Floating container
   container: {
-    position: 'absolute',
+    position: "absolute",
     zIndex: 1000,
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     boxShadow: tokens.shadow16,
     ...shorthands.borderRadius(tokens.borderRadiusLarge),
-    ...shorthands.overflow('hidden'),
+    ...shorthands.overflow("hidden"),
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
   },
   containerHidden: {
-    display: 'none',
+    display: "none",
   },
   // Header (draggable handle)
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    cursor: 'grab',
-    userSelect: 'none',
+    cursor: "grab",
+    userSelect: "none",
   },
   headerDragging: {
-    cursor: 'grabbing',
+    cursor: "grabbing",
   },
   headerTitle: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   headerTitleText: {
@@ -110,67 +110,67 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   headerActions: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   headerButton: {
     color: tokens.colorNeutralForegroundOnBrand,
-    minWidth: 'auto',
+    minWidth: "auto",
     ...shorthands.padding(tokens.spacingVerticalXS),
-    ':hover': {
+    ":hover": {
       backgroundColor: tokens.colorBrandBackgroundHover,
     },
   },
   // Body
   body: {
     flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.overflow('hidden'),
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.overflow("hidden"),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Resize handle (bottom-right corner)
   resizeHandle: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     right: 0,
-    width: '16px',
-    height: '16px',
-    cursor: 'se-resize',
-    backgroundColor: 'transparent',
-    '::after': {
+    width: "16px",
+    height: "16px",
+    cursor: "se-resize",
+    backgroundColor: "transparent",
+    "::after": {
       content: '""',
-      position: 'absolute',
-      bottom: '4px',
-      right: '4px',
-      width: '8px',
-      height: '8px',
-      ...shorthands.borderRight('2px', 'solid', tokens.colorNeutralStroke1),
-      ...shorthands.borderBottom('2px', 'solid', tokens.colorNeutralStroke1),
+      position: "absolute",
+      bottom: "4px",
+      right: "4px",
+      width: "8px",
+      height: "8px",
+      ...shorthands.borderRight("2px", "solid", tokens.colorNeutralStroke1),
+      ...shorthands.borderBottom("2px", "solid", tokens.colorNeutralStroke1),
     },
   },
   // Minimized state
   minimized: {
-    width: '280px !important',
-    height: 'auto !important',
+    width: "280px !important",
+    height: "auto !important",
   },
   minimizedBody: {
-    display: 'none',
+    display: "none",
   },
   // Advanced options panel
   advancedOptions: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.gap(tokens.spacingVerticalXS),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
   },
   advancedOptionsRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   modelLabel: {
@@ -179,7 +179,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   modelDropdown: {
-    minWidth: '180px',
+    minWidth: "180px",
   },
   modelDescription: {
     fontSize: tokens.fontSizeBase100,
@@ -233,38 +233,54 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
 
   // Refs for tracking drag/resize
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; posX: number; posY: number } | null>(null);
-  const resizeStartRef = useRef<{ mouseX: number; mouseY: number; width: number; height: number } | null>(null);
+  const dragStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    posX: number;
+    posY: number;
+  } | null>(null);
+  const resizeStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    width: number;
+    height: number;
+  } | null>(null);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Drag handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleDragStart = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    // Only start drag from header (not buttons)
-    if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+  const handleDragStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Only start drag from header (not buttons)
+      if ((e.target as HTMLElement).tagName === "BUTTON") return;
 
-    e.preventDefault();
-    setIsDragging(true);
-    dragStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      posX: position.x,
-      posY: position.y,
-    };
-  }, [position]);
+      e.preventDefault();
+      setIsDragging(true);
+      dragStartRef.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        posX: position.x,
+        posY: position.y,
+      };
+    },
+    [position],
+  );
 
-  const handleDragMove = useCallback((e: MouseEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
+  const handleDragMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isDragging || !dragStartRef.current) return;
 
-    const deltaX = e.clientX - dragStartRef.current.mouseX;
-    const deltaY = e.clientY - dragStartRef.current.mouseY;
+      const deltaX = e.clientX - dragStartRef.current.mouseX;
+      const deltaY = e.clientY - dragStartRef.current.mouseY;
 
-    setPosition({
-      x: Math.max(0, dragStartRef.current.posX + deltaX),
-      y: Math.max(0, dragStartRef.current.posY + deltaY),
-    });
-  }, [isDragging]);
+      setPosition({
+        x: Math.max(0, dragStartRef.current.posX + deltaX),
+        y: Math.max(0, dragStartRef.current.posY + deltaY),
+      });
+    },
+    [isDragging],
+  );
 
   const handleDragEnd = useCallback(() => {
     setIsDragging(false);
@@ -275,29 +291,41 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
   // Resize handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleResizeStart = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    resizeStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      width: size.width,
-      height: size.height,
-    };
-  }, [size]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(true);
+      resizeStartRef.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        width: size.width,
+        height: size.height,
+      };
+    },
+    [size],
+  );
 
-  const handleResizeMove = useCallback((e: MouseEvent) => {
-    if (!isResizing || !resizeStartRef.current) return;
+  const handleResizeMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isResizing || !resizeStartRef.current) return;
 
-    const deltaX = e.clientX - resizeStartRef.current.mouseX;
-    const deltaY = e.clientY - resizeStartRef.current.mouseY;
+      const deltaX = e.clientX - resizeStartRef.current.mouseX;
+      const deltaY = e.clientY - resizeStartRef.current.mouseY;
 
-    setSize({
-      width: Math.min(maxWidth, Math.max(minWidth, resizeStartRef.current.width + deltaX)),
-      height: Math.min(maxHeight, Math.max(minHeight, resizeStartRef.current.height + deltaY)),
-    });
-  }, [isResizing, minWidth, maxWidth, minHeight, maxHeight]);
+      setSize({
+        width: Math.min(
+          maxWidth,
+          Math.max(minWidth, resizeStartRef.current.width + deltaX),
+        ),
+        height: Math.min(
+          maxHeight,
+          Math.max(minHeight, resizeStartRef.current.height + deltaY),
+        ),
+      });
+    },
+    [isResizing, minWidth, maxWidth, minHeight, maxHeight],
+  );
 
   const handleResizeEnd = useCallback(() => {
     setIsResizing(false);
@@ -310,22 +338,22 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
 
   useEffect(() => {
     if (isDragging) {
-      window.addEventListener('mousemove', handleDragMove);
-      window.addEventListener('mouseup', handleDragEnd);
+      window.addEventListener("mousemove", handleDragMove);
+      window.addEventListener("mouseup", handleDragEnd);
       return () => {
-        window.removeEventListener('mousemove', handleDragMove);
-        window.removeEventListener('mouseup', handleDragEnd);
+        window.removeEventListener("mousemove", handleDragMove);
+        window.removeEventListener("mouseup", handleDragEnd);
       };
     }
   }, [isDragging, handleDragMove, handleDragEnd]);
 
   useEffect(() => {
     if (isResizing) {
-      window.addEventListener('mousemove', handleResizeMove);
-      window.addEventListener('mouseup', handleResizeEnd);
+      window.addEventListener("mousemove", handleResizeMove);
+      window.addEventListener("mouseup", handleResizeEnd);
       return () => {
-        window.removeEventListener('mousemove', handleResizeMove);
-        window.removeEventListener('mouseup', handleResizeEnd);
+        window.removeEventListener("mousemove", handleResizeMove);
+        window.removeEventListener("mouseup", handleResizeEnd);
       };
     }
   }, [isResizing, handleResizeMove, handleResizeEnd]);
@@ -352,11 +380,13 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
         setModelSelection(data.optionValue as AiModelSelection);
       }
     },
-    [setModelSelection]
+    [setModelSelection],
   );
 
   // Get current model display text
-  const currentModelOption = AI_MODEL_OPTIONS.find((m) => m.id === modelSelection);
+  const currentModelOption = AI_MODEL_OPTIONS.find(
+    (m) => m.id === modelSelection,
+  );
   const modelDisplayText = currentModelOption
     ? `${currentModelOption.name} (${currentModelOption.description})`
     : modelSelection;
@@ -371,7 +401,7 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
       className={mergeClasses(
         styles.container,
         !isOpen && styles.containerHidden,
-        isMinimized && styles.minimized
+        isMinimized && styles.minimized,
       )}
       style={{
         left: position.x,
@@ -388,7 +418,7 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
       <div
         className={mergeClasses(
           styles.header,
-          isDragging && styles.headerDragging
+          isDragging && styles.headerDragging,
         )}
         onMouseDown={handleDragStart}
       >
@@ -405,8 +435,8 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
             icon={<Settings20Regular />}
             onClick={handleSettingsToggle}
             className={styles.headerButton}
-            aria-label={showAdvancedOptions ? 'Hide settings' : 'Show settings'}
-            title={showAdvancedOptions ? 'Hide settings' : 'Show settings'}
+            aria-label={showAdvancedOptions ? "Hide settings" : "Show settings"}
+            title={showAdvancedOptions ? "Hide settings" : "Show settings"}
             aria-pressed={showAdvancedOptions}
           />
           <Button
@@ -415,8 +445,8 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
             icon={<SubtractCircle20Regular />}
             onClick={handleMinimize}
             className={styles.headerButton}
-            aria-label={isMinimized ? 'Expand' : 'Minimize'}
-            title={isMinimized ? 'Expand' : 'Minimize'}
+            aria-label={isMinimized ? "Expand" : "Minimize"}
+            title={isMinimized ? "Expand" : "Minimize"}
           />
           <Button
             appearance="transparent"
@@ -446,9 +476,15 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
               aria-label="Select AI model"
             >
               {AI_MODEL_OPTIONS.map((option) => (
-                <Option key={option.id} value={option.id} text={`${option.name} (${option.description})`}>
+                <Option
+                  key={option.id}
+                  value={option.id}
+                  text={`${option.name} (${option.description})`}
+                >
                   {option.name}
-                  <span className={styles.modelDescription}>({option.description})</span>
+                  <span className={styles.modelDescription}>
+                    ({option.description})
+                  </span>
                 </Option>
               ))}
             </Dropdown>
@@ -457,7 +493,12 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
       )}
 
       {/* Body */}
-      <div className={mergeClasses(styles.body, isMinimized && styles.minimizedBody)}>
+      <div
+        className={mergeClasses(
+          styles.body,
+          isMinimized && styles.minimizedBody,
+        )}
+      >
         {children}
       </div>
 

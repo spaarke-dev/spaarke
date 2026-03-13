@@ -30,7 +30,10 @@ const FluentDecorator = (Story: React.ComponentType) => {
 };
 
 // Theme switcher decorator
-const ThemeSwitcherDecorator = (Story: React.ComponentType, context: { globals: { theme?: string } }) => {
+const ThemeSwitcherDecorator = (
+  Story: React.ComponentType,
+  context: { globals: { theme?: string } },
+) => {
   const selectedTheme = context.globals.theme || "light";
   currentTheme = themes[selectedTheme as keyof typeof themes] || themes.light;
   return <Story />;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import {
   makeStyles,
   tokens,
@@ -12,7 +12,7 @@ import {
   MenuItem,
   MenuDivider,
   Badge,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   PersonRegular,
   SignOutRegular,
@@ -20,10 +20,10 @@ import {
   WeatherMoonRegular,
   WeatherSunnyRegular,
   ColorRegular,
-} from '@fluentui/react-icons';
-import { SpaarkeLogo } from './SpaarkeLogo';
-import type { ThemePreference } from '../hooks/useTheme';
-import type { HostType } from '../../adapters/types';
+} from "@fluentui/react-icons";
+import { SpaarkeLogo } from "./SpaarkeLogo";
+import type { ThemePreference } from "../hooks/useTheme";
+import type { HostType } from "../../adapters/types";
 
 /**
  * TaskPaneHeader - Header component for Office Add-in task pane.
@@ -39,10 +39,10 @@ import type { HostType } from '../../adapters/types';
 
 const useStyles = makeStyles({
   header: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
@@ -52,32 +52,32 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
   },
   titleSection: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   title: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground2,
   },
   actions: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
   userEmail: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '150px',
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    maxWidth: "150px",
   },
 });
 
@@ -107,15 +107,14 @@ export interface TaskPaneHeaderProps {
   compact?: boolean;
 }
 
-
 /**
  * Gets the icon for the current theme preference.
  */
 function getThemeIcon(preference: ThemePreference): React.ReactElement {
   switch (preference) {
-    case 'dark':
+    case "dark":
       return <WeatherMoonRegular />;
-    case 'light':
+    case "light":
       return <WeatherSunnyRegular />;
     default:
       return <ColorRegular />;
@@ -123,14 +122,14 @@ function getThemeIcon(preference: ThemePreference): React.ReactElement {
 }
 
 export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
-  title = 'Spaarke',
-  hostType = 'outlook',
+  title = "Spaarke",
+  hostType = "outlook",
   userName,
   userEmail,
   isAuthenticated = false,
   onSignOut,
   onSettings,
-  themePreference = 'auto',
+  themePreference = "auto",
   onThemeChange,
   compact = false,
 }) => {
@@ -164,33 +163,45 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
               <MenuList>
                 <MenuItem
                   icon={<ColorRegular />}
-                  onClick={() => onThemeChange('auto')}
+                  onClick={() => onThemeChange("auto")}
                 >
                   Auto
-                  {themePreference === 'auto' && (
-                    <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
+                  {themePreference === "auto" && (
+                    <Badge
+                      appearance="filled"
+                      size="small"
+                      style={{ marginLeft: "8px" }}
+                    >
                       Active
                     </Badge>
                   )}
                 </MenuItem>
                 <MenuItem
                   icon={<WeatherSunnyRegular />}
-                  onClick={() => onThemeChange('light')}
+                  onClick={() => onThemeChange("light")}
                 >
                   Light
-                  {themePreference === 'light' && (
-                    <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
+                  {themePreference === "light" && (
+                    <Badge
+                      appearance="filled"
+                      size="small"
+                      style={{ marginLeft: "8px" }}
+                    >
                       Active
                     </Badge>
                   )}
                 </MenuItem>
                 <MenuItem
                   icon={<WeatherMoonRegular />}
-                  onClick={() => onThemeChange('dark')}
+                  onClick={() => onThemeChange("dark")}
                 >
                   Dark
-                  {themePreference === 'dark' && (
-                    <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
+                  {themePreference === "dark" && (
+                    <Badge
+                      appearance="filled"
+                      size="small"
+                      style={{ marginLeft: "8px" }}
+                    >
                       Active
                     </Badge>
                   )}
@@ -216,7 +227,10 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
         {isAuthenticated && (userName || userEmail) && (
           <Menu>
             <MenuTrigger>
-              <Tooltip content={userName || userEmail || 'User'} relationship="label">
+              <Tooltip
+                content={userName || userEmail || "User"}
+                relationship="label"
+              >
                 <Button
                   appearance="subtle"
                   icon={<PersonRegular />}

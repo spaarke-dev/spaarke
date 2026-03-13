@@ -2,11 +2,11 @@
  * AI Completion Node - generates text using AI completion.
  */
 
-import * as React from 'react';
-import { Text, tokens } from '@fluentui/react-components';
-import { BrainCircuit20Regular } from '@fluentui/react-icons';
-import { BaseNode } from './BaseNode';
-import type { PlaybookNodeData } from '../../stores';
+import * as React from "react";
+import { Text, tokens } from "@fluentui/react-components";
+import { BrainCircuit20Regular } from "@fluentui/react-icons";
+import { BaseNode } from "./BaseNode";
+import type { PlaybookNodeData } from "../../stores";
 
 interface AiCompletionNodeProps {
   data: PlaybookNodeData;

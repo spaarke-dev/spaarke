@@ -8,7 +8,10 @@
  * @see EventTypeService - Consumer of IWebApiLike interface
  */
 
-import { IWebApiLike, IWebApiRetrieveMultipleResponse } from "@spaarke/ui-components";
+import {
+  IWebApiLike,
+  IWebApiRetrieveMultipleResponse,
+} from "@spaarke/ui-components";
 
 /**
  * Creates an IWebApiLike adapter from PCF ComponentFramework.WebApi
@@ -27,30 +30,34 @@ import { IWebApiLike, IWebApiRetrieveMultipleResponse } from "@spaarke/ui-compon
  * ```
  */
 export function createWebApiAdapter(
-    webApi: ComponentFramework.WebApi
+  webApi: ComponentFramework.WebApi,
 ): IWebApiLike {
-    return {
-        retrieveRecord: async (
-            entityType: string,
-            id: string,
-            options?: string
-        ): Promise<Record<string, unknown>> => {
-            const result = await webApi.retrieveRecord(entityType, id, options);
-            // PCF WebApi returns ComponentFramework.WebApi.Entity which is compatible with Record<string, unknown>
-            return result as unknown as Record<string, unknown>;
-        },
+  return {
+    retrieveRecord: async (
+      entityType: string,
+      id: string,
+      options?: string,
+    ): Promise<Record<string, unknown>> => {
+      const result = await webApi.retrieveRecord(entityType, id, options);
+      // PCF WebApi returns ComponentFramework.WebApi.Entity which is compatible with Record<string, unknown>
+      return result as unknown as Record<string, unknown>;
+    },
 
-        retrieveMultipleRecords: async (
-            entityType: string,
-            options?: string,
-            maxPageSize?: number
-        ): Promise<IWebApiRetrieveMultipleResponse> => {
-            const result = await webApi.retrieveMultipleRecords(entityType, options, maxPageSize);
-            // PCF WebApi returns RetrieveMultipleResponse which has entities array and nextLink
-            return {
-                entities: result.entities as Record<string, unknown>[],
-                nextLink: result.nextLink
-            };
-        }
-    };
+    retrieveMultipleRecords: async (
+      entityType: string,
+      options?: string,
+      maxPageSize?: number,
+    ): Promise<IWebApiRetrieveMultipleResponse> => {
+      const result = await webApi.retrieveMultipleRecords(
+        entityType,
+        options,
+        maxPageSize,
+      );
+      // PCF WebApi returns RetrieveMultipleResponse which has entities array and nextLink
+      return {
+        entities: result.entities as Record<string, unknown>[],
+        nextLink: result.nextLink,
+      };
+    },
+  };
 }

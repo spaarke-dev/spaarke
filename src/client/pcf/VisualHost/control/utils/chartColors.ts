@@ -179,10 +179,11 @@ export function getSeriesColor(index: number): string {
  */
 export function applyChartColors<T extends { color?: string }>(
   dataPoints: T[],
-  getIndex?: (item: T, index: number) => number
+  getIndex?: (item: T, index: number) => number,
 ): T[] {
   return dataPoints.map((point, index) => ({
     ...point,
-    color: point.color || getSeriesColor(getIndex ? getIndex(point, index) : index),
+    color:
+      point.color || getSeriesColor(getIndex ? getIndex(point, index) : index),
   }));
 }

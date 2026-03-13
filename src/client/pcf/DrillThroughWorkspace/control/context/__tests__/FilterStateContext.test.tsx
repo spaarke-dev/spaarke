@@ -44,7 +44,9 @@ function createMockDataset(): ComponentFramework.PropertyTypes.DataSet {
     sorting: [],
     filtering: {
       clearFilter: jest.fn(),
-      getFilter: jest.fn().mockReturnValue({ conditions: [], filterOperator: 0 }),
+      getFilter: jest
+        .fn()
+        .mockReturnValue({ conditions: [], filterOperator: 0 }),
       setFilter: jest.fn(),
     } as unknown as ComponentFramework.PropertyHelper.DataSetApi.Filtering,
     linking: {
@@ -197,7 +199,7 @@ describe("FilterStateProvider", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     expect(screen.getByTestId("isFiltered")).toHaveTextContent("no");
@@ -211,7 +213,7 @@ describe("FilterStateProvider", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer onContext={(ctx) => (capturedContext = ctx)} />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     expect(capturedContext?.dataset).toBe(mockDataset);
@@ -223,7 +225,7 @@ describe("FilterStateProvider", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     // Click set filter button
@@ -246,7 +248,7 @@ describe("FilterStateProvider", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     // Set a filter first
@@ -280,7 +282,7 @@ describe("FilterStateProvider", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     // Click buttons - should not throw
@@ -308,9 +310,7 @@ describe("useFilterState", () => {
 
     let capturedContext: IFilterStateContextValue | undefined;
 
-    render(
-      <TestConsumer onContext={(ctx) => (capturedContext = ctx)} />
-    );
+    render(<TestConsumer onContext={(ctx) => (capturedContext = ctx)} />);
 
     expect(capturedContext?.isFiltered).toBe(false);
     expect(capturedContext?.activeFilter).toBeNull();
@@ -326,7 +326,7 @@ describe("useFilterState", () => {
     render(
       <FilterStateProvider dataset={mockDataset}>
         <TestConsumer onContext={(ctx) => (capturedContext = ctx)} />
-      </FilterStateProvider>
+      </FilterStateProvider>,
     );
 
     expect(capturedContext?.isFiltered).toBe(false);

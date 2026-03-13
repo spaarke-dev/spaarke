@@ -4,4 +4,7 @@
  * @version 1.0.0
  */
 
-export { TestModeSelector, type TestModeSelectorProps } from './TestModeSelector';
+export {
+  TestModeSelector,
+  type TestModeSelectorProps,
+} from "./TestModeSelector";

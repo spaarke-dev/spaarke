@@ -26,7 +26,11 @@
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
 import { App } from "./App";
-import { detectTheme, isDarkTheme, setupThemeListener } from "./providers/ThemeProvider";
+import {
+  detectTheme,
+  isDarkTheme,
+  setupThemeListener,
+} from "./providers/ThemeProvider";
 import { parseUrlParams } from "./utils/parseUrlParams";
 import { initializeAuth } from "./services/authInit";
 
@@ -50,8 +54,8 @@ const initialSavedSearchId = appParams.savedSearchId ?? "";
 const rawUrlParams = new URLSearchParams(window.location.search);
 const dataEnvelope = rawUrlParams.get("data");
 const themeParams = dataEnvelope
-    ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-    : rawUrlParams;
+  ? new URLSearchParams(decodeURIComponent(dataEnvelope))
+  : rawUrlParams;
 
 let theme = detectTheme(themeParams);
 let isDark = isDarkTheme(themeParams);
@@ -64,44 +68,45 @@ document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
 // ---------------------------------------------------------------------------
 
 const container = document.getElementById("root");
-if (!container) throw new Error("[SemanticSearch] Root container #root not found in DOM.");
+if (!container)
+  throw new Error("[SemanticSearch] Root container #root not found in DOM.");
 
 const root = createRoot(container);
 
 function renderApp(): void {
-    root.render(
-        <FluentProvider theme={theme} style={{ height: "100%" }}>
-            <App
-                initialQuery={initialQuery}
-                initialDomain={initialDomain}
-                initialScope={initialScope}
-                initialEntityId={initialEntityId}
-                initialSavedSearchId={initialSavedSearchId}
-                isDark={isDark}
-            />
-        </FluentProvider>
-    );
+  root.render(
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+      <App
+        initialQuery={initialQuery}
+        initialDomain={initialDomain}
+        initialScope={initialScope}
+        initialEntityId={initialEntityId}
+        initialSavedSearchId={initialSavedSearchId}
+        isDark={isDark}
+      />
+    </FluentProvider>,
+  );
 }
 
 // Initialize @spaarke/auth before rendering so tokens are ready for API calls.
 // Uses multi-tenant authority and window.location.origin — no hardcoded tenant/redirect.
 initializeAuth()
-    .then(() => {
-        console.info("[SemanticSearch] Auth initialized, rendering app.");
-        renderApp();
-    })
-    .catch((err) => {
-        console.error("[SemanticSearch] Auth init failed, rendering anyway.", err);
-        renderApp();
-    });
+  .then(() => {
+    console.info("[SemanticSearch] Auth initialized, rendering app.");
+    renderApp();
+  })
+  .catch((err) => {
+    console.error("[SemanticSearch] Auth init failed, rendering anyway.", err);
+    renderApp();
+  });
 
 // ---------------------------------------------------------------------------
 // Theme change listener — re-render on system/user preference change
 // ---------------------------------------------------------------------------
 
 setupThemeListener(() => {
-    theme = detectTheme(themeParams);
-    isDark = isDarkTheme(themeParams);
-    document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
-    renderApp();
+  theme = detectTheme(themeParams);
+  isDark = isDarkTheme(themeParams);
+  document.body.style.backgroundColor = isDark ? "#292929" : "#ffffff";
+  renderApp();
 });

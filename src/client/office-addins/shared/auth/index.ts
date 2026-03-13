@@ -22,17 +22,17 @@
  */
 
 // Main service
-export { naaAuthService, NaaAuthServiceImpl } from './NaaAuthService';
+export { naaAuthService, NaaAuthServiceImpl } from "./NaaAuthService";
 
 // Types and interfaces
 export type {
   INaaAuthService,
   NaaAuthState,
   TokenResult,
-} from './NaaAuthService';
+} from "./NaaAuthService";
 
 // Error types
-export { NaaAuthError, NaaAuthErrorCode } from './NaaAuthService';
+export { NaaAuthError, NaaAuthErrorCode } from "./NaaAuthService";
 
 // Configuration
 export {
@@ -44,6 +44,6 @@ export {
   createPopupRequest,
   TOKEN_CACHE_PREFIX,
   TOKEN_EXPIRY_BUFFER_SECONDS,
-} from './authConfig';
+} from "./authConfig";
 
-export type { NaaAuthConfig } from './authConfig';
+export type { NaaAuthConfig } from "./authConfig";

@@ -11,7 +11,7 @@ import { IDatasetColumn, IDatasetRecord } from "./DatasetTypes";
 export type ColumnRenderer = (
   value: any,
   record: IDatasetRecord,
-  column: IDatasetColumn
+  column: IDatasetColumn,
 ) => React.ReactElement | string | null;
 
 /**
@@ -52,7 +52,7 @@ export enum DataverseAttributeType {
   // Other
   Boolean = "Boolean",
   Image = "Image",
-  File = "File"
+  File = "File",
 }
 
 /**

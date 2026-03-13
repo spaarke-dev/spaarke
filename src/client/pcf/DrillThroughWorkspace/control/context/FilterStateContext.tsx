@@ -9,7 +9,13 @@
  */
 
 import * as React from "react";
-import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import type { DrillInteraction, DrillOperator } from "../types";
 import { logger } from "../utils/logger";
 
@@ -20,12 +26,14 @@ import { logger } from "../utils/logger";
 /**
  * Type alias for PCF ConditionOperator
  */
-type ConditionOperator = ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator;
+type ConditionOperator =
+  ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator;
 
 /**
  * Type alias for PCF FilterOperator
  */
-type FilterOperator = ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator;
+type FilterOperator =
+  ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator;
 
 /**
  * PCF Condition Operator mapping
@@ -104,7 +112,8 @@ const defaultContextValue: IFilterStateContextValue = {
 /**
  * Filter State Context
  */
-export const FilterStateContext = createContext<IFilterStateContextValue>(defaultContextValue);
+export const FilterStateContext =
+  createContext<IFilterStateContextValue>(defaultContextValue);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -114,7 +123,7 @@ export const FilterStateContext = createContext<IFilterStateContextValue>(defaul
  * Convert DrillOperator to PCF ConditionOperator
  */
 function drillOperatorToConditionOperator(
-  operator: DrillOperator
+  operator: DrillOperator,
 ): ConditionOperator {
   switch (operator) {
     case "eq":
@@ -135,7 +144,7 @@ function drillOperatorToConditionOperator(
  * @returns FilterExpression for dataset.filtering.setFilter()
  */
 export function drillInteractionToFilterExpression(
-  interaction: DrillInteraction
+  interaction: DrillInteraction,
 ): ComponentFramework.PropertyHelper.DataSetApi.FilterExpression {
   const { field, operator, value } = interaction;
 
@@ -199,7 +208,8 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
   dataset,
   children,
 }) => {
-  const [activeFilter, setActiveFilterState] = useState<DrillInteraction | null>(null);
+  const [activeFilter, setActiveFilterState] =
+    useState<DrillInteraction | null>(null);
 
   /**
    * Apply a drill interaction filter to the dataset
@@ -209,7 +219,10 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
       logger.info("FilterStateContext", "setFilter called", filter);
 
       if (!dataset?.filtering) {
-        logger.error("FilterStateContext", "Dataset filtering API not available");
+        logger.error(
+          "FilterStateContext",
+          "Dataset filtering API not available",
+        );
         return;
       }
 
@@ -220,7 +233,7 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
         logger.info(
           "FilterStateContext",
           "Applying filter expression",
-          filterExpression
+          filterExpression,
         );
 
         // Apply filter via platform API
@@ -237,7 +250,7 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
         logger.error("FilterStateContext", "Failed to apply filter", error);
       }
     },
-    [dataset]
+    [dataset],
   );
 
   /**
@@ -278,7 +291,7 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
       isFiltered: activeFilter !== null,
       dataset,
     }),
-    [activeFilter, setFilter, clearFilter, dataset]
+    [activeFilter, setFilter, clearFilter, dataset],
   );
 
   return (
@@ -317,7 +330,7 @@ export function useFilterState(): IFilterStateContextValue {
   if (context === defaultContextValue) {
     logger.warn(
       "FilterStateContext",
-      "useFilterState called outside of FilterStateProvider"
+      "useFilterState called outside of FilterStateProvider",
     );
   }
 

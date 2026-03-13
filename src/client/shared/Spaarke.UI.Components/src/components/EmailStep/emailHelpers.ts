@@ -11,5 +11,5 @@
  */
 export function extractEmailFromUserName(name: string): string {
   const match = name.match(/\(([^)]+@[^)]+)\)/);
-  return match ? match[1] : '';
+  return match ? match[1] : "";
 }

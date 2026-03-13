@@ -8,8 +8,8 @@
  * @version 1.1.0
  */
 
-import * as React from 'react';
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import * as React from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   TabList,
   Tab,
@@ -30,7 +30,7 @@ import {
   Card,
   CardHeader,
   Badge,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   Search20Regular,
   Dismiss20Regular,
@@ -42,16 +42,16 @@ import {
   ChevronRight20Regular,
   Calendar20Regular,
   Info20Regular,
-} from '@fluentui/react-icons';
-import { ScopeList } from './ScopeList';
+} from "@fluentui/react-icons";
+import { ScopeList } from "./ScopeList";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ScopeType = 'actions' | 'skills' | 'tools' | 'knowledge';
-export type ScopeTypeFilter = ScopeType | 'all';
-export type OwnershipType = 'system' | 'customer';
+export type ScopeType = "actions" | "skills" | "tools" | "knowledge";
+export type ScopeTypeFilter = ScopeType | "all";
+export type OwnershipType = "system" | "customer";
 
 /** Debounce delay for search input (ms) */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -98,33 +98,33 @@ export interface ScopeBrowserProps {
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   filterRow: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     marginBottom: tokens.spacingVerticalM,
   },
   filterDropdown: {
-    minWidth: '140px',
+    minWidth: "140px",
   },
   tabList: {
     marginBottom: tokens.spacingVerticalM,
   },
   searchContainer: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   searchInput: {
@@ -132,26 +132,26 @@ const useStyles = makeStyles({
   },
   mainContent: {
     flex: 1,
-    display: 'flex',
-    ...shorthands.overflow('hidden'),
+    display: "flex",
+    ...shorthands.overflow("hidden"),
   },
   content: {
     flex: 1,
-    ...shorthands.overflow('hidden'),
-    display: 'flex',
-    flexDirection: 'column',
+    ...shorthands.overflow("hidden"),
+    display: "flex",
+    flexDirection: "column",
   },
   detailPanel: {
-    width: '300px',
-    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke2),
+    width: "300px",
+    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground2,
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.overflow('hidden'),
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.overflow("hidden"),
   },
   detailPanelHeader: {
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground3,
   },
   detailPanelTitle: {
@@ -160,7 +160,7 @@ const useStyles = makeStyles({
   },
   detailPanelContent: {
     flex: 1,
-    ...shorthands.overflow('auto'),
+    ...shorthands.overflow("auto"),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
   detailSection: {
@@ -170,22 +170,22 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     marginBottom: tokens.spacingVerticalXS,
-    display: 'block',
+    display: "block",
   },
   detailValue: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
-    wordBreak: 'break-word',
+    wordBreak: "break-word",
   },
   detailBadgeRow: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     marginBottom: tokens.spacingVerticalS,
   },
   detailMetaRow: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
@@ -200,19 +200,19 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
   },
   emptyDetailPanel: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
     color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+    textAlign: "center",
     ...shorthands.padding(tokens.spacingVerticalL),
   },
   loadingContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
     ...shorthands.padding(tokens.spacingVerticalXXL),
   },
@@ -220,14 +220,14 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
   emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
     ...shorthands.padding(tokens.spacingVerticalXXL),
     color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+    textAlign: "center",
   },
 });
 
@@ -235,19 +235,25 @@ const useStyles = makeStyles({
 // Tab Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TAB_CONFIG: Record<ScopeType, { label: string; icon: React.ReactElement }> = {
-  actions: { label: 'Actions', icon: <Play20Regular /> },
-  skills: { label: 'Skills', icon: <Lightbulb20Regular /> },
-  tools: { label: 'Tools', icon: <Wrench20Regular /> },
-  knowledge: { label: 'Knowledge', icon: <Book20Regular /> },
+const TAB_CONFIG: Record<
+  ScopeType,
+  { label: string; icon: React.ReactElement }
+> = {
+  actions: { label: "Actions", icon: <Play20Regular /> },
+  skills: { label: "Skills", icon: <Lightbulb20Regular /> },
+  tools: { label: "Tools", icon: <Wrench20Regular /> },
+  knowledge: { label: "Knowledge", icon: <Book20Regular /> },
 };
 
-const TYPE_FILTER_CONFIG: Record<ScopeTypeFilter, { label: string; icon: React.ReactElement }> = {
-  all: { label: 'All Types', icon: <Apps20Regular /> },
-  actions: { label: 'Actions', icon: <Play20Regular /> },
-  skills: { label: 'Skills', icon: <Lightbulb20Regular /> },
-  tools: { label: 'Tools', icon: <Wrench20Regular /> },
-  knowledge: { label: 'Knowledge', icon: <Book20Regular /> },
+const TYPE_FILTER_CONFIG: Record<
+  ScopeTypeFilter,
+  { label: string; icon: React.ReactElement }
+> = {
+  all: { label: "All Types", icon: <Apps20Regular /> },
+  actions: { label: "Actions", icon: <Play20Regular /> },
+  skills: { label: "Skills", icon: <Lightbulb20Regular /> },
+  tools: { label: "Tools", icon: <Wrench20Regular /> },
+  knowledge: { label: "Knowledge", icon: <Book20Regular /> },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -260,21 +266,21 @@ const createMockScopes = (type: ScopeType): ScopeItem[] => {
       name: `SYS-${type.toUpperCase()}-001`,
       displayName: `Standard ${type.slice(0, -1)} One`,
       description: `System-provided ${type.slice(0, -1)} for common operations.`,
-      ownershipType: 'system',
+      ownershipType: "system",
       isImmutable: true,
     },
     {
       name: `SYS-${type.toUpperCase()}-002`,
       displayName: `Standard ${type.slice(0, -1)} Two`,
       description: `Another system-provided ${type.slice(0, -1)}.`,
-      ownershipType: 'system',
+      ownershipType: "system",
       isImmutable: true,
     },
     {
       name: `CUST-${type.toUpperCase()}-001`,
       displayName: `Custom ${type.slice(0, -1)} One`,
       description: `Customer-created ${type.slice(0, -1)} for specific needs.`,
-      ownershipType: 'customer',
+      ownershipType: "customer",
       isImmutable: false,
     },
   ];
@@ -291,7 +297,10 @@ const createMockScopes = (type: ScopeType): ScopeItem[] => {
   }));
 };
 
-const defaultFetchScopes = async (type: ScopeType, searchTerm?: string): Promise<ScopeItem[]> => {
+const defaultFetchScopes = async (
+  type: ScopeType,
+  searchTerm?: string,
+): Promise<ScopeItem[]> => {
   // Simulate API delay
   await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -303,7 +312,7 @@ const defaultFetchScopes = async (type: ScopeType, searchTerm?: string): Promise
       (s) =>
         s.name.toLowerCase().includes(term) ||
         s.displayName.toLowerCase().includes(term) ||
-        s.description.toLowerCase().includes(term)
+        s.description.toLowerCase().includes(term),
     );
   }
 
@@ -344,18 +353,22 @@ interface ScopeDetailPanelProps {
   onSelect?: (scope: ScopeItem, type: ScopeType) => void;
 }
 
-const ScopeDetailPanel: React.FC<ScopeDetailPanelProps> = ({ scope, scopeType, onSelect }) => {
+const ScopeDetailPanel: React.FC<ScopeDetailPanelProps> = ({
+  scope,
+  scopeType,
+  onSelect,
+}) => {
   const styles = useStyles();
 
   // Format date for display
   const formatDate = useCallback((dateString: string) => {
     try {
       return new Date(dateString).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
     } catch {
       return dateString;
@@ -387,9 +400,13 @@ const ScopeDetailPanel: React.FC<ScopeDetailPanelProps> = ({ scope, scopeType, o
           <Badge
             appearance="filled"
             size="small"
-            className={scope.ownershipType === 'system' ? styles.systemBadge : styles.customerBadge}
+            className={
+              scope.ownershipType === "system"
+                ? styles.systemBadge
+                : styles.customerBadge
+            }
           >
-            {scope.ownershipType === 'system' ? 'System' : 'Customer'}
+            {scope.ownershipType === "system" ? "System" : "Customer"}
           </Badge>
           <Badge appearance="outline" size="small">
             {TYPE_FILTER_CONFIG[scopeType].label}
@@ -412,7 +429,9 @@ const ScopeDetailPanel: React.FC<ScopeDetailPanelProps> = ({ scope, scopeType, o
         {/* Description */}
         <div className={styles.detailSection}>
           <Text className={styles.detailLabel}>Description</Text>
-          <Text className={styles.detailValue}>{scope.description || 'No description provided'}</Text>
+          <Text className={styles.detailValue}>
+            {scope.description || "No description provided"}
+          </Text>
         </div>
 
         {/* Parent (if extended) */}
@@ -469,16 +488,17 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   fetchScopes = defaultFetchScopes,
   readOnly = false,
   showDetailPanel = true,
-  initialTypeFilter = 'actions',
+  initialTypeFilter = "actions",
 }) => {
   const styles = useStyles();
 
   // State
-  const [typeFilter, setTypeFilter] = useState<ScopeTypeFilter>(initialTypeFilter);
+  const [typeFilter, setTypeFilter] =
+    useState<ScopeTypeFilter>(initialTypeFilter);
   const [selectedTab, setSelectedTab] = useState<ScopeType>(
-    initialTypeFilter === 'all' ? 'actions' : initialTypeFilter
+    initialTypeFilter === "all" ? "actions" : initialTypeFilter,
   );
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedScope, setSelectedScope] = useState<ScopeItem | null>(null);
   const [scopes, setScopes] = useState<Record<ScopeType, ScopeItem[]>>({
     actions: [],
@@ -517,29 +537,30 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
       } catch (error) {
         setErrors((prev) => ({
           ...prev,
-          [type]: error instanceof Error ? error.message : 'Failed to load scopes',
+          [type]:
+            error instanceof Error ? error.message : "Failed to load scopes",
         }));
       } finally {
         setIsLoading((prev) => ({ ...prev, [type]: false }));
       }
     },
-    [fetchScopes]
+    [fetchScopes],
   );
 
   // Load all scope types (for "All" filter)
   const loadAllScopes = useCallback(
     async (search?: string) => {
-      const types: ScopeType[] = ['actions', 'skills', 'tools', 'knowledge'];
+      const types: ScopeType[] = ["actions", "skills", "tools", "knowledge"];
       await Promise.all(types.map((type) => loadScopes(type, search)));
     },
-    [loadScopes]
+    [loadScopes],
   );
 
   // Load scopes when tab changes (lazy load)
   useEffect(() => {
-    if (typeFilter === 'all') {
+    if (typeFilter === "all") {
       // Load all types when "All" is selected
-      const types: ScopeType[] = ['actions', 'skills', 'tools', 'knowledge'];
+      const types: ScopeType[] = ["actions", "skills", "tools", "knowledge"];
       types.forEach((type) => {
         if (!loadedTabs.has(type) && !isLoading[type]) {
           loadScopes(type);
@@ -553,13 +574,13 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   // Handle debounced search - trigger search when debounced value changes
   useEffect(() => {
     // Skip initial render
-    if (!searchTriggeredRef.current && debouncedSearchTerm === '') {
+    if (!searchTriggeredRef.current && debouncedSearchTerm === "") {
       searchTriggeredRef.current = true;
       return;
     }
     searchTriggeredRef.current = true;
 
-    if (typeFilter === 'all') {
+    if (typeFilter === "all") {
       loadAllScopes(debouncedSearchTerm || undefined);
     } else {
       loadScopes(selectedTab, debouncedSearchTerm || undefined);
@@ -571,21 +592,24 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
     (_: unknown, data: { optionValue?: string }) => {
       const newFilter = data.optionValue as ScopeTypeFilter;
       setTypeFilter(newFilter);
-      if (newFilter !== 'all') {
+      if (newFilter !== "all") {
         setSelectedTab(newFilter);
       }
       setSelectedScope(null);
-      setSearchTerm('');
+      setSearchTerm("");
     },
-    []
+    [],
   );
 
   // Handle tab change (for non-"All" filter)
-  const handleTabSelect = useCallback((_: SelectTabEvent, data: SelectTabData) => {
-    setSelectedTab(data.value as ScopeType);
-    setSelectedScope(null);
-    setSearchTerm(''); // Clear search when switching tabs
-  }, []);
+  const handleTabSelect = useCallback(
+    (_: SelectTabEvent, data: SelectTabData) => {
+      setSelectedTab(data.value as ScopeType);
+      setSelectedScope(null);
+      setSearchTerm(""); // Clear search when switching tabs
+    },
+    [],
+  );
 
   // Handle scope row click (for detail panel)
   const handleScopeClick = useCallback((scope: ScopeItem) => {
@@ -594,12 +618,12 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
   // Handle clear search
   const handleClearSearch = useCallback(() => {
-    setSearchTerm('');
+    setSearchTerm("");
   }, []);
 
   // Get scopes for display (filtered by type or all)
   const displayScopes = useMemo(() => {
-    if (typeFilter === 'all') {
+    if (typeFilter === "all") {
       // Combine all scopes with type indicator
       const allScopes: { scope: ScopeItem; type: ScopeType }[] = [];
       (Object.keys(scopes) as ScopeType[]).forEach((type) => {
@@ -608,8 +632,10 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
         });
       });
       // Sort by modified date (newest first)
-      allScopes.sort((a, b) =>
-        new Date(b.scope.modifiedOn).getTime() - new Date(a.scope.modifiedOn).getTime()
+      allScopes.sort(
+        (a, b) =>
+          new Date(b.scope.modifiedOn).getTime() -
+          new Date(a.scope.modifiedOn).getTime(),
       );
       return allScopes.map((item) => item.scope);
     }
@@ -618,7 +644,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
   // Current loading state
   const currentLoading = useMemo(() => {
-    if (typeFilter === 'all') {
+    if (typeFilter === "all") {
       return Object.values(isLoading).some((l) => l);
     }
     return isLoading[selectedTab];
@@ -626,10 +652,12 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
   // Current error state
   const currentError = useMemo(() => {
-    if (typeFilter === 'all') {
-      const errorTypes = (Object.keys(errors) as ScopeType[]).filter((t) => errors[t]);
+    if (typeFilter === "all") {
+      const errorTypes = (Object.keys(errors) as ScopeType[]).filter(
+        (t) => errors[t],
+      );
       if (errorTypes.length > 0) {
-        return `Failed to load: ${errorTypes.join(', ')}`;
+        return `Failed to load: ${errorTypes.join(", ")}`;
       }
       return null;
     }
@@ -638,7 +666,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
   // Determine the scope type for the selected scope (needed for "All" mode)
   const selectedScopeType = useMemo((): ScopeType => {
-    if (typeFilter === 'all' && selectedScope) {
+    if (typeFilter === "all" && selectedScope) {
       // Find which type the selected scope belongs to
       for (const type of Object.keys(scopes) as ScopeType[]) {
         if (scopes[type].some((s) => s.id === selectedScope.id)) {
@@ -661,16 +689,18 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
             value={TYPE_FILTER_CONFIG[typeFilter].label}
             onOptionSelect={handleTypeFilterChange}
           >
-            {(Object.keys(TYPE_FILTER_CONFIG) as ScopeTypeFilter[]).map((filter) => (
-              <Option key={filter} value={filter}>
-                {TYPE_FILTER_CONFIG[filter].label}
-              </Option>
-            ))}
+            {(Object.keys(TYPE_FILTER_CONFIG) as ScopeTypeFilter[]).map(
+              (filter) => (
+                <Option key={filter} value={filter}>
+                  {TYPE_FILTER_CONFIG[filter].label}
+                </Option>
+              ),
+            )}
           </Dropdown>
         </div>
 
         {/* Tabs (only shown when not filtering by "All") */}
-        {typeFilter !== 'all' && (
+        {typeFilter !== "all" && (
           <TabList
             className={styles.tabList}
             selectedValue={selectedTab}
@@ -690,8 +720,8 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
           <Input
             className={styles.searchInput}
             placeholder={
-              typeFilter === 'all'
-                ? 'Search all scopes...'
+              typeFilter === "all"
+                ? "Search all scopes..."
                 : `Search ${TAB_CONFIG[selectedTab].label.toLowerCase()}...`
             }
             value={searchTerm}
@@ -724,8 +754,8 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
               <Spinner
                 size="medium"
                 label={
-                  typeFilter === 'all'
-                    ? 'Loading all scopes...'
+                  typeFilter === "all"
+                    ? "Loading all scopes..."
                     : `Loading ${TAB_CONFIG[selectedTab].label.toLowerCase()}...`
                 }
               />
@@ -744,10 +774,16 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
           {/* Empty state */}
           {!currentLoading && !currentError && displayScopes.length === 0 && (
             <div className={styles.emptyState}>
-              {typeFilter === 'all' ? <Apps20Regular /> : TAB_CONFIG[selectedTab].icon}
+              {typeFilter === "all" ? (
+                <Apps20Regular />
+              ) : (
+                TAB_CONFIG[selectedTab].icon
+              )}
               <p>
-                No{' '}
-                {typeFilter === 'all' ? 'scopes' : TAB_CONFIG[selectedTab].label.toLowerCase()}{' '}
+                No{" "}
+                {typeFilter === "all"
+                  ? "scopes"
+                  : TAB_CONFIG[selectedTab].label.toLowerCase()}{" "}
                 found
               </p>
               {searchTerm && <p>Try adjusting your search terms</p>}

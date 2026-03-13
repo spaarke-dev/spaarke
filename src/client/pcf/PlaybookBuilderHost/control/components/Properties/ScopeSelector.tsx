@@ -4,8 +4,8 @@
  * Filters available options based on the node's action type capabilities.
  */
 
-import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import * as React from "react";
+import { useCallback, useMemo } from "react";
 import {
   makeStyles,
   tokens,
@@ -16,66 +16,66 @@ import {
   Divider,
   shorthands,
   Checkbox,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import type {
   DropdownProps,
   OptionOnSelectData,
   SelectionEvents,
   CheckboxOnChangeData,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   BrainCircuitRegular,
   LibraryRegular,
   WrenchRegular,
-} from '@fluentui/react-icons';
-import { useCanvasStore, PlaybookNodeType } from '../../stores';
+} from "@fluentui/react-icons";
+import { useCanvasStore, PlaybookNodeType } from "../../stores";
 import {
   useScopeStore,
   SkillItem,
   KnowledgeItem,
   ToolItem,
-} from '../../stores/scopeStore';
+} from "../../stores/scopeStore";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   section: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     marginBottom: tokens.spacingVerticalXS,
   },
   checkboxGroup: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
-    ...shorthands.padding(tokens.spacingVerticalS, '0'),
-    maxHeight: '180px',
-    overflowY: 'auto',
+    ...shorthands.padding(tokens.spacingVerticalS, "0"),
+    maxHeight: "180px",
+    overflowY: "auto",
   },
   checkboxItem: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
   },
   itemDescription: {
     color: tokens.colorNeutralForeground3,
-    marginLeft: '28px', // Align with checkbox label
+    marginLeft: "28px", // Align with checkbox label
   },
   emptyState: {
     color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   disabledMessage: {
     color: tokens.colorNeutralForeground4,
-    fontStyle: 'italic',
+    fontStyle: "italic",
     ...shorthands.padding(tokens.spacingVerticalS),
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
@@ -116,7 +116,7 @@ export const ScopeSelector = React.memo(function ScopeSelector({
   const { skills, knowledge, tools, getCapabilities } = useScopeStore();
   const capabilities = useMemo(
     () => getCapabilities(nodeType),
-    [getCapabilities, nodeType]
+    [getCapabilities, nodeType],
   );
 
   // Determine what to render based on props and capabilities
@@ -127,21 +127,36 @@ export const ScopeSelector = React.memo(function ScopeSelector({
   // If nothing to show for this section, show appropriate message
   if (!shouldShowSkills && !shouldShowKnowledge && !shouldShowTools) {
     // If we're showing a specific section (e.g., just skills) and it's not allowed
-    if (showSkills && !showKnowledge && !showTools && !capabilities.allowsSkills) {
+    if (
+      showSkills &&
+      !showKnowledge &&
+      !showTools &&
+      !capabilities.allowsSkills
+    ) {
       return (
         <Text className={styles.disabledMessage}>
           This node type does not support skills.
         </Text>
       );
     }
-    if (!showSkills && showKnowledge && !showTools && !capabilities.allowsKnowledge) {
+    if (
+      !showSkills &&
+      showKnowledge &&
+      !showTools &&
+      !capabilities.allowsKnowledge
+    ) {
       return (
         <Text className={styles.disabledMessage}>
           This node type does not support knowledge sources.
         </Text>
       );
     }
-    if (!showSkills && !showKnowledge && showTools && !capabilities.allowsTools) {
+    if (
+      !showSkills &&
+      !showKnowledge &&
+      showTools &&
+      !capabilities.allowsTools
+    ) {
       return (
         <Text className={styles.disabledMessage}>
           This node type does not support tools.
@@ -217,7 +232,7 @@ function SkillsMultiSelect({
           : selectedIds.filter((id) => id !== skillId);
         onUpdate(nodeId, { skillIds: newIds });
       },
-    [selectedIds, nodeId, onUpdate]
+    [selectedIds, nodeId, onUpdate],
   );
 
   return (
@@ -277,7 +292,7 @@ function KnowledgeMultiSelect({
           : selectedIds.filter((id) => id !== knowledgeId);
         onUpdate(nodeId, { knowledgeIds: newIds });
       },
-    [selectedIds, nodeId, onUpdate]
+    [selectedIds, nodeId, onUpdate],
   );
 
   return (
@@ -287,7 +302,9 @@ function KnowledgeMultiSelect({
         <Label>Knowledge</Label>
       </div>
       {knowledge.length === 0 ? (
-        <Text className={styles.emptyState}>No knowledge sources available</Text>
+        <Text className={styles.emptyState}>
+          No knowledge sources available
+        </Text>
       ) : (
         <div className={styles.checkboxGroup}>
           {knowledge.map((item) => (
@@ -321,20 +338,25 @@ interface ToolDropdownProps {
   onUpdate: (nodeId: string, data: Record<string, unknown>) => void;
 }
 
-function ToolDropdown({ tools, selectedId, nodeId, onUpdate }: ToolDropdownProps) {
+function ToolDropdown({
+  tools,
+  selectedId,
+  nodeId,
+  onUpdate,
+}: ToolDropdownProps) {
   const styles = useStyles();
 
   const selectedTool = useMemo(
     () => tools.find((t) => t.id === selectedId),
-    [tools, selectedId]
+    [tools, selectedId],
   );
 
-  const handleToolChange: DropdownProps['onOptionSelect'] = useCallback(
+  const handleToolChange: DropdownProps["onOptionSelect"] = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       // data.optionValue is the tool ID or empty string for "(None)"
       onUpdate(nodeId, { toolId: data.optionValue || undefined });
     },
-    [nodeId, onUpdate]
+    [nodeId, onUpdate],
   );
 
   return (
@@ -346,7 +368,7 @@ function ToolDropdown({ tools, selectedId, nodeId, onUpdate }: ToolDropdownProps
       <Dropdown
         id="tool-dropdown"
         placeholder="Select a tool..."
-        value={selectedTool?.name || ''}
+        value={selectedTool?.name || ""}
         selectedOptions={selectedId ? [selectedId] : []}
         onOptionSelect={handleToolChange}
       >
@@ -360,7 +382,10 @@ function ToolDropdown({ tools, selectedId, nodeId, onUpdate }: ToolDropdownProps
               {tool.description && (
                 <Text
                   size={100}
-                  style={{ display: 'block', color: tokens.colorNeutralForeground3 }}
+                  style={{
+                    display: "block",
+                    color: tokens.colorNeutralForeground3,
+                  }}
                 >
                   {tool.description}
                 </Text>

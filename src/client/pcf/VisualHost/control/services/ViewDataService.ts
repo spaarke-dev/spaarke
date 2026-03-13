@@ -31,7 +31,10 @@ export interface IViewDataContext {
  * View data service error
  */
 export class ViewDataError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = "ViewDataError";
   }
@@ -55,7 +58,10 @@ export interface IEventRecord {
 /**
  * Cache for view FetchXML definitions
  */
-const viewCache = new Map<string, { fetchXml: string; entityName: string; timestamp: number }>();
+const viewCache = new Map<
+  string,
+  { fetchXml: string; entityName: string; timestamp: number }
+>();
 const VIEW_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes (views change infrequently)
 
 /**
@@ -78,7 +84,7 @@ export function clearViewCache(viewId?: string): void {
  */
 export async function getViewFetchXml(
   webApi: IConfigWebApi,
-  viewId: string
+  viewId: string,
 ): Promise<{ fetchXml: string; entityName: string }> {
   const normalizedId = viewId.replace(/[{}]/g, "").toLowerCase();
 
@@ -96,11 +102,14 @@ export async function getViewFetchXml(
 
   for (const entityType of viewEntities) {
     try {
-      logger.debug("ViewDataService", `Trying ${entityType} for ${normalizedId}`);
+      logger.debug(
+        "ViewDataService",
+        `Trying ${entityType} for ${normalizedId}`,
+      );
       const record = await webApi.retrieveRecord(
         entityType,
         normalizedId,
-        "?$select=fetchxml,returnedtypecode,name"
+        "?$select=fetchxml,returnedtypecode,name",
       );
 
       const fetchXml = record.fetchxml as string;
@@ -117,10 +126,14 @@ export async function getViewFetchXml(
         timestamp: Date.now(),
       });
 
-      logger.info("ViewDataService", `Retrieved view from ${entityType}: ${record.name}`, {
-        entityName,
-        fetchXmlLength: fetchXml.length,
-      });
+      logger.info(
+        "ViewDataService",
+        `Retrieved view from ${entityType}: ${record.name}`,
+        {
+          entityName,
+          fetchXmlLength: fetchXml.length,
+        },
+      );
 
       return { fetchXml, entityName };
     } catch (error) {
@@ -131,8 +144,14 @@ export async function getViewFetchXml(
 
       // If this is the last entity type to try, throw the error
       if (entityType === viewEntities[viewEntities.length - 1]) {
-        if (msg.includes("does not exist") || msg.includes("not found") || msg.includes("0x80040217")) {
-          throw new ViewDataError(`View not found in savedquery or userquery: ${normalizedId}`);
+        if (
+          msg.includes("does not exist") ||
+          msg.includes("not found") ||
+          msg.includes("0x80040217")
+        ) {
+          throw new ViewDataError(
+            `View not found in savedquery or userquery: ${normalizedId}`,
+          );
         }
         throw new ViewDataError(`Failed to retrieve view: ${msg}`, error);
       }
@@ -153,7 +172,11 @@ function extractViewErrorMessage(error: unknown): string {
   if (error && typeof error === "object") {
     const obj = error as Record<string, unknown>;
     if (typeof obj.message === "string") return obj.message;
-    try { return JSON.stringify(error); } catch { /* ignore */ }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      /* ignore */
+    }
   }
   return String(error);
 }
@@ -171,7 +194,7 @@ function extractViewErrorMessage(error: unknown): string {
 export function injectContextFilter(
   fetchXml: string,
   fieldName: string,
-  recordId: string
+  recordId: string,
 ): string {
   const cleanId = recordId.replace(/[{}]/g, "");
 
@@ -186,15 +209,19 @@ export function injectContextFilter(
   // Check if there's already a top-level <filter in the entity
   const entityMatch = fetchXml.match(/<entity\s[^>]*>/i);
   if (!entityMatch) {
-    logger.warn("ViewDataService", "Could not find <entity> in FetchXML, appending filter");
+    logger.warn(
+      "ViewDataService",
+      "Could not find <entity> in FetchXML, appending filter",
+    );
     // Fallback: try to inject before </fetch>
     return fetchXml.replace(
       /<\/fetch>/i,
-      `<filter type="and">${condition}</filter></fetch>`
+      `<filter type="and">${condition}</filter></fetch>`,
     );
   }
 
-  const entityTagEnd = fetchXml.indexOf(">", fetchXml.indexOf(entityMatch[0])) + 1;
+  const entityTagEnd =
+    fetchXml.indexOf(">", fetchXml.indexOf(entityMatch[0])) + 1;
 
   // Look for an existing top-level <filter> element (first one after <entity>)
   const afterEntity = fetchXml.substring(entityTagEnd);
@@ -203,7 +230,8 @@ export function injectContextFilter(
   if (existingFilterMatch) {
     // There's already a filter - wrap existing filter content and our condition in an AND
     // Find the position of the existing <filter> tag
-    const filterPos = entityTagEnd + afterEntity.indexOf(existingFilterMatch[0]);
+    const filterPos =
+      entityTagEnd + afterEntity.indexOf(existingFilterMatch[0]);
     const filterTag = existingFilterMatch[0];
 
     // Check if existing filter already has type="and"
@@ -221,9 +249,11 @@ export function injectContextFilter(
     // Find the matching </filter> for this filter element
     const closingFilterPos = findMatchingClose(fetchXml, filterPos, "filter");
     if (closingFilterPos >= 0) {
-      const existingFilter = fetchXml.substring(filterPos, closingFilterPos + "</filter>".length);
-      const wrappedFilter =
-        `<filter type="and">${condition}${existingFilter}</filter>`;
+      const existingFilter = fetchXml.substring(
+        filterPos,
+        closingFilterPos + "</filter>".length,
+      );
+      const wrappedFilter = `<filter type="and">${condition}${existingFilter}</filter>`;
       return (
         fetchXml.substring(0, filterPos) +
         wrappedFilter +
@@ -244,7 +274,11 @@ export function injectContextFilter(
  * Find the matching closing tag position for a given opening tag position.
  * Handles nested elements of the same type.
  */
-function findMatchingClose(xml: string, openPos: number, tagName: string): number {
+function findMatchingClose(
+  xml: string,
+  openPos: number,
+  tagName: string,
+): number {
   const openTag = new RegExp(`<${tagName}[\\s>]`, "gi");
   const closeTag = `</${tagName}>`;
   let depth = 0;
@@ -288,13 +322,16 @@ function findMatchingClose(xml: string, openPos: number, tagName: string): numbe
  */
 export function injectRequiredAttributes(
   fetchXml: string,
-  requiredColumns: string[]
+  requiredColumns: string[],
 ): string {
   if (!requiredColumns || requiredColumns.length === 0) return fetchXml;
 
   // <all-attributes /> means every column is returned — nothing to inject
   if (/<all-attributes\s*\/?>/i.test(fetchXml)) {
-    logger.debug("ViewDataService", "View uses <all-attributes />, skipping attribute injection");
+    logger.debug(
+      "ViewDataService",
+      "View uses <all-attributes />, skipping attribute injection",
+    );
     return fetchXml;
   }
 
@@ -318,7 +355,7 @@ export function injectRequiredAttributes(
     // Check if attribute already exists in the view's FetchXML
     const exists = new RegExp(
       `<attribute\\s[^>]*name=["']${fetchXmlAttr}["']`,
-      "i"
+      "i",
     ).test(fetchXml);
 
     if (!exists) {
@@ -328,13 +365,11 @@ export function injectRequiredAttributes(
 
   if (toInject.length === 0) return fetchXml;
 
-  const attrXml = toInject
-    .map((a) => `<attribute name="${a}" />`)
-    .join("");
+  const attrXml = toInject.map((a) => `<attribute name="${a}" />`).join("");
 
   logger.info(
     "ViewDataService",
-    `Injecting required attributes into view FetchXML: ${toInject.join(", ")}`
+    `Injecting required attributes into view FetchXML: ${toInject.join(", ")}`,
   );
 
   return (
@@ -358,15 +393,12 @@ export function applyMaxItems(fetchXml: string, maxItems: number): string {
     // Replace existing top value
     return fetchXml.replace(
       /(<fetch[^>]*)\btop\s*=\s*["']\d+["']([^>]*>)/i,
-      `$1top="${maxItems}"$2`
+      `$1top="${maxItems}"$2`,
     );
   }
 
   // Add top attribute
-  return fetchXml.replace(
-    /(<fetch)([^>]*>)/i,
-    `$1 top="${maxItems}"$2`
-  );
+  return fetchXml.replace(/(<fetch)([^>]*>)/i, `$1 top="${maxItems}"$2`);
 }
 
 // ──────────────────────────────────────────────────
@@ -402,7 +434,7 @@ export interface ISubstitutionParams {
 export function substituteParameters(
   fetchXml: string,
   params: ISubstitutionParams,
-  paramMappings?: string
+  paramMappings?: string,
 ): string {
   let result = fetchXml;
 
@@ -432,14 +464,18 @@ export function substituteParameters(
         }
       }
     } catch {
-      logger.warn("ViewDataService", "Failed to parse fetchXmlParams JSON", { paramMappings });
+      logger.warn("ViewDataService", "Failed to parse fetchXmlParams JSON", {
+        paramMappings,
+      });
     }
   }
 
   // Log any remaining unresolved placeholders
   const remaining = result.match(/\{[a-zA-Z_]+\}/g);
   if (remaining) {
-    logger.warn("ViewDataService", "Unresolved placeholders in FetchXML", { remaining });
+    logger.warn("ViewDataService", "Unresolved placeholders in FetchXML", {
+      remaining,
+    });
   }
 
   return result;
@@ -453,7 +489,11 @@ export function substituteParameters(
  * Query source resolved by priority.
  * Priority order: pcfOverride → customFetchXml → view → directEntity
  */
-export type QuerySource = "pcfOverride" | "customFetchXml" | "view" | "directEntity";
+export type QuerySource =
+  | "pcfOverride"
+  | "customFetchXml"
+  | "view"
+  | "directEntity";
 
 /**
  * Resolved query result from priority resolution
@@ -494,18 +534,25 @@ export interface IQueryResolutionInputs {
  * @returns Resolved query with source, fetchXml, and entityName
  */
 export async function resolveQuery(
-  inputs: IQueryResolutionInputs
+  inputs: IQueryResolutionInputs,
 ): Promise<IResolvedQuery> {
-  const { chartDefinition, fetchXmlOverride, substitutionParams, webApi } = inputs;
+  const { chartDefinition, fetchXmlOverride, substitutionParams, webApi } =
+    inputs;
   const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
 
   // Priority 1: PCF override
   if (fetchXmlOverride?.trim()) {
-    logger.info("ViewDataService", "Using PCF fetchXmlOverride", { entityName });
+    logger.info("ViewDataService", "Using PCF fetchXmlOverride", {
+      entityName,
+    });
     let fetchXml = fetchXmlOverride;
 
     if (substitutionParams) {
-      fetchXml = substituteParameters(fetchXml, substitutionParams, chartDefinition.sprk_fetchxmlparams);
+      fetchXml = substituteParameters(
+        fetchXml,
+        substitutionParams,
+        chartDefinition.sprk_fetchxmlparams,
+      );
     }
 
     return { source: "pcfOverride", fetchXml, entityName };
@@ -513,11 +560,19 @@ export async function resolveQuery(
 
   // Priority 2: Custom FetchXML on chart definition
   if (chartDefinition.sprk_fetchxmlquery?.trim()) {
-    logger.info("ViewDataService", "Using custom FetchXML from chart definition", { entityName });
+    logger.info(
+      "ViewDataService",
+      "Using custom FetchXML from chart definition",
+      { entityName },
+    );
     let fetchXml = chartDefinition.sprk_fetchxmlquery;
 
     if (substitutionParams) {
-      fetchXml = substituteParameters(fetchXml, substitutionParams, chartDefinition.sprk_fetchxmlparams);
+      fetchXml = substituteParameters(
+        fetchXml,
+        substitutionParams,
+        chartDefinition.sprk_fetchxmlparams,
+      );
     }
 
     return { source: "customFetchXml", fetchXml, entityName };
@@ -530,14 +585,16 @@ export async function resolveQuery(
       entityName,
     });
 
-    const { fetchXml: viewFetchXml, entityName: viewEntity } = await getViewFetchXml(
-      webApi,
-      chartDefinition.sprk_baseviewid
-    );
+    const { fetchXml: viewFetchXml, entityName: viewEntity } =
+      await getViewFetchXml(webApi, chartDefinition.sprk_baseviewid);
 
     let fetchXml = viewFetchXml;
     if (substitutionParams) {
-      fetchXml = substituteParameters(fetchXml, substitutionParams, chartDefinition.sprk_fetchxmlparams);
+      fetchXml = substituteParameters(
+        fetchXml,
+        substitutionParams,
+        chartDefinition.sprk_fetchxmlparams,
+      );
     }
 
     return {
@@ -548,14 +605,21 @@ export async function resolveQuery(
   }
 
   // Priority 4: Direct entity query (caller builds FetchXML from entity name)
-  logger.info("ViewDataService", "Using direct entity query (no FetchXML source)", { entityName });
+  logger.info(
+    "ViewDataService",
+    "Using direct entity query (no FetchXML source)",
+    { entityName },
+  );
   return { source: "directEntity", entityName };
 }
 
 /**
  * Calculate days until a due date from today
  */
-function calculateDaysUntilDue(dueDate: Date): { daysUntilDue: number; isOverdue: boolean } {
+function calculateDaysUntilDue(dueDate: Date): {
+  daysUntilDue: number;
+  isOverdue: boolean;
+} {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const due = new Date(dueDate);
@@ -576,15 +640,21 @@ function mapRecordToEvent(record: Record<string, unknown>): IEventRecord {
 
   // Event type from formatted value annotation or FetchXML link-entity alias
   const eventTypeName =
-    (record["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] as string) ||
+    (record[
+      "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"
+    ] as string) ||
     (record["eventtype.sprk_name"] as string) ||
     "Event";
 
   // Event type color from FetchXML link-entity alias (if available)
-  const eventTypeColor = (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
+  const eventTypeColor =
+    (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
 
   return {
-    eventId: (record.sprk_eventid as string) || (record[`${getEntityPrimaryKey(record)}` ] as string) || "",
+    eventId:
+      (record.sprk_eventid as string) ||
+      (record[`${getEntityPrimaryKey(record)}`] as string) ||
+      "",
     eventName: (record.sprk_eventname as string) || "Untitled Event",
     eventTypeName,
     dueDate,
@@ -593,8 +663,9 @@ function mapRecordToEvent(record: Record<string, unknown>): IEventRecord {
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
     assignedTo:
-      (record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] as string) ||
-      undefined,
+      (record[
+        "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"
+      ] as string) || undefined,
   };
 }
 
@@ -627,7 +698,7 @@ function getEntityPrimaryKey(record: Record<string, unknown>): string {
  */
 export async function fetchEventsFromView(
   webApi: IConfigWebApi,
-  viewContext: IViewDataContext
+  viewContext: IViewDataContext,
 ): Promise<IEventRecord[]> {
   const { viewId, contextFilter, maxItems } = viewContext;
 
@@ -638,16 +709,27 @@ export async function fetchEventsFromView(
   });
 
   // Step 1: Get the view's FetchXML
-  const { fetchXml: rawFetchXml, entityName } = await getViewFetchXml(webApi, viewId);
+  const { fetchXml: rawFetchXml, entityName } = await getViewFetchXml(
+    webApi,
+    viewId,
+  );
 
   // Step 1.5: Apply parameter substitution if params provided
   let fetchXml = viewContext.substitutionParams
-    ? substituteParameters(rawFetchXml, viewContext.substitutionParams, viewContext.paramMappings)
+    ? substituteParameters(
+        rawFetchXml,
+        viewContext.substitutionParams,
+        viewContext.paramMappings,
+      )
     : rawFetchXml;
 
   // Step 2: Inject context filter if provided
   if (contextFilter?.fieldName && contextFilter?.recordId) {
-    fetchXml = injectContextFilter(fetchXml, contextFilter.fieldName, contextFilter.recordId);
+    fetchXml = injectContextFilter(
+      fetchXml,
+      contextFilter.fieldName,
+      contextFilter.recordId,
+    );
     logger.debug("ViewDataService", "Injected context filter", {
       fieldName: contextFilter.fieldName,
     });
@@ -663,12 +745,19 @@ export async function fetchEventsFromView(
     const encodedFetchXml = encodeURIComponent(fetchXml);
     const queryOptions = `?fetchXml=${encodedFetchXml}`;
 
-    const result = await webApi.retrieveMultipleRecords(entityName, queryOptions);
-
-    logger.info("ViewDataService", `View query returned ${result.entities.length} records`, {
+    const result = await webApi.retrieveMultipleRecords(
       entityName,
-      viewId,
-    });
+      queryOptions,
+    );
+
+    logger.info(
+      "ViewDataService",
+      `View query returned ${result.entities.length} records`,
+      {
+        entityName,
+        viewId,
+      },
+    );
 
     // Step 5: Map to event records
     return result.entities.map(mapRecordToEvent);
@@ -691,12 +780,15 @@ export async function fetchEventsFromView(
 export async function fetchEventsFromChartDefinition(
   webApi: IConfigWebApi,
   chartDefinition: IChartDefinition,
-  contextRecordId?: string
+  contextRecordId?: string,
 ): Promise<IEventRecord[]> {
   const viewId = chartDefinition.sprk_baseviewid;
 
   if (!viewId) {
-    logger.warn("ViewDataService", "No view ID configured, falling back to direct query");
+    logger.warn(
+      "ViewDataService",
+      "No view ID configured, falling back to direct query",
+    );
     return [];
   }
 

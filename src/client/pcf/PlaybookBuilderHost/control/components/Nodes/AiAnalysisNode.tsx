@@ -2,11 +2,11 @@
  * AI Analysis Node - processes data with AI and produces structured output.
  */
 
-import * as React from 'react';
-import { Text, tokens } from '@fluentui/react-components';
-import { BrainCircuit20Regular } from '@fluentui/react-icons';
-import { BaseNode } from './BaseNode';
-import type { PlaybookNodeData } from '../../stores';
+import * as React from "react";
+import { Text, tokens } from "@fluentui/react-components";
+import { BrainCircuit20Regular } from "@fluentui/react-icons";
+import { BaseNode } from "./BaseNode";
+import type { PlaybookNodeData } from "../../stores";
 
 interface AiAnalysisNodeProps {
   data: PlaybookNodeData;

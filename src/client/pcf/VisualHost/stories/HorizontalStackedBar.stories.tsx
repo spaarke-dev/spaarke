@@ -5,8 +5,15 @@
 
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { HorizontalStackedBar, IHorizontalStackedBarProps } from "../control/components/HorizontalStackedBar";
-import type { IAggregatedDataPoint, ICardConfig, IColorThreshold } from "../control/types";
+import {
+  HorizontalStackedBar,
+  IHorizontalStackedBarProps,
+} from "../control/components/HorizontalStackedBar";
+import type {
+  IAggregatedDataPoint,
+  ICardConfig,
+  IColorThreshold,
+} from "../control/types";
 
 const meta: Meta<typeof HorizontalStackedBar> = {
   title: "Charts/HorizontalStackedBar",

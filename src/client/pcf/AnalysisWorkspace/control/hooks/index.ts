@@ -3,4 +3,8 @@
  */
 
 export { useSseStream } from "./useSseStream";
-export type { ISseStreamOptions, ISseStreamState, ISseStreamActions } from "./useSseStream";
+export type {
+  ISseStreamOptions,
+  ISseStreamState,
+  ISseStreamActions,
+} from "./useSseStream";

@@ -41,16 +41,18 @@ const BASE_FILTER = "&$filter=statecode eq 0&$orderby=sprk_name";
 export async function loadPlaybooks(webApi: any): Promise<IPlaybook[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.playbook,
-    `?$select=${ID_FIELDS.playbook},sprk_name,sprk_description${BASE_FILTER}`
+    `?$select=${ID_FIELDS.playbook},sprk_name,sprk_description${BASE_FILTER}`,
   );
 
-  return result.entities.map((entity: any): IPlaybook => ({
-    id: entity[ID_FIELDS.playbook] as string,
-    name: entity.sprk_name as string,
-    description: (entity.sprk_description as string) || "",
-    icon: "Lightbulb", // No dedicated icon field in Dataverse
-    isDefault: false,
-  }));
+  return result.entities.map(
+    (entity: any): IPlaybook => ({
+      id: entity[ID_FIELDS.playbook] as string,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || "",
+      icon: "Lightbulb", // No dedicated icon field in Dataverse
+      isDefault: false,
+    }),
+  );
 }
 
 /**
@@ -62,15 +64,17 @@ export async function loadPlaybooks(webApi: any): Promise<IPlaybook[]> {
 export async function loadActions(webApi: any): Promise<IAction[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.action,
-    `?$select=${ID_FIELDS.action},sprk_name,sprk_description${BASE_FILTER}`
+    `?$select=${ID_FIELDS.action},sprk_name,sprk_description${BASE_FILTER}`,
   );
 
-  return result.entities.map((entity: any): IAction => ({
-    id: entity[ID_FIELDS.action] as string,
-    name: entity.sprk_name as string,
-    description: (entity.sprk_description as string) || "",
-    icon: "Play", // No dedicated icon field in Dataverse
-  }));
+  return result.entities.map(
+    (entity: any): IAction => ({
+      id: entity[ID_FIELDS.action] as string,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || "",
+      icon: "Play", // No dedicated icon field in Dataverse
+    }),
+  );
 }
 
 /**
@@ -82,16 +86,18 @@ export async function loadActions(webApi: any): Promise<IAction[]> {
 export async function loadSkills(webApi: any): Promise<ISkill[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.skill,
-    `?$select=${ID_FIELDS.skill},sprk_name,sprk_description${BASE_FILTER}`
+    `?$select=${ID_FIELDS.skill},sprk_name,sprk_description${BASE_FILTER}`,
   );
 
-  return result.entities.map((entity: any): ISkill => ({
-    id: entity[ID_FIELDS.skill] as string,
-    name: entity.sprk_name as string,
-    description: (entity.sprk_description as string) || "",
-    icon: "Brain", // No dedicated icon field in Dataverse
-    type: "analysis", // No dedicated type field in Dataverse
-  }));
+  return result.entities.map(
+    (entity: any): ISkill => ({
+      id: entity[ID_FIELDS.skill] as string,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || "",
+      icon: "Brain", // No dedicated icon field in Dataverse
+      type: "analysis", // No dedicated type field in Dataverse
+    }),
+  );
 }
 
 /**
@@ -103,16 +109,18 @@ export async function loadSkills(webApi: any): Promise<ISkill[]> {
 export async function loadKnowledge(webApi: any): Promise<IKnowledge[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.knowledge,
-    `?$select=${ID_FIELDS.knowledge},sprk_name,sprk_description${BASE_FILTER}`
+    `?$select=${ID_FIELDS.knowledge},sprk_name,sprk_description${BASE_FILTER}`,
   );
 
-  return result.entities.map((entity: any): IKnowledge => ({
-    id: entity[ID_FIELDS.knowledge] as string,
-    name: entity.sprk_name as string,
-    description: (entity.sprk_description as string) || "",
-    icon: "Library", // No dedicated icon field in Dataverse
-    source: "dataverse", // No dedicated source field in Dataverse
-  }));
+  return result.entities.map(
+    (entity: any): IKnowledge => ({
+      id: entity[ID_FIELDS.knowledge] as string,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || "",
+      icon: "Library", // No dedicated icon field in Dataverse
+      source: "dataverse", // No dedicated source field in Dataverse
+    }),
+  );
 }
 
 /**
@@ -124,16 +132,18 @@ export async function loadKnowledge(webApi: any): Promise<IKnowledge[]> {
 export async function loadTools(webApi: any): Promise<ITool[]> {
   const result = await webApi.retrieveMultipleRecords(
     ENTITY_NAMES.tool,
-    `?$select=${ID_FIELDS.tool},sprk_name,sprk_description${BASE_FILTER}`
+    `?$select=${ID_FIELDS.tool},sprk_name,sprk_description${BASE_FILTER}`,
   );
 
-  return result.entities.map((entity: any): ITool => ({
-    id: entity[ID_FIELDS.tool] as string,
-    name: entity.sprk_name as string,
-    description: (entity.sprk_description as string) || "",
-    icon: "Wrench", // No dedicated icon field in Dataverse
-    toolType: "api", // No dedicated toolType field in Dataverse
-  }));
+  return result.entities.map(
+    (entity: any): ITool => ({
+      id: entity[ID_FIELDS.tool] as string,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || "",
+      icon: "Wrench", // No dedicated icon field in Dataverse
+      toolType: "api", // No dedicated toolType field in Dataverse
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +163,7 @@ export async function loadTools(webApi: any): Promise<ITool[]> {
  */
 export async function loadPlaybookScopes(
   webApi: any,
-  playbookId: string
+  playbookId: string,
 ): Promise<IPlaybookScopes> {
   const scopes: IPlaybookScopes = {
     actionIds: [],
@@ -172,7 +182,7 @@ export async function loadPlaybookScopes(
   const playbook = await webApi.retrieveRecord(
     ENTITY_NAMES.playbook,
     playbookId,
-    expandQuery
+    expandQuery,
   );
 
   // Extract skill IDs
@@ -181,7 +191,9 @@ export async function loadPlaybookScopes(
     Array.isArray(playbook[RELATIONSHIP_NAMES.playbookSkill])
   ) {
     scopes.skillIds = (
-      playbook[RELATIONSHIP_NAMES.playbookSkill] as Array<Record<string, string>>
+      playbook[RELATIONSHIP_NAMES.playbookSkill] as Array<
+        Record<string, string>
+      >
     ).map((s) => s[ID_FIELDS.skill]);
   }
 
@@ -191,7 +203,9 @@ export async function loadPlaybookScopes(
     Array.isArray(playbook[RELATIONSHIP_NAMES.playbookKnowledge])
   ) {
     scopes.knowledgeIds = (
-      playbook[RELATIONSHIP_NAMES.playbookKnowledge] as Array<Record<string, string>>
+      playbook[RELATIONSHIP_NAMES.playbookKnowledge] as Array<
+        Record<string, string>
+      >
     ).map((k) => k[ID_FIELDS.knowledge]);
   }
 
@@ -211,7 +225,9 @@ export async function loadPlaybookScopes(
     Array.isArray(playbook[RELATIONSHIP_NAMES.playbookAction])
   ) {
     scopes.actionIds = (
-      playbook[RELATIONSHIP_NAMES.playbookAction] as Array<Record<string, string>>
+      playbook[RELATIONSHIP_NAMES.playbookAction] as Array<
+        Record<string, string>
+      >
     ).map((a) => a[ID_FIELDS.action]);
   }
 

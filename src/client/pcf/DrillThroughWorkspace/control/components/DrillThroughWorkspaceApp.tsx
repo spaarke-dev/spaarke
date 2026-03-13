@@ -23,10 +23,7 @@ import {
   Text,
   Tooltip,
 } from "@fluentui/react-components";
-import {
-  DismissRegular,
-  FilterRegular,
-} from "@fluentui/react-icons";
+import { DismissRegular, FilterRegular } from "@fluentui/react-icons";
 import type { DrillInteraction, IChartDefinition, IChartData } from "../types";
 import { TwoPanelLayout } from "./TwoPanelLayout";
 import { DrillThroughGrid } from "./DrillThroughGrid";
@@ -40,7 +37,10 @@ import {
   ConfigurationNotFoundError,
   ConfigurationLoadError,
 } from "../services/ConfigurationLoader";
-import { fetchAndAggregate, AggregationError } from "../services/DataAggregationService";
+import {
+  fetchAndAggregate,
+  AggregationError,
+} from "../services/DataAggregationService";
 import { logger } from "../utils/logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +154,8 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [chartDefinition, setChartDefinition] = useState<IChartDefinition | null>(null);
+  const [chartDefinition, setChartDefinition] =
+    useState<IChartDefinition | null>(null);
   const [chartData, setChartData] = useState<IChartData | null>(null);
 
   // Get filter state from context
@@ -175,42 +176,42 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
         setError(null);
         logger.info(
           "WorkspaceContent",
-          `Loading chart definition: ${chartDefinitionId}`
+          `Loading chart definition: ${chartDefinitionId}`,
         );
 
         // Load chart definition from Dataverse
         const definition = await loadChartDefinition(
           { webAPI: webApi },
-          chartDefinitionId
+          chartDefinitionId,
         );
         setChartDefinition(definition);
 
         logger.info(
           "WorkspaceContent",
-          `Loaded definition: ${definition.sprk_name}`
+          `Loaded definition: ${definition.sprk_name}`,
         );
 
         // Fetch and aggregate data for the chart
         if (definition.sprk_entitylogicalname) {
           logger.info(
             "WorkspaceContent",
-            `Fetching data from ${definition.sprk_entitylogicalname}`
+            `Fetching data from ${definition.sprk_entitylogicalname}`,
           );
 
-          const data = await fetchAndAggregate(
-            { webAPI: webApi },
-            definition
-          );
+          const data = await fetchAndAggregate({ webAPI: webApi }, definition);
           setChartData(data);
 
           logger.info(
             "WorkspaceContent",
-            `Aggregated ${data.dataPoints.length} data points from ${data.totalRecords} records`
+            `Aggregated ${data.dataPoints.length} data points from ${data.totalRecords} records`,
           );
         }
       } catch (err) {
         if (err instanceof ConfigurationNotFoundError) {
-          logger.warn("WorkspaceContent", `Chart not found: ${chartDefinitionId}`);
+          logger.warn(
+            "WorkspaceContent",
+            `Chart not found: ${chartDefinitionId}`,
+          );
           setError(`Chart definition not found: ${chartDefinitionId}`);
         } else if (err instanceof ConfigurationLoadError) {
           logger.error("WorkspaceContent", "Failed to load configuration", err);
@@ -219,7 +220,8 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
           logger.error("WorkspaceContent", "Failed to aggregate data", err);
           setError(`Failed to load chart data: ${err.message}`);
         } else {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+          const errorMessage =
+            err instanceof Error ? err.message : "Unknown error";
           logger.error("WorkspaceContent", "Failed to load chart", err);
           setError(`Failed to load chart: ${errorMessage}`);
         }
@@ -240,7 +242,7 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
       logger.info("WorkspaceContent", "Drill interaction", interaction);
       setFilter(interaction);
     },
-    [setFilter]
+    [setFilter],
   );
 
   /**
@@ -310,13 +312,10 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   /**
    * Handle record selection from grid
    */
-  const handleGridSelectionChange = useCallback(
-    (recordIds: string[]) => {
-      logger.debug("WorkspaceContent", "Grid selection changed", { recordIds });
-      // Selection is managed by DrillThroughGrid and synced with platform
-    },
-    []
-  );
+  const handleGridSelectionChange = useCallback((recordIds: string[]) => {
+    logger.debug("WorkspaceContent", "Grid selection changed", { recordIds });
+    // Selection is managed by DrillThroughGrid and synced with platform
+  }, []);
 
   /**
    * Render dataset grid content
@@ -414,13 +413,9 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
  * Wraps content with FilterStateProvider to enable filter sharing
  * between chart and dataset grid.
  */
-export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> = ({
-  chartDefinitionId,
-  dataset,
-  webApi,
-  onRecordSelect,
-  onClose,
-}) => {
+export const DrillThroughWorkspaceApp: React.FC<
+  IDrillThroughWorkspaceAppProps
+> = ({ chartDefinitionId, dataset, webApi, onRecordSelect, onClose }) => {
   return (
     <FilterStateProvider dataset={dataset}>
       <WorkspaceContent

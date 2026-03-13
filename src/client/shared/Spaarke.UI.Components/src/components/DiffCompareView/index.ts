@@ -8,14 +8,19 @@
  */
 
 export { DiffCompareView } from "./DiffCompareView";
-export { extractTextFromHtml, computeHtmlDiff, detectBlockChanges, escapeHtml } from "./diffUtils";
+export {
+  extractTextFromHtml,
+  computeHtmlDiff,
+  detectBlockChanges,
+  escapeHtml,
+} from "./diffUtils";
 export type {
-    IDiffCompareViewProps,
-    IDiffSegment,
-    DiffCompareViewMode,
-    DiffOptions,
-    DiffResult,
-    DiffStats,
-    BlockChange,
-    BlockChangeType,
+  IDiffCompareViewProps,
+  IDiffSegment,
+  DiffCompareViewMode,
+  DiffOptions,
+  DiffResult,
+  DiffStats,
+  BlockChange,
+  BlockChangeType,
 } from "./DiffCompareView.types";

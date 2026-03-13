@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useEffect, useState } from "react";
 import {
   makeStyles,
   tokens,
@@ -20,7 +20,7 @@ import {
   mergeClasses,
   Textarea,
   Label,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   SaveRegular,
   DocumentRegular,
@@ -34,10 +34,10 @@ import {
   CopyRegular,
   PersonSearchRegular,
   EditRegular,
-} from '@fluentui/react-icons';
-import { EntityPicker } from './EntityPicker';
-import { AttachmentSelector } from './AttachmentSelector';
-import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
+} from "@fluentui/react-icons";
+import { EntityPicker } from "./EntityPicker";
+import { AttachmentSelector } from "./AttachmentSelector";
+import type { EntitySearchResult, EntityType } from "../hooks/useEntitySearch";
 import {
   useSaveFlow,
   type SaveFlowContext,
@@ -46,64 +46,64 @@ import {
   type JobStatus,
   type StageStatus,
   type UseSaveFlowOptions,
-} from '../hooks/useSaveFlow';
-import { useAnnounce } from '../hooks/useAnnounce';
-import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+} from "../hooks/useSaveFlow";
+import { useAnnounce } from "../hooks/useAnnounce";
+import type { AttachmentInfo, HostType } from "@shared/adapters/types";
 
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
  */
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalL,
-    width: '100%',
+    width: "100%",
   },
   section: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   sectionTitle: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
     marginBottom: tokens.spacingVerticalXS,
   },
   documentInfo: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
   },
   documentInfoRow: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   processingOptions: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
   },
   processingOption: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: tokens.spacingVerticalXS,
   },
   processingLabel: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
   fieldContainer: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
   },
   fieldLabel: {
@@ -112,65 +112,65 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   actions: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
   },
   errorActions: {
-    display: 'flex',
+    display: "flex",
     gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalS,
   },
   jobStatus: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingVerticalM,
   },
   jobHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   stageList: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
     marginTop: tokens.spacingVerticalS,
   },
   stageItem: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalXS,
   },
   stageIcon: {
-    width: '20px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: "20px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   successCard: {
-    textAlign: 'center',
+    textAlign: "center",
     padding: tokens.spacingVerticalL,
   },
   successIcon: {
-    fontSize: '48px',
+    fontSize: "48px",
     color: tokens.colorPaletteGreenForeground1,
     marginBottom: tokens.spacingVerticalM,
   },
   successActions: {
-    display: 'flex',
+    display: "flex",
     gap: tokens.spacingHorizontalS,
-    justifyContent: 'center',
+    justifyContent: "center",
     marginTop: tokens.spacingVerticalM,
   },
   duplicateCard: {
     padding: tokens.spacingVerticalM,
   },
   duplicateActions: {
-    display: 'flex',
+    display: "flex",
     gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
@@ -180,25 +180,37 @@ const useStyles = makeStyles({
  * Stage display names.
  */
 const STAGE_DISPLAY_NAMES: Record<string, string> = {
-  RecordsCreated: 'Creating records',
-  FileUploaded: 'Uploading file',
-  ProfileSummary: 'Generating summary',
-  Indexed: 'Indexing for search',
-  DeepAnalysis: 'Running AI analysis',
+  RecordsCreated: "Creating records",
+  FileUploaded: "Uploading file",
+  ProfileSummary: "Generating summary",
+  Indexed: "Indexing for search",
+  DeepAnalysis: "Running AI analysis",
 };
 
 /**
  * Stage icon component.
  */
-function StageIcon({ status }: { status: StageStatus['status'] }): React.ReactElement {
+function StageIcon({
+  status,
+}: {
+  status: StageStatus["status"];
+}): React.ReactElement {
   switch (status) {
-    case 'Completed':
-      return <CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} />;
-    case 'Running':
+    case "Completed":
+      return (
+        <CheckmarkCircleRegular
+          style={{ color: tokens.colorPaletteGreenForeground1 }}
+        />
+      );
+    case "Running":
       return <Spinner size="tiny" />;
-    case 'Failed':
-      return <ErrorCircleRegular style={{ color: tokens.colorPaletteRedForeground1 }} />;
-    case 'Skipped':
+    case "Failed":
+      return (
+        <ErrorCircleRegular
+          style={{ color: tokens.colorPaletteRedForeground1 }}
+        />
+      );
+    case "Skipped":
       return <span style={{ color: tokens.colorNeutralForeground3 }}>-</span>;
     default:
       return <span style={{ color: tokens.colorNeutralForeground3 }}>-</span>;
@@ -222,7 +234,11 @@ export interface SaveFlowProps {
   /** Email sender display name (Outlook only) */
   senderDisplayName?: string;
   /** Email recipients (Outlook only) */
-  recipients?: Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>;
+  recipients?: Array<{
+    email: string;
+    displayName?: string;
+    type: "to" | "cc" | "bcc";
+  }>;
   /** Email sent date (Outlook only) */
   sentDate?: Date;
   /** Email body content (Outlook only) */
@@ -242,7 +258,7 @@ export interface SaveFlowProps {
   /** Callback when view document is clicked */
   onViewDocument?: (documentUrl: string) => void;
   /** Callback to navigate to different view */
-  onNavigate?: (view: 'save' | 'status') => void;
+  onNavigate?: (view: "save" | "status") => void;
   /** Entity types allowed for association */
   allowedEntityTypes?: EntityType[];
   /** Whether to show document info section */
@@ -294,7 +310,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     documentUrl,
     documentContentBase64,
     getAccessToken,
-    apiBaseUrl = '',
+    apiBaseUrl = "",
     onComplete,
     onQuickCreate,
     onViewDocument,
@@ -308,20 +324,23 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const { announce } = useAnnounce();
 
   // Initialize save flow hook
-  const saveFlowOptions: UseSaveFlowOptions = useMemo(() => ({
-    apiBaseUrl,
-    getAccessToken,
-    onComplete: (docId, docUrl) => {
-      announce('Document saved successfully', 'polite');
-      onComplete?.(docId, docUrl);
-    },
-    onError: (error) => {
-      announce(`Error: ${error.message}`, 'assertive');
-    },
-    onDuplicate: (docId, message) => {
-      announce('Duplicate detected: ' + message, 'polite');
-    },
-  }), [apiBaseUrl, getAccessToken, onComplete, announce]);
+  const saveFlowOptions: UseSaveFlowOptions = useMemo(
+    () => ({
+      apiBaseUrl,
+      getAccessToken,
+      onComplete: (docId, docUrl) => {
+        announce("Document saved successfully", "polite");
+        onComplete?.(docId, docUrl);
+      },
+      onError: (error) => {
+        announce(`Error: ${error.message}`, "assertive");
+      },
+      onDuplicate: (docId, message) => {
+        announce("Duplicate detected: " + message, "polite");
+      },
+    }),
+    [apiBaseUrl, getAccessToken, onComplete, announce],
+  );
 
   const {
     flowState,
@@ -347,25 +366,42 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   } = useSaveFlow(saveFlowOptions);
 
   // Local state for document metadata fields
-  const [documentName, setDocumentName] = useState<string>('');
-  const [documentDescription, setDocumentDescription] = useState<string>('');
+  const [documentName, setDocumentName] = useState<string>("");
+  const [documentDescription, setDocumentDescription] = useState<string>("");
 
   // Build save context
-  const buildSaveContext = useCallback((): SaveFlowContext => ({
-    hostType,
-    itemId,
-    itemName,
-    documentName: documentName || undefined,
-    documentDescription: documentDescription || undefined,
-    attachments,
-    senderEmail,
-    senderDisplayName,
-    recipients,
-    sentDate,
-    emailBody,
-    documentUrl,
-    documentContentBase64,
-  }), [hostType, itemId, itemName, documentName, documentDescription, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl, documentContentBase64]);
+  const buildSaveContext = useCallback(
+    (): SaveFlowContext => ({
+      hostType,
+      itemId,
+      itemName,
+      documentName: documentName || undefined,
+      documentDescription: documentDescription || undefined,
+      attachments,
+      senderEmail,
+      senderDisplayName,
+      recipients,
+      sentDate,
+      emailBody,
+      documentUrl,
+      documentContentBase64,
+    }),
+    [
+      hostType,
+      itemId,
+      itemName,
+      documentName,
+      documentDescription,
+      attachments,
+      senderEmail,
+      senderDisplayName,
+      recipients,
+      sentDate,
+      emailBody,
+      documentUrl,
+      documentContentBase64,
+    ],
+  );
 
   // Handle save button click
   const handleSave = useCallback(() => {
@@ -374,12 +410,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   }, [buildSaveContext, startSave]);
 
   // Handle entity selection
-  const handleEntitySelect = useCallback((entity: EntitySearchResult | null) => {
-    setSelectedEntity(entity);
-    if (entity) {
-      announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
-    }
-  }, [setSelectedEntity, announce]);
+  const handleEntitySelect = useCallback(
+    (entity: EntitySearchResult | null) => {
+      setSelectedEntity(entity);
+      if (entity) {
+        announce(`Selected ${entity.entityType}: ${entity.name}`, "polite");
+      }
+    },
+    [setSelectedEntity, announce],
+  );
 
   // Handle view document
   const handleViewDocument = useCallback(() => {
@@ -393,26 +432,28 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     if (savedDocumentUrl) {
       try {
         await navigator.clipboard.writeText(savedDocumentUrl);
-        announce('Link copied to clipboard', 'polite');
+        announce("Link copied to clipboard", "polite");
       } catch {
-        announce('Failed to copy link', 'assertive');
+        announce("Failed to copy link", "assertive");
       }
     }
   }, [savedDocumentUrl, announce]);
 
   // Announce state changes
   useEffect(() => {
-    if (flowState === 'uploading') {
-      announce('Uploading document...', 'polite');
-    } else if (flowState === 'processing') {
-      announce('Processing document...', 'polite');
+    if (flowState === "uploading") {
+      announce("Uploading document...", "polite");
+    } else if (flowState === "processing") {
+      announce("Processing document...", "polite");
     }
   }, [flowState, announce]);
 
   // Calculate progress percentage for job status
   const progressPercentage = useMemo(() => {
     if (!jobStatus?.stages) return 0;
-    const completed = jobStatus.stages.filter(s => s.status === 'Completed' || s.status === 'Skipped').length;
+    const completed = jobStatus.stages.filter(
+      (s) => s.status === "Completed" || s.status === "Skipped",
+    ).length;
     return (completed / jobStatus.stages.length) * 100;
   }, [jobStatus]);
 
@@ -427,9 +468,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           <Badge
             appearance="filled"
             color={
-              jobStatus.status === 'Completed' ? 'success' :
-              jobStatus.status === 'Failed' ? 'danger' :
-              'informative'
+              jobStatus.status === "Completed"
+                ? "success"
+                : jobStatus.status === "Failed"
+                  ? "danger"
+                  : "informative"
             }
           >
             {jobStatus.status}
@@ -453,7 +496,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               <div className={styles.stageIcon}>
                 <StageIcon status={stage.status} />
               </div>
-              <Text size={200}>{STAGE_DISPLAY_NAMES[stage.name] || stage.name}</Text>
+              <Text size={200}>
+                {STAGE_DISPLAY_NAMES[stage.name] || stage.name}
+              </Text>
             </div>
           ))}
         </div>
@@ -464,10 +509,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Render success state
   const renderSuccessState = () => (
     <Card className={styles.successCard}>
-      <CheckmarkCircleRegular className={styles.successIcon} aria-hidden="true" />
-      <Text size={500} weight="semibold">Document Saved</Text>
+      <CheckmarkCircleRegular
+        className={styles.successIcon}
+        aria-hidden="true"
+      />
+      <Text size={500} weight="semibold">
+        Document Saved
+      </Text>
       <Body1 style={{ marginTop: tokens.spacingVerticalS }}>
-        Your document has been saved to Spaarke and associated with{' '}
+        Your document has been saved to Spaarke and associated with{" "}
         <Text weight="semibold">{selectedEntity?.name}</Text>.
       </Body1>
       <div className={styles.successActions}>
@@ -504,14 +554,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       <MessageBar intent="info">
         <MessageBarBody>
           <MessageBarTitle>Document Already Saved</MessageBarTitle>
-          {duplicateInfo?.message || 'This item was previously saved to this association.'}
+          {duplicateInfo?.message ||
+            "This item was previously saved to this association."}
         </MessageBarBody>
       </MessageBar>
       <div className={styles.duplicateActions}>
         <Button
           appearance="primary"
           icon={<OpenRegular />}
-          onClick={() => duplicateInfo && onViewDocument?.(duplicateInfo.documentId)}
+          onClick={() =>
+            duplicateInfo && onViewDocument?.(duplicateInfo.documentId)
+          }
         >
           View Existing Document
         </Button>
@@ -532,10 +585,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const renderErrorState = () => (
     <MessageBar intent="error">
       <MessageBarBody>
-        <MessageBarTitle>{error?.title || 'Error'}</MessageBarTitle>
+        <MessageBarTitle>{error?.title || "Error"}</MessageBarTitle>
         {error?.message}
         {error?.action && (
-          <Text size={200} style={{ display: 'block', marginTop: tokens.spacingVerticalXS }}>
+          <Text
+            size={200}
+            style={{ display: "block", marginTop: tokens.spacingVerticalXS }}
+          >
             {error.action}
           </Text>
         )}
@@ -569,7 +625,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             </div>
             <Switch
               checked={processingOptions.profileSummary}
-              onChange={() => toggleProcessingOption('profileSummary')}
+              onChange={() => toggleProcessingOption("profileSummary")}
               disabled={isSaving}
               aria-label="Enable profile summary generation"
             />
@@ -584,7 +640,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             </div>
             <Switch
               checked={processingOptions.ragIndex}
-              onChange={() => toggleProcessingOption('ragIndex')}
+              onChange={() => toggleProcessingOption("ragIndex")}
               disabled={isSaving}
               aria-label="Enable search indexing"
             />
@@ -603,23 +659,21 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           <div className={styles.sectionTitle}>
             <DocumentRegular />
             <Text weight="semibold">
-              {hostType === 'outlook' ? 'Email' : 'Document'}
+              {hostType === "outlook" ? "Email" : "Document"}
             </Text>
           </div>
           <div className={styles.documentInfo}>
             <div className={styles.documentInfoRow}>
               <Text weight="semibold">{itemName}</Text>
             </div>
-            {hostType === 'outlook' && (senderDisplayName || senderEmail) && (
+            {hostType === "outlook" && (senderDisplayName || senderEmail) && (
               <div className={styles.documentInfoRow}>
                 <Text size={200}>From: {senderDisplayName || senderEmail}</Text>
               </div>
             )}
-            {hostType === 'outlook' && sentDate && (
+            {hostType === "outlook" && sentDate && (
               <div className={styles.documentInfoRow}>
-                <Text size={200}>
-                  Sent: {sentDate.toLocaleDateString()}
-                </Text>
+                <Text size={200}>Sent: {sentDate.toLocaleDateString()}</Text>
               </div>
             )}
           </div>
@@ -647,7 +701,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               rows={2}
             />
           </div>
-          <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
+          <div
+            className={styles.fieldContainer}
+            style={{ marginTop: tokens.spacingVerticalM }}
+          >
             <Label htmlFor="document-description" className={styles.fieldLabel}>
               Description
             </Label>
@@ -665,7 +722,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       </div>
 
       {/* Attachment Selector (Outlook only) */}
-      {hostType === 'outlook' && attachments.length > 0 && (
+      {hostType === "outlook" && attachments.length > 0 && (
         <AttachmentSelector
           attachments={attachments}
           selectedIds={selectedAttachmentIds}
@@ -688,7 +745,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           disabled={isSaving || !isValid}
           size="large"
         >
-          {isSaving ? 'Saving...' : 'Save to Spaarke'}
+          {isSaving ? "Saving..." : "Save to Spaarke"}
         </Button>
       </div>
     </>
@@ -697,31 +754,31 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Determine what to render based on flow state
   const renderContent = () => {
     switch (flowState) {
-      case 'complete':
+      case "complete":
         return renderSuccessState();
-      case 'duplicate':
+      case "duplicate":
         return renderDuplicateState();
-      case 'uploading':
-      case 'processing':
+      case "uploading":
+      case "processing":
         return (
           <>
             {renderJobStatus()}
-            {flowState === 'uploading' && (
-              <Text size={200} style={{ textAlign: 'center' }}>
+            {flowState === "uploading" && (
+              <Text size={200} style={{ textAlign: "center" }}>
                 Uploading to Spaarke...
               </Text>
             )}
           </>
         );
-      case 'error':
+      case "error":
         return (
           <>
             {renderErrorState()}
             {renderForm()}
           </>
         );
-      case 'idle':
-      case 'selecting':
+      case "idle":
+      case "selecting":
       default:
         return renderForm();
     }

@@ -24,18 +24,18 @@ import { logInfo } from "../utils/logger";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface IMonacoEditorProps {
-    /** Current document content */
-    value: string;
-    /** Callback when content changes */
-    onChange: (value: string) => void;
-    /** Language for syntax highlighting (default: markdown) */
-    language?: string;
-    /** Read-only mode */
-    readOnly?: boolean;
-    /** Use dark theme */
-    isDarkMode?: boolean;
-    /** Placeholder text when empty */
-    placeholder?: string;
+  /** Current document content */
+  value: string;
+  /** Callback when content changes */
+  onChange: (value: string) => void;
+  /** Language for syntax highlighting (default: markdown) */
+  language?: string;
+  /** Read-only mode */
+  readOnly?: boolean;
+  /** Use dark theme */
+  isDarkMode?: boolean;
+  /** Placeholder text when empty */
+  placeholder?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,28 +43,28 @@ export interface IMonacoEditorProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-    container: {
-        width: "100%",
-        height: "100%",
-        position: "relative" as const
-    },
-    loading: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100%",
-        backgroundColor: tokens.colorNeutralBackground1
-    },
-    placeholder: {
-        position: "absolute" as const,
-        top: "12px",
-        left: "64px", // Account for line numbers
-        color: tokens.colorNeutralForeground3,
-        pointerEvents: "none" as const,
-        zIndex: 1,
-        fontFamily: "Consolas, 'Courier New', monospace",
-        fontSize: "14px"
-    }
+  container: {
+    width: "100%",
+    height: "100%",
+    position: "relative" as const,
+  },
+  loading: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  placeholder: {
+    position: "absolute" as const,
+    top: "12px",
+    left: "64px", // Account for line numbers
+    color: tokens.colorNeutralForeground3,
+    pointerEvents: "none" as const,
+    zIndex: 1,
+    fontFamily: "Consolas, 'Courier New', monospace",
+    fontSize: "14px",
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,125 +72,126 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
-    value,
-    onChange,
-    language = "markdown",
-    readOnly = false,
-    isDarkMode = false,
-    placeholder = "Start typing..."
+  value,
+  onChange,
+  language = "markdown",
+  readOnly = false,
+  isDarkMode = false,
+  placeholder = "Start typing...",
 }) => {
-    const styles = useStyles();
-    const [isLoading, setIsLoading] = React.useState(true);
-    const editorRef = React.useRef<unknown>(null);
+  const styles = useStyles();
+  const [isLoading, setIsLoading] = React.useState(true);
+  const editorRef = React.useRef<unknown>(null);
 
-    // Handle editor mount
-    const handleEditorMount: OnMount = (editor, monaco) => {
-        editorRef.current = editor;
-        setIsLoading(false);
-        logInfo("MonacoEditor", "Editor mounted");
+  // Handle editor mount
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    setIsLoading(false);
+    logInfo("MonacoEditor", "Editor mounted");
 
-        // Configure markdown-specific settings
-        monaco.languages.setLanguageConfiguration("markdown", {
-            wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g
-        });
+    // Configure markdown-specific settings
+    monaco.languages.setLanguageConfiguration("markdown", {
+      wordPattern:
+        /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+    });
 
-        // Add custom keyboard shortcuts
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-            logInfo("MonacoEditor", "Save shortcut triggered");
-            // Save is handled by parent via auto-save
-        });
+    // Add custom keyboard shortcuts
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      logInfo("MonacoEditor", "Save shortcut triggered");
+      // Save is handled by parent via auto-save
+    });
 
-        // Focus the editor
-        editor.focus();
-    };
+    // Focus the editor
+    editor.focus();
+  };
 
-    // Handle content changes
-    const handleChange: OnChange = (newValue) => {
-        onChange(newValue || "");
-    };
+  // Handle content changes
+  const handleChange: OnChange = (newValue) => {
+    onChange(newValue || "");
+  };
 
-    // Determine theme
-    const theme = isDarkMode ? "vs-dark" : "vs-light";
+  // Determine theme
+  const theme = isDarkMode ? "vs-dark" : "vs-light";
 
-    return (
-        <div className={styles.container}>
-            {/* Loading spinner */}
-            {isLoading && (
-                <div className={styles.loading}>
-                    <Spinner size="medium" label="Loading editor..." />
-                </div>
-            )}
-
-            {/* Placeholder text */}
-            {!isLoading && !value && (
-                <div className={styles.placeholder}>{placeholder}</div>
-            )}
-
-            {/* Monaco Editor */}
-            <Editor
-                height="100%"
-                language={language}
-                value={value}
-                theme={theme}
-                onChange={handleChange}
-                onMount={handleEditorMount}
-                loading={null} // We handle loading ourselves
-                options={{
-                    // Layout
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-
-                    // Text
-                    wordWrap: "on",
-                    wrappingIndent: "same",
-                    fontSize: 14,
-                    fontFamily: "Consolas, 'Courier New', monospace",
-                    lineHeight: 1.6,
-
-                    // Line numbers
-                    lineNumbers: "on",
-                    lineNumbersMinChars: 3,
-                    glyphMargin: false,
-                    folding: true,
-
-                    // Editing
-                    readOnly: readOnly,
-                    quickSuggestions: false,
-                    suggestOnTriggerCharacters: false,
-                    acceptSuggestionOnEnter: "off",
-                    tabSize: 2,
-                    insertSpaces: true,
-
-                    // Scrolling
-                    scrollbar: {
-                        vertical: "auto",
-                        horizontal: "hidden",
-                        verticalScrollbarSize: 10
-                    },
-
-                    // Selection
-                    selectionHighlight: true,
-                    occurrencesHighlight: "off",
-                    renderLineHighlight: "line",
-
-                    // Formatting
-                    formatOnPaste: false,
-                    formatOnType: false,
-
-                    // Accessibility
-                    accessibilitySupport: "auto",
-
-                    // Cursor
-                    cursorBlinking: "smooth",
-                    cursorSmoothCaretAnimation: "on",
-
-                    // Padding
-                    padding: { top: 12, bottom: 12 }
-                }}
-            />
+  return (
+    <div className={styles.container}>
+      {/* Loading spinner */}
+      {isLoading && (
+        <div className={styles.loading}>
+          <Spinner size="medium" label="Loading editor..." />
         </div>
-    );
+      )}
+
+      {/* Placeholder text */}
+      {!isLoading && !value && (
+        <div className={styles.placeholder}>{placeholder}</div>
+      )}
+
+      {/* Monaco Editor */}
+      <Editor
+        height="100%"
+        language={language}
+        value={value}
+        theme={theme}
+        onChange={handleChange}
+        onMount={handleEditorMount}
+        loading={null} // We handle loading ourselves
+        options={{
+          // Layout
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+
+          // Text
+          wordWrap: "on",
+          wrappingIndent: "same",
+          fontSize: 14,
+          fontFamily: "Consolas, 'Courier New', monospace",
+          lineHeight: 1.6,
+
+          // Line numbers
+          lineNumbers: "on",
+          lineNumbersMinChars: 3,
+          glyphMargin: false,
+          folding: true,
+
+          // Editing
+          readOnly: readOnly,
+          quickSuggestions: false,
+          suggestOnTriggerCharacters: false,
+          acceptSuggestionOnEnter: "off",
+          tabSize: 2,
+          insertSpaces: true,
+
+          // Scrolling
+          scrollbar: {
+            vertical: "auto",
+            horizontal: "hidden",
+            verticalScrollbarSize: 10,
+          },
+
+          // Selection
+          selectionHighlight: true,
+          occurrencesHighlight: "off",
+          renderLineHighlight: "line",
+
+          // Formatting
+          formatOnPaste: false,
+          formatOnType: false,
+
+          // Accessibility
+          accessibilitySupport: "auto",
+
+          // Cursor
+          cursorBlinking: "smooth",
+          cursorSmoothCaretAnimation: "on",
+
+          // Padding
+          padding: { top: 12, bottom: 12 },
+        }}
+      />
+    </div>
+  );
 };
 
 export default MonacoEditor;

@@ -7,8 +7,8 @@
  * @version 1.0.0
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
-import { useExecutionStore, ExecutionEvent } from '../stores/executionStore';
+import { useEffect, useRef, useCallback, useState } from "react";
+import { useExecutionStore, ExecutionEvent } from "../stores/executionStore";
 
 interface UseExecutionStreamOptions {
   /** Base URL for the API endpoint */
@@ -33,7 +33,7 @@ interface UseExecutionStreamReturn {
   /** Whether currently executing */
   isExecuting: boolean;
   /** Connection status */
-  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
+  connectionStatus: "disconnected" | "connecting" | "connected" | "error";
   /** Connection error message */
   connectionError: string | null;
 }
@@ -43,14 +43,15 @@ interface UseExecutionStreamReturn {
  * Handles connection lifecycle, reconnection, and event dispatching.
  */
 export function useExecutionStream(
-  options: UseExecutionStreamOptions
+  options: UseExecutionStreamOptions,
 ): UseExecutionStreamReturn {
-  const { apiBaseUrl, accessToken, playbookId, recordId, onComplete, onError } = options;
+  const { apiBaseUrl, accessToken, playbookId, recordId, onComplete, onError } =
+    options;
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<
-    'disconnected' | 'connecting' | 'connected' | 'error'
-  >('disconnected');
+    "disconnected" | "connecting" | "connected" | "error"
+  >("disconnected");
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const {
@@ -77,68 +78,70 @@ export function useExecutionStream(
       eventSourceRef.current.close();
     }
 
-    setConnectionStatus('connecting');
+    setConnectionStatus("connecting");
     setConnectionError(null);
     resetExecution();
 
     // Construct SSE URL with query parameters
-    const sseUrl = new URL(`${apiBaseUrl}/api/playbooks/${playbookId}/execute/stream`);
-    sseUrl.searchParams.set('recordId', recordId);
+    const sseUrl = new URL(
+      `${apiBaseUrl}/api/playbooks/${playbookId}/execute/stream`,
+    );
+    sseUrl.searchParams.set("recordId", recordId);
 
-    console.info('[useExecutionStream] Connecting to SSE:', sseUrl.toString());
+    console.info("[useExecutionStream] Connecting to SSE:", sseUrl.toString());
 
     // Note: EventSource doesn't support custom headers natively.
     // For authenticated SSE, we pass token as query param (backend validates it)
     // In production, consider using fetch + ReadableStream for better auth support
-    sseUrl.searchParams.set('token', accessToken);
+    sseUrl.searchParams.set("token", accessToken);
 
     const eventSource = new EventSource(sseUrl.toString());
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
-      console.info('[useExecutionStream] SSE connection opened');
-      setConnectionStatus('connected');
+      console.info("[useExecutionStream] SSE connection opened");
+      setConnectionStatus("connected");
     };
 
     eventSource.onmessage = (event) => {
       try {
         const data: ExecutionEvent = JSON.parse(event.data);
-        console.debug('[useExecutionStream] Received event:', data.eventType);
+        console.debug("[useExecutionStream] Received event:", data.eventType);
 
         // Initialize execution on first event if needed
-        if (data.eventType === 'execution_started' && data.executionId) {
+        if (data.eventType === "execution_started" && data.executionId) {
           storeStartExecution(data.executionId);
         }
 
         handleEvent(data);
 
         // Handle completion
-        if (data.eventType === 'execution_completed') {
-          setConnectionStatus('disconnected');
+        if (data.eventType === "execution_completed") {
+          setConnectionStatus("disconnected");
           eventSource.close();
           eventSourceRef.current = null;
           onComplete?.();
         }
 
         // Handle failure
-        if (data.eventType === 'execution_failed') {
-          setConnectionStatus('error');
+        if (data.eventType === "execution_failed") {
+          setConnectionStatus("error");
           eventSource.close();
           eventSourceRef.current = null;
-          onError?.(data.error ?? 'Execution failed');
+          onError?.(data.error ?? "Execution failed");
         }
       } catch (error) {
-        console.error('[useExecutionStream] Failed to parse event:', error);
+        console.error("[useExecutionStream] Failed to parse event:", error);
       }
     };
 
     eventSource.onerror = (error) => {
-      console.error('[useExecutionStream] SSE error:', error);
-      setConnectionStatus('error');
-      setConnectionError('Connection lost. Please try again.');
+      console.error("[useExecutionStream] SSE error:", error);
+      setConnectionStatus("error");
+      setConnectionError("Connection lost. Please try again.");
       eventSource.close();
       eventSourceRef.current = null;
-      onError?.('Connection error');
+      onError?.("Connection error");
     };
   }, [
     apiBaseUrl,
@@ -158,8 +161,8 @@ export function useExecutionStream(
       eventSourceRef.current = null;
     }
     storeStopExecution();
-    setConnectionStatus('disconnected');
-    console.info('[useExecutionStream] Execution stopped by user');
+    setConnectionStatus("disconnected");
+    console.info("[useExecutionStream] Execution stopped by user");
   }, [storeStopExecution]);
 
   return {

@@ -127,7 +127,7 @@ function getSystemThemePreference(): boolean {
  * @returns boolean - true if dark mode should be active
  */
 export function getEffectiveDarkMode(
-  context?: ComponentFramework.Context<IInputs>
+  context?: ComponentFramework.Context<IInputs>,
 ): boolean {
   const preference = getUserThemePreference();
 
@@ -146,7 +146,10 @@ export function getEffectiveDarkMode(
   const contextAny = context as any;
   if (contextAny?.fluentDesignLanguage?.isDarkTheme !== undefined) {
     const isDark = contextAny.fluentDesignLanguage.isDarkTheme;
-    logger.debug("ThemeProvider", `Using Power Apps context: ${isDark ? "dark" : "light"}`);
+    logger.debug(
+      "ThemeProvider",
+      `Using Power Apps context: ${isDark ? "dark" : "light"}`,
+    );
     return isDark;
   }
 
@@ -158,7 +161,10 @@ export function getEffectiveDarkMode(
 
   // 4. Fall back to system preference
   const systemDark = getSystemThemePreference();
-  logger.debug("ThemeProvider", `Using system preference: ${systemDark ? "dark" : "light"}`);
+  logger.debug(
+    "ThemeProvider",
+    `Using system preference: ${systemDark ? "dark" : "light"}`,
+  );
   return systemDark;
 }
 
@@ -166,7 +172,7 @@ export function getEffectiveDarkMode(
  * Detect if dark mode is active (legacy function for compatibility)
  */
 export function isDarkMode(
-  context?: ComponentFramework.Context<IInputs>
+  context?: ComponentFramework.Context<IInputs>,
 ): boolean {
   return getEffectiveDarkMode(context);
 }
@@ -175,7 +181,7 @@ export function isDarkMode(
  * Get current theme mode
  */
 export function getThemeMode(
-  context?: ComponentFramework.Context<IInputs>
+  context?: ComponentFramework.Context<IInputs>,
 ): ThemeMode {
   if (isHighContrast()) {
     return "high-contrast";
@@ -191,7 +197,7 @@ export function getThemeMode(
  * Supports light, dark, and high-contrast modes per ADR-021
  */
 export function resolveTheme(
-  context?: ComponentFramework.Context<IInputs>
+  context?: ComponentFramework.Context<IInputs>,
 ): Theme {
   try {
     // High-contrast mode takes precedence (accessibility requirement)
@@ -201,10 +207,17 @@ export function resolveTheme(
     }
 
     const isDark = getEffectiveDarkMode(context);
-    logger.debug("ThemeProvider", `Theme resolved: ${isDark ? "dark" : "light"}`);
+    logger.debug(
+      "ThemeProvider",
+      `Theme resolved: ${isDark ? "dark" : "light"}`,
+    );
     return isDark ? webDarkTheme : webLightTheme;
   } catch (error) {
-    logger.warn("ThemeProvider", "Error resolving theme, using light theme fallback", error);
+    logger.warn(
+      "ThemeProvider",
+      "Error resolving theme, using light theme fallback",
+      error,
+    );
     return webLightTheme;
   }
 }
@@ -216,7 +229,7 @@ export function resolveTheme(
  */
 export function setupThemeListener(
   onThemeChange: (themeMode: ThemeMode) => void,
-  context?: ComponentFramework.Context<IInputs>
+  context?: ComponentFramework.Context<IInputs>,
 ): () => void {
   // Handle custom theme change event (from ribbon menu)
   const handleThemeChange = () => {

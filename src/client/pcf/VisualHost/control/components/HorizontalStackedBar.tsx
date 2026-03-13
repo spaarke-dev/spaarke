@@ -16,7 +16,11 @@
 
 import * as React from "react";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { IAggregatedDataPoint, ICardConfig, ColorTokenSet } from "../types";
+import type {
+  IAggregatedDataPoint,
+  ICardConfig,
+  ColorTokenSet,
+} from "../types";
 import { formatValue } from "../utils/valueFormatters";
 
 // ============= Props =============
@@ -67,7 +71,10 @@ function resolveBarColor(fillRatio: number, config?: ICardConfig): string {
   if (config?.colorThresholds) {
     for (const threshold of config.colorThresholds) {
       if (fillRatio >= threshold.range[0] && fillRatio <= threshold.range[1]) {
-        return getTokenSetColors(threshold.tokenSet).borderAccent || tokens.colorBrandBackground;
+        return (
+          getTokenSetColors(threshold.tokenSet).borderAccent ||
+          tokens.colorBrandBackground
+        );
       }
     }
   }
@@ -177,7 +184,9 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   const hasTotalValue = totalPoint !== undefined && totalValue > 0;
 
   const remaining = hasTotalValue ? totalValue - currentValue : 0;
-  const fillRatio = hasTotalValue ? Math.min(Math.max(currentValue / totalValue, 0), 1) : 0;
+  const fillRatio = hasTotalValue
+    ? Math.min(Math.max(currentValue / totalValue, 0), 1)
+    : 0;
   const fillPercent = fillRatio * 100;
 
   // --- Resolve colors ---
@@ -189,8 +198,12 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   const remainingLabel = "remaining";
 
   const formattedCurrent = formatValue(currentValue, valueFormat, nullDisplay);
-  const formattedTotal = hasTotalValue ? formatValue(totalValue, valueFormat, nullDisplay) : null;
-  const formattedRemaining = hasTotalValue ? formatValue(remaining, valueFormat, nullDisplay) : null;
+  const formattedTotal = hasTotalValue
+    ? formatValue(totalValue, valueFormat, nullDisplay)
+    : null;
+  const formattedRemaining = hasTotalValue
+    ? formatValue(remaining, valueFormat, nullDisplay)
+    : null;
 
   // --- Accessibility ---
   const ariaLabel = hasTotalValue

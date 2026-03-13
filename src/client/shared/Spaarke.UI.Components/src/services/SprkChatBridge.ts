@@ -96,7 +96,9 @@ export type SprkChatBridgeEventName = keyof SprkChatBridgeEventMap;
 // ---------------------------------------------------------------------------
 
 /** Internal envelope sent across the transport */
-interface BridgeEnvelope<K extends SprkChatBridgeEventName = SprkChatBridgeEventName> {
+interface BridgeEnvelope<
+  K extends SprkChatBridgeEventName = SprkChatBridgeEventName,
+> {
   channel: string;
   event: K;
   payload: SprkChatBridgeEventMap[K];
@@ -130,7 +132,7 @@ export interface SprkChatBridgeOptions {
 
 /** Typed event handler */
 export type SprkChatBridgeHandler<K extends SprkChatBridgeEventName> = (
-  payload: SprkChatBridgeEventMap[K]
+  payload: SprkChatBridgeEventMap[K],
 ) => void;
 
 /** Unsubscribe function returned by subscribe() */
@@ -180,7 +182,7 @@ function createBroadcastTransport(channelName: string): Transport {
 
 function createPostMessageTransport(
   channelName: string,
-  allowedOrigin: string
+  allowedOrigin: string,
 ): Transport {
   let receiveHandler: ((envelope: BridgeEnvelope) => void) | null = null;
 
@@ -273,7 +275,11 @@ export class SprkChatBridge {
   private disconnected = false;
 
   constructor(options: SprkChatBridgeOptions) {
-    const { context, transport: transportPref = "auto", allowedOrigin } = options;
+    const {
+      context,
+      transport: transportPref = "auto",
+      allowedOrigin,
+    } = options;
 
     this.channelName = `sprk-workspace-${context}`;
 
@@ -286,9 +292,12 @@ export class SprkChatBridge {
       transportPref === "broadcast" ||
       (transportPref === "auto" && typeof BroadcastChannel !== "undefined");
 
-    if (transportPref === "broadcast" && typeof BroadcastChannel === "undefined") {
+    if (
+      transportPref === "broadcast" &&
+      typeof BroadcastChannel === "undefined"
+    ) {
       throw new Error(
-        "SprkChatBridge: BroadcastChannel transport requested but BroadcastChannel is not available in this environment."
+        "SprkChatBridge: BroadcastChannel transport requested but BroadcastChannel is not available in this environment.",
       );
     }
 
@@ -312,7 +321,7 @@ export class SprkChatBridge {
    */
   emit<K extends SprkChatBridgeEventName>(
     event: K,
-    payload: SprkChatBridgeEventMap[K]
+    payload: SprkChatBridgeEventMap[K],
   ): void {
     if (this.disconnected) {
       throw new Error("SprkChatBridge: Cannot emit after disconnect.");
@@ -336,7 +345,7 @@ export class SprkChatBridge {
    */
   subscribe<K extends SprkChatBridgeEventName>(
     event: K,
-    handler: SprkChatBridgeHandler<K>
+    handler: SprkChatBridgeHandler<K>,
   ): SprkChatBridgeUnsubscribe {
     if (this.disconnected) {
       throw new Error("SprkChatBridge: Cannot subscribe after disconnect.");
@@ -350,7 +359,8 @@ export class SprkChatBridge {
 
     // Cast is safe: the type constraint ensures K-specific handler is added
     // to the K-specific set. Runtime routing in routeMessage ensures correct dispatch.
-    const typedHandler = handler as SprkChatBridgeHandler<SprkChatBridgeEventName>;
+    const typedHandler =
+      handler as SprkChatBridgeHandler<SprkChatBridgeEventName>;
     handlerSet.add(typedHandler);
 
     return () => {
@@ -404,7 +414,7 @@ export class SprkChatBridge {
       } catch (error) {
         console.error(
           `SprkChatBridge: Error in handler for "${envelope.event}":`,
-          error
+          error,
         );
       }
     }

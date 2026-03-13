@@ -7,7 +7,7 @@
  * @see projects/sdap-office-integration/spec.md for error code catalog
  */
 
-import type { ProblemDetails, OfficeApiErrorCode } from './types';
+import type { ProblemDetails, OfficeApiErrorCode } from "./types";
 
 /**
  * Error thrown by the Office API client.
@@ -27,10 +27,10 @@ export class OfficeApiError extends Error {
       isAuthError?: boolean;
       isRateLimited?: boolean;
       retryAfterSeconds?: number;
-    }
+    },
   ) {
     super(problemDetails.detail || problemDetails.title);
-    this.name = 'OfficeApiError';
+    this.name = "OfficeApiError";
     this.problemDetails = problemDetails;
     this.isNetworkError = options?.isNetworkError ?? false;
     this.isAuthError = options?.isAuthError ?? false;
@@ -86,42 +86,47 @@ export class OfficeApiError extends Error {
  */
 const ERROR_CODE_MESSAGES: Record<string, string> = {
   // Validation errors
-  OFFICE_001: 'The content type is not supported.',
-  OFFICE_002: 'Please select a valid entity type.',
-  OFFICE_003: 'Please select an association target (Matter, Project, Account, etc.).',
-  OFFICE_004: 'This attachment is too large. Maximum size is 25MB per file.',
-  OFFICE_005: 'Total attachments are too large. Maximum combined size is 100MB.',
-  OFFICE_006: 'This file type is not allowed for security reasons.',
+  OFFICE_001: "The content type is not supported.",
+  OFFICE_002: "Please select a valid entity type.",
+  OFFICE_003:
+    "Please select an association target (Matter, Project, Account, etc.).",
+  OFFICE_004: "This attachment is too large. Maximum size is 25MB per file.",
+  OFFICE_005:
+    "Total attachments are too large. Maximum combined size is 100MB.",
+  OFFICE_006: "This file type is not allowed for security reasons.",
   // Not found errors
-  OFFICE_007: 'The selected entity could not be found. It may have been deleted.',
-  OFFICE_008: 'The job status could not be found. It may have expired.',
+  OFFICE_007:
+    "The selected entity could not be found. It may have been deleted.",
+  OFFICE_008: "The job status could not be found. It may have expired.",
   // Permission errors
-  OFFICE_009: 'You do not have permission to perform this action.',
-  OFFICE_010: 'You do not have permission to create this type of entity.',
+  OFFICE_009: "You do not have permission to perform this action.",
+  OFFICE_010: "You do not have permission to create this type of entity.",
   // Conflict
-  OFFICE_011: 'This document has already been saved with this association.',
+  OFFICE_011: "This document has already been saved with this association.",
   // Service errors
-  OFFICE_012: 'There was a problem uploading the file. Please try again.',
-  OFFICE_013: 'There was a problem connecting to Microsoft services. Please try again.',
-  OFFICE_014: 'There was a problem saving to the database. Please try again.',
-  OFFICE_015: 'The processing service is currently unavailable. Please try again later.',
+  OFFICE_012: "There was a problem uploading the file. Please try again.",
+  OFFICE_013:
+    "There was a problem connecting to Microsoft services. Please try again.",
+  OFFICE_014: "There was a problem saving to the database. Please try again.",
+  OFFICE_015:
+    "The processing service is currently unavailable. Please try again later.",
 };
 
 /**
  * Maps HTTP status codes to generic messages.
  */
 const STATUS_CODE_MESSAGES: Record<number, string> = {
-  400: 'The request was invalid. Please check your input and try again.',
-  401: 'Your session has expired. Please sign in again.',
-  403: 'You do not have permission to perform this action.',
-  404: 'The requested resource could not be found.',
-  408: 'The request timed out. Please try again.',
-  409: 'There was a conflict with your request. Please refresh and try again.',
-  429: 'Too many requests. Please wait a moment and try again.',
-  500: 'An unexpected error occurred. Please try again later.',
-  502: 'A service is temporarily unavailable. Please try again.',
-  503: 'The service is temporarily unavailable. Please try again later.',
-  504: 'The request timed out. Please try again.',
+  400: "The request was invalid. Please check your input and try again.",
+  401: "Your session has expired. Please sign in again.",
+  403: "You do not have permission to perform this action.",
+  404: "The requested resource could not be found.",
+  408: "The request timed out. Please try again.",
+  409: "There was a conflict with your request. Please refresh and try again.",
+  429: "Too many requests. Please wait a moment and try again.",
+  500: "An unexpected error occurred. Please try again later.",
+  502: "A service is temporarily unavailable. Please try again.",
+  503: "The service is temporarily unavailable. Please try again later.",
+  504: "The request timed out. Please try again.",
 };
 
 /**
@@ -129,12 +134,15 @@ const STATUS_CODE_MESSAGES: Record<number, string> = {
  */
 export function getUserFriendlyMessage(problemDetails: ProblemDetails): string {
   // First, check for a specific error code message
-  if (problemDetails.errorCode && ERROR_CODE_MESSAGES[problemDetails.errorCode]) {
+  if (
+    problemDetails.errorCode &&
+    ERROR_CODE_MESSAGES[problemDetails.errorCode]
+  ) {
     return ERROR_CODE_MESSAGES[problemDetails.errorCode];
   }
 
   // If there's a specific detail message, use it (but sanitize)
-  if (problemDetails.detail && !problemDetails.detail.includes('Exception')) {
+  if (problemDetails.detail && !problemDetails.detail.includes("Exception")) {
     // Return the detail if it doesn't look like a stack trace
     return problemDetails.detail;
   }
@@ -145,7 +153,7 @@ export function getUserFriendlyMessage(problemDetails: ProblemDetails): string {
   }
 
   // Last resort
-  return problemDetails.title || 'An unexpected error occurred.';
+  return problemDetails.title || "An unexpected error occurred.";
 }
 
 /**
@@ -153,10 +161,11 @@ export function getUserFriendlyMessage(problemDetails: ProblemDetails): string {
  */
 export function createNetworkErrorDetails(error: Error): ProblemDetails {
   return {
-    type: 'https://spaarke.com/errors/network-error',
-    title: 'Network Error',
+    type: "https://spaarke.com/errors/network-error",
+    title: "Network Error",
     status: 0,
-    detail: 'Unable to connect to the server. Please check your internet connection.',
+    detail:
+      "Unable to connect to the server. Please check your internet connection.",
   };
 }
 
@@ -165,10 +174,10 @@ export function createNetworkErrorDetails(error: Error): ProblemDetails {
  */
 export function createAuthErrorDetails(message?: string): ProblemDetails {
   return {
-    type: 'https://spaarke.com/errors/auth-error',
-    title: 'Authentication Error',
+    type: "https://spaarke.com/errors/auth-error",
+    title: "Authentication Error",
     status: 401,
-    detail: message || 'Your session has expired. Please sign in again.',
+    detail: message || "Your session has expired. Please sign in again.",
   };
 }
 
@@ -177,10 +186,10 @@ export function createAuthErrorDetails(message?: string): ProblemDetails {
  */
 export function createTimeoutErrorDetails(): ProblemDetails {
   return {
-    type: 'https://spaarke.com/errors/timeout',
-    title: 'Request Timeout',
+    type: "https://spaarke.com/errors/timeout",
+    title: "Request Timeout",
     status: 408,
-    detail: 'The request took too long to complete. Please try again.',
+    detail: "The request took too long to complete. Please try again.",
   };
 }
 
@@ -188,10 +197,11 @@ export function createTimeoutErrorDetails(): ProblemDetails {
  * Create a ProblemDetails object for an unknown error.
  */
 export function createUnknownErrorDetails(error?: unknown): ProblemDetails {
-  const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+  const message =
+    error instanceof Error ? error.message : "An unexpected error occurred.";
   return {
-    type: 'https://spaarke.com/errors/unknown',
-    title: 'Error',
+    type: "https://spaarke.com/errors/unknown",
+    title: "Error",
     status: 500,
     detail: message,
   };
@@ -250,7 +260,12 @@ export function isRetryableError(error: OfficeApiError): boolean {
   }
 
   // Specific error codes that are retryable
-  const retryableCodes = ['OFFICE_012', 'OFFICE_013', 'OFFICE_014', 'OFFICE_015'];
+  const retryableCodes = [
+    "OFFICE_012",
+    "OFFICE_013",
+    "OFFICE_014",
+    "OFFICE_015",
+  ];
   if (error.errorCode && retryableCodes.includes(error.errorCode)) {
     return true;
   }
@@ -261,12 +276,14 @@ export function isRetryableError(error: OfficeApiError): boolean {
 /**
  * Format validation errors for display.
  */
-export function formatValidationErrors(errors: Record<string, string[]>): string {
+export function formatValidationErrors(
+  errors: Record<string, string[]>,
+): string {
   const messages: string[] = [];
   for (const [field, fieldErrors] of Object.entries(errors)) {
     for (const error of fieldErrors) {
       messages.push(`${field}: ${error}`);
     }
   }
-  return messages.join('\n');
+  return messages.join("\n");
 }

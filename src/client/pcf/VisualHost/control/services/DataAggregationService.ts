@@ -13,7 +13,11 @@ import type {
 } from "../types";
 import { AggregationType } from "../types";
 import { logger } from "../utils/logger";
-import { getViewFetchXml, injectContextFilter, injectRequiredAttributes } from "./ViewDataService";
+import {
+  getViewFetchXml,
+  injectContextFilter,
+  injectRequiredAttributes,
+} from "./ViewDataService";
 import type { IConfigWebApi } from "./ConfigurationLoader";
 
 /**
@@ -24,7 +28,7 @@ export interface IAggregationWebApi {
   retrieveMultipleRecords(
     entityType: string,
     options?: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ): Promise<{
     entities: Array<Record<string, unknown>>;
     nextLink?: string;
@@ -67,7 +71,10 @@ export interface IAggregationOptions {
  * Aggregation error types
  */
 export class AggregationError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = "AggregationError";
   }
@@ -113,7 +120,7 @@ function getCacheKey(
   aggregationType: AggregationType,
   aggregationField: string | undefined,
   groupByField: string | undefined,
-  contextFilter?: IContextFilter
+  contextFilter?: IContextFilter,
 ): string {
   const contextPart = contextFilter
     ? `:${contextFilter.fieldName}=${contextFilter.recordId}`
@@ -143,7 +150,11 @@ function extractErrorMessage(error: unknown): string {
   if (error && typeof error === "object") {
     const obj = error as Record<string, unknown>;
     if (typeof obj.message === "string") return obj.message;
-    try { return JSON.stringify(error); } catch { /* ignore */ }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      /* ignore */
+    }
   }
   return String(error);
 }
@@ -161,13 +172,16 @@ export async function fetchRecords(
     selectColumns?: string[];
     contextFilter?: { fieldName: string; recordId: string };
     maxRecords?: number;
-  }
+  },
 ): Promise<Array<Record<string, unknown>>> {
   const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
 
   // When a saved view is provided, use its FetchXML (applies view filters)
   if (options?.viewId) {
-    logger.info("DataAggregationService", `Fetch path: VIEW (${options.viewId})`);
+    logger.info(
+      "DataAggregationService",
+      `Fetch path: VIEW (${options.viewId})`,
+    );
     return fetchRecordsFromView(context, entityName, options.viewId, {
       contextFilter: options.contextFilter,
       maxRecords,
@@ -176,7 +190,10 @@ export async function fetchRecords(
   }
 
   // Fallback: basic FetchXML query (no view filters)
-  logger.info("DataAggregationService", `Fetch path: BASIC (${entityName}, no view)`);
+  logger.info(
+    "DataAggregationService",
+    `Fetch path: BASIC (${entityName}, no view)`,
+  );
   return fetchRecordsBasic(context, entityName, {
     selectColumns: options?.selectColumns,
     contextFilter: options?.contextFilter,
@@ -195,7 +212,7 @@ async function fetchRecordsBasic(
     selectColumns?: string[];
     contextFilter?: { fieldName: string; recordId: string };
     maxRecords?: number;
-  }
+  },
 ): Promise<Array<Record<string, unknown>>> {
   const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
 
@@ -217,29 +234,42 @@ async function fetchRecordsBasic(
       .replace(/_value$/, "");
     const cleanId = options.contextFilter.recordId.replace(/[{}]/g, "");
     filterXml = `<filter type="and"><condition attribute="${filterField}" operator="eq" value="${cleanId}" /></filter>`;
-    logger.info("DataAggregationService", `Context filter: ${options.contextFilter.fieldName} → ${filterField} = ${cleanId}`);
+    logger.info(
+      "DataAggregationService",
+      `Context filter: ${options.contextFilter.fieldName} → ${filterField} = ${cleanId}`,
+    );
   }
 
   const fetchXml = `<fetch top="${maxRecords}"><entity name="${entityName}">${attributesXml}${filterXml}</entity></fetch>`;
 
-  logger.debug("DataAggregationService", `FetchXML (basic): ${fetchXml.substring(0, 500)}`);
+  logger.debug(
+    "DataAggregationService",
+    `FetchXML (basic): ${fetchXml.substring(0, 500)}`,
+  );
 
   try {
     const encodedFetchXml = encodeURIComponent(fetchXml);
     const result = await context.webAPI.retrieveMultipleRecords(
       entityName,
-      `?fetchXml=${encodedFetchXml}`
+      `?fetchXml=${encodedFetchXml}`,
     );
 
     logger.info(
       "DataAggregationService",
-      `Fetched ${result.entities.length} records from ${entityName}`
+      `Fetched ${result.entities.length} records from ${entityName}`,
     );
     return result.entities;
   } catch (error: unknown) {
     const errorMessage = extractErrorMessage(error);
-    logger.error("DataAggregationService", `Failed to fetch records (basic): ${errorMessage}`, error);
-    throw new AggregationError(`Failed to fetch records: ${errorMessage}`, error);
+    logger.error(
+      "DataAggregationService",
+      `Failed to fetch records (basic): ${errorMessage}`,
+      error,
+    );
+    throw new AggregationError(
+      `Failed to fetch records: ${errorMessage}`,
+      error,
+    );
   }
 }
 
@@ -256,7 +286,7 @@ async function fetchRecordsFromView(
     maxRecords?: number;
     /** WebAPI property names required for chart aggregation (groupByField, aggregationField) */
     requiredColumns?: string[];
-  }
+  },
 ): Promise<Array<Record<string, unknown>>> {
   const webApi = context.webAPI as IConfigWebApi;
 
@@ -269,7 +299,10 @@ async function fetchRecordsFromView(
     let fetchXml = viewFetchXml;
 
     // DIAGNOSTIC: Log the raw view FetchXML BEFORE any injection
-    logger.info("DataAggregationService", `[DIAG] Raw view FetchXML (before injection):\n${viewFetchXml}`);
+    logger.info(
+      "DataAggregationService",
+      `[DIAG] Raw view FetchXML (before injection):\n${viewFetchXml}`,
+    );
 
     // Inject required attributes for chart aggregation (groupByField, aggregationField)
     // This ensures the view returns these columns even if they're not in the view's column set
@@ -282,31 +315,51 @@ async function fetchRecordsFromView(
       const filterField = options.contextFilter.fieldName
         .replace(/^_/, "")
         .replace(/_value$/, "");
-      logger.info("DataAggregationService", `[DIAG] Context filter: fieldName="${options.contextFilter.fieldName}" → filterField="${filterField}", recordId="${options.contextFilter.recordId}"`);
-      fetchXml = injectContextFilter(fetchXml, filterField, options.contextFilter.recordId);
+      logger.info(
+        "DataAggregationService",
+        `[DIAG] Context filter: fieldName="${options.contextFilter.fieldName}" → filterField="${filterField}", recordId="${options.contextFilter.recordId}"`,
+      );
+      fetchXml = injectContextFilter(
+        fetchXml,
+        filterField,
+        options.contextFilter.recordId,
+      );
     } else {
-      logger.info("DataAggregationService", `[DIAG] No context filter provided`);
+      logger.info(
+        "DataAggregationService",
+        `[DIAG] No context filter provided`,
+      );
     }
 
     // DIAGNOSTIC: Log the FINAL FetchXML that will be executed
-    logger.info("DataAggregationService", `[DIAG] Final FetchXML (after injection):\n${fetchXml}`);
+    logger.info(
+      "DataAggregationService",
+      `[DIAG] Final FetchXML (after injection):\n${fetchXml}`,
+    );
 
     const encodedFetchXml = encodeURIComponent(fetchXml);
     const result = await context.webAPI.retrieveMultipleRecords(
       resolvedEntity,
-      `?fetchXml=${encodedFetchXml}`
+      `?fetchXml=${encodedFetchXml}`,
     );
 
     logger.info(
       "DataAggregationService",
-      `Fetched ${result.entities.length} records from view ${viewId}`
+      `Fetched ${result.entities.length} records from view ${viewId}`,
     );
 
     return result.entities;
   } catch (error: unknown) {
     const errorMessage = extractErrorMessage(error);
-    logger.error("DataAggregationService", `Failed to fetch from view: ${errorMessage}`, error);
-    throw new AggregationError(`Failed to fetch from view: ${errorMessage}`, error);
+    logger.error(
+      "DataAggregationService",
+      `Failed to fetch from view: ${errorMessage}`,
+      error,
+    );
+    throw new AggregationError(
+      `Failed to fetch from view: ${errorMessage}`,
+      error,
+    );
   }
 }
 
@@ -317,11 +370,15 @@ export function aggregateRecords(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
   aggregationField?: string,
-  groupByField?: string
+  groupByField?: string,
 ): IAggregatedDataPoint[] {
   // If no group by field, return single aggregated value
   if (!groupByField) {
-    const value = calculateAggregation(records, aggregationType, aggregationField);
+    const value = calculateAggregation(
+      records,
+      aggregationType,
+      aggregationField,
+    );
     return [
       {
         label: "Total",
@@ -342,7 +399,10 @@ export function aggregateRecords(
     const first = records[0];
     const rawVal = first[groupByField];
     const fmtVal = first[formattedValueKey];
-    logger.info("DataAggregationService", `[DIAG] groupByField="${groupByField}" → raw=${rawVal === undefined ? "(undefined)" : JSON.stringify(rawVal)}, formatted=${fmtVal === undefined ? "(undefined)" : JSON.stringify(fmtVal)}`);
+    logger.info(
+      "DataAggregationService",
+      `[DIAG] groupByField="${groupByField}" → raw=${rawVal === undefined ? "(undefined)" : JSON.stringify(rawVal)}, formatted=${fmtVal === undefined ? "(undefined)" : JSON.stringify(fmtVal)}`,
+    );
   }
 
   for (const record of records) {
@@ -360,13 +420,19 @@ export function aggregateRecords(
   const dataPoints: IAggregatedDataPoint[] = [];
 
   for (const [groupKey, groupRecords] of groups) {
-    const value = calculateAggregation(groupRecords, aggregationType, aggregationField);
+    const value = calculateAggregation(
+      groupRecords,
+      aggregationType,
+      aggregationField,
+    );
     const firstRecord = groupRecords[0];
     const fieldValue = firstRecord?.[groupByField];
 
     // Capture option set color from OData annotation (if available)
     const colorAnnotationKey = `${groupByField}@OData.Community.Display.V1.Color`;
-    const optionSetColor = firstRecord?.[colorAnnotationKey] as string | undefined;
+    const optionSetColor = firstRecord?.[colorAnnotationKey] as
+      | string
+      | undefined;
 
     // Capture raw numeric fieldValue as sortOrder (for option set ordering)
     const sortOrder = typeof fieldValue === "number" ? fieldValue : undefined;
@@ -385,7 +451,7 @@ export function aggregateRecords(
 
   logger.debug(
     "DataAggregationService",
-    `Aggregated ${records.length} records into ${dataPoints.length} groups`
+    `Aggregated ${records.length} records into ${dataPoints.length} groups`,
   );
 
   return dataPoints;
@@ -405,7 +471,10 @@ function formatGroupKey(value: unknown): string {
 
   if (typeof value === "object") {
     // Handle Dataverse lookup/optionset formatted values
-    if ("name" in value && typeof (value as Record<string, unknown>).name === "string") {
+    if (
+      "name" in value &&
+      typeof (value as Record<string, unknown>).name === "string"
+    ) {
       return (value as Record<string, unknown>).name as string;
     }
     return String(value);
@@ -420,7 +489,7 @@ function formatGroupKey(value: unknown): string {
 function calculateAggregation(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
-  aggregationField?: string
+  aggregationField?: string,
 ): number {
   if (records.length === 0) {
     return 0;
@@ -443,7 +512,10 @@ function calculateAggregation(
       return calculateMax(records, aggregationField);
 
     default:
-      logger.warn("DataAggregationService", `Unknown aggregation type: ${aggregationType}`);
+      logger.warn(
+        "DataAggregationService",
+        `Unknown aggregation type: ${aggregationType}`,
+      );
       return records.length;
   }
 }
@@ -453,10 +525,13 @@ function calculateAggregation(
  */
 function extractNumericValues(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number[] {
   if (!field) {
-    logger.warn("DataAggregationService", "No aggregation field specified for numeric aggregation");
+    logger.warn(
+      "DataAggregationService",
+      "No aggregation field specified for numeric aggregation",
+    );
     return [];
   }
 
@@ -469,7 +544,8 @@ function extractNumericValues(
       continue;
     }
 
-    const numValue = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
+    const numValue =
+      typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue));
 
     if (!isNaN(numValue)) {
       values.push(numValue);
@@ -484,7 +560,7 @@ function extractNumericValues(
  */
 function calculateSum(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   return values.reduce((sum, val) => sum + val, 0);
@@ -495,7 +571,7 @@ function calculateSum(
  */
 function calculateAverage(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -507,7 +583,7 @@ function calculateAverage(
  */
 function calculateMin(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -519,7 +595,7 @@ function calculateMin(
  */
 function calculateMax(
   records: Array<Record<string, unknown>>,
-  field?: string
+  field?: string,
 ): number {
   const values = extractNumericValues(records, field);
   if (values.length === 0) return 0;
@@ -537,11 +613,12 @@ function calculateMax(
 export async function fetchAndAggregate(
   context: IAggregationContext,
   definition: IChartDefinition,
-  options?: IAggregationOptions
+  options?: IAggregationOptions,
 ): Promise<IChartData> {
   const entityName = definition.sprk_entitylogicalname;
   const viewId = definition.sprk_baseviewid;
-  const aggregationType = definition.sprk_aggregationtype ?? AggregationType.Count;
+  const aggregationType =
+    definition.sprk_aggregationtype ?? AggregationType.Count;
   const aggregationField = definition.sprk_aggregationfield;
   const groupByField = definition.sprk_groupbyfield;
 
@@ -556,7 +633,7 @@ export async function fetchAndAggregate(
     aggregationType,
     aggregationField,
     groupByField,
-    options?.contextFilter
+    options?.contextFilter,
   );
 
   if (!options?.skipCache) {
@@ -567,14 +644,18 @@ export async function fetchAndAggregate(
     }
   }
 
-  logger.info("DataAggregationService", `Aggregating data for ${definition.sprk_name}`, {
-    entityName,
-    viewId: viewId || "(none)",
-    aggregationType,
-    aggregationField,
-    groupByField,
-    contextFilter: options?.contextFilter,
-  });
+  logger.info(
+    "DataAggregationService",
+    `Aggregating data for ${definition.sprk_name}`,
+    {
+      entityName,
+      viewId: viewId || "(none)",
+      aggregationType,
+      aggregationField,
+      groupByField,
+      contextFilter: options?.contextFilter,
+    },
+  );
 
   // Determine which columns to fetch
   const selectColumns: string[] = [];
@@ -598,7 +679,7 @@ export async function fetchAndAggregate(
     records,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
   );
 
   const chartData: IChartData = {
@@ -617,7 +698,7 @@ export async function fetchAndAggregate(
 
   logger.info(
     "DataAggregationService",
-    `Aggregation complete: ${dataPoints.length} data points from ${records.length} records`
+    `Aggregation complete: ${dataPoints.length} data points from ${records.length} records`,
   );
 
   return chartData;
@@ -630,13 +711,13 @@ export function aggregateData(
   records: Array<Record<string, unknown>>,
   aggregationType: AggregationType,
   aggregationField?: string,
-  groupByField?: string
+  groupByField?: string,
 ): IChartData {
   const dataPoints = aggregateRecords(
     records,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
   );
 
   return {

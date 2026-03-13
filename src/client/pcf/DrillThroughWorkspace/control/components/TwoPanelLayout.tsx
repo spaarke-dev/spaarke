@@ -206,13 +206,14 @@ export const TwoPanelLayout: React.FC<ITwoPanelLayoutProps> = ({
       document.addEventListener("touchmove", handleMove);
       document.addEventListener("touchend", handleEnd);
     },
-    [enableResize, isStacked, leftWidth, onResize]
+    [enableResize, isStacked, leftWidth, onResize],
   );
 
   // Dynamic styles for resizable layout
-  const leftPanelStyle: React.CSSProperties = enableResize && !isStacked
-    ? { width: `${leftWidth}%`, minWidth: "200px", maxWidth: "60%" }
-    : {};
+  const leftPanelStyle: React.CSSProperties =
+    enableResize && !isStacked
+      ? { width: `${leftWidth}%`, minWidth: "200px", maxWidth: "60%" }
+      : {};
 
   return (
     <div

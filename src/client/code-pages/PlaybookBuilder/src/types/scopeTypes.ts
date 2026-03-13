@@ -10,10 +10,10 @@
 // ---------------------------------------------------------------------------
 
 export interface AnalysisSkill {
-    id: string;
-    name: string;
-    description: string;
-    category: string;
+  id: string;
+  name: string;
+  description: string;
+  category: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -21,10 +21,10 @@ export interface AnalysisSkill {
 // ---------------------------------------------------------------------------
 
 export interface AiKnowledge {
-    id: string;
-    name: string;
-    description: string;
-    sourceType: string;
+  id: string;
+  name: string;
+  description: string;
+  sourceType: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,9 +32,9 @@ export interface AiKnowledge {
 // ---------------------------------------------------------------------------
 
 export interface AnalysisTool {
-    id: string;
-    name: string;
-    description: string;
+  id: string;
+  name: string;
+  description: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,9 +42,9 @@ export interface AnalysisTool {
 // ---------------------------------------------------------------------------
 
 export interface AnalysisAction {
-    id: string;
-    name: string;
-    description: string;
+  id: string;
+  name: string;
+  description: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,14 +55,14 @@ export type AiProvider = "AzureOpenAI" | "OpenAI" | "Anthropic";
 export type AiCapability = "Chat" | "Completion" | "Embedding";
 
 export interface AiModelDeployment {
-    id: string;
-    name: string;
-    provider: string;
-    capability: string;
-    modelId: string;
-    contextWindow: number;
-    isActive: boolean;
-    description?: string;
+  id: string;
+  name: string;
+  provider: string;
+  capability: string;
+  modelId: string;
+  contextWindow: number;
+  isActive: boolean;
+  description?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ export interface AiModelDeployment {
 // ---------------------------------------------------------------------------
 
 export interface ActionTypeCapabilities {
-    allowsSkills: boolean;
-    allowsKnowledge: boolean;
-    allowsTools: boolean;
+  allowsSkills: boolean;
+  allowsKnowledge: boolean;
+  allowsTools: boolean;
 }

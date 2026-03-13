@@ -64,7 +64,7 @@ export interface SseConnection {
  */
 export function createSseConnection(
   url: string,
-  options: SseClientOptions
+  options: SseClientOptions,
 ): SseConnection {
   const {
     accessToken,
@@ -85,49 +85,53 @@ export function createSseConnection(
     }
 
     const headers: HeadersInit = {
-      Accept: 'text/event-stream',
+      Accept: "text/event-stream",
       Authorization: `Bearer ${accessToken}`,
-      'Cache-Control': 'no-cache',
+      "Cache-Control": "no-cache",
     };
 
     if (lastEventId) {
-      headers['Last-Event-ID'] = lastEventId;
+      headers["Last-Event-ID"] = lastEventId;
     }
 
     try {
       const response = await fetch(url, {
-        method: 'GET',
+        method: "GET",
         headers,
         signal: abortController.signal,
-        cache: 'no-store',
+        cache: "no-store",
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(`SSE connection failed: ${response.status} - ${errorText}`);
+        const errorText = await response
+          .text()
+          .catch(() => response.statusText);
+        throw new Error(
+          `SSE connection failed: ${response.status} - ${errorText}`,
+        );
       }
 
       if (!response.body) {
-        throw new Error('SSE response has no body');
+        throw new Error("SSE response has no body");
       }
 
       isConnected = true;
       onOpen?.();
 
       const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
       let currentEvent: Partial<SseEvent> = {};
 
       const processLine = (line: string): void => {
         // Empty line marks end of event
-        if (line === '') {
+        if (line === "") {
           if (currentEvent.data !== undefined) {
             // Parse data as JSON if possible
             let parsedData: unknown;
             try {
               parsedData =
-                typeof currentEvent.data === 'string'
+                typeof currentEvent.data === "string"
                   ? JSON.parse(currentEvent.data)
                   : currentEvent.data;
             } catch {
@@ -146,40 +150,41 @@ export function createSseConnection(
         }
 
         // Comment line (ignore)
-        if (line.startsWith(':')) {
+        if (line.startsWith(":")) {
           return;
         }
 
         // Parse field: value
-        const colonIndex = line.indexOf(':');
+        const colonIndex = line.indexOf(":");
         let field: string;
         let value: string;
 
         if (colonIndex === -1) {
           field = line;
-          value = '';
+          value = "";
         } else {
           field = line.slice(0, colonIndex);
           // Skip single space after colon if present
-          value = line.charAt(colonIndex + 1) === ' '
-            ? line.slice(colonIndex + 2)
-            : line.slice(colonIndex + 1);
+          value =
+            line.charAt(colonIndex + 1) === " "
+              ? line.slice(colonIndex + 2)
+              : line.slice(colonIndex + 1);
         }
 
         switch (field) {
-          case 'event':
+          case "event":
             currentEvent.event = value;
             break;
-          case 'data':
+          case "data":
             // Data can be multi-line, append with newline
             currentEvent.data = currentEvent.data
               ? `${currentEvent.data}\n${value}`
               : value;
             break;
-          case 'id':
+          case "id":
             currentEvent.id = value;
             break;
-          case 'retry':
+          case "retry":
             const retryMs = parseInt(value, 10);
             if (!isNaN(retryMs)) {
               currentEvent.retry = retryMs;
@@ -197,7 +202,7 @@ export function createSseConnection(
         if (done) {
           // Process any remaining buffer
           if (buffer) {
-            const lines = buffer.split('\n');
+            const lines = buffer.split("\n");
             for (const line of lines) {
               processLine(line);
             }
@@ -208,9 +213,9 @@ export function createSseConnection(
         buffer += decoder.decode(value, { stream: true });
 
         // Process complete lines
-        const lines = buffer.split('\n');
+        const lines = buffer.split("\n");
         // Keep the last potentially incomplete line in buffer
-        buffer = lines.pop() ?? '';
+        buffer = lines.pop() ?? "";
 
         for (const line of lines) {
           processLine(line);
@@ -221,7 +226,7 @@ export function createSseConnection(
       onClose?.();
     } catch (error) {
       isConnected = false;
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && error.name === "AbortError") {
         // Connection was intentionally closed
         onClose?.();
         return;

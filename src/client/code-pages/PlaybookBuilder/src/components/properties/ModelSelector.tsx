@@ -7,14 +7,14 @@
 
 import { memo, useEffect, useCallback } from "react";
 import {
-    makeStyles,
-    tokens,
-    shorthands,
-    Dropdown,
-    Option,
-    Badge,
-    Spinner,
-    Text,
+  makeStyles,
+  tokens,
+  shorthands,
+  Dropdown,
+  Option,
+  Badge,
+  Spinner,
+  Text,
 } from "@fluentui/react-components";
 import { useModelStore } from "../../stores/modelStore";
 
@@ -23,8 +23,8 @@ import { useModelStore } from "../../stores/modelStore";
 // ---------------------------------------------------------------------------
 
 interface ModelSelectorProps {
-    modelDeploymentId?: string;
-    onModelChange: (modelId: string | undefined) => void;
+  modelDeploymentId?: string;
+  onModelChange: (modelId: string | undefined) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,35 +32,37 @@ interface ModelSelectorProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-    root: {
-        display: "flex",
-        flexDirection: "column",
-        ...shorthands.gap("4px"),
-    },
-    optionRow: {
-        display: "flex",
-        alignItems: "center",
-        ...shorthands.gap("8px"),
-    },
-    optionName: {
-        flex: 1,
-    },
-    contextHint: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase200,
-    },
+  root: {
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.gap("4px"),
+  },
+  optionRow: {
+    display: "flex",
+    alignItems: "center",
+    ...shorthands.gap("8px"),
+  },
+  optionName: {
+    flex: 1,
+  },
+  contextHint: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 // ---------------------------------------------------------------------------
 // Provider badge colors
 // ---------------------------------------------------------------------------
 
-function getProviderAppearance(provider: string): "informative" | "success" | "warning" | "important" {
-    const p = provider.toLowerCase();
-    if (p.includes("azure")) return "informative";
-    if (p.includes("openai")) return "success";
-    if (p.includes("anthropic")) return "warning";
-    return "important";
+function getProviderAppearance(
+  provider: string,
+): "informative" | "success" | "warning" | "important" {
+  const p = provider.toLowerCase();
+  if (p.includes("azure")) return "informative";
+  if (p.includes("openai")) return "success";
+  if (p.includes("anthropic")) return "warning";
+  return "important";
 }
 
 // ---------------------------------------------------------------------------
@@ -68,65 +70,74 @@ function getProviderAppearance(provider: string): "informative" | "success" | "w
 // ---------------------------------------------------------------------------
 
 export const ModelSelector = memo(function ModelSelector({
-    modelDeploymentId,
-    onModelChange,
+  modelDeploymentId,
+  onModelChange,
 }: ModelSelectorProps) {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    const models = useModelStore((s) => s.models);
-    const isLoading = useModelStore((s) => s.isLoading);
-    const loadModelDeployments = useModelStore((s) => s.loadModelDeployments);
-    const getActiveModels = useModelStore((s) => s.getActiveModels);
-    const getModelById = useModelStore((s) => s.getModelById);
+  const models = useModelStore((s) => s.models);
+  const isLoading = useModelStore((s) => s.isLoading);
+  const loadModelDeployments = useModelStore((s) => s.loadModelDeployments);
+  const getActiveModels = useModelStore((s) => s.getActiveModels);
+  const getModelById = useModelStore((s) => s.getModelById);
 
-    // Lazy load on first render
-    useEffect(() => {
-        if (models.length === 0) {
-            loadModelDeployments();
-        }
-    }, [models.length, loadModelDeployments]);
-
-    const handleSelect = useCallback(
-        (_: unknown, data: { optionValue?: string }) => {
-            onModelChange(data.optionValue === "__default__" ? undefined : data.optionValue);
-        },
-        [onModelChange],
-    );
-
-    if (isLoading) {
-        return <Spinner size="tiny" label="Loading models..." />;
+  // Lazy load on first render
+  useEffect(() => {
+    if (models.length === 0) {
+      loadModelDeployments();
     }
+  }, [models.length, loadModelDeployments]);
 
-    const activeModels = getActiveModels();
-    const selectedModel = modelDeploymentId ? getModelById(modelDeploymentId) : undefined;
+  const handleSelect = useCallback(
+    (_: unknown, data: { optionValue?: string }) => {
+      onModelChange(
+        data.optionValue === "__default__" ? undefined : data.optionValue,
+      );
+    },
+    [onModelChange],
+  );
 
-    return (
-        <div className={styles.root}>
-            <Dropdown
+  if (isLoading) {
+    return <Spinner size="tiny" label="Loading models..." />;
+  }
+
+  const activeModels = getActiveModels();
+  const selectedModel = modelDeploymentId
+    ? getModelById(modelDeploymentId)
+    : undefined;
+
+  return (
+    <div className={styles.root}>
+      <Dropdown
+        size="small"
+        value={selectedModel ? selectedModel.name : "Auto (recommended)"}
+        selectedOptions={
+          modelDeploymentId ? [modelDeploymentId] : ["__default__"]
+        }
+        onOptionSelect={handleSelect}
+      >
+        <Option key="__default__" value="__default__">
+          Auto (recommended)
+        </Option>
+        {activeModels.map((model) => (
+          <Option key={model.id} value={model.id} text={model.name}>
+            <div className={styles.optionRow}>
+              <span className={styles.optionName}>{model.name}</span>
+              <Badge
                 size="small"
-                value={selectedModel ? selectedModel.name : "Auto (recommended)"}
-                selectedOptions={modelDeploymentId ? [modelDeploymentId] : ["__default__"]}
-                onOptionSelect={handleSelect}
-            >
-                <Option key="__default__" value="__default__">
-                    Auto (recommended)
-                </Option>
-                {activeModels.map((model) => (
-                    <Option key={model.id} value={model.id} text={model.name}>
-                        <div className={styles.optionRow}>
-                            <span className={styles.optionName}>{model.name}</span>
-                            <Badge size="small" appearance={getProviderAppearance(model.provider)}>
-                                {model.provider}
-                            </Badge>
-                        </div>
-                    </Option>
-                ))}
-            </Dropdown>
-            <Text className={styles.contextHint}>
-                {selectedModel
-                    ? `Context: ${(selectedModel.contextWindow / 1000).toFixed(0)}k tokens`
-                    : "Automatically selects the best model for this operation"}
-            </Text>
-        </div>
-    );
+                appearance={getProviderAppearance(model.provider)}
+              >
+                {model.provider}
+              </Badge>
+            </div>
+          </Option>
+        ))}
+      </Dropdown>
+      <Text className={styles.contextHint}>
+        {selectedModel
+          ? `Context: ${(selectedModel.contextWindow / 1000).toFixed(0)}k tokens`
+          : "Automatically selects the best model for this operation"}
+      </Text>
+    </div>
+  );
 });

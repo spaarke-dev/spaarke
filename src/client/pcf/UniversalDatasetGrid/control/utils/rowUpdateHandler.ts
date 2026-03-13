@@ -12,20 +12,20 @@
  */
 
 import {
-    OptimisticRowUpdateRequest,
-    OptimisticUpdateResult,
-    RowFieldUpdate
-} from '../types';
-import { logger } from './logger';
+  OptimisticRowUpdateRequest,
+  OptimisticUpdateResult,
+  RowFieldUpdate,
+} from "../types";
+import { logger } from "./logger";
 
 /**
  * Stored row state for rollback functionality.
  * Captures field values before optimistic update.
  */
 interface RowSnapshot {
-    recordId: string;
-    previousValues: RowFieldUpdate[];
-    timestamp: number;
+  recordId: string;
+  previousValues: RowFieldUpdate[];
+  timestamp: number;
 }
 
 /**
@@ -44,13 +44,16 @@ const SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000;
  * Clean up old snapshots to prevent memory leaks.
  */
 function cleanupOldSnapshots(): void {
-    const now = Date.now();
-    for (const [recordId, snapshot] of rowSnapshots.entries()) {
-        if (now - snapshot.timestamp > SNAPSHOT_MAX_AGE_MS) {
-            rowSnapshots.delete(recordId);
-            logger.debug('RowUpdateHandler', `Cleaned up old snapshot for record ${recordId}`);
-        }
+  const now = Date.now();
+  for (const [recordId, snapshot] of rowSnapshots.entries()) {
+    if (now - snapshot.timestamp > SNAPSHOT_MAX_AGE_MS) {
+      rowSnapshots.delete(recordId);
+      logger.debug(
+        "RowUpdateHandler",
+        `Cleaned up old snapshot for record ${recordId}`,
+      );
     }
+  }
 }
 
 /**
@@ -60,21 +63,21 @@ function cleanupOldSnapshots(): void {
  * @param currentValues - Current field values to preserve
  */
 export function createRowSnapshot(
-    recordId: string,
-    currentValues: RowFieldUpdate[]
+  recordId: string,
+  currentValues: RowFieldUpdate[],
 ): void {
-    // Clean up any old snapshots first
-    cleanupOldSnapshots();
+  // Clean up any old snapshots first
+  cleanupOldSnapshots();
 
-    rowSnapshots.set(recordId, {
-        recordId,
-        previousValues: currentValues,
-        timestamp: Date.now()
-    });
+  rowSnapshots.set(recordId, {
+    recordId,
+    previousValues: currentValues,
+    timestamp: Date.now(),
+  });
 
-    logger.debug('RowUpdateHandler', `Created snapshot for record ${recordId}`, {
-        fieldCount: currentValues.length
-    });
+  logger.debug("RowUpdateHandler", `Created snapshot for record ${recordId}`, {
+    fieldCount: currentValues.length,
+  });
 }
 
 /**
@@ -84,7 +87,7 @@ export function createRowSnapshot(
  * @returns Snapshot if exists, undefined otherwise
  */
 export function getRowSnapshot(recordId: string): RowSnapshot | undefined {
-    return rowSnapshots.get(recordId);
+  return rowSnapshots.get(recordId);
 }
 
 /**
@@ -93,8 +96,8 @@ export function getRowSnapshot(recordId: string): RowSnapshot | undefined {
  * @param recordId - Record ID to clear snapshot for
  */
 export function clearRowSnapshot(recordId: string): void {
-    rowSnapshots.delete(recordId);
-    logger.debug('RowUpdateHandler', `Cleared snapshot for record ${recordId}`);
+  rowSnapshots.delete(recordId);
+  logger.debug("RowUpdateHandler", `Cleared snapshot for record ${recordId}`);
 }
 
 /**
@@ -104,41 +107,42 @@ export function clearRowSnapshot(recordId: string): void {
  * @returns Error message if invalid, null if valid
  */
 export function validateUpdateRequest(
-    request: OptimisticRowUpdateRequest
+  request: OptimisticRowUpdateRequest,
 ): string | null {
-    if (!request) {
-        return 'Update request is required';
+  if (!request) {
+    return "Update request is required";
+  }
+
+  if (!request.recordId || typeof request.recordId !== "string") {
+    return "recordId is required and must be a string";
+  }
+
+  // Validate GUID format (loose check)
+  const guidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!guidRegex.test(request.recordId)) {
+    return `Invalid recordId format: ${request.recordId}`;
+  }
+
+  if (!request.updates || !Array.isArray(request.updates)) {
+    return "updates array is required";
+  }
+
+  if (request.updates.length === 0) {
+    return "updates array must not be empty";
+  }
+
+  for (const update of request.updates) {
+    if (!update.fieldName || typeof update.fieldName !== "string") {
+      return "Each update must have a fieldName string";
     }
 
-    if (!request.recordId || typeof request.recordId !== 'string') {
-        return 'recordId is required and must be a string';
+    if (typeof update.formattedValue !== "string") {
+      return `formattedValue for ${update.fieldName} must be a string`;
     }
+  }
 
-    // Validate GUID format (loose check)
-    const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!guidRegex.test(request.recordId)) {
-        return `Invalid recordId format: ${request.recordId}`;
-    }
-
-    if (!request.updates || !Array.isArray(request.updates)) {
-        return 'updates array is required';
-    }
-
-    if (request.updates.length === 0) {
-        return 'updates array must not be empty';
-    }
-
-    for (const update of request.updates) {
-        if (!update.fieldName || typeof update.fieldName !== 'string') {
-            return 'Each update must have a fieldName string';
-        }
-
-        if (typeof update.formattedValue !== 'string') {
-            return `formattedValue for ${update.fieldName} must be a string`;
-        }
-    }
-
-    return null;
+  return null;
 }
 
 /**
@@ -146,9 +150,12 @@ export function validateUpdateRequest(
  * Used when creating rollback is not possible.
  */
 export function createNoOpRollback(): () => void {
-    return () => {
-        logger.warn('RowUpdateHandler', 'No-op rollback called - no previous state available');
-    };
+  return () => {
+    logger.warn(
+      "RowUpdateHandler",
+      "No-op rollback called - no previous state available",
+    );
+  };
 }
 
 /**
@@ -158,11 +165,11 @@ export function createNoOpRollback(): () => void {
  * @returns OptimisticUpdateResult with error
  */
 export function createErrorResult(error: string): OptimisticUpdateResult {
-    return {
-        success: false,
-        error,
-        rollback: createNoOpRollback()
-    };
+  return {
+    success: false,
+    error,
+    rollback: createNoOpRollback(),
+  };
 }
 
 /**
@@ -171,11 +178,13 @@ export function createErrorResult(error: string): OptimisticUpdateResult {
  * @param rollbackFn - Function to rollback the update
  * @returns OptimisticUpdateResult indicating success
  */
-export function createSuccessResult(rollbackFn: () => void): OptimisticUpdateResult {
-    return {
-        success: true,
-        rollback: rollbackFn
-    };
+export function createSuccessResult(
+  rollbackFn: () => void,
+): OptimisticUpdateResult {
+  return {
+    success: true,
+    rollback: rollbackFn,
+  };
 }
 
 /**
@@ -187,33 +196,36 @@ export function createSuccessResult(rollbackFn: () => void): OptimisticUpdateRes
  * @returns Previous values before update
  */
 export function applyFieldUpdates(
-    row: Record<string, unknown>,
-    updates: RowFieldUpdate[]
+  row: Record<string, unknown>,
+  updates: RowFieldUpdate[],
 ): RowFieldUpdate[] {
-    const previousValues: RowFieldUpdate[] = [];
+  const previousValues: RowFieldUpdate[] = [];
 
-    for (const update of updates) {
-        // Capture previous value
-        const previousValue = row[update.fieldName];
-        previousValues.push({
-            fieldName: update.fieldName,
-            formattedValue: typeof previousValue === 'string' ? previousValue : String(previousValue ?? ''),
-            rawValue: previousValue
-        });
+  for (const update of updates) {
+    // Capture previous value
+    const previousValue = row[update.fieldName];
+    previousValues.push({
+      fieldName: update.fieldName,
+      formattedValue:
+        typeof previousValue === "string"
+          ? previousValue
+          : String(previousValue ?? ""),
+      rawValue: previousValue,
+    });
 
-        // Apply new value
-        row[update.fieldName] = update.formattedValue;
+    // Apply new value
+    row[update.fieldName] = update.formattedValue;
 
-        // If rawValue provided and this is a lookup field, update the _lookupIds too
-        if (update.rawValue !== undefined && row._lookupIds) {
-            const lookupIds = row._lookupIds as Record<string, string | undefined>;
-            if (typeof update.rawValue === 'string') {
-                lookupIds[update.fieldName] = update.rawValue;
-            }
-        }
+    // If rawValue provided and this is a lookup field, update the _lookupIds too
+    if (update.rawValue !== undefined && row._lookupIds) {
+      const lookupIds = row._lookupIds as Record<string, string | undefined>;
+      if (typeof update.rawValue === "string") {
+        lookupIds[update.fieldName] = update.rawValue;
+      }
     }
+  }
 
-    return previousValues;
+  return previousValues;
 }
 
 /**
@@ -223,11 +235,11 @@ export function applyFieldUpdates(
  * @param updates - Updates being applied
  */
 export function logOptimisticUpdate(
-    recordId: string,
-    updates: RowFieldUpdate[]
+  recordId: string,
+  updates: RowFieldUpdate[],
 ): void {
-    logger.info('RowUpdateHandler', `Optimistic update for record ${recordId}`, {
-        fieldCount: updates.length,
-        fields: updates.map(u => u.fieldName)
-    });
+  logger.info("RowUpdateHandler", `Optimistic update for record ${recordId}`, {
+    fieldCount: updates.length,
+    fields: updates.map((u) => u.fieldName),
+  });
 }

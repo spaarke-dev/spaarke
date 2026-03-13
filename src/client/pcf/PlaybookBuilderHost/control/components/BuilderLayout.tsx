@@ -5,8 +5,8 @@
  * Properties panel auto-opens when a node is selected.
  */
 
-import * as React from 'react';
-import { DragEvent, useCallback, useState, useEffect } from 'react';
+import * as React from "react";
+import { DragEvent, useCallback, useState, useEffect } from "react";
 import {
   makeStyles,
   tokens,
@@ -16,7 +16,7 @@ import {
   Button,
   shorthands,
   mergeClasses,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   PanelLeft20Regular,
   PanelRight20Regular,
@@ -27,80 +27,85 @@ import {
   TaskListSquareLtr20Regular,
   Clock20Regular,
   Sparkle20Regular,
-} from '@fluentui/react-icons';
-import { Tooltip } from '@fluentui/react-components';
-import { Canvas } from './Canvas';
-import { PropertiesPanel } from './Properties';
-import { ExecutionOverlay } from './Execution';
-import { useCanvasStore, type PlaybookNodeType } from '../stores/canvasStore';
-import { useExecutionStore } from '../stores/executionStore';
-import { useAiAssistantStore } from '../stores/aiAssistantStore';
-import { AiAssistantModal, ChatHistory, ChatInput, SuggestionBar } from './AiAssistant';
+} from "@fluentui/react-icons";
+import { Tooltip } from "@fluentui/react-components";
+import { Canvas } from "./Canvas";
+import { PropertiesPanel } from "./Properties";
+import { ExecutionOverlay } from "./Execution";
+import { useCanvasStore, type PlaybookNodeType } from "../stores/canvasStore";
+import { useExecutionStore } from "../stores/executionStore";
+import { useAiAssistantStore } from "../stores/aiAssistantStore";
+import {
+  AiAssistantModal,
+  ChatHistory,
+  ChatInput,
+  SuggestionBar,
+} from "./AiAssistant";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    height: '100%',
-    width: '100%',
-    ...shorthands.overflow('hidden'),
+    display: "flex",
+    height: "100%",
+    width: "100%",
+    ...shorthands.overflow("hidden"),
   },
   // Sidebar toggle button
   sidebarToggle: {
-    position: 'absolute',
+    position: "absolute",
     zIndex: 10,
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
     boxShadow: tokens.shadow4,
   },
   leftToggle: {
-    left: '8px',
-    top: '8px',
+    left: "8px",
+    top: "8px",
   },
   rightToggle: {
-    right: '8px',
-    top: '8px',
+    right: "8px",
+    top: "8px",
   },
   aiAssistantToggle: {
-    right: '48px',
-    top: '8px',
+    right: "48px",
+    top: "8px",
   },
   aiAssistantActive: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    ':hover': {
+    ":hover": {
       backgroundColor: tokens.colorBrandBackgroundHover,
       color: tokens.colorNeutralForegroundOnBrand,
     },
   },
   // Sidebar styles
   sidebar: {
-    width: '200px',
+    width: "200px",
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.padding(tokens.spacingHorizontalS),
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalXS,
-    transitionProperty: 'width, padding, opacity',
-    transitionDuration: '0.2s',
-    transitionTimingFunction: 'ease-out',
+    transitionProperty: "width, padding, opacity",
+    transitionDuration: "0.2s",
+    transitionTimingFunction: "ease-out",
   },
   sidebarCollapsed: {
-    width: '0',
-    ...shorthands.padding('0'),
+    width: "0",
+    ...shorthands.padding("0"),
     opacity: 0,
-    ...shorthands.overflow('hidden'),
+    ...shorthands.overflow("hidden"),
   },
   leftSidebar: {
-    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.borderRight("1px", "solid", tokens.colorNeutralStroke1),
   },
   rightSidebar: {
-    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke1),
-    width: '280px',
+    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke1),
+    width: "280px",
   },
   canvasContainer: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
   },
   sectionTitle: {
     marginBottom: tokens.spacingVerticalXS,
@@ -108,36 +113,36 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalS,
   },
   paletteItem: {
-    cursor: 'grab',
-    ':active': {
-      cursor: 'grabbing',
+    cursor: "grab",
+    ":active": {
+      cursor: "grabbing",
     },
   },
   nodeIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '24px',
-    height: '24px',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "24px",
+    height: "24px",
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
   },
   nodeIconAi: {
-    backgroundColor: '#0078D4',
+    backgroundColor: "#0078D4",
   },
   nodeIconCondition: {
-    backgroundColor: '#FFB900',
-    color: '#000000',
+    backgroundColor: "#FFB900",
+    color: "#000000",
   },
   nodeIconDelivery: {
-    backgroundColor: '#107C10',
+    backgroundColor: "#107C10",
   },
   nodeIconIntegration: {
-    backgroundColor: '#8764B8',
+    backgroundColor: "#8764B8",
   },
   nodeIconWait: {
-    backgroundColor: '#E3008C',
+    backgroundColor: "#E3008C",
   },
 });
 
@@ -147,55 +152,55 @@ interface PaletteItem {
   label: string;
   icon: React.ReactNode;
   iconStyle:
-    | 'nodeIconAi'
-    | 'nodeIconCondition'
-    | 'nodeIconDelivery'
-    | 'nodeIconIntegration'
-    | 'nodeIconWait';
+    | "nodeIconAi"
+    | "nodeIconCondition"
+    | "nodeIconDelivery"
+    | "nodeIconIntegration"
+    | "nodeIconWait";
 }
 
 const paletteItems: PaletteItem[] = [
   {
-    type: 'aiAnalysis',
-    label: 'AI Analysis',
+    type: "aiAnalysis",
+    label: "AI Analysis",
     icon: <BrainCircuit20Regular />,
-    iconStyle: 'nodeIconAi',
+    iconStyle: "nodeIconAi",
   },
   {
-    type: 'aiCompletion',
-    label: 'AI Completion',
+    type: "aiCompletion",
+    label: "AI Completion",
     icon: <BrainCircuit20Regular />,
-    iconStyle: 'nodeIconAi',
+    iconStyle: "nodeIconAi",
   },
   {
-    type: 'condition',
-    label: 'Condition',
+    type: "condition",
+    label: "Condition",
     icon: <Branch20Regular />,
-    iconStyle: 'nodeIconCondition',
+    iconStyle: "nodeIconCondition",
   },
   {
-    type: 'deliverOutput',
-    label: 'Deliver Output',
+    type: "deliverOutput",
+    label: "Deliver Output",
     icon: <DocumentArrowRight20Regular />,
-    iconStyle: 'nodeIconDelivery',
+    iconStyle: "nodeIconDelivery",
   },
   {
-    type: 'createTask',
-    label: 'Create Task',
+    type: "createTask",
+    label: "Create Task",
     icon: <TaskListSquareLtr20Regular />,
-    iconStyle: 'nodeIconIntegration',
+    iconStyle: "nodeIconIntegration",
   },
   {
-    type: 'sendEmail',
-    label: 'Send Email',
+    type: "sendEmail",
+    label: "Send Email",
     icon: <Mail20Regular />,
-    iconStyle: 'nodeIconIntegration',
+    iconStyle: "nodeIconIntegration",
   },
   {
-    type: 'wait',
-    label: 'Wait',
+    type: "wait",
+    label: "Wait",
     icon: <Clock20Regular />,
-    iconStyle: 'nodeIconWait',
+    iconStyle: "nodeIconWait",
   },
 ];
 
@@ -230,7 +235,7 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
       // sendMessage uses the stored serviceConfig from the store
       sendMessage(message);
     },
-    [sendMessage]
+    [sendMessage],
   );
 
   // Auto-open/close properties panel based on node selection
@@ -244,14 +249,18 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
 
   // Handle drag start from palette
   const onDragStart = useCallback(
-    (event: DragEvent<HTMLDivElement>, type: PlaybookNodeType, label: string) => {
+    (
+      event: DragEvent<HTMLDivElement>,
+      type: PlaybookNodeType,
+      label: string,
+    ) => {
       event.dataTransfer.setData(
-        'application/reactflow',
-        JSON.stringify({ type, label })
+        "application/reactflow",
+        JSON.stringify({ type, label }),
       );
-      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.effectAllowed = "move";
     },
-    []
+    [],
   );
 
   return (
@@ -261,7 +270,7 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
         className={mergeClasses(
           styles.sidebar,
           styles.leftSidebar,
-          !leftPanelOpen && styles.sidebarCollapsed
+          !leftPanelOpen && styles.sidebarCollapsed,
         )}
       >
         <Text className={styles.sectionTitle} weight="semibold" size={200}>
@@ -278,7 +287,12 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
           >
             <CardHeader
               image={
-                <div className={mergeClasses(styles.nodeIcon, styles[item.iconStyle])}>
+                <div
+                  className={mergeClasses(
+                    styles.nodeIcon,
+                    styles[item.iconStyle],
+                  )}
+                >
                   {item.icon}
                 </div>
               }
@@ -297,17 +311,21 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
           appearance="subtle"
           size="small"
           onClick={() => setLeftPanelOpen(!leftPanelOpen)}
-          title={leftPanelOpen ? 'Hide palette' : 'Show palette'}
-          aria-label={leftPanelOpen ? 'Hide palette' : 'Show palette'}
+          title={leftPanelOpen ? "Hide palette" : "Show palette"}
+          aria-label={leftPanelOpen ? "Hide palette" : "Show palette"}
         />
 
         {/* AI Assistant Toggle Button */}
-        <Tooltip content="AI Assistant" relationship="label" positioning="below">
+        <Tooltip
+          content="AI Assistant"
+          relationship="label"
+          positioning="below"
+        >
           <Button
             className={mergeClasses(
               styles.sidebarToggle,
               styles.aiAssistantToggle,
-              isAiAssistantOpen && styles.aiAssistantActive
+              isAiAssistantOpen && styles.aiAssistantActive,
             )}
             icon={<Sparkle20Regular />}
             appearance="subtle"
@@ -325,8 +343,8 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
           appearance="subtle"
           size="small"
           onClick={() => setRightPanelOpen(!rightPanelOpen)}
-          title={rightPanelOpen ? 'Hide properties' : 'Show properties'}
-          aria-label={rightPanelOpen ? 'Hide properties' : 'Show properties'}
+          title={rightPanelOpen ? "Hide properties" : "Show properties"}
+          aria-label={rightPanelOpen ? "Hide properties" : "Show properties"}
         />
 
         <Canvas />
@@ -340,7 +358,7 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
         className={mergeClasses(
           styles.sidebar,
           styles.rightSidebar,
-          !rightPanelOpen && styles.sidebarCollapsed
+          !rightPanelOpen && styles.sidebarCollapsed,
         )}
       >
         <PropertiesPanel />

@@ -222,7 +222,9 @@ describe("xrmContext", () => {
       const result = detectThemeFromHost();
 
       expect(result.source).toBe("media-query");
-      expect(mockMatchMedia).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
+      expect(mockMatchMedia).toHaveBeenCalledWith(
+        "(prefers-color-scheme: dark)",
+      );
     });
 
     it("should return default light theme when no detection method works", () => {

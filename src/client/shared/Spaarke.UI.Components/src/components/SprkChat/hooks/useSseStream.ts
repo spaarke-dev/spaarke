@@ -16,25 +16,25 @@ import { IChatSseEvent, ICitation, IUseSseStreamResult } from "../types";
  * Expects format: data: {"type":"token","content":"..."}
  */
 export function parseSseEvent(line: string): IChatSseEvent | null {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data: ")) {
-        return null;
-    }
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data: ")) {
+    return null;
+  }
 
-    const jsonStr = trimmed.substring(6); // Remove "data: " prefix
-    if (!jsonStr) {
-        return null;
-    }
+  const jsonStr = trimmed.substring(6); // Remove "data: " prefix
+  if (!jsonStr) {
+    return null;
+  }
 
-    try {
-        const parsed = JSON.parse(jsonStr) as IChatSseEvent;
-        if (parsed && typeof parsed.type === "string") {
-            return parsed;
-        }
-        return null;
-    } catch {
-        return null;
+  try {
+    const parsed = JSON.parse(jsonStr) as IChatSseEvent;
+    if (parsed && typeof parsed.type === "string") {
+      return parsed;
     }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -45,15 +45,19 @@ export function parseSseEvent(line: string): IChatSseEvent | null {
  * Falls back to `event.suggestions` for backward compatibility.
  */
 function parseSuggestions(event: IChatSseEvent): string[] {
-    // Primary: data.suggestions (ChatSseSuggestionsData from the backend)
-    if (event.data?.suggestions && event.data.suggestions.length > 0) {
-        return event.data.suggestions.filter((s) => typeof s === "string" && s.length > 0);
-    }
-    // Fallback: event.suggestions (if sent as a top-level property)
-    if (Array.isArray(event.suggestions) && event.suggestions.length > 0) {
-        return event.suggestions.filter((s) => typeof s === "string" && s.length > 0);
-    }
-    return [];
+  // Primary: data.suggestions (ChatSseSuggestionsData from the backend)
+  if (event.data?.suggestions && event.data.suggestions.length > 0) {
+    return event.data.suggestions.filter(
+      (s) => typeof s === "string" && s.length > 0,
+    );
+  }
+  // Fallback: event.suggestions (if sent as a top-level property)
+  if (Array.isArray(event.suggestions) && event.suggestions.length > 0) {
+    return event.suggestions.filter(
+      (s) => typeof s === "string" && s.length > 0,
+    );
+  }
+  return [];
 }
 
 /**
@@ -78,194 +82,191 @@ function parseSuggestions(event: IChatSseEvent): string[] {
  * ```
  */
 export function useSseStream(): IUseSseStreamResult {
-    const [content, setContent] = useState<string>("");
-    const [isDone, setIsDone] = useState<boolean>(false);
-    const [error, setError] = useState<Error | null>(null);
-    const [isStreaming, setIsStreaming] = useState<boolean>(false);
-    const [suggestions, setSuggestions] = useState<string[]>([]);
-    const [citations, setCitations] = useState<ICitation[]>([]);
+  const [content, setContent] = useState<string>("");
+  const [isDone, setIsDone] = useState<boolean>(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [citations, setCitations] = useState<ICitation[]>([]);
 
-    const abortControllerRef = useRef<AbortController | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-    const cancelStream = useCallback(() => {
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
-        }
-        setIsStreaming(false);
-    }, []);
+  const cancelStream = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+  }, []);
 
-    const clearSuggestions = useCallback(() => {
-        setSuggestions([]);
-    }, []);
+  const clearSuggestions = useCallback(() => {
+    setSuggestions([]);
+  }, []);
 
-    /**
-     * Extract tenant ID from JWT access token for X-Tenant-Id header.
-     */
-    const extractTenantId = (token: string): string | null => {
+  /**
+   * Extract tenant ID from JWT access token for X-Tenant-Id header.
+   */
+  const extractTenantId = (token: string): string | null => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const payload = JSON.parse(atob(parts[1]));
+      return payload.tid || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const startStream = useCallback(
+    (url: string, body: Record<string, unknown>, token: string) => {
+      // Cancel any existing stream
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Reset state
+      setContent("");
+      setIsDone(false);
+      setError(null);
+      setIsStreaming(true);
+      setSuggestions([]);
+      setCitations([]);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const fetchStream = async () => {
         try {
-            const parts = token.split(".");
-            if (parts.length !== 3) return null;
-            const payload = JSON.parse(atob(parts[1]));
-            return payload.tid || null;
-        } catch {
-            return null;
-        }
-    };
+          const tenantId = extractTenantId(token);
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
 
-    const startStream = useCallback(
-        (url: string, body: Record<string, unknown>, token: string) => {
-            // Cancel any existing stream
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(
+              `Chat request failed (${response.status}): ${errorText}`,
+            );
+          }
+
+          if (!response.body) {
+            throw new Error("Response body is empty");
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let accumulated = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
             }
 
-            // Reset state
-            setContent("");
-            setIsDone(false);
-            setError(null);
-            setIsStreaming(true);
-            setSuggestions([]);
-            setCitations([]);
+            buffer += decoder.decode(value, { stream: true });
 
-            const controller = new AbortController();
-            abortControllerRef.current = controller;
+            // SSE events are separated by double newlines
+            const parts = buffer.split("\n\n");
+            // Keep the last incomplete part in the buffer
+            buffer = parts.pop() || "";
 
-            const fetchStream = async () => {
-                try {
-                    const tenantId = extractTenantId(token);
-                    const response = await fetch(url, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            Authorization: `Bearer ${token}`,
-                            ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
-                        },
-                        body: JSON.stringify(body),
-                        signal: controller.signal,
-                    });
-
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(
-                            `Chat request failed (${response.status}): ${errorText}`
-                        );
-                    }
-
-                    if (!response.body) {
-                        throw new Error("Response body is empty");
-                    }
-
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = "";
-                    let accumulated = "";
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            break;
-                        }
-
-                        buffer += decoder.decode(value, { stream: true });
-
-                        // SSE events are separated by double newlines
-                        const parts = buffer.split("\n\n");
-                        // Keep the last incomplete part in the buffer
-                        buffer = parts.pop() || "";
-
-                        for (const part of parts) {
-                            const lines = part.split("\n");
-                            for (const line of lines) {
-                                const event = parseSseEvent(line);
-                                if (!event) {
-                                    continue;
-                                }
-
-                                if (event.type === "token" && event.content) {
-                                    accumulated += event.content;
-                                    // Use functional update to ensure correct state
-                                    setContent(accumulated);
-                                } else if (event.type === "suggestions") {
-                                    const suggestionsData = parseSuggestions(event);
-                                    if (suggestionsData.length > 0) {
-                                        setSuggestions(suggestionsData);
-                                    }
-                                } else if (event.type === "citations" && event.data?.citations) {
-                                    setCitations(mapSseCitations(event.data.citations));
-                                } else if (event.type === "done") {
-                                    setIsDone(true);
-                                    setIsStreaming(false);
-                                } else if (event.type === "error") {
-                                    throw new Error(
-                                        event.content || "Stream error"
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    // Process any remaining buffer
-                    if (buffer.trim()) {
-                        const lines = buffer.split("\n");
-                        for (const line of lines) {
-                            const event = parseSseEvent(line);
-                            if (!event) {
-                                continue;
-                            }
-                            if (event.type === "token" && event.content) {
-                                accumulated += event.content;
-                                setContent(accumulated);
-                            } else if (event.type === "suggestions") {
-                                const suggestionsData = parseSuggestions(event);
-                                if (suggestionsData.length > 0) {
-                                    setSuggestions(suggestionsData);
-                                }
-                            } else if (event.type === "citations" && event.data?.citations) {
-                                setCitations(mapSseCitations(event.data.citations));
-                            } else if (event.type === "done") {
-                                setIsDone(true);
-                            } else if (event.type === "error") {
-                                setError(
-                                    new Error(event.content || "Stream error")
-                                );
-                            }
-                        }
-                    }
-
-                    setIsStreaming(false);
-                } catch (err: unknown) {
-                    if (err instanceof DOMException && err.name === "AbortError") {
-                        // Stream was cancelled by user, not an error
-                        setIsStreaming(false);
-                        return;
-                    }
-
-                    const errorObj =
-                        err instanceof Error
-                            ? err
-                            : new Error("Unknown stream error");
-                    setError(errorObj);
-                    setIsStreaming(false);
+            for (const part of parts) {
+              const lines = part.split("\n");
+              for (const line of lines) {
+                const event = parseSseEvent(line);
+                if (!event) {
+                  continue;
                 }
-            };
 
-            fetchStream();
-        },
-        []
-    );
+                if (event.type === "token" && event.content) {
+                  accumulated += event.content;
+                  // Use functional update to ensure correct state
+                  setContent(accumulated);
+                } else if (event.type === "suggestions") {
+                  const suggestionsData = parseSuggestions(event);
+                  if (suggestionsData.length > 0) {
+                    setSuggestions(suggestionsData);
+                  }
+                } else if (
+                  event.type === "citations" &&
+                  event.data?.citations
+                ) {
+                  setCitations(mapSseCitations(event.data.citations));
+                } else if (event.type === "done") {
+                  setIsDone(true);
+                  setIsStreaming(false);
+                } else if (event.type === "error") {
+                  throw new Error(event.content || "Stream error");
+                }
+              }
+            }
+          }
 
-    return {
-        content,
-        isDone,
-        error,
-        isStreaming,
-        suggestions,
-        citations,
-        startStream,
-        cancelStream,
-        clearSuggestions,
-    };
+          // Process any remaining buffer
+          if (buffer.trim()) {
+            const lines = buffer.split("\n");
+            for (const line of lines) {
+              const event = parseSseEvent(line);
+              if (!event) {
+                continue;
+              }
+              if (event.type === "token" && event.content) {
+                accumulated += event.content;
+                setContent(accumulated);
+              } else if (event.type === "suggestions") {
+                const suggestionsData = parseSuggestions(event);
+                if (suggestionsData.length > 0) {
+                  setSuggestions(suggestionsData);
+                }
+              } else if (event.type === "citations" && event.data?.citations) {
+                setCitations(mapSseCitations(event.data.citations));
+              } else if (event.type === "done") {
+                setIsDone(true);
+              } else if (event.type === "error") {
+                setError(new Error(event.content || "Stream error"));
+              }
+            }
+          }
+
+          setIsStreaming(false);
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            // Stream was cancelled by user, not an error
+            setIsStreaming(false);
+            return;
+          }
+
+          const errorObj =
+            err instanceof Error ? err : new Error("Unknown stream error");
+          setError(errorObj);
+          setIsStreaming(false);
+        }
+      };
+
+      fetchStream();
+    },
+    [],
+  );
+
+  return {
+    content,
+    isDone,
+    error,
+    isStreaming,
+    suggestions,
+    citations,
+    startStream,
+    cancelStream,
+    clearSuggestions,
+  };
 }
 
 /**
@@ -273,15 +274,17 @@ export function useSseStream(): IUseSseStreamResult {
  * Converts the camelCase `sourceName` from the server to the `source` field
  * expected by CitationMarker/SprkChatCitationPopover components.
  */
-function mapSseCitations(items: NonNullable<IChatSseEvent["data"]>["citations"]): ICitation[] {
-    if (!items || items.length === 0) {
-        return [];
-    }
-    return items.map((item) => ({
-        id: item.id,
-        source: item.sourceName,
-        page: item.page ?? undefined,
-        excerpt: item.excerpt,
-        chunkId: item.chunkId,
-    }));
+function mapSseCitations(
+  items: NonNullable<IChatSseEvent["data"]>["citations"],
+): ICitation[] {
+  if (!items || items.length === 0) {
+    return [];
+  }
+  return items.map((item) => ({
+    id: item.id,
+    source: item.sourceName,
+    page: item.page ?? undefined,
+    excerpt: item.excerpt,
+    chunkId: item.chunkId,
+  }));
 }

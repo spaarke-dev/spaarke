@@ -181,7 +181,7 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
       className={mergeClasses(
         styles.card,
         isInteractive && styles.cardInteractive,
-        fillContainer && !hasExplicitDimensions && styles.cardFillContainer
+        fillContainer && !hasExplicitDimensions && styles.cardFillContainer,
       )}
       style={{
         backgroundColor: colorTokens.cardBackground,
@@ -213,7 +213,10 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
       <div className={styles.content}>
         {/* Header: Icon + Area Label */}
         <div className={styles.header}>
-          <span className={styles.icon} style={{ color: colorTokens.iconColor }}>
+          <span
+            className={styles.icon}
+            style={{ color: colorTokens.iconColor }}
+          >
             <AreaIcon />
           </span>
           <Text

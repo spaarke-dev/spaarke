@@ -5,9 +5,9 @@
  */
 
 export function useDocumentStreamConsumer(_options: unknown) {
-    return {
-        isStreaming: false,
-        operationId: null as string | null,
-        tokenCount: 0,
-    };
+  return {
+    isStreaming: false,
+    operationId: null as string | null,
+    tokenCount: 0,
+  };
 }

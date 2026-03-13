@@ -52,25 +52,27 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
-    fontFamily: tokens.fontFamilyBase
+    fontFamily: tokens.fontFamilyBase,
   },
   content: {
     flex: 1,
-    overflow: "hidden"
+    overflow: "hidden",
   },
   loading: {
     padding: tokens.spacingVerticalXL,
     textAlign: "center",
-    color: tokens.colorNeutralForeground2
+    color: tokens.colorNeutralForeground2,
   },
   error: {
     padding: tokens.spacingVerticalXL,
     textAlign: "center",
-    color: tokens.colorPaletteRedForeground1
-  }
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
-export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props) => {
+export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (
+  props,
+) => {
   const styles = useStyles();
 
   // Load entity configuration if provided
@@ -85,7 +87,7 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props
 
   // Use appropriate hook based on mode
   const datasetResult = useDatasetMode({
-    dataset: props.dataset || ({} as any)
+    dataset: props.dataset || ({} as any),
   });
 
   const headlessResult = useHeadlessMode({
@@ -93,15 +95,24 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props
     entityName: props.headlessConfig?.entityName || "",
     fetchXml: props.headlessConfig?.fetchXml,
     pageSize: props.headlessConfig?.pageSize || 25,
-    autoLoad: isHeadlessMode
+    autoLoad: isHeadlessMode,
   });
 
   // Select result based on mode
   const result = isHeadlessMode ? headlessResult : datasetResult;
-  const { records, columns, loading, error, hasNextPage, loadNextPage, refresh } = result;
+  const {
+    records,
+    columns,
+    loading,
+    error,
+    hasNextPage,
+    loadNextPage,
+    refresh,
+  } = result;
 
   // Get entity name
-  const entityName = records[0]?.entityName || props.headlessConfig?.entityName || "";
+  const entityName =
+    records[0]?.entityName || props.headlessConfig?.entityName || "";
 
   // Get entity-specific configuration
   const entityConfig = React.useMemo(() => {
@@ -119,7 +130,7 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props
       showToolbar: true,
       enabledCommands: ["open", "create", "delete", "refresh"],
       theme: "Auto",
-      scrollBehavior: "Auto"
+      scrollBehavior: "Auto",
     };
 
     if (!entityConfig) return baseConfig;
@@ -132,32 +143,43 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props
       enableVirtualization: entityConfig.enableVirtualization,
       rowHeight: entityConfig.rowHeight,
       scrollBehavior: entityConfig.scrollBehavior,
-      toolbarShowOverflow: entityConfig.toolbarShowOverflow
+      toolbarShowOverflow: entityConfig.toolbarShowOverflow,
     };
   }, [props.config, entityConfig]);
 
   // Detect theme from context
   const theme = React.useMemo(
     () => detectTheme(props.context, finalConfig.theme),
-    [props.context, finalConfig.theme]
+    [props.context, finalConfig.theme],
   );
 
   // Get entity privileges
-  const [privileges, setPrivileges] = React.useState<IEntityPrivileges | undefined>();
+  const [privileges, setPrivileges] = React.useState<
+    IEntityPrivileges | undefined
+  >();
 
   React.useEffect(() => {
     if (props.dataset) {
       // Dataset mode: Use dataset.security
-      const datasetPrivileges = PrivilegeService.getPrivilegesFromDataset(props.dataset);
+      const datasetPrivileges = PrivilegeService.getPrivilegesFromDataset(
+        props.dataset,
+      );
       setPrivileges(datasetPrivileges);
-    } else if (props.headlessConfig?.webAPI && props.headlessConfig?.entityName) {
+    } else if (
+      props.headlessConfig?.webAPI &&
+      props.headlessConfig?.entityName
+    ) {
       // Headless mode: Query privileges via Web API
       PrivilegeService.getEntityPrivileges(
         props.headlessConfig.webAPI,
-        props.headlessConfig.entityName
+        props.headlessConfig.entityName,
       ).then(setPrivileges);
     }
-  }, [props.dataset, props.headlessConfig?.webAPI, props.headlessConfig?.entityName]);
+  }, [
+    props.dataset,
+    props.headlessConfig?.webAPI,
+    props.headlessConfig?.entityName,
+  ]);
 
   // Select view component based on config
   const ViewComponent = React.useMemo(() => {
@@ -173,41 +195,59 @@ export const UniversalDatasetGrid: React.FC<IUniversalDatasetGridProps> = (props
   }, [finalConfig.viewMode]);
 
   // Handle record click
-  const handleRecordClick = React.useCallback((record: any) => {
-    props.onRecordClick(record.id);
-  }, [props]);
+  const handleRecordClick = React.useCallback(
+    (record: any) => {
+      props.onRecordClick(record.id);
+    },
+    [props],
+  );
 
   // Get commands based on config and privileges (including custom commands)
   const commands = React.useMemo(() => {
     if (!entityName) {
-      return CommandRegistry.getCommands(finalConfig.enabledCommands, privileges);
+      return CommandRegistry.getCommands(
+        finalConfig.enabledCommands,
+        privileges,
+      );
     }
     return CommandRegistry.getCommandsWithCustom(
       finalConfig.enabledCommands,
       entityName,
-      privileges
+      privileges,
     );
   }, [finalConfig.enabledCommands, entityName, privileges]);
 
   // Build command context
   const commandContext = React.useMemo((): ICommandContext => {
     return {
-      selectedRecords: records.filter(r => props.selectedRecordIds.includes(r.id)),
-      entityName: records[0]?.entityName || props.headlessConfig?.entityName || "",
-      webAPI: props.headlessConfig?.webAPI || (props.context as any)?.webAPI || ({} as any),
+      selectedRecords: records.filter((r) =>
+        props.selectedRecordIds.includes(r.id),
+      ),
+      entityName:
+        records[0]?.entityName || props.headlessConfig?.entityName || "",
+      webAPI:
+        props.headlessConfig?.webAPI ||
+        (props.context as any)?.webAPI ||
+        ({} as any),
       navigation: (props.context as any)?.navigation || ({} as any),
       refresh: refresh,
       emitLastAction: (action) => {
         console.log(`Last action: ${action}`);
-      }
+      },
     };
-  }, [records, props.selectedRecordIds, props.headlessConfig, props.context, refresh]);
+  }, [
+    records,
+    props.selectedRecordIds,
+    props.headlessConfig,
+    props.context,
+    refresh,
+  ]);
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts({
     commands,
     context: commandContext,
-    enabled: finalConfig.showToolbar && commands.length > 0
+    enabled: finalConfig.showToolbar && commands.length > 0,
   });
 
   return (

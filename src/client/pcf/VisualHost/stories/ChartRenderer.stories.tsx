@@ -8,7 +8,11 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { action } from "@storybook/addon-actions";
 import { ChartRenderer } from "../control/components/ChartRenderer";
 import { VisualType, AggregationType } from "../control/types";
-import type { IChartDefinition, IChartData, IAggregatedDataPoint } from "../control/types";
+import type {
+  IChartDefinition,
+  IChartData,
+  IAggregatedDataPoint,
+} from "../control/types";
 
 // Sample data for stories
 const sampleDataPoints: IAggregatedDataPoint[] = [
@@ -358,11 +362,13 @@ export const AllVisualTypes: Story = {
                 type === VisualType.MetricCard
                   ? {
                       ...baseChartData,
-                      dataPoints: [{ label: "Total", value: 110, fieldValue: null }],
+                      dataPoints: [
+                        { label: "Total", value: 110, fieldValue: null },
+                      ],
                     }
                   : type === VisualType.LineChart
-                  ? { ...baseChartData, dataPoints: monthlyDataPoints }
-                  : baseChartData
+                    ? { ...baseChartData, dataPoints: monthlyDataPoints }
+                    : baseChartData
               }
               onDrillInteraction={action(`drill-${name}`)}
               height={250}

@@ -8,9 +8,13 @@ import {
   DeleteRegular,
   ArrowSyncRegular,
   OpenRegular,
-  ArrowUploadRegular
+  ArrowUploadRegular,
 } from "@fluentui/react-icons";
-import { ICommand, ICommandContext, IEntityPrivileges } from "../types/CommandTypes";
+import {
+  ICommand,
+  ICommandContext,
+  IEntityPrivileges,
+} from "../types/CommandTypes";
 import { EntityConfigurationService } from "./EntityConfigurationService";
 import { CustomCommandFactory } from "./CustomCommandFactory";
 
@@ -18,7 +22,6 @@ import { CustomCommandFactory } from "./CustomCommandFactory";
  * Built-in command handlers
  */
 export class CommandRegistry {
-
   /**
    * Create new record
    */
@@ -32,18 +35,20 @@ export class CommandRegistry {
       description: "Create a new record",
       keyboardShortcut: "Ctrl+N",
       handler: async (context: ICommandContext) => {
-        context.navigation.openForm({
-          entityName: context.entityName,
-          useQuickCreateForm: false
-        }).then(() => {
-          if (context.refresh) {
-            context.refresh();
-          }
-          if (context.emitLastAction) {
-            context.emitLastAction("create");
-          }
-        });
-      }
+        context.navigation
+          .openForm({
+            entityName: context.entityName,
+            useQuickCreateForm: false,
+          })
+          .then(() => {
+            if (context.refresh) {
+              context.refresh();
+            }
+            if (context.emitLastAction) {
+              context.emitLastAction("create");
+            }
+          });
+      },
     };
   }
 
@@ -69,13 +74,13 @@ export class CommandRegistry {
         context.navigation.openForm({
           entityName: context.entityName,
           entityId: record.id,
-          openInNewWindow: false
+          openInNewWindow: false,
         });
 
         if (context.emitLastAction) {
           context.emitLastAction("open");
         }
-      }
+      },
     };
   }
 
@@ -89,7 +94,8 @@ export class CommandRegistry {
       icon: React.createElement(DeleteRegular),
       requiresSelection: true,
       multiSelectSupport: true,
-      confirmationMessage: "Are you sure you want to delete the selected record(s)?",
+      confirmationMessage:
+        "Are you sure you want to delete the selected record(s)?",
       group: "secondary",
       description: "Delete selected records",
       keyboardShortcut: "Delete",
@@ -113,7 +119,7 @@ export class CommandRegistry {
         if (context.emitLastAction) {
           context.emitLastAction("delete");
         }
-      }
+      },
     };
   }
 
@@ -137,7 +143,7 @@ export class CommandRegistry {
         if (context.emitLastAction) {
           context.emitLastAction("refresh");
         }
-      }
+      },
     };
   }
 
@@ -160,7 +166,7 @@ export class CommandRegistry {
         if (context.emitLastAction) {
           context.emitLastAction("upload");
         }
-      }
+      },
     };
   }
 
@@ -187,9 +193,12 @@ export class CommandRegistry {
   /**
    * Get multiple commands by keys, filtered by user privileges
    */
-  static getCommands(keys: string[], privileges?: IEntityPrivileges): ICommand[] {
+  static getCommands(
+    keys: string[],
+    privileges?: IEntityPrivileges,
+  ): ICommand[] {
     const commands = keys
-      .map(key => this.getCommand(key))
+      .map((key) => this.getCommand(key))
       .filter((cmd): cmd is ICommand => cmd !== undefined);
 
     // If no privileges provided, return all commands
@@ -198,7 +207,7 @@ export class CommandRegistry {
     }
 
     // Filter commands based on required privileges
-    return commands.filter(cmd => this.hasRequiredPrivilege(cmd, privileges));
+    return commands.filter((cmd) => this.hasRequiredPrivilege(cmd, privileges));
   }
 
   /**
@@ -207,17 +216,20 @@ export class CommandRegistry {
   static getCommandsWithCustom(
     keys: string[],
     entityLogicalName: string,
-    privileges?: IEntityPrivileges
+    privileges?: IEntityPrivileges,
   ): ICommand[] {
     const commands: ICommand[] = [];
 
-    keys.forEach(key => {
+    keys.forEach((key) => {
       // Try built-in command first
       let command = this.getCommand(key);
 
       // If not built-in, check custom commands
       if (!command) {
-        const customConfig = EntityConfigurationService.getCustomCommand(entityLogicalName, key);
+        const customConfig = EntityConfigurationService.getCustomCommand(
+          entityLogicalName,
+          key,
+        );
         if (customConfig) {
           command = CustomCommandFactory.createCommand(key, customConfig);
         }
@@ -231,13 +243,16 @@ export class CommandRegistry {
     // Filter by privileges if provided
     if (!privileges) return commands;
 
-    return commands.filter(cmd => this.hasRequiredPrivilege(cmd, privileges));
+    return commands.filter((cmd) => this.hasRequiredPrivilege(cmd, privileges));
   }
 
   /**
    * Check if user has required privilege for a command
    */
-  private static hasRequiredPrivilege(command: ICommand, privileges: IEntityPrivileges): boolean {
+  private static hasRequiredPrivilege(
+    command: ICommand,
+    privileges: IEntityPrivileges,
+  ): boolean {
     switch (command.key.toLowerCase()) {
       case "create":
         return privileges.canCreate;

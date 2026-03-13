@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 /** Result category tab in the results grid. */
-export type FindSimilarDomain = 'documents' | 'matters' | 'projects';
+export type FindSimilarDomain = "documents" | "matters" | "projects";
 
 /** A single document search result from POST /api/ai/search. */
 export interface IDocumentResult {
@@ -51,7 +51,7 @@ export interface IFindSimilarResults {
 }
 
 /** Lifecycle status of the find-similar search. */
-export type FindSimilarStatus = 'idle' | 'loading' | 'success' | 'error';
+export type FindSimilarStatus = "idle" | "loading" | "success" | "error";
 
 // ---------------------------------------------------------------------------
 // Grid adapter types (matches SearchResultsGrid pattern)
@@ -95,7 +95,7 @@ export interface IFindSimilarServiceConfig {
  * equivalent navigation API.
  */
 export interface INavigationMessage {
-  action: 'openRecord' | 'openView';
+  action: "openRecord" | "openView";
   entityName: string;
   entityId?: string;
   viewId?: string;

@@ -12,7 +12,7 @@
  * Shared library version — external dependencies (navigation, file preview
  * services) are injected via callback props.
  */
-import * as React from 'react';
+import * as React from "react";
 import {
   DataGrid,
   DataGridHeader,
@@ -32,13 +32,10 @@ import {
   tokens,
   type TableColumnDefinition,
   type TableColumnSizingOptions,
-} from '@fluentui/react-components';
-import {
-  EyeRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
-import { FilePreviewDialog } from '../FilePreview';
-import type { IFilePreviewServices } from '../FilePreview/filePreviewTypes';
+} from "@fluentui/react-components";
+import { EyeRegular, OpenRegular } from "@fluentui/react-icons";
+import { FilePreviewDialog } from "../FilePreview";
+import type { IFilePreviewServices } from "../FilePreview/filePreviewTypes";
 import type {
   FindSimilarStatus,
   FindSimilarDomain,
@@ -48,7 +45,7 @@ import type {
   IGridRecord,
   IGridColumn,
   INavigationMessage,
-} from './findSimilarTypes';
+} from "./findSimilarTypes";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -70,21 +67,66 @@ export interface IFindSimilarResultsStepProps {
 // ---------------------------------------------------------------------------
 
 const DOCUMENT_COLUMNS: IGridColumn[] = [
-  { name: 'name', displayName: 'Name', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
-  { name: 'combinedScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'fileType', displayName: 'File Type', dataType: 'FileType', visualSizeFactor: 1 },
+  {
+    name: "name",
+    displayName: "Name",
+    dataType: "SingleLine.Text",
+    visualSizeFactor: 3,
+  },
+  {
+    name: "combinedScore",
+    displayName: "Score",
+    dataType: "Percentage",
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: "fileType",
+    displayName: "File Type",
+    dataType: "FileType",
+    visualSizeFactor: 1,
+  },
 ];
 
 const MATTER_COLUMNS: IGridColumn[] = [
-  { name: 'recordName', displayName: 'Matter Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
-  { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
+  {
+    name: "recordName",
+    displayName: "Matter Name",
+    dataType: "SingleLine.Text",
+    visualSizeFactor: 2.5,
+  },
+  {
+    name: "confidenceScore",
+    displayName: "Score",
+    dataType: "Percentage",
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: "recordDescription",
+    displayName: "Description",
+    dataType: "SingleLine.Text",
+    visualSizeFactor: 3,
+  },
 ];
 
 const PROJECT_COLUMNS: IGridColumn[] = [
-  { name: 'recordName', displayName: 'Project Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
-  { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
+  {
+    name: "recordName",
+    displayName: "Project Name",
+    dataType: "SingleLine.Text",
+    visualSizeFactor: 2.5,
+  },
+  {
+    name: "confidenceScore",
+    displayName: "Score",
+    dataType: "Percentage",
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: "recordDescription",
+    displayName: "Description",
+    dataType: "SingleLine.Text",
+    visualSizeFactor: 3,
+  },
 ];
 
 const COLUMNS_BY_DOMAIN: Record<FindSimilarDomain, IGridColumn[]> = {
@@ -104,19 +146,19 @@ const PAGE_SIZE = 10;
 // ---------------------------------------------------------------------------
 
 function renderByDataType(value: unknown, dataType: string): string {
-  if (value == null || value === '') return '';
+  if (value == null || value === "") return "";
 
   switch (dataType) {
-    case 'Percentage': {
-      const num = typeof value === 'number' ? value : Number(value);
+    case "Percentage": {
+      const num = typeof value === "number" ? value : Number(value);
       if (isNaN(num)) return String(value);
       return `${Math.round(num * 100)}%`;
     }
-    case 'FileType': {
-      return typeof value === 'string' ? value.toUpperCase() : String(value);
+    case "FileType": {
+      return typeof value === "string" ? value.toUpperCase() : String(value);
     }
     default: {
-      if (typeof value === 'number') return value.toLocaleString();
+      if (typeof value === "number") return value.toLocaleString();
       return String(value);
     }
   }
@@ -129,7 +171,7 @@ function renderByDataType(value: unknown, dataType: string): string {
 function mapDocumentResults(docs: IDocumentResult[]): IGridRecord[] {
   return docs.map((d) => ({
     id: d.documentId,
-    entityName: 'sprk_document',
+    entityName: "sprk_document",
     name: d.name,
     combinedScore: d.combinedScore,
     fileType: d.fileType,
@@ -155,27 +197,27 @@ function mapRecordResults(records: IRecordResult[]): IGridRecord[] {
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
-    height: '100%',
+    height: "100%",
   },
   loadingContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     gap: tokens.spacingVerticalL,
-    minHeight: '300px',
+    minHeight: "300px",
   },
   errorContainer: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
   },
   tabContent: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     flex: 1,
     minHeight: 0,
   },
@@ -183,19 +225,19 @@ const useStyles = makeStyles({
     flex: 1,
   },
   emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     gap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingVerticalXXL,
-    minHeight: '200px',
+    minHeight: "200px",
   },
   cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
@@ -205,24 +247,24 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   actionsCell: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXXS,
   },
   stepTitle: {
-    display: 'block',
+    display: "block",
     marginBottom: tokens.spacingVerticalXS,
   },
   stepSubtitle: {
-    display: 'block',
+    display: "block",
     color: tokens.colorNeutralForeground3,
   },
   sentinel: {
-    height: '1px',
-    width: '100%',
+    height: "1px",
+    width: "100%",
   },
   loadMoreText: {
-    textAlign: 'center',
+    textAlign: "center",
     color: tokens.colorNeutralForeground3,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
@@ -252,8 +294,8 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
 
   // Preview dialog state
   const [previewOpen, setPreviewOpen] = React.useState(false);
-  const [previewDocId, setPreviewDocId] = React.useState('');
-  const [previewDocName, setPreviewDocName] = React.useState('');
+  const [previewDocId, setPreviewDocId] = React.useState("");
+  const [previewDocName, setPreviewDocName] = React.useState("");
 
   // Lazy loading state
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
@@ -288,7 +330,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
   const handleOpenRecord = React.useCallback(
     (record: IGridRecord) => {
       onNavigateToEntity({
-        action: 'openRecord',
+        action: "openRecord",
         entityName: record.entityName,
         entityId: record.id,
       });
@@ -304,10 +346,10 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
         compare: (a, b) => {
           const aVal = a[col.name];
           const bVal = b[col.name];
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
+          if (typeof aVal === "number" && typeof bVal === "number") {
             return aVal - bVal;
           }
-          return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+          return String(aVal ?? "").localeCompare(String(bVal ?? ""));
         },
         renderHeaderCell: () => col.displayName,
         renderCell: (item) => renderByDataType(item[col.name], col.dataType),
@@ -316,11 +358,11 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
 
     // Actions column
     const actionsCol = createTableColumn<GridItem>({
-      columnId: '_actions',
+      columnId: "_actions",
       compare: () => 0,
-      renderHeaderCell: () => '',
+      renderHeaderCell: () => "",
       renderCell: (item) => {
-        if (domain === 'documents') {
+        if (domain === "documents") {
           return (
             <div className={styles.actionsCell}>
               <Tooltip content="Preview" relationship="label">
@@ -342,7 +384,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
         }
 
         // Matters and Projects — single "Open" action
-        const label = domain === 'matters' ? 'Open matter' : 'Open project';
+        const label = domain === "matters" ? "Open matter" : "Open project";
         return (
           <div className={styles.actionsCell}>
             <Tooltip content={label} relationship="label">
@@ -351,7 +393,10 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
                 size="small"
                 icon={<OpenRegular />}
                 aria-label={label}
-                onClick={(e) => { e.stopPropagation(); handleOpenRecord(item); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenRecord(item);
+                }}
               />
             </Tooltip>
           </div>
@@ -365,7 +410,9 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
     for (const col of columns) {
-      const defaultWidth = col.visualSizeFactor ? Math.round(col.visualSizeFactor * 100) : 150;
+      const defaultWidth = col.visualSizeFactor
+        ? Math.round(col.visualSizeFactor * 100)
+        : 150;
       options[col.name] = {
         defaultWidth,
         minWidth: Math.max(80, Math.round(defaultWidth * 0.5)),
@@ -373,7 +420,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
       };
     }
     // Actions column sizing
-    options['_actions'] = {
+    options["_actions"] = {
       defaultWidth: 48,
       minWidth: 48,
       idealWidth: 48,
@@ -394,7 +441,9 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
   if (records.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <Text size={400} weight="semibold">No results found</Text>
+        <Text size={400} weight="semibold">
+          No results found
+        </Text>
         <Text size={200}>
           No similar {domain} were found for the uploaded files.
         </Text>
@@ -414,7 +463,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
           resizableColumns
           columnSizingOptions={columnSizingOptions}
           getRowId={(item: GridItem) => item._rowId}
-          style={{ minWidth: '100%' }}
+          style={{ minWidth: "100%" }}
           aria-label={`Similar ${domain} results`}
         >
           <DataGridHeader>
@@ -428,7 +477,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
           </DataGridHeader>
           <DataGridBody<GridItem>>
             {({ item, rowId }) => (
-              <DataGridRow<GridItem> key={rowId} style={{ height: '44px' }}>
+              <DataGridRow<GridItem> key={rowId} style={{ height: "44px" }}>
                 {({ renderCell }) => (
                   <DataGridCell className={styles.cell}>
                     {renderCell(item)}
@@ -450,7 +499,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
       )}
 
       {/* File Preview Dialog (documents domain) */}
-      {domain === 'documents' && (
+      {domain === "documents" && (
         <FilePreviewDialog
           open={previewOpen}
           documentId={previewDocId}
@@ -476,26 +525,41 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
   filePreviewServices,
 }) => {
   const styles = useStyles();
-  const [activeDomain, setActiveDomain] = React.useState<FindSimilarDomain>('documents');
+  const [activeDomain, setActiveDomain] =
+    React.useState<FindSimilarDomain>("documents");
 
   // Derive grid data — must be above early returns to satisfy rules of hooks
-  const gridData: { records: IGridRecord[]; count: number } = React.useMemo(() => {
-    if (!results) return { records: [], count: 0 };
-    switch (activeDomain) {
-      case 'documents':
-        return { records: mapDocumentResults(results.documents ?? []), count: results.documentsTotalCount };
-      case 'matters':
-        return { records: mapRecordResults(results.matters ?? []), count: results.mattersTotalCount };
-      case 'projects':
-        return { records: mapRecordResults(results.projects ?? []), count: results.projectsTotalCount };
-    }
-  }, [activeDomain, results]);
+  const gridData: { records: IGridRecord[]; count: number } =
+    React.useMemo(() => {
+      if (!results) return { records: [], count: 0 };
+      switch (activeDomain) {
+        case "documents":
+          return {
+            records: mapDocumentResults(results.documents ?? []),
+            count: results.documentsTotalCount,
+          };
+        case "matters":
+          return {
+            records: mapRecordResults(results.matters ?? []),
+            count: results.mattersTotalCount,
+          };
+        case "projects":
+          return {
+            records: mapRecordResults(results.projects ?? []),
+            count: results.projectsTotalCount,
+          };
+      }
+    }, [activeDomain, results]);
 
   // Loading state
-  if (status === 'loading') {
+  if (status === "loading") {
     return (
       <div className={styles.loadingContainer}>
-        <Spinner size="large" label="Searching for similar items..." labelPosition="below" />
+        <Spinner
+          size="large"
+          label="Searching for similar items..."
+          labelPosition="below"
+        />
         <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
           Extracting text and running semantic search. This may take a moment.
         </Text>
@@ -504,16 +568,20 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
   }
 
   // Error state
-  if (status === 'error') {
+  if (status === "error") {
     return (
       <div className={styles.errorContainer}>
         <Text as="h2" size={500} weight="semibold">
           Search Results
         </Text>
         <Text size={300} style={{ color: tokens.colorPaletteRedForeground1 }}>
-          {errorMessage || 'An error occurred while searching.'}
+          {errorMessage || "An error occurred while searching."}
         </Text>
-        <Button appearance="primary" onClick={onRetry} style={{ alignSelf: 'flex-start' }}>
+        <Button
+          appearance="primary"
+          onClick={onRetry}
+          style={{ alignSelf: "flex-start" }}
+        >
           Retry Search
         </Button>
       </div>
@@ -521,7 +589,7 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
   }
 
   // Idle state
-  if (status === 'idle' || !results) {
+  if (status === "idle" || !results) {
     return (
       <div className={styles.container}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
@@ -534,7 +602,10 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
     );
   }
 
-  const totalFound = results.documentsTotalCount + results.mattersTotalCount + results.projectsTotalCount;
+  const totalFound =
+    results.documentsTotalCount +
+    results.mattersTotalCount +
+    results.projectsTotalCount;
 
   // Success state
   return (
@@ -544,18 +615,26 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
           Search Results
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Found {totalFound} similar item{totalFound !== 1 ? 's' : ''} across documents, matters, and projects.
+          Found {totalFound} similar item{totalFound !== 1 ? "s" : ""} across
+          documents, matters, and projects.
         </Text>
       </div>
 
       <TabList
         selectedValue={activeDomain}
-        onTabSelect={(_e, data) => setActiveDomain(data.value as FindSimilarDomain)}
+        onTabSelect={(_e, data) =>
+          setActiveDomain(data.value as FindSimilarDomain)
+        }
       >
         <Tab value="documents">
           Documents
           {results.documentsTotalCount > 0 && (
-            <Badge appearance="tint" color="informative" size="small" style={{ marginLeft: '6px' }}>
+            <Badge
+              appearance="tint"
+              color="informative"
+              size="small"
+              style={{ marginLeft: "6px" }}
+            >
               {results.documentsTotalCount}
             </Badge>
           )}
@@ -563,7 +642,12 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
         <Tab value="matters">
           Matters
           {results.mattersTotalCount > 0 && (
-            <Badge appearance="tint" color="informative" size="small" style={{ marginLeft: '6px' }}>
+            <Badge
+              appearance="tint"
+              color="informative"
+              size="small"
+              style={{ marginLeft: "6px" }}
+            >
               {results.mattersTotalCount}
             </Badge>
           )}
@@ -571,7 +655,12 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
         <Tab value="projects">
           Projects
           {results.projectsTotalCount > 0 && (
-            <Badge appearance="tint" color="informative" size="small" style={{ marginLeft: '6px' }}>
+            <Badge
+              appearance="tint"
+              color="informative"
+              size="small"
+              style={{ marginLeft: "6px" }}
+            >
               {results.projectsTotalCount}
             </Badge>
           )}

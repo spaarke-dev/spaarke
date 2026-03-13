@@ -17,24 +17,21 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Use for: follow-up actions, workflow assignments.
  */
 export const CreateTaskNode = React.memo(function CreateTaskNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<TaskListSquareLtr20Regular />}
-            typeLabel="Create Task"
-        >
-            {data.outputVariable && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Output: {data.outputVariable}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<TaskListSquareLtr20Regular />}
+      typeLabel="Create Task"
+    >
+      {data.outputVariable && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Output: {data.outputVariable}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

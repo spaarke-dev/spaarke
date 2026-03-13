@@ -35,8 +35,8 @@
 import { useEffect, useCallback } from "react";
 import type { RichTextEditorRef } from "@spaarke/ui-components/components/RichTextEditor";
 import {
-    useDocumentStreaming,
-    type UseDocumentStreamingResult,
+  useDocumentStreaming,
+  type UseDocumentStreamingResult,
 } from "../hooks/useDocumentStreaming";
 import { StreamingIndicator } from "./StreamingIndicator";
 
@@ -45,37 +45,37 @@ import { StreamingIndicator } from "./StreamingIndicator";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface DocumentStreamBridgeProps {
-    /**
-     * Context identifier for the BroadcastChannel (typically the analysis session ID).
-     * Channel becomes: sprk-workspace-{context}
-     */
-    context: string;
+  /**
+   * Context identifier for the BroadcastChannel (typically the analysis session ID).
+   * Channel becomes: sprk-workspace-{context}
+   */
+  context: string;
 
-    /**
-     * Ref to the RichTextEditor providing streaming + HTML APIs.
-     */
-    editorRef: React.RefObject<RichTextEditorRef | null>;
+  /**
+   * Ref to the RichTextEditor providing streaming + HTML APIs.
+   */
+  editorRef: React.RefObject<RichTextEditorRef | null>;
 
-    /**
-     * Whether the bridge should be active. Defaults to true.
-     * Set to false when editor is not mounted or context is not ready.
-     */
-    enabled?: boolean;
+  /**
+   * Whether the bridge should be active. Defaults to true.
+   * Set to false when editor is not mounted or context is not ready.
+   */
+  enabled?: boolean;
 
-    /**
-     * Optional callback to receive streaming state changes.
-     * Useful for parent components that need to react to streaming state
-     * (e.g., disable other controls during streaming).
-     */
-    onStreamingStateChange?: (state: DocumentStreamingState) => void;
+  /**
+   * Optional callback to receive streaming state changes.
+   * Useful for parent components that need to react to streaming state
+   * (e.g., disable other controls during streaming).
+   */
+  onStreamingStateChange?: (state: DocumentStreamingState) => void;
 }
 
 /** Streaming state exposed to parent components */
 export interface DocumentStreamingState {
-    isStreaming: boolean;
-    isReplacing: boolean;
-    tokenCount: number;
-    operationId: string | null;
+  isStreaming: boolean;
+  isReplacing: boolean;
+  tokenCount: number;
+  operationId: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,70 +83,70 @@ export interface DocumentStreamingState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function DocumentStreamBridge({
+  context,
+  editorRef,
+  enabled = true,
+  onStreamingStateChange,
+}: DocumentStreamBridgeProps): JSX.Element {
+  const streaming: UseDocumentStreamingResult = useDocumentStreaming({
     context,
     editorRef,
-    enabled = true,
-    onStreamingStateChange,
-}: DocumentStreamBridgeProps): JSX.Element {
-    const streaming: UseDocumentStreamingResult = useDocumentStreaming({
-        context,
-        editorRef,
-        enabled,
+    enabled,
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Notify parent of streaming state changes
+  // ─────────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    onStreamingStateChange?.({
+      isStreaming: streaming.isStreaming,
+      isReplacing: streaming.isReplacing,
+      tokenCount: streaming.tokenCount,
+      operationId: streaming.operationId,
     });
+  }, [
+    streaming.isStreaming,
+    streaming.isReplacing,
+    streaming.tokenCount,
+    streaming.operationId,
+    onStreamingStateChange,
+  ]);
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Notify parent of streaming state changes
-    // ─────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────
+  // Escape key handler for cancel
+  // ─────────────────────────────────────────────────────────────────────
 
-    useEffect(() => {
-        onStreamingStateChange?.({
-            isStreaming: streaming.isStreaming,
-            isReplacing: streaming.isReplacing,
-            tokenCount: streaming.tokenCount,
-            operationId: streaming.operationId,
-        });
-    }, [
-        streaming.isStreaming,
-        streaming.isReplacing,
-        streaming.tokenCount,
-        streaming.operationId,
-        onStreamingStateChange,
-    ]);
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === "Escape" && streaming.isStreaming) {
+        event.preventDefault();
+        event.stopPropagation();
+        streaming.cancelStream();
+      }
+    },
+    [streaming.isStreaming, streaming.cancelStream],
+  );
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Escape key handler for cancel
-    // ─────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (streaming.isStreaming) {
+      document.addEventListener("keydown", handleKeyDown, true);
+      return () => {
+        document.removeEventListener("keydown", handleKeyDown, true);
+      };
+    }
+  }, [streaming.isStreaming, handleKeyDown]);
 
-    const handleKeyDown = useCallback(
-        (event: KeyboardEvent) => {
-            if (event.key === "Escape" && streaming.isStreaming) {
-                event.preventDefault();
-                event.stopPropagation();
-                streaming.cancelStream();
-            }
-        },
-        [streaming.isStreaming, streaming.cancelStream]
-    );
+  // ─────────────────────────────────────────────────────────────────────
+  // Render streaming indicator
+  // ─────────────────────────────────────────────────────────────────────
 
-    useEffect(() => {
-        if (streaming.isStreaming) {
-            document.addEventListener("keydown", handleKeyDown, true);
-            return () => {
-                document.removeEventListener("keydown", handleKeyDown, true);
-            };
-        }
-    }, [streaming.isStreaming, handleKeyDown]);
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Render streaming indicator
-    // ─────────────────────────────────────────────────────────────────────
-
-    return (
-        <StreamingIndicator
-            isStreaming={streaming.isStreaming}
-            tokenCount={streaming.tokenCount}
-            isReplacing={streaming.isReplacing}
-            onCancel={streaming.cancelStream}
-        />
-    );
+  return (
+    <StreamingIndicator
+      isStreaming={streaming.isStreaming}
+      tokenCount={streaming.tokenCount}
+      isReplacing={streaming.isReplacing}
+      onCancel={streaming.cancelStream}
+    />
+  );
 }

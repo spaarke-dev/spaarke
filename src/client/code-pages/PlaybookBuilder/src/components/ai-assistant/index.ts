@@ -31,20 +31,24 @@ export type { CommandPaletteProps } from "./CommandPalette";
 
 // Commands
 export {
-    COMMANDS,
-    NODE_TYPE_INFO,
-    CATEGORY_LABELS,
-    CATEGORY_ORDER,
-    filterCommands,
-    getCommandsByCategory,
-    findCommand,
-    parseSlashCommand,
+  COMMANDS,
+  NODE_TYPE_INFO,
+  CATEGORY_LABELS,
+  CATEGORY_ORDER,
+  filterCommands,
+  getCommandsByCategory,
+  findCommand,
+  parseSlashCommand,
 } from "./commands";
 export type { SlashCommand } from "./commands";
 
 // Error Display
 export { ErrorDisplay } from "./ErrorDisplay";
-export type { ErrorDisplayProps, AiBuilderError, ErrorSeverity } from "./ErrorDisplay";
+export type {
+  ErrorDisplayProps,
+  AiBuilderError,
+  ErrorSeverity,
+} from "./ErrorDisplay";
 
 // Operation Feedback
 export { OperationFeedback } from "./OperationFeedback";

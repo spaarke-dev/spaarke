@@ -5,7 +5,10 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { action } from "@storybook/addon-actions";
-import { CalendarVisual, ICalendarEvent } from "../control/components/CalendarVisual";
+import {
+  CalendarVisual,
+  ICalendarEvent,
+} from "../control/components/CalendarVisual";
 
 const meta: Meta<typeof CalendarVisual> = {
   title: "Charts/CalendarVisual",
@@ -14,7 +17,8 @@ const meta: Meta<typeof CalendarVisual> = {
     layout: "padded",
     docs: {
       description: {
-        component: "CalendarVisual displays a monthly calendar grid with event indicators.",
+        component:
+          "CalendarVisual displays a monthly calendar grid with event indicators.",
       },
     },
   },

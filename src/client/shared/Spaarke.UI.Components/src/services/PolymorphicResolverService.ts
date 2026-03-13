@@ -28,7 +28,7 @@ export interface IPolymorphicWebApi {
   retrieveMultipleRecords(
     entityLogicalName: string,
     query: string,
-    maxPageSize?: number
+    maxPageSize?: number,
   ): Promise<{ entities: Record<string, unknown>[] }>;
 }
 
@@ -71,7 +71,7 @@ const _recordTypeCache = new Map<string, IRecordTypeRef>();
  */
 export async function resolveRecordType(
   webApi: IPolymorphicWebApi,
-  entityLogicalName: string
+  entityLogicalName: string,
 ): Promise<IRecordTypeRef | null> {
   const cached = _recordTypeCache.get(entityLogicalName);
   if (cached) return cached;
@@ -80,19 +80,25 @@ export async function resolveRecordType(
     const query =
       `?$filter=sprk_recordlogicalname eq '${entityLogicalName}' and statecode eq 0` +
       `&$select=sprk_recordtype_refid,sprk_recorddisplayname`;
-    const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
+    const result = await webApi.retrieveMultipleRecords(
+      "sprk_recordtype_ref",
+      query,
+    );
 
     if (result.entities?.length > 0) {
       const rec = result.entities[0];
       const entry: IRecordTypeRef = {
-        id: rec['sprk_recordtype_refid'] as string,
-        name: rec['sprk_recorddisplayname'] as string,
+        id: rec["sprk_recordtype_refid"] as string,
+        name: rec["sprk_recorddisplayname"] as string,
       };
       _recordTypeCache.set(entityLogicalName, entry);
       return entry;
     }
   } catch (err) {
-    console.warn(`[PolymorphicResolver] resolveRecordType(${entityLogicalName}) error:`, err);
+    console.warn(
+      `[PolymorphicResolver] resolveRecordType(${entityLogicalName}) error:`,
+      err,
+    );
   }
   return null;
 }
@@ -106,27 +112,36 @@ export async function resolveRecordType(
  * Tries to resolve clientUrl and appId from the Xrm context; falls back
  * to a relative URL.
  */
-export function buildRecordUrl(entityLogicalName: string, recordId: string): string {
-  const cleanId = recordId.replace(/[{}]/g, '').toLowerCase();
+export function buildRecordUrl(
+  entityLogicalName: string,
+  recordId: string,
+): string {
+  const cleanId = recordId.replace(/[{}]/g, "").toLowerCase();
 
   try {
     // Walk frames to find Xrm
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    const xrm =
+      (window as any).Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
     const globalCtx = xrm?.Utility?.getGlobalContext?.();
-    const clientUrl: string = globalCtx?.getClientUrl?.() ?? '';
+    const clientUrl: string = globalCtx?.getClientUrl?.() ?? "";
 
     if (clientUrl) {
-      const url = new URL('/main.aspx', clientUrl);
+      const url = new URL("/main.aspx", clientUrl);
       // Try to get app ID from URL params
       const appId =
-        new URLSearchParams(window.location.search).get('appid') ??
-        new URLSearchParams(window.parent?.location?.search ?? '').get('appid') ??
-        '';
-      if (appId) url.searchParams.set('appid', appId.replace(/[{}]/g, '').toLowerCase());
-      url.searchParams.set('pagetype', 'entityrecord');
-      url.searchParams.set('etn', entityLogicalName);
-      url.searchParams.set('id', cleanId);
+        new URLSearchParams(window.location.search).get("appid") ??
+        new URLSearchParams(window.parent?.location?.search ?? "").get(
+          "appid",
+        ) ??
+        "";
+      if (appId)
+        url.searchParams.set("appid", appId.replace(/[{}]/g, "").toLowerCase());
+      url.searchParams.set("pagetype", "entityrecord");
+      url.searchParams.set("etn", entityLogicalName);
+      url.searchParams.set("id", cleanId);
       return url.toString();
     }
   } catch {
@@ -147,9 +162,11 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
 export function findNavProp(
   entries: INavPropEntry[],
   referencedEntity: string,
-  columnHint?: string
+  columnHint?: string,
 ): string | undefined {
-  const matches = entries.filter((e) => e.referencedEntity === referencedEntity);
+  const matches = entries.filter(
+    (e) => e.referencedEntity === referencedEntity,
+  );
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0].navPropName;
   if (columnHint) {
@@ -190,33 +207,52 @@ export async function applyResolverFields(
   parentEntitySet: string,
   parentRecordId: string,
   parentRecordName: string,
-  entityLookupHint?: string
+  entityLookupHint?: string,
 ): Promise<void> {
   // 1. Bind entity-specific regarding lookup
-  const entityNavProp = findNavProp(navProps, parentEntityLogicalName, entityLookupHint);
+  const entityNavProp = findNavProp(
+    navProps,
+    parentEntityLogicalName,
+    entityLookupHint,
+  );
   if (entityNavProp) {
-    entity[`${entityNavProp}@odata.bind`] = `/${parentEntitySet}(${parentRecordId})`;
+    entity[`${entityNavProp}@odata.bind`] =
+      `/${parentEntitySet}(${parentRecordId})`;
   } else {
     console.warn(
-      `[PolymorphicResolver] No nav-prop for ${parentEntityLogicalName} (hint: ${entityLookupHint}), skipping entity-specific lookup`
+      `[PolymorphicResolver] No nav-prop for ${parentEntityLogicalName} (hint: ${entityLookupHint}), skipping entity-specific lookup`,
     );
   }
 
   // 2. Populate denormalized text/URL fields
-  entity['sprk_regardingrecordid'] = parentRecordId.replace(/[{}]/g, '').toLowerCase();
-  entity['sprk_regardingrecordname'] = parentRecordName;
-  entity['sprk_regardingrecordurl'] = buildRecordUrl(parentEntityLogicalName, parentRecordId);
+  entity["sprk_regardingrecordid"] = parentRecordId
+    .replace(/[{}]/g, "")
+    .toLowerCase();
+  entity["sprk_regardingrecordname"] = parentRecordName;
+  entity["sprk_regardingrecordurl"] = buildRecordUrl(
+    parentEntityLogicalName,
+    parentRecordId,
+  );
 
   // 3. Bind sprk_regardingrecordtype lookup to sprk_recordtype_ref
   const recordType = await resolveRecordType(webApi, parentEntityLogicalName);
   if (recordType) {
-    const rtNavProp = findNavProp(navProps, 'sprk_recordtype_ref', 'regardingrecordtype');
+    const rtNavProp = findNavProp(
+      navProps,
+      "sprk_recordtype_ref",
+      "regardingrecordtype",
+    );
     if (rtNavProp) {
-      entity[`${rtNavProp}@odata.bind`] = `/sprk_recordtype_refs(${recordType.id})`;
+      entity[`${rtNavProp}@odata.bind`] =
+        `/sprk_recordtype_refs(${recordType.id})`;
     } else {
-      console.warn('[PolymorphicResolver] No nav-prop for sprk_recordtype_ref (regardingrecordtype)');
+      console.warn(
+        "[PolymorphicResolver] No nav-prop for sprk_recordtype_ref (regardingrecordtype)",
+      );
     }
   } else {
-    console.warn(`[PolymorphicResolver] Record type ref not found for ${parentEntityLogicalName}`);
+    console.warn(
+      `[PolymorphicResolver] Record type ref not found for ${parentEntityLogicalName}`,
+    );
   }
 }

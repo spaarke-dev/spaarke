@@ -14,10 +14,7 @@ import {
   Badge,
   mergeClasses,
 } from "@fluentui/react-components";
-import {
-  ChevronLeftRegular,
-  ChevronRightRegular,
-} from "@fluentui/react-icons";
+import { ChevronLeftRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { DrillInteraction } from "../../types";
 
 export interface ICalendarEvent {
@@ -146,8 +143,18 @@ const useStyles = makeStyles({
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 /**
@@ -203,7 +210,7 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
   const styles = useStyles();
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(
-    initialMonth || new Date(today.getFullYear(), today.getMonth(), 1)
+    initialMonth || new Date(today.getFullYear(), today.getMonth(), 1),
   );
 
   const eventMap = useMemo(() => {
@@ -217,22 +224,37 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
 
   const calendarDays = useMemo(
     () => getCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth()),
-    [currentMonth]
+    [currentMonth],
   );
 
   const handlePrevMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+    setCurrentMonth(
+      new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1),
+    );
   };
 
   const handleNextMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+    setCurrentMonth(
+      new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1),
+    );
   };
 
   const handleDayClick = (date: Date, event?: ICalendarEvent) => {
     if (onDrillInteraction && drillField) {
       // Create a date range for the entire day
-      const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+      const startOfDay = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+      );
+      const endOfDay = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+        23,
+        59,
+        59,
+      );
 
       onDrillInteraction({
         field: drillField,
@@ -291,9 +313,11 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
                 !isCurrentMonth && styles.dayOutsideMonth,
                 isToday && styles.dayToday,
                 hasEvents && styles.dayWithEvents,
-                isInteractive && styles.dayInteractive
+                isInteractive && styles.dayInteractive,
               )}
-              onClick={isInteractive ? () => handleDayClick(date, event) : undefined}
+              onClick={
+                isInteractive ? () => handleDayClick(date, event) : undefined
+              }
               tabIndex={isInteractive ? 0 : undefined}
               role={isInteractive ? "button" : undefined}
               aria-label={`${date.toLocaleDateString()}${hasEvents ? `, ${event.count} events` : ""}`}
@@ -301,7 +325,7 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
               <Text
                 className={mergeClasses(
                   styles.dayNumber,
-                  isToday && styles.dayNumberToday
+                  isToday && styles.dayNumberToday,
                 )}
               >
                 {date.getDate()}

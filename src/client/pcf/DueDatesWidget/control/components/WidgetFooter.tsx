@@ -12,12 +12,12 @@
 
 import * as React from "react";
 import {
-    makeStyles,
-    tokens,
-    Link,
-    Badge,
-    Text,
-    shorthands
+  makeStyles,
+  tokens,
+  Link,
+  Badge,
+  Text,
+  shorthands,
 } from "@fluentui/react-components";
 import { ChevronRight20Regular } from "@fluentui/react-icons";
 
@@ -26,12 +26,12 @@ import { ChevronRight20Regular } from "@fluentui/react-icons";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface IWidgetFooterProps {
-    /** Total number of events matching the filter criteria */
-    totalEventCount: number;
-    /** Number of items currently displayed */
-    displayedCount: number;
-    /** Callback when "All Events" link is clicked */
-    onViewAllClick: () => void;
+  /** Total number of events matching the filter criteria */
+  totalEventCount: number;
+  /** Number of items currently displayed */
+  displayedCount: number;
+  /** Callback when "All Events" link is clicked */
+  onViewAllClick: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,51 +46,51 @@ const BADGE_THRESHOLD = 10;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-    footer: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-        ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
-        marginTop: "auto"
+  footer: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    marginTop: "auto",
+  },
+  linkContainer: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: tokens.spacingHorizontalXS,
+  },
+  link: {
+    display: "flex",
+    alignItems: "center",
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightMedium,
+    color: tokens.colorBrandForeground1,
+    textDecoration: "none",
+    cursor: "pointer",
+    transitionProperty: "color",
+    transitionDuration: tokens.durationNormal,
+    "&:hover": {
+      color: tokens.colorBrandForeground2,
+      textDecoration: "underline",
     },
-    linkContainer: {
-        display: "flex",
-        alignItems: "center",
-        columnGap: tokens.spacingHorizontalXS
+    "&:focus": {
+      outlineStyle: "solid",
+      outlineWidth: "2px",
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: "2px",
     },
-    link: {
-        display: "flex",
-        alignItems: "center",
-        fontSize: tokens.fontSizeBase200,
-        fontWeight: tokens.fontWeightMedium,
-        color: tokens.colorBrandForeground1,
-        textDecoration: "none",
-        cursor: "pointer",
-        transitionProperty: "color",
-        transitionDuration: tokens.durationNormal,
-        "&:hover": {
-            color: tokens.colorBrandForeground2,
-            textDecoration: "underline"
-        },
-        "&:focus": {
-            outlineStyle: "solid",
-            outlineWidth: "2px",
-            outlineColor: tokens.colorStrokeFocus2,
-            outlineOffset: "2px"
-        }
-    },
-    chevron: {
-        fontSize: "12px",
-        marginLeft: tokens.spacingHorizontalXXS,
-        color: "inherit"
-    },
-    badge: {
-        marginLeft: tokens.spacingHorizontalXS
-    },
-    badgeText: {
-        fontWeight: tokens.fontWeightSemibold
-    }
+  },
+  chevron: {
+    fontSize: "12px",
+    marginLeft: tokens.spacingHorizontalXXS,
+    color: "inherit",
+  },
+  badge: {
+    marginLeft: tokens.spacingHorizontalXS,
+  },
+  badgeText: {
+    fontWeight: tokens.fontWeightSemibold,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,58 +98,61 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const WidgetFooter: React.FC<IWidgetFooterProps> = ({
-    totalEventCount,
-    displayedCount,
-    onViewAllClick
+  totalEventCount,
+  displayedCount,
+  onViewAllClick,
 }) => {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    // Determine if we should show the badge
-    // Show badge when there are more events than displayed AND total exceeds threshold
-    const showBadge = totalEventCount > displayedCount && totalEventCount > BADGE_THRESHOLD;
+  // Determine if we should show the badge
+  // Show badge when there are more events than displayed AND total exceeds threshold
+  const showBadge =
+    totalEventCount > displayedCount && totalEventCount > BADGE_THRESHOLD;
 
-    // Calculate remaining events not shown
-    const remainingCount = totalEventCount - displayedCount;
+  // Calculate remaining events not shown
+  const remainingCount = totalEventCount - displayedCount;
 
-    /**
-     * Handle keyboard navigation for the link
-     */
-    const handleKeyDown = (event: React.KeyboardEvent<HTMLAnchorElement>): void => {
-        if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onViewAllClick();
-        }
-    };
+  /**
+   * Handle keyboard navigation for the link
+   */
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLAnchorElement>,
+  ): void => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onViewAllClick();
+    }
+  };
 
-    return (
-        <div className={styles.footer}>
-            <div className={styles.linkContainer}>
-                <Link
-                    className={styles.link}
-                    onClick={onViewAllClick}
-                    onKeyDown={handleKeyDown}
-                    tabIndex={0}
-                    aria-label={
-                        showBadge
-                            ? `View all events (${totalEventCount} total, ${remainingCount} more)`
-                            : "View all events"
-                    }
-                >
-                    All Events
-                    <ChevronRight20Regular className={styles.chevron} />
-                </Link>
-                {showBadge && (
-                    <Badge
-                        className={styles.badge}
-                        appearance="filled"
-                        color="informative"
-                        size="small"
-                        aria-label={`${remainingCount} more events`}
-                    >
-                        <Text className={styles.badgeText}>+{remainingCount}</Text>
-                    </Badge>
-                )}
-            </div>
-        </div>
-    );
+  return (
+    <div className={styles.footer}>
+      <div className={styles.linkContainer}>
+        <Link
+          className={styles.link}
+          onClick={onViewAllClick}
+          onKeyDown={handleKeyDown}
+          tabIndex={0}
+          aria-label={
+            showBadge
+              ? `View all events (${totalEventCount} total, ${remainingCount} more)`
+              : "View all events"
+          }
+        >
+          All Events
+          <ChevronRight20Regular className={styles.chevron} />
+        </Link>
+        {showBadge && (
+          <Badge
+            className={styles.badge}
+            appearance="filled"
+            color="informative"
+            size="small"
+            aria-label={`${remainingCount} more events`}
+          >
+            <Text className={styles.badgeText}>+{remainingCount}</Text>
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
 };

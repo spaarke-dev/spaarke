@@ -6,14 +6,14 @@
  * @packageDocumentation
  */
 
-export { SdapApiClient } from './SdapApiClient';
+export { SdapApiClient } from "./SdapApiClient";
 
 export type {
-    SdapClientConfig,
-    DriveItem,
-    UploadSession,
-    FileMetadata,
-    UploadProgressCallback,
-    SdapApiError,
-    Container
-} from './types';
+  SdapClientConfig,
+  DriveItem,
+  UploadSession,
+  FileMetadata,
+  UploadProgressCallback,
+  SdapApiError,
+  Container,
+} from "./types";

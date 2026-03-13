@@ -13,8 +13,8 @@
  * @version 1.0.0
  */
 
-import * as React from 'react';
-import { useEffect, useRef } from 'react';
+import * as React from "react";
+import { useEffect, useRef } from "react";
 import {
   Text,
   Badge,
@@ -28,7 +28,7 @@ import {
   tokens,
   shorthands,
   mergeClasses,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   Bot20Regular,
   Person20Regular,
@@ -38,13 +38,13 @@ import {
   Edit12Regular,
   Link12Regular,
   DismissRegular,
-} from '@fluentui/react-icons';
+} from "@fluentui/react-icons";
 import {
   useAiAssistantStore,
   type ChatMessage,
   type CanvasOperation,
-} from '../../stores/aiAssistantStore';
-import { ClarificationOptions } from './ClarificationOptions';
+} from "../../stores/aiAssistantStore";
+import { ClarificationOptions } from "./ClarificationOptions";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -53,50 +53,50 @@ import { ClarificationOptions } from './ClarificationOptions';
 const useStyles = makeStyles({
   // Container
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     flex: 1,
-    ...shorthands.overflow('hidden'),
+    ...shorthands.overflow("hidden"),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   // Scrollable message area
   messageList: {
     flex: 1,
-    overflowY: 'auto',
-    overflowX: 'hidden',
+    overflowY: "auto",
+    overflowX: "hidden",
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalM),
   },
   // Individual message wrapper
   messageWrapper: {
-    display: 'flex',
-    flexDirection: 'column',
-    maxWidth: '85%',
+    display: "flex",
+    flexDirection: "column",
+    maxWidth: "85%",
   },
   // User message alignment (right)
   userMessage: {
-    alignSelf: 'flex-end',
-    alignItems: 'flex-end',
+    alignSelf: "flex-end",
+    alignItems: "flex-end",
   },
   // Assistant message alignment (left)
   assistantMessage: {
-    alignSelf: 'flex-start',
-    alignItems: 'flex-start',
+    alignSelf: "flex-start",
+    alignItems: "flex-start",
   },
   // System message alignment (center)
   systemMessage: {
-    alignSelf: 'center',
-    alignItems: 'center',
-    maxWidth: '90%',
+    alignSelf: "center",
+    alignItems: "center",
+    maxWidth: "90%",
   },
   // Message bubble
   messageBubble: {
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.borderRadius(tokens.borderRadiusLarge),
-    wordBreak: 'break-word',
-    whiteSpace: 'pre-wrap',
+    wordBreak: "break-word",
+    whiteSpace: "pre-wrap",
   },
   // User bubble styling
   userBubble: {
@@ -107,15 +107,15 @@ const useStyles = makeStyles({
   assistantBubble: {
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
   },
   // System bubble styling
   systemBubble: {
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
-    fontStyle: 'italic',
+    fontStyle: "italic",
     fontSize: tokens.fontSizeBase200,
-    textAlign: 'center',
+    textAlign: "center",
   },
   // Streaming bubble (typing indicator)
   streamingBubble: {
@@ -123,8 +123,8 @@ const useStyles = makeStyles({
   },
   // Message header with icon
   messageHeader: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
     marginBottom: tokens.spacingVerticalXS,
   },
@@ -142,43 +142,43 @@ const useStyles = makeStyles({
   },
   // Operation badges container
   operationsContainer: {
-    display: 'flex',
-    flexWrap: 'wrap',
+    display: "flex",
+    flexWrap: "wrap",
     ...shorthands.gap(tokens.spacingHorizontalXS),
     marginTop: tokens.spacingVerticalS,
   },
   // Operation badge
   operationBadge: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXXS),
   },
   // Empty state
   emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
     ...shorthands.padding(tokens.spacingVerticalXXL),
-    textAlign: 'center',
+    textAlign: "center",
     color: tokens.colorNeutralForeground3,
   },
   emptyIcon: {
-    fontSize: '32px',
+    fontSize: "32px",
     marginBottom: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground4,
   },
   // Streaming indicator
   streamingIndicator: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderRadius(tokens.borderRadiusLarge),
-    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
-    alignSelf: 'flex-start',
+    ...shorthands.border("1px", "solid", tokens.colorBrandStroke1),
+    alignSelf: "flex-start",
   },
   streamingText: {
     color: tokens.colorNeutralForeground2,
@@ -197,26 +197,26 @@ const useStyles = makeStyles({
  * Format timestamp for display.
  */
 const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
 /**
  * Get icon and color for operation type.
  */
-const getOperationIcon = (type: CanvasOperation['type']) => {
+const getOperationIcon = (type: CanvasOperation["type"]) => {
   switch (type) {
-    case 'add_node':
-      return { icon: <AddCircle12Regular />, color: 'success' as const };
-    case 'remove_node':
-      return { icon: <Delete12Regular />, color: 'danger' as const };
-    case 'update_node':
-      return { icon: <Edit12Regular />, color: 'warning' as const };
-    case 'add_edge':
-      return { icon: <Link12Regular />, color: 'informative' as const };
-    case 'remove_edge':
-      return { icon: <Delete12Regular />, color: 'subtle' as const };
+    case "add_node":
+      return { icon: <AddCircle12Regular />, color: "success" as const };
+    case "remove_node":
+      return { icon: <Delete12Regular />, color: "danger" as const };
+    case "update_node":
+      return { icon: <Edit12Regular />, color: "warning" as const };
+    case "add_edge":
+      return { icon: <Link12Regular />, color: "informative" as const };
+    case "remove_edge":
+      return { icon: <Delete12Regular />, color: "subtle" as const };
     default:
-      return { icon: <CheckmarkCircle12Regular />, color: 'brand' as const };
+      return { icon: <CheckmarkCircle12Regular />, color: "brand" as const };
   }
 };
 
@@ -226,18 +226,18 @@ const getOperationIcon = (type: CanvasOperation['type']) => {
 const getOperationLabel = (op: CanvasOperation): string => {
   if (op.description) return op.description;
   switch (op.type) {
-    case 'add_node':
-      return `Added node${op.nodeId ? ` ${op.nodeId}` : ''}`;
-    case 'remove_node':
-      return `Removed node${op.nodeId ? ` ${op.nodeId}` : ''}`;
-    case 'update_node':
-      return `Updated node${op.nodeId ? ` ${op.nodeId}` : ''}`;
-    case 'add_edge':
-      return `Added edge${op.edgeId ? ` ${op.edgeId}` : ''}`;
-    case 'remove_edge':
-      return `Removed edge${op.edgeId ? ` ${op.edgeId}` : ''}`;
+    case "add_node":
+      return `Added node${op.nodeId ? ` ${op.nodeId}` : ""}`;
+    case "remove_node":
+      return `Removed node${op.nodeId ? ` ${op.nodeId}` : ""}`;
+    case "update_node":
+      return `Updated node${op.nodeId ? ` ${op.nodeId}` : ""}`;
+    case "add_edge":
+      return `Added edge${op.edgeId ? ` ${op.edgeId}` : ""}`;
+    case "remove_edge":
+      return `Removed edge${op.edgeId ? ` ${op.edgeId}` : ""}`;
     default:
-      return 'Canvas updated';
+      return "Canvas updated";
   }
 };
 
@@ -267,18 +267,23 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
   showTimestamps = true,
   showIcons = true,
   showOperations = true,
-  emptyMessage = 'Start a conversation with the AI assistant',
+  emptyMessage = "Start a conversation with the AI assistant",
 }) => {
   const styles = useStyles();
   const messageListRef = useRef<HTMLDivElement>(null);
 
   // Store state
-  const { messages, isStreaming, streamingState, error, setError, respondToClarification } = useAiAssistantStore();
+  const {
+    messages,
+    isStreaming,
+    streamingState,
+    error,
+    setError,
+    respondToClarification,
+  } = useAiAssistantStore();
 
   // Apply message limit if specified
-  const displayMessages = maxMessages
-    ? messages.slice(-maxMessages)
-    : messages;
+  const displayMessages = maxMessages ? messages.slice(-maxMessages) : messages;
 
   // Auto-scroll to bottom when new messages arrive or during streaming
   useEffect(() => {
@@ -289,9 +294,9 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   // Render a single message
   const renderMessage = (message: ChatMessage) => {
-    const isUser = message.role === 'user';
-    const isAssistant = message.role === 'assistant';
-    const isSystem = message.role === 'system';
+    const isUser = message.role === "user";
+    const isAssistant = message.role === "assistant";
+    const isSystem = message.role === "system";
 
     return (
       <div
@@ -300,7 +305,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
           styles.messageWrapper,
           isUser && styles.userMessage,
           isAssistant && styles.assistantMessage,
-          isSystem && styles.systemMessage
+          isSystem && styles.systemMessage,
         )}
         role="listitem"
       >
@@ -308,12 +313,17 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
         {showIcons && !isSystem && (
           <div className={styles.messageHeader}>
             {isUser ? (
-              <Person20Regular className={mergeClasses(styles.messageIcon, styles.messageIconUser)} />
+              <Person20Regular
+                className={mergeClasses(
+                  styles.messageIcon,
+                  styles.messageIconUser,
+                )}
+              />
             ) : (
               <Bot20Regular className={styles.messageIcon} />
             )}
             <Text size={100} className={styles.messageIcon}>
-              {isUser ? 'You' : 'AI Assistant'}
+              {isUser ? "You" : "AI Assistant"}
             </Text>
           </div>
         )}
@@ -325,7 +335,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
             isUser && styles.userBubble,
             isAssistant && styles.assistantBubble,
             isSystem && styles.systemBubble,
-            message.isStreaming && styles.streamingBubble
+            message.isStreaming && styles.streamingBubble,
           )}
         >
           <Text size={300}>{message.content}</Text>
@@ -392,7 +402,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
       >
         <Spinner size="tiny" />
         <Text className={styles.streamingText}>
-          {streamingState.currentStep || 'AI is thinking...'}
+          {streamingState.currentStep || "AI is thinking..."}
           {streamingState.operationCount > 0 && (
             <span> ({streamingState.operationCount} changes)</span>
           )}
@@ -416,10 +426,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
       >
         {/* Error display */}
         {error && (
-          <MessageBar
-            className={styles.errorBar}
-            intent="error"
-          >
+          <MessageBar className={styles.errorBar} intent="error">
             <MessageBarBody>
               <MessageBarTitle>Error</MessageBarTitle>
               {error}

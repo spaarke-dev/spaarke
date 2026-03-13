@@ -51,7 +51,9 @@ describe("CommandBar", () => {
     it("should hide Delete button when showDelete is false", () => {
       renderWithProvider(<CommandBar {...defaultProps} showDelete={false} />);
 
-      expect(screen.queryByLabelText(/delete selected/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/delete selected/i),
+      ).not.toBeInTheDocument();
     });
 
     it("should hide Refresh button when showRefresh is false", () => {
@@ -84,7 +86,11 @@ describe("CommandBar", () => {
 
     it("should enable Delete button when there is a selection", () => {
       renderWithProvider(
-        <CommandBar {...defaultProps} selectedIds={["id-1", "id-2"]} canDelete />
+        <CommandBar
+          {...defaultProps}
+          selectedIds={["id-1", "id-2"]}
+          canDelete
+        />,
       );
 
       const deleteButton = screen.getByLabelText(/delete selected/i);
@@ -93,7 +99,11 @@ describe("CommandBar", () => {
 
     it("should disable Delete button when canDelete is false", () => {
       renderWithProvider(
-        <CommandBar {...defaultProps} selectedIds={["id-1"]} canDelete={false} />
+        <CommandBar
+          {...defaultProps}
+          selectedIds={["id-1"]}
+          canDelete={false}
+        />,
       );
 
       const deleteButton = screen.getByLabelText(/delete selected/i);
@@ -101,7 +111,9 @@ describe("CommandBar", () => {
     });
 
     it("should show selection count on Delete button", () => {
-      renderWithProvider(<CommandBar {...defaultProps} selectedIds={["id-1", "id-2"]} />);
+      renderWithProvider(
+        <CommandBar {...defaultProps} selectedIds={["id-1", "id-2"]} />,
+      );
 
       expect(screen.getByText("2")).toBeInTheDocument();
     });
@@ -121,7 +133,11 @@ describe("CommandBar", () => {
       const onDelete = jest.fn();
       const selectedIds = ["id-1", "id-2"];
       renderWithProvider(
-        <CommandBar {...defaultProps} selectedIds={selectedIds} onDelete={onDelete} />
+        <CommandBar
+          {...defaultProps}
+          selectedIds={selectedIds}
+          onDelete={onDelete}
+        />,
       );
 
       fireEvent.click(screen.getByLabelText(/delete selected/i));
@@ -131,7 +147,9 @@ describe("CommandBar", () => {
 
     it("should call onRefresh when Refresh button is clicked", () => {
       const onRefresh = jest.fn();
-      renderWithProvider(<CommandBar {...defaultProps} onRefresh={onRefresh} />);
+      renderWithProvider(
+        <CommandBar {...defaultProps} onRefresh={onRefresh} />,
+      );
 
       fireEvent.click(screen.getByLabelText(/refresh data/i));
 
@@ -196,7 +214,7 @@ describe("CommandBar", () => {
     it("should call onSearch when Enter is pressed in search box", () => {
       const onSearch = jest.fn();
       renderWithProvider(
-        <CommandBar {...defaultProps} showSearch onSearch={onSearch} />
+        <CommandBar {...defaultProps} showSearch onSearch={onSearch} />,
       );
 
       const searchInput = screen.getByLabelText(/search records/i);
@@ -212,7 +230,7 @@ describe("CommandBar", () => {
           {...defaultProps}
           showSearch
           searchPlaceholder="Find events..."
-        />
+        />,
       );
 
       expect(screen.getByPlaceholderText("Find events...")).toBeInTheDocument();
@@ -222,7 +240,7 @@ describe("CommandBar", () => {
   describe("compact mode", () => {
     it("should apply compact styles when compact is true", () => {
       const { container } = renderWithProvider(
-        <CommandBar {...defaultProps} compact />
+        <CommandBar {...defaultProps} compact />,
       );
 
       // The toolbar should have the compact class applied
@@ -233,7 +251,9 @@ describe("CommandBar", () => {
 
   describe("accessibility", () => {
     it("should have proper aria-label on toolbar", () => {
-      const { container } = renderWithProvider(<CommandBar {...defaultProps} />);
+      const { container } = renderWithProvider(
+        <CommandBar {...defaultProps} />,
+      );
 
       const toolbar = container.querySelector('[role="toolbar"]');
       expect(toolbar).toHaveAttribute("aria-label", "sprk_event command bar");
@@ -244,15 +264,15 @@ describe("CommandBar", () => {
 
       expect(screen.getByLabelText(/create new/i)).toHaveAttribute(
         "aria-keyshortcuts",
-        "Control+N"
+        "Control+N",
       );
       expect(screen.getByLabelText(/delete selected/i)).toHaveAttribute(
         "aria-keyshortcuts",
-        "Delete"
+        "Delete",
       );
       expect(screen.getByLabelText(/refresh data/i)).toHaveAttribute(
         "aria-keyshortcuts",
-        "F5"
+        "F5",
       );
     });
   });

@@ -15,190 +15,178 @@ import { IChatMessage } from "../types";
 import { renderWithProviders } from "../../../__mocks__/pcfMocks";
 
 describe("SprkChatMessage", () => {
-    const userMessage: IChatMessage = {
-        role: "User",
-        content: "Hello, can you help me?",
-        timestamp: "2026-02-23T10:00:00Z",
-    };
+  const userMessage: IChatMessage = {
+    role: "User",
+    content: "Hello, can you help me?",
+    timestamp: "2026-02-23T10:00:00Z",
+  };
 
-    const assistantMessage: IChatMessage = {
+  const assistantMessage: IChatMessage = {
+    role: "Assistant",
+    content: "Of course! How can I assist you today?",
+    timestamp: "2026-02-23T10:00:05Z",
+  };
+
+  describe("Rendering", () => {
+    it("should render a user message with correct content", () => {
+      renderWithProviders(<SprkChatMessage message={userMessage} />);
+
+      expect(screen.getByText("Hello, can you help me?")).toBeInTheDocument();
+    });
+
+    it("should render an assistant message with correct content", () => {
+      renderWithProviders(<SprkChatMessage message={assistantMessage} />);
+
+      expect(
+        screen.getByText("Of course! How can I assist you today?"),
+      ).toBeInTheDocument();
+    });
+
+    it("should render with listitem role", () => {
+      renderWithProviders(<SprkChatMessage message={userMessage} />);
+
+      expect(screen.getByRole("listitem")).toBeInTheDocument();
+    });
+
+    it("should have aria-label with message role", () => {
+      renderWithProviders(<SprkChatMessage message={userMessage} />);
+
+      expect(screen.getByLabelText("User message")).toBeInTheDocument();
+    });
+
+    it("should render assistant message with correct aria-label", () => {
+      renderWithProviders(<SprkChatMessage message={assistantMessage} />);
+
+      expect(screen.getByLabelText("Assistant message")).toBeInTheDocument();
+    });
+  });
+
+  describe("Timestamps", () => {
+    it("should display timestamp for non-streaming messages", () => {
+      renderWithProviders(
+        <SprkChatMessage message={userMessage} isStreaming={false} />,
+      );
+
+      // The formatted time should appear (locale-dependent, check for any time format)
+      const timeElements = screen
+        .getByLabelText("User message")
+        .querySelectorAll("span");
+      // At least one span should contain time-like content
+      expect(timeElements.length).toBeGreaterThan(0);
+    });
+
+    it("should not display timestamp when streaming", () => {
+      const streamingMsg: IChatMessage = {
         role: "Assistant",
-        content: "Of course! How can I assist you today?",
+        content: "typing...",
         timestamp: "2026-02-23T10:00:05Z",
-    };
+      };
 
-    describe("Rendering", () => {
-        it("should render a user message with correct content", () => {
-            renderWithProviders(
-                <SprkChatMessage message={userMessage} />
-            );
+      renderWithProviders(
+        <SprkChatMessage message={streamingMsg} isStreaming={true} />,
+      );
 
-            expect(screen.getByText("Hello, can you help me?")).toBeInTheDocument();
-        });
+      // Message content should be visible
+      expect(screen.getByText("typing...")).toBeInTheDocument();
+    });
+  });
 
-        it("should render an assistant message with correct content", () => {
-            renderWithProviders(
-                <SprkChatMessage message={assistantMessage} />
-            );
+  describe("Streaming Indicator", () => {
+    it("should show thinking indicator when streaming with empty content", () => {
+      const emptyStreamMsg: IChatMessage = {
+        role: "Assistant",
+        content: "",
+        timestamp: "2026-02-23T10:00:05Z",
+      };
 
-            expect(screen.getByText("Of course! How can I assist you today?")).toBeInTheDocument();
-        });
+      renderWithProviders(
+        <SprkChatMessage message={emptyStreamMsg} isStreaming={true} />,
+      );
 
-        it("should render with listitem role", () => {
-            renderWithProviders(
-                <SprkChatMessage message={userMessage} />
-            );
-
-            expect(screen.getByRole("listitem")).toBeInTheDocument();
-        });
-
-        it("should have aria-label with message role", () => {
-            renderWithProviders(
-                <SprkChatMessage message={userMessage} />
-            );
-
-            expect(screen.getByLabelText("User message")).toBeInTheDocument();
-        });
-
-        it("should render assistant message with correct aria-label", () => {
-            renderWithProviders(
-                <SprkChatMessage message={assistantMessage} />
-            );
-
-            expect(screen.getByLabelText("Assistant message")).toBeInTheDocument();
-        });
+      expect(screen.getByText("Thinking...")).toBeInTheDocument();
     });
 
-    describe("Timestamps", () => {
-        it("should display timestamp for non-streaming messages", () => {
-            renderWithProviders(
-                <SprkChatMessage message={userMessage} isStreaming={false} />
-            );
+    it("should not show thinking indicator when streaming with content", () => {
+      const partialMsg: IChatMessage = {
+        role: "Assistant",
+        content: "Partial response",
+        timestamp: "2026-02-23T10:00:05Z",
+      };
 
-            // The formatted time should appear (locale-dependent, check for any time format)
-            const timeElements = screen.getByLabelText("User message").querySelectorAll("span");
-            // At least one span should contain time-like content
-            expect(timeElements.length).toBeGreaterThan(0);
-        });
+      renderWithProviders(
+        <SprkChatMessage message={partialMsg} isStreaming={true} />,
+      );
 
-        it("should not display timestamp when streaming", () => {
-            const streamingMsg: IChatMessage = {
-                role: "Assistant",
-                content: "typing...",
-                timestamp: "2026-02-23T10:00:05Z",
-            };
-
-            renderWithProviders(
-                <SprkChatMessage message={streamingMsg} isStreaming={true} />
-            );
-
-            // Message content should be visible
-            expect(screen.getByText("typing...")).toBeInTheDocument();
-        });
+      expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+      expect(screen.getByText("Partial response")).toBeInTheDocument();
     });
 
-    describe("Streaming Indicator", () => {
-        it("should show thinking indicator when streaming with empty content", () => {
-            const emptyStreamMsg: IChatMessage = {
-                role: "Assistant",
-                content: "",
-                timestamp: "2026-02-23T10:00:05Z",
-            };
+    it("should not show thinking indicator when not streaming", () => {
+      const emptyMsg: IChatMessage = {
+        role: "Assistant",
+        content: "",
+        timestamp: "2026-02-23T10:00:05Z",
+      };
 
-            renderWithProviders(
-                <SprkChatMessage message={emptyStreamMsg} isStreaming={true} />
-            );
+      renderWithProviders(
+        <SprkChatMessage message={emptyMsg} isStreaming={false} />,
+      );
 
-            expect(screen.getByText("Thinking...")).toBeInTheDocument();
-        });
+      expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    });
+  });
 
-        it("should not show thinking indicator when streaming with content", () => {
-            const partialMsg: IChatMessage = {
-                role: "Assistant",
-                content: "Partial response",
-                timestamp: "2026-02-23T10:00:05Z",
-            };
+  describe("Dark Mode Compliance", () => {
+    it("should use semantic tokens (no hardcoded colors in rendered output)", () => {
+      const { container } = renderWithProviders(
+        <SprkChatMessage message={userMessage} />,
+      );
 
-            renderWithProviders(
-                <SprkChatMessage message={partialMsg} isStreaming={true} />
-            );
+      // Verify the component renders without inline hardcoded color styles
+      // Fluent UI tokens are applied via CSS classes, not inline styles
+      const rootDiv = container.firstChild as HTMLElement;
+      expect(rootDiv).toBeInTheDocument();
+      // No inline color/background-color styles should be set
+      expect(rootDiv.style.color).toBe("");
+      expect(rootDiv.style.backgroundColor).toBe("");
+    });
+  });
 
-            expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
-            expect(screen.getByText("Partial response")).toBeInTheDocument();
-        });
+  describe("Edge Cases", () => {
+    it("should handle empty content gracefully", () => {
+      const emptyMsg: IChatMessage = {
+        role: "User",
+        content: "",
+        timestamp: "2026-02-23T10:00:00Z",
+      };
 
-        it("should not show thinking indicator when not streaming", () => {
-            const emptyMsg: IChatMessage = {
-                role: "Assistant",
-                content: "",
-                timestamp: "2026-02-23T10:00:05Z",
-            };
+      renderWithProviders(<SprkChatMessage message={emptyMsg} />);
 
-            renderWithProviders(
-                <SprkChatMessage message={emptyMsg} isStreaming={false} />
-            );
-
-            expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
-        });
+      expect(screen.getByLabelText("User message")).toBeInTheDocument();
     });
 
-    describe("Dark Mode Compliance", () => {
-        it("should use semantic tokens (no hardcoded colors in rendered output)", () => {
-            const { container } = renderWithProviders(
-                <SprkChatMessage message={userMessage} />
-            );
+    it("should handle very long content", () => {
+      const longMsg: IChatMessage = {
+        role: "Assistant",
+        content: "A".repeat(5000),
+        timestamp: "2026-02-23T10:00:00Z",
+      };
 
-            // Verify the component renders without inline hardcoded color styles
-            // Fluent UI tokens are applied via CSS classes, not inline styles
-            const rootDiv = container.firstChild as HTMLElement;
-            expect(rootDiv).toBeInTheDocument();
-            // No inline color/background-color styles should be set
-            expect(rootDiv.style.color).toBe("");
-            expect(rootDiv.style.backgroundColor).toBe("");
-        });
+      renderWithProviders(<SprkChatMessage message={longMsg} />);
+
+      expect(screen.getByText("A".repeat(5000))).toBeInTheDocument();
     });
 
-    describe("Edge Cases", () => {
-        it("should handle empty content gracefully", () => {
-            const emptyMsg: IChatMessage = {
-                role: "User",
-                content: "",
-                timestamp: "2026-02-23T10:00:00Z",
-            };
+    it("should handle invalid timestamp gracefully", () => {
+      const badTimestamp: IChatMessage = {
+        role: "User",
+        content: "Test",
+        timestamp: "invalid-date",
+      };
 
-            renderWithProviders(
-                <SprkChatMessage message={emptyMsg} />
-            );
+      renderWithProviders(<SprkChatMessage message={badTimestamp} />);
 
-            expect(screen.getByLabelText("User message")).toBeInTheDocument();
-        });
-
-        it("should handle very long content", () => {
-            const longMsg: IChatMessage = {
-                role: "Assistant",
-                content: "A".repeat(5000),
-                timestamp: "2026-02-23T10:00:00Z",
-            };
-
-            renderWithProviders(
-                <SprkChatMessage message={longMsg} />
-            );
-
-            expect(screen.getByText("A".repeat(5000))).toBeInTheDocument();
-        });
-
-        it("should handle invalid timestamp gracefully", () => {
-            const badTimestamp: IChatMessage = {
-                role: "User",
-                content: "Test",
-                timestamp: "invalid-date",
-            };
-
-            renderWithProviders(
-                <SprkChatMessage message={badTimestamp} />
-            );
-
-            expect(screen.getByText("Test")).toBeInTheDocument();
-        });
+      expect(screen.getByText("Test")).toBeInTheDocument();
     });
+  });
 });

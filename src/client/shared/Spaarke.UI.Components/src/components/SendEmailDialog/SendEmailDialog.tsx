@@ -24,7 +24,7 @@
  *   - makeStyles with semantic tokens — ZERO hardcoded colors
  */
 
-import * as React from 'react';
+import * as React from "react";
 import {
   Dialog,
   DialogSurface,
@@ -40,10 +40,10 @@ import {
   Text,
   makeStyles,
   tokens,
-} from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
-import { LookupField } from '../LookupField/LookupField';
-import type { ILookupItem } from '../../types/LookupTypes';
+} from "@fluentui/react-components";
+import { Dismiss24Regular } from "@fluentui/react-icons";
+import { LookupField } from "../LookupField/LookupField";
+import type { ILookupItem } from "../../types/LookupTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,18 +81,18 @@ export interface ISendEmailDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    maxWidth: '520px',
-    width: '90vw',
+    maxWidth: "520px",
+    width: "90vw",
   },
   form: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalS,
   },
   labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
+    display: "inline-flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalXXS,
   },
   requiredMark: {
@@ -103,8 +103,8 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalXS,
   },
   spinnerOverlay: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     gap: tokens.spacingHorizontalS,
   },
 });
@@ -124,9 +124,11 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   const styles = useStyles();
 
   // Form state
-  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(null);
-  const [subject, setSubject] = React.useState('');
-  const [body, setBody] = React.useState('');
+  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(
+    null,
+  );
+  const [subject, setSubject] = React.useState("");
+  const [body, setBody] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -134,8 +136,8 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   React.useEffect(() => {
     if (open) {
       setSelectedUser(null);
-      setSubject(defaultSubject ?? '');
-      setBody(defaultBody ?? '');
+      setSubject(defaultSubject ?? "");
+      setBody(defaultBody ?? "");
       setSending(false);
       setError(null);
     }
@@ -154,8 +156,12 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
       await onSend({ to: selectedUser, subject: subject.trim(), body });
       onClose();
     } catch (err) {
-      console.error('[SendEmailDialog] Send failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send email. Please try again.');
+      console.error("[SendEmailDialog] Send failed:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to send email. Please try again.",
+      );
     } finally {
       setSending(false);
     }
@@ -163,12 +169,15 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
 
   const canSend = !!selectedUser && !!subject.trim() && !sending;
 
-  const renderLabel = (text: string, required?: boolean): React.ReactElement => (
+  const renderLabel = (
+    text: string,
+    required?: boolean,
+  ): React.ReactElement => (
     <span className={styles.labelRow}>
       {text}
       {required && (
         <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
+          {" *"}
         </span>
       )}
     </span>
@@ -210,7 +219,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
               />
 
               {/* Subject */}
-              <Field label={renderLabel('Subject', true)} required>
+              <Field label={renderLabel("Subject", true)} required>
                 <Input
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
@@ -221,7 +230,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
               </Field>
 
               {/* Body */}
-              <Field label={renderLabel('Message')}>
+              <Field label={renderLabel("Message")}>
                 <Textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
@@ -254,7 +263,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
                 Sending...
               </span>
             ) : (
-              'Send'
+              "Send"
             )}
           </Button>
         </DialogActions>
@@ -263,4 +272,4 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
   );
 };
 
-SendEmailDialog.displayName = 'SendEmailDialog';
+SendEmailDialog.displayName = "SendEmailDialog";

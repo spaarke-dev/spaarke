@@ -147,7 +147,11 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, item: IMiniTableItem, rank: number) => {
+  const handleKeyDown = (
+    e: React.KeyboardEvent,
+    item: IMiniTableItem,
+    rank: number,
+  ) => {
     if (interactive && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
       handleRowClick(item, rank);
@@ -176,7 +180,9 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
           <TableHeader>
             <TableRow>
               {showRank && (
-                <TableHeaderCell className={mergeClasses(styles.headerCell, styles.rankCell)}>
+                <TableHeaderCell
+                  className={mergeClasses(styles.headerCell, styles.rankCell)}
+                >
                   #
                 </TableHeaderCell>
               )}
@@ -185,7 +191,7 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
                   key={column.key}
                   className={mergeClasses(
                     styles.headerCell,
-                    column.isValue && styles.valueCell
+                    column.isValue && styles.valueCell,
                   )}
                   style={column.width ? { width: column.width } : undefined}
                 >
@@ -202,15 +208,23 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
                   key={item.id}
                   className={mergeClasses(
                     styles.row,
-                    isInteractive && styles.rowInteractive
+                    isInteractive && styles.rowInteractive,
                   )}
-                  onClick={isInteractive ? () => handleRowClick(item, rank) : undefined}
-                  onKeyDown={isInteractive ? (e) => handleKeyDown(e, item, rank) : undefined}
+                  onClick={
+                    isInteractive ? () => handleRowClick(item, rank) : undefined
+                  }
+                  onKeyDown={
+                    isInteractive
+                      ? (e) => handleKeyDown(e, item, rank)
+                      : undefined
+                  }
                   tabIndex={isInteractive ? 0 : undefined}
                   aria-label={`Rank ${rank}: ${item.values[columns[0]?.key] || item.id}`}
                 >
                   {showRank && (
-                    <TableCell className={mergeClasses(styles.cell, styles.rankCell)}>
+                    <TableCell
+                      className={mergeClasses(styles.cell, styles.rankCell)}
+                    >
                       {rank}
                     </TableCell>
                   )}
@@ -219,7 +233,7 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
                       key={column.key}
                       className={mergeClasses(
                         styles.cell,
-                        column.isValue && styles.valueCell
+                        column.isValue && styles.valueCell,
                       )}
                     >
                       <TableCellLayout>

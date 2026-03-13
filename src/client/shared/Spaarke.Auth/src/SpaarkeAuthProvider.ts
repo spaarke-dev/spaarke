@@ -1,13 +1,13 @@
-import type { Configuration } from '@azure/msal-browser';
-import type { IAuthConfig, ITokenResult } from './types';
-import { AuthError } from './errors';
-import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
-import { BridgeStrategy } from './strategies/BridgeStrategy';
-import { CacheStrategy } from './strategies/CacheStrategy';
-import { XrmStrategy } from './strategies/XrmStrategy';
-import { MsalSilentStrategy } from './strategies/MsalSilentStrategy';
-import { MsalPopupStrategy } from './strategies/MsalPopupStrategy';
-import { publishToken } from './tokenBridge';
+import type { Configuration } from "@azure/msal-browser";
+import type { IAuthConfig, ITokenResult } from "./types";
+import { AuthError } from "./errors";
+import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from "./config";
+import { BridgeStrategy } from "./strategies/BridgeStrategy";
+import { CacheStrategy } from "./strategies/CacheStrategy";
+import { XrmStrategy } from "./strategies/XrmStrategy";
+import { MsalSilentStrategy } from "./strategies/MsalSilentStrategy";
+import { MsalPopupStrategy } from "./strategies/MsalPopupStrategy";
+import { publishToken } from "./tokenBridge";
 
 /**
  * Core auth provider — chains 5 token acquisition strategies:
@@ -32,8 +32,8 @@ export class SpaarkeAuthProvider {
     // Validate requireXrm option
     if (this._config.requireXrm && !this._isXrmAvailable()) {
       throw new AuthError(
-        'Xrm is required but not available in this context',
-        'xrm_required',
+        "Xrm is required but not available in this context",
+        "xrm_required",
       );
     }
 
@@ -44,7 +44,7 @@ export class SpaarkeAuthProvider {
         redirectUri: this._config.redirectUri,
       },
       cache: {
-        cacheLocation: 'sessionStorage',
+        cacheLocation: "sessionStorage",
         storeAuthStateInCookie: false,
       },
       system: {
@@ -58,7 +58,10 @@ export class SpaarkeAuthProvider {
     this._cacheStrategy = new CacheStrategy();
     this._bridgeStrategy = new BridgeStrategy();
     this._xrmStrategy = new XrmStrategy(this._config.bffApiScope);
-    this._msalSilentStrategy = new MsalSilentStrategy(msalConfig, this._config.bffApiScope);
+    this._msalSilentStrategy = new MsalSilentStrategy(
+      msalConfig,
+      this._config.bffApiScope,
+    );
     this._msalPopupStrategy = new MsalPopupStrategy(
       () => this._msalSilentStrategy.getMsalInstance(),
       this._config.bffApiScope,
@@ -105,7 +108,7 @@ export class SpaarkeAuthProvider {
     }
 
     // All strategies exhausted
-    return '';
+    return "";
   }
 
   /** Clear the in-memory cache. Call on 401 to force re-acquisition. */
@@ -116,7 +119,9 @@ export class SpaarkeAuthProvider {
   /** Whether a cached token is currently available (synchronous check). */
   isAuthenticated(): boolean {
     // Quick sync check — don't trigger async strategies
-    return this._cacheStrategy.tryAcquireToken !== undefined && this._hasValidCache();
+    return (
+      this._cacheStrategy.tryAcquireToken !== undefined && this._hasValidCache()
+    );
   }
 
   /** Get the resolved config. */
@@ -138,20 +143,33 @@ export class SpaarkeAuthProvider {
     // 2. Xrm global context (frame-walk)
     try {
       const frames: Window[] = [window];
-      try { if (window.parent !== window) frames.push(window.parent); } catch { /* */ }
-      try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* */ }
+      try {
+        if (window.parent !== window) frames.push(window.parent);
+      } catch {
+        /* */
+      }
+      try {
+        if (window.top && window.top !== window) frames.push(window.top);
+      } catch {
+        /* */
+      }
 
       for (const frame of frames) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const xrm = (frame as any).Xrm;
-          const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+          const tid =
+            xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
           if (tid) return tid;
-        } catch { /* cross-origin */ }
+        } catch {
+          /* cross-origin */
+        }
       }
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
-    return '';
+    return "";
   }
 
   /** Stop proactive refresh (cleanup). */
@@ -179,10 +197,13 @@ export class SpaarkeAuthProvider {
   }
 
   private _isXrmAvailable(): boolean {
-    if (typeof window === 'undefined') return false;
+    if (typeof window === "undefined") return false;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+      const xrm =
+        (window as any).Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
       return !!xrm?.Utility?.getGlobalContext;
     } catch {
       return false;

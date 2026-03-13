@@ -3,10 +3,10 @@
  * Minimal declaration to satisfy TypeScript compiler
  */
 declare module "marked" {
-    interface MarkedOptions {
-        gfm?: boolean;
-        breaks?: boolean;
-    }
+  interface MarkedOptions {
+    gfm?: boolean;
+    breaks?: boolean;
+  }
 
-    export function parse(markdown: string, options?: MarkedOptions): string;
+  export function parse(markdown: string, options?: MarkedOptions): string;
 }

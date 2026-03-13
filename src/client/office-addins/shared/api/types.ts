@@ -14,12 +14,17 @@
 /**
  * Types of content that can be saved to Spaarke.
  */
-export type SourceType = 'OutlookEmail' | 'OutlookAttachment' | 'WordDocument';
+export type SourceType = "OutlookEmail" | "OutlookAttachment" | "WordDocument";
 
 /**
  * Types of entities that documents can be associated with.
  */
-export type AssociationType = 'Matter' | 'Project' | 'Invoice' | 'Account' | 'Contact';
+export type AssociationType =
+  | "Matter"
+  | "Project"
+  | "Invoice"
+  | "Account"
+  | "Contact";
 
 // ============================================
 // Save Request/Response
@@ -132,12 +137,23 @@ export interface SaveResponse {
 /**
  * Overall job status.
  */
-export type JobStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'PartialSuccess' | 'NeedsAttention';
+export type JobStatus =
+  | "Queued"
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "PartialSuccess"
+  | "NeedsAttention";
 
 /**
  * Individual stage status.
  */
-export type StageStatus = 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Skipped';
+export type StageStatus =
+  | "Pending"
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "Skipped";
 
 /**
  * Processing stage information.
@@ -283,7 +299,12 @@ export interface DocumentSearchParams {
 /**
  * Valid entity types for quick create.
  */
-export type QuickCreateEntityType = 'matter' | 'project' | 'invoice' | 'account' | 'contact';
+export type QuickCreateEntityType =
+  | "matter"
+  | "project"
+  | "invoice"
+  | "account"
+  | "contact";
 
 /**
  * Base quick create request.
@@ -359,7 +380,7 @@ export interface QuickCreateResponse {
 /**
  * Share role for document access.
  */
-export type ShareRole = 'ViewOnly' | 'Download' | 'Edit';
+export type ShareRole = "ViewOnly" | "Download" | "Edit";
 
 /**
  * Share links request.
@@ -395,7 +416,7 @@ export interface ExternalInvitation {
   /** Recipient email */
   email: string;
   /** Invitation status */
-  status: 'Created' | 'Pending' | 'Sent' | 'Accepted' | 'Declined';
+  status: "Created" | "Pending" | "Sent" | "Accepted" | "Declined";
   /** Invitation ID */
   invitationId?: string;
 }
@@ -490,7 +511,7 @@ export interface FavoriteItem {
   /** Item ID */
   id: string;
   /** Item type (entity or document) */
-  itemType: 'entity' | 'document';
+  itemType: "entity" | "document";
   /** Entity type (if entity) */
   entityType?: AssociationType;
   /** Display name */
@@ -543,25 +564,25 @@ export interface ProblemDetails {
  */
 export enum OfficeApiErrorCode {
   // Validation errors (400)
-  INVALID_SOURCE_TYPE = 'OFFICE_001',
-  INVALID_ASSOCIATION_TYPE = 'OFFICE_002',
-  ASSOCIATION_REQUIRED = 'OFFICE_003',
-  ATTACHMENT_TOO_LARGE = 'OFFICE_004',
-  TOTAL_SIZE_EXCEEDED = 'OFFICE_005',
-  BLOCKED_FILE_TYPE = 'OFFICE_006',
+  INVALID_SOURCE_TYPE = "OFFICE_001",
+  INVALID_ASSOCIATION_TYPE = "OFFICE_002",
+  ASSOCIATION_REQUIRED = "OFFICE_003",
+  ATTACHMENT_TOO_LARGE = "OFFICE_004",
+  TOTAL_SIZE_EXCEEDED = "OFFICE_005",
+  BLOCKED_FILE_TYPE = "OFFICE_006",
   // Not found errors (404)
-  ASSOCIATION_NOT_FOUND = 'OFFICE_007',
-  JOB_NOT_FOUND = 'OFFICE_008',
+  ASSOCIATION_NOT_FOUND = "OFFICE_007",
+  JOB_NOT_FOUND = "OFFICE_008",
   // Forbidden errors (403)
-  ACCESS_DENIED = 'OFFICE_009',
-  CANNOT_CREATE_ENTITY = 'OFFICE_010',
+  ACCESS_DENIED = "OFFICE_009",
+  CANNOT_CREATE_ENTITY = "OFFICE_010",
   // Conflict errors (409)
-  DOCUMENT_EXISTS = 'OFFICE_011',
+  DOCUMENT_EXISTS = "OFFICE_011",
   // Service errors (502/503)
-  SPE_UPLOAD_FAILED = 'OFFICE_012',
-  GRAPH_API_ERROR = 'OFFICE_013',
-  DATAVERSE_ERROR = 'OFFICE_014',
-  PROCESSING_UNAVAILABLE = 'OFFICE_015',
+  SPE_UPLOAD_FAILED = "OFFICE_012",
+  GRAPH_API_ERROR = "OFFICE_013",
+  DATAVERSE_ERROR = "OFFICE_014",
+  PROCESSING_UNAVAILABLE = "OFFICE_015",
 }
 
 // ============================================
@@ -585,7 +606,7 @@ export interface SseStageUpdateEvent {
  */
 export interface SseJobCompleteEvent {
   /** Final job status */
-  status: 'Completed' | 'Failed' | 'PartialSuccess';
+  status: "Completed" | "Failed" | "PartialSuccess";
   /** Document ID */
   documentId?: string;
   /** Document URL */
@@ -599,9 +620,17 @@ export interface SseJobCompleteEvent {
 /**
  * SSE event types.
  */
-export type SseEventType = 'stage-update' | 'job-complete' | 'error' | 'heartbeat';
+export type SseEventType =
+  | "stage-update"
+  | "job-complete"
+  | "error"
+  | "heartbeat";
 
 /**
  * SSE event data union.
  */
-export type SseEventData = SseStageUpdateEvent | SseJobCompleteEvent | ProblemDetails | null;
+export type SseEventData =
+  | SseStageUpdateEvent
+  | SseJobCompleteEvent
+  | ProblemDetails
+  | null;

@@ -134,9 +134,10 @@ function getResolvedTheme(): Theme {
 // PCF Control Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class DrillThroughWorkspace
-  implements ComponentFramework.StandardControl<IInputs, IOutputs>
-{
+export class DrillThroughWorkspace implements ComponentFramework.StandardControl<
+  IInputs,
+  IOutputs
+> {
   private _container: HTMLDivElement;
   private _context: ComponentFramework.Context<IInputs>;
   private _notifyOutputChanged: () => void;
@@ -159,7 +160,7 @@ export class DrillThroughWorkspace
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     _state: ComponentFramework.Dictionary,
-    container: HTMLDivElement
+    container: HTMLDivElement,
   ): void {
     logger.info("DrillThroughWorkspace", "init() called");
 
@@ -234,7 +235,7 @@ export class DrillThroughWorkspace
 
     logger.info(
       "DrillThroughWorkspace",
-      `Container size: ${allocatedWidth}x${allocatedHeight}`
+      `Container size: ${allocatedWidth}x${allocatedHeight}`,
     );
 
     // Get input parameters
@@ -248,7 +249,7 @@ export class DrillThroughWorkspace
       "DrillThroughWorkspace",
       `Rendering with chartDefinitionId: ${chartDefinitionId}, dataset records: ${
         dataset?.sortedRecordIds?.length ?? 0
-      }`
+      }`,
     );
 
     // Render React component (React 16 pattern per ADR-022)
@@ -262,9 +263,9 @@ export class DrillThroughWorkspace
           webApi: this._context.webAPI,
           onRecordSelect: this.handleRecordSelect.bind(this),
           onClose: this.handleClose.bind(this),
-        })
+        }),
       ),
-      this._container
+      this._container,
     );
     this._isRendered = true;
   }
@@ -303,7 +304,7 @@ export class DrillThroughWorkspace
       logger.error(
         "DrillThroughWorkspace",
         "closeDialog error, trying fallback",
-        err
+        err,
       );
       this.tryWindowClose();
     }
@@ -319,7 +320,10 @@ export class DrillThroughWorkspace
 
       // For dialogs in iframe, message the parent
       if (window.parent !== window) {
-        window.parent.postMessage({ type: "DRILLTHROUGH_WORKSPACE_CLOSE" }, "*");
+        window.parent.postMessage(
+          { type: "DRILLTHROUGH_WORKSPACE_CLOSE" },
+          "*",
+        );
       }
 
       // Try window.close as last resort
@@ -349,21 +353,21 @@ export class DrillThroughWorkspace
       this._themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
       this._themeMediaQuery.addEventListener(
         "change",
-        this.handleThemeChange.bind(this)
+        this.handleThemeChange.bind(this),
       );
 
       // Listen for high-contrast changes
       this._forcedColorsQuery = window.matchMedia("(forced-colors: active)");
       this._forcedColorsQuery.addEventListener(
         "change",
-        this.handleThemeChange.bind(this)
+        this.handleThemeChange.bind(this),
       );
     }
 
     // Listen for custom theme change events
     window.addEventListener(
       "spaarke-theme-change",
-      this.handleThemeChange.bind(this)
+      this.handleThemeChange.bind(this),
     );
   }
 
@@ -371,18 +375,18 @@ export class DrillThroughWorkspace
     if (this._themeMediaQuery) {
       this._themeMediaQuery.removeEventListener(
         "change",
-        this.handleThemeChange.bind(this)
+        this.handleThemeChange.bind(this),
       );
     }
     if (this._forcedColorsQuery) {
       this._forcedColorsQuery.removeEventListener(
         "change",
-        this.handleThemeChange.bind(this)
+        this.handleThemeChange.bind(this),
       );
     }
     window.removeEventListener(
       "spaarke-theme-change",
-      this.handleThemeChange.bind(this)
+      this.handleThemeChange.bind(this),
     );
   }
 

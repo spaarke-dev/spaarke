@@ -7,17 +7,14 @@
  * Note: Uses EdgeText from react-flow-renderer v10 for labels.
  */
 
-import * as React from 'react';
-import {
-  getSmoothStepPath,
-  EdgeText,
-} from 'react-flow-renderer';
-import type { EdgeProps } from 'react-flow-renderer';
+import * as React from "react";
+import { getSmoothStepPath, EdgeText } from "react-flow-renderer";
+import type { EdgeProps } from "react-flow-renderer";
 
 // Green color for true branch
-const TRUE_BRANCH_COLOR = '#107C10';
+const TRUE_BRANCH_COLOR = "#107C10";
 // Red color for false branch
-const FALSE_BRANCH_COLOR = '#D13438';
+const FALSE_BRANCH_COLOR = "#D13438";
 
 /**
  * Custom edge for true branch connections (green).
@@ -69,7 +66,7 @@ export const TrueBranchEdge: React.FC<EdgeProps> = ({
           fontSize: 10,
         }}
         labelBgStyle={{
-          fill: '#ffffff',
+          fill: "#ffffff",
           fillOpacity: 0.9,
         }}
         labelBgPadding={[4, 6] as [number, number]}
@@ -129,7 +126,7 @@ export const FalseBranchEdge: React.FC<EdgeProps> = ({
           fontSize: 10,
         }}
         labelBgStyle={{
-          fill: '#ffffff',
+          fill: "#ffffff",
           fillOpacity: 0.9,
         }}
         labelBgPadding={[4, 6] as [number, number]}

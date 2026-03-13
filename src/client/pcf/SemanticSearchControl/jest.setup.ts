@@ -7,14 +7,14 @@ import "@testing-library/jest-dom";
 
 // Mock Xrm global object (Dataverse runtime)
 const mockXrm = {
-    Navigation: {
-        navigateTo: jest.fn().mockResolvedValue(undefined),
-    },
-    Utility: {
-        getGlobalContext: jest.fn().mockReturnValue({
-            getClientUrl: () => "https://test.crm.dynamics.com",
-        }),
-    },
+  Navigation: {
+    navigateTo: jest.fn().mockResolvedValue(undefined),
+  },
+  Utility: {
+    getGlobalContext: jest.fn().mockReturnValue({
+      getClientUrl: () => "https://test.crm.dynamics.com",
+    }),
+  },
 };
 
 // @ts-expect-error - Xrm is a global
@@ -26,17 +26,17 @@ global.open = jest.fn();
 // Mock IntersectionObserver for infinite scroll tests
 const mockIntersectionObserver = jest.fn();
 mockIntersectionObserver.mockReturnValue({
-    observe: jest.fn(),
-    unobserve: jest.fn(),
-    disconnect: jest.fn(),
+  observe: jest.fn(),
+  unobserve: jest.fn(),
+  disconnect: jest.fn(),
 });
 global.IntersectionObserver = mockIntersectionObserver;
 
 // Suppress console warnings in tests
 const originalWarn = console.warn;
 beforeAll(() => {
-    console.warn = jest.fn();
+  console.warn = jest.fn();
 });
 afterAll(() => {
-    console.warn = originalWarn;
+  console.warn = originalWarn;
 });

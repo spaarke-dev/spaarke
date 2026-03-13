@@ -19,25 +19,22 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Terminal node (no source handle / output connection).
  */
 export const DeliverOutputNode = React.memo(function DeliverOutputNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<DocumentArrowRight20Regular />}
-            typeLabel="Deliver Output"
-            sourceHandleCount={0}
-        >
-            {data.outputVariable && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Variable: {data.outputVariable}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<DocumentArrowRight20Regular />}
+      typeLabel="Deliver Output"
+      sourceHandleCount={0}
+    >
+      {data.outputVariable && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Variable: {data.outputVariable}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

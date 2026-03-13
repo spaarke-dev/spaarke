@@ -17,24 +17,21 @@ import type { PlaybookNodeData } from "../../types/canvas";
  * Use for: notifications, reports, automated communications.
  */
 export const SendEmailNode = React.memo(function SendEmailNode({
-    data,
-    selected,
+  data,
+  selected,
 }: NodeProps<Node<PlaybookNodeData>>) {
-    return (
-        <BaseNode
-            data={data}
-            selected={selected}
-            icon={<Mail20Regular />}
-            typeLabel="Send Email"
-        >
-            {data.outputVariable && (
-                <Text
-                    size={100}
-                    style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                    Output: {data.outputVariable}
-                </Text>
-            )}
-        </BaseNode>
-    );
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      icon={<Mail20Regular />}
+      typeLabel="Send Email"
+    >
+      {data.outputVariable && (
+        <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+          Output: {data.outputVariable}
+        </Text>
+      )}
+    </BaseNode>
+  );
 });

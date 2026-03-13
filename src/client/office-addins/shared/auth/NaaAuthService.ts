@@ -28,7 +28,7 @@ import {
   InteractionRequiredAuthError,
   BrowserAuthError,
   AuthError,
-} from '@azure/msal-browser';
+} from "@azure/msal-browser";
 
 import {
   type NaaAuthConfig,
@@ -37,28 +37,28 @@ import {
   createFallbackMsalConfig,
   getBffApiScopes,
   TOKEN_EXPIRY_BUFFER_SECONDS,
-} from './authConfig';
+} from "./authConfig";
 
 /**
  * Authentication error codes for user-friendly messaging.
  */
 export enum NaaAuthErrorCode {
   /** Service not initialized */
-  NOT_INITIALIZED = 'NAA_001',
+  NOT_INITIALIZED = "NAA_001",
   /** Silent token acquisition failed */
-  SILENT_FAILED = 'NAA_002',
+  SILENT_FAILED = "NAA_002",
   /** Interactive auth was cancelled by user */
-  USER_CANCELLED = 'NAA_003',
+  USER_CANCELLED = "NAA_003",
   /** Popup was blocked by browser */
-  POPUP_BLOCKED = 'NAA_004',
+  POPUP_BLOCKED = "NAA_004",
   /** Network error during authentication */
-  NETWORK_ERROR = 'NAA_005',
+  NETWORK_ERROR = "NAA_005",
   /** Invalid or expired token */
-  TOKEN_INVALID = 'NAA_006',
+  TOKEN_INVALID = "NAA_006",
   /** NAA not supported by this Office client */
-  NAA_NOT_SUPPORTED = 'NAA_007',
+  NAA_NOT_SUPPORTED = "NAA_007",
   /** Unknown authentication error */
-  UNKNOWN = 'NAA_999',
+  UNKNOWN = "NAA_999",
 }
 
 /**
@@ -69,9 +69,13 @@ export class NaaAuthError extends Error {
   public readonly userMessage: string;
   public readonly originalError?: Error;
 
-  constructor(code: NaaAuthErrorCode, userMessage: string, originalError?: Error) {
+  constructor(
+    code: NaaAuthErrorCode,
+    userMessage: string,
+    originalError?: Error,
+  ) {
     super(userMessage);
-    this.name = 'NaaAuthError';
+    this.name = "NaaAuthError";
     this.code = code;
     this.userMessage = userMessage;
     this.originalError = originalError;
@@ -208,7 +212,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
 
   public async initialize(config?: Partial<NaaAuthConfig>): Promise<void> {
     if (this.initialized) {
-      console.warn('[NaaAuthService] Already initialized');
+      console.warn("[NaaAuthService] Already initialized");
       return;
     }
 
@@ -219,14 +223,18 @@ class NaaAuthServiceImpl implements INaaAuthService {
 
     if (this.naaSupported) {
       // Use NAA (Nested App Authentication) - the preferred method
-      console.info('[NaaAuthService] Using Nested App Authentication (NAA)');
+      console.info("[NaaAuthService] Using Nested App Authentication (NAA)");
       this.msalInstance = await createNestablePublicClientApplication(
-        createNaaMsalConfig(this.config)
+        createNaaMsalConfig(this.config),
       );
     } else {
       // Fallback to standard MSAL with Dialog API
-      console.info('[NaaAuthService] NAA not supported, using fallback authentication');
-      const pca = new PublicClientApplication(createFallbackMsalConfig(this.config));
+      console.info(
+        "[NaaAuthService] NAA not supported, using fallback authentication",
+      );
+      const pca = new PublicClientApplication(
+        createFallbackMsalConfig(this.config),
+      );
       // MSAL v3+ requires explicit initialization
       await pca.initialize();
       this.msalInstance = pca;
@@ -240,7 +248,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
         this.notifyStateChange();
       }
     } catch (error) {
-      console.warn('[NaaAuthService] Redirect handling failed:', error);
+      console.warn("[NaaAuthService] Redirect handling failed:", error);
     }
 
     // Check for existing cached account
@@ -286,7 +294,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
       }
     } catch (error) {
       // Silent failed, will try interactive below
-      console.info('[NaaAuthService] Silent auth failed, trying interactive');
+      console.info("[NaaAuthService] Silent auth failed, trying interactive");
     }
 
     // Try interactive authentication
@@ -319,7 +327,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
         postLogoutRedirectUri: window.location.origin,
       });
     } catch (error) {
-      console.warn('[NaaAuthService] Logout failed:', error);
+      console.warn("[NaaAuthService] Logout failed:", error);
       // Even if logout fails, clear local state
     }
 
@@ -361,7 +369,9 @@ class NaaAuthServiceImpl implements INaaAuthService {
     };
   }
 
-  public onAuthStateChange(callback: (state: NaaAuthState) => void): () => void {
+  public onAuthStateChange(
+    callback: (state: NaaAuthState) => void,
+  ): () => void {
     this.authStateListeners.add(callback);
 
     // Immediately notify with current state
@@ -377,11 +387,13 @@ class NaaAuthServiceImpl implements INaaAuthService {
   // Private methods
   // ============================================
 
-  private ensureInitialized(): asserts this is { msalInstance: IPublicClientApplication } {
+  private ensureInitialized(): asserts this is {
+    msalInstance: IPublicClientApplication;
+  } {
     if (!this.initialized || !this.msalInstance) {
       throw new NaaAuthError(
         NaaAuthErrorCode.NOT_INITIALIZED,
-        'Authentication service is not initialized. Call initialize() first.'
+        "Authentication service is not initialized. Call initialize() first.",
       );
     }
   }
@@ -397,7 +409,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
       try {
         listener(state);
       } catch (error) {
-        console.error('[NaaAuthService] Auth state listener error:', error);
+        console.error("[NaaAuthService] Auth state listener error:", error);
       }
     });
   }
@@ -455,7 +467,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
     if (!this.msalInstance) {
       throw new NaaAuthError(
         NaaAuthErrorCode.NOT_INITIALIZED,
-        'Authentication service is not initialized.'
+        "Authentication service is not initialized.",
       );
     }
 
@@ -464,13 +476,13 @@ class NaaAuthServiceImpl implements INaaAuthService {
     return await this.msalInstance.acquireTokenPopup({
       scopes: getBffApiScopes(this.config),
       loginHint,
-      prompt: this.currentAccount ? undefined : 'select_account',
+      prompt: this.currentAccount ? undefined : "select_account",
     });
   }
 
   private mapToTokenResult(
     authResult: AuthenticationResult,
-    fromCache: boolean
+    fromCache: boolean,
   ): TokenResult {
     return {
       accessToken: authResult.accessToken,
@@ -485,36 +497,36 @@ class NaaAuthServiceImpl implements INaaAuthService {
     if (error instanceof InteractionRequiredAuthError) {
       return new NaaAuthError(
         NaaAuthErrorCode.SILENT_FAILED,
-        'Sign-in required. Please sign in to continue.',
-        error
+        "Sign-in required. Please sign in to continue.",
+        error,
       );
     }
 
     if (error instanceof BrowserAuthError) {
       // Check for user cancellation
-      if (error.errorCode === 'user_cancelled') {
+      if (error.errorCode === "user_cancelled") {
         return new NaaAuthError(
           NaaAuthErrorCode.USER_CANCELLED,
-          'Sign-in was cancelled.',
-          error
+          "Sign-in was cancelled.",
+          error,
         );
       }
 
       // Check for popup blocked
-      if (error.errorCode === 'popup_window_error') {
+      if (error.errorCode === "popup_window_error") {
         return new NaaAuthError(
           NaaAuthErrorCode.POPUP_BLOCKED,
-          'Sign-in popup was blocked. Please allow popups for this site.',
-          error
+          "Sign-in popup was blocked. Please allow popups for this site.",
+          error,
         );
       }
 
       // Network errors
-      if (error.errorCode === 'network_error') {
+      if (error.errorCode === "network_error") {
         return new NaaAuthError(
           NaaAuthErrorCode.NETWORK_ERROR,
-          'Network error during sign-in. Please check your connection.',
-          error
+          "Network error during sign-in. Please check your connection.",
+          error,
         );
       }
     }
@@ -523,16 +535,17 @@ class NaaAuthServiceImpl implements INaaAuthService {
       return new NaaAuthError(
         NaaAuthErrorCode.UNKNOWN,
         `Authentication failed: ${error.errorMessage}`,
-        error
+        error,
       );
     }
 
     // Unknown error
-    const message = error instanceof Error ? error.message : 'Unknown authentication error';
+    const message =
+      error instanceof Error ? error.message : "Unknown authentication error";
     return new NaaAuthError(
       NaaAuthErrorCode.UNKNOWN,
       message,
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
     );
   }
 
@@ -553,8 +566,8 @@ class NaaAuthServiceImpl implements INaaAuthService {
   private async detectNaaSupport(): Promise<boolean> {
     try {
       // Check if we're in an Office context
-      if (typeof Office === 'undefined' || !Office.context) {
-        console.warn('[NaaAuthService] Not running in Office context');
+      if (typeof Office === "undefined" || !Office.context) {
+        console.warn("[NaaAuthService] Not running in Office context");
         return false;
       }
 
@@ -571,7 +584,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
       const diagnostics = Office.context.diagnostics;
       if (!diagnostics) {
         // If diagnostics are not available, assume NAA might not be supported
-        console.warn('[NaaAuthService] Office diagnostics not available');
+        console.warn("[NaaAuthService] Office diagnostics not available");
         return false;
       }
 
@@ -579,7 +592,9 @@ class NaaAuthServiceImpl implements INaaAuthService {
       const platform = diagnostics.platform;
       const version = diagnostics.version;
 
-      console.info(`[NaaAuthService] Office platform: ${platform}, version: ${version}`);
+      console.info(
+        `[NaaAuthService] Office platform: ${platform}, version: ${version}`,
+      );
 
       // Office on the web always supports NAA
       if (platform === Office.PlatformType.OfficeOnline) {
@@ -593,9 +608,9 @@ class NaaAuthServiceImpl implements INaaAuthService {
 
       if (platform === Office.PlatformType.PC) {
         // Parse Windows version (format: 16.0.XXXXX.YYYYY)
-        const versionParts = version.split('.');
+        const versionParts = version.split(".");
         if (versionParts.length >= 3) {
-          const build = parseInt(versionParts[2] || '0', 10);
+          const build = parseInt(versionParts[2] || "0", 10);
           // NAA support started at build 13530
           return build >= 13530;
         }
@@ -611,7 +626,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
       // For unknown platforms, try NAA (it will fail gracefully if not supported)
       return true;
     } catch (error) {
-      console.warn('[NaaAuthService] NAA detection failed:', error);
+      console.warn("[NaaAuthService] NAA detection failed:", error);
       // Default to false on error
       return false;
     }

@@ -23,11 +23,7 @@ export type {
   ScopeTabId,
 } from "./types";
 
-export {
-  ENTITY_NAMES,
-  RELATIONSHIP_NAMES,
-  ID_FIELDS,
-} from "./types";
+export { ENTITY_NAMES, RELATIONSHIP_NAMES, ID_FIELDS } from "./types";
 
 // Services
 export {

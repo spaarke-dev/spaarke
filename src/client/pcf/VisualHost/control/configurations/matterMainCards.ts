@@ -17,11 +17,7 @@
  * by actual Dataverse record GUIDs at deployment time.
  */
 
-import {
-  VisualType,
-  AggregationType,
-  type IChartDefinition,
-} from "../types";
+import { VisualType, AggregationType, type IChartDefinition } from "../types";
 
 // ---------------------------------------------------------------------------
 // Configuration JSON payloads
@@ -38,9 +34,9 @@ const GUIDELINES_CONFIG_JSON = JSON.stringify({
   icon: "guidelines",
   contextTemplate: "You have a {grade}% in {area} compliance",
   colorRules: [
-    { range: [0.85, 1.00], color: "blue" },
-    { range: [0.70, 0.84], color: "yellow" },
-    { range: [0.00, 0.69], color: "red" },
+    { range: [0.85, 1.0], color: "blue" },
+    { range: [0.7, 0.84], color: "yellow" },
+    { range: [0.0, 0.69], color: "red" },
   ],
 });
 
@@ -97,8 +93,7 @@ export const GUIDELINES_CARD_CONFIG: IChartDefinition = {
 export const BUDGET_CARD_CONFIG: IChartDefinition = {
   sprk_chartdefinitionid: "00000000-0000-0000-0000-000000000031",
   sprk_name: "Budget",
-  sprk_description:
-    "Displays budget compliance grade for the current matter",
+  sprk_description: "Displays budget compliance grade for the current matter",
   sprk_visualtype: VisualType.ReportCardMetric,
   sprk_entitylogicalname: "sprk_matter",
   sprk_aggregationfield: "sprk_budgetcompliancegrade_current",
@@ -116,8 +111,7 @@ export const BUDGET_CARD_CONFIG: IChartDefinition = {
 export const OUTCOMES_CARD_CONFIG: IChartDefinition = {
   sprk_chartdefinitionid: "00000000-0000-0000-0000-000000000032",
   sprk_name: "Outcomes",
-  sprk_description:
-    "Displays outcome compliance grade for the current matter",
+  sprk_description: "Displays outcome compliance grade for the current matter",
   sprk_visualtype: VisualType.ReportCardMetric,
   sprk_entitylogicalname: "sprk_matter",
   sprk_aggregationfield: "sprk_outcomecompliancegrade_current",

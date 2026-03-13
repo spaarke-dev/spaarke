@@ -47,7 +47,10 @@ interface ISavedQueryRecord {
 export class ViewService {
   private xrm: XrmContext;
   private fetchXmlService: FetchXmlService;
-  private viewCache: Map<string, { views: IViewDefinition[]; timestamp: number }> = new Map();
+  private viewCache: Map<
+    string,
+    { views: IViewDefinition[]; timestamp: number }
+  > = new Map();
   private cacheTTL: number = 5 * 60 * 1000; // 5 minutes
 
   /**
@@ -67,7 +70,7 @@ export class ViewService {
    */
   async getViews(
     entityLogicalName: string,
-    options: IGetViewsOptions = {}
+    options: IGetViewsOptions = {},
   ): Promise<IViewDefinition[]> {
     const cacheKey = `${entityLogicalName}_${options.includeCustom}_${options.includePersonal}`;
 
@@ -91,14 +94,17 @@ export class ViewService {
 
     // Fetch custom configurations if requested
     if (options.includeCustom) {
-      const customViews = await this.fetchCustomConfigurations(entityLogicalName);
+      const customViews =
+        await this.fetchCustomConfigurations(entityLogicalName);
       views.push(...customViews);
     }
 
     // Filter by view type if specified
     let filteredViews = views;
     if (options.viewTypes && options.viewTypes.length > 0) {
-      filteredViews = views.filter((v) => options.viewTypes!.includes(v.viewType));
+      filteredViews = views.filter((v) =>
+        options.viewTypes!.includes(v.viewType),
+      );
     }
 
     // Sort by sortOrder, then by name
@@ -116,7 +122,10 @@ export class ViewService {
     }
 
     // Cache results
-    this.viewCache.set(cacheKey, { views: filteredViews, timestamp: Date.now() });
+    this.viewCache.set(cacheKey, {
+      views: filteredViews,
+      timestamp: Date.now(),
+    });
 
     return filteredViews;
   }
@@ -129,7 +138,7 @@ export class ViewService {
    */
   async getDefaultView(
     entityLogicalName: string,
-    options: IGetViewsOptions = {}
+    options: IGetViewsOptions = {},
   ): Promise<IViewDefinition | undefined> {
     const views = await this.getViews(entityLogicalName, options);
 
@@ -151,10 +160,12 @@ export class ViewService {
    */
   async getViewById(
     viewId: string,
-    entityLogicalName: string
+    entityLogicalName: string,
   ): Promise<IViewDefinition | undefined> {
     // Try to find in cache first
-    const views = await this.getViews(entityLogicalName, { includeCustom: true });
+    const views = await this.getViews(entityLogicalName, {
+      includeCustom: true,
+    });
     const cached = views.find((v) => v.id === viewId);
     if (cached) {
       return cached;
@@ -165,7 +176,7 @@ export class ViewService {
       const record = await this.xrm.WebApi.retrieveRecord(
         "savedquery",
         viewId,
-        "?$select=savedqueryid,name,returnedtypecode,fetchxml,layoutxml,isdefault,querytype"
+        "?$select=savedqueryid,name,returnedtypecode,fetchxml,layoutxml,isdefault,querytype",
       );
 
       return this.mapSavedQueryToViewDefinition(record as ISavedQueryRecord);
@@ -199,7 +210,9 @@ export class ViewService {
   /**
    * Fetch saved queries (system views) for an entity
    */
-  private async fetchSavedQueries(entityLogicalName: string): Promise<IViewDefinition[]> {
+  private async fetchSavedQueries(
+    entityLogicalName: string,
+  ): Promise<IViewDefinition[]> {
     try {
       const filter = [
         `returnedtypecode eq '${entityLogicalName}'`,
@@ -210,11 +223,11 @@ export class ViewService {
 
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
         "savedquery",
-        `?$select=savedqueryid,name,returnedtypecode,fetchxml,layoutxml,isdefault,querytype&$filter=${filter}&$orderby=name`
+        `?$select=savedqueryid,name,returnedtypecode,fetchxml,layoutxml,isdefault,querytype&$filter=${filter}&$orderby=name`,
       );
 
       return (result.entities as ISavedQueryRecord[]).map((record) =>
-        this.mapSavedQueryToViewDefinition(record)
+        this.mapSavedQueryToViewDefinition(record),
       );
     } catch (error) {
       console.error("[ViewService] Failed to fetch saved queries:", error);
@@ -225,7 +238,9 @@ export class ViewService {
   /**
    * Fetch user queries (personal views) for an entity
    */
-  private async fetchUserQueries(entityLogicalName: string): Promise<IViewDefinition[]> {
+  private async fetchUserQueries(
+    entityLogicalName: string,
+  ): Promise<IViewDefinition[]> {
     try {
       const filter = [
         `returnedtypecode eq '${entityLogicalName}'`,
@@ -235,7 +250,7 @@ export class ViewService {
 
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
         "userquery",
-        `?$select=userqueryid,name,returnedtypecode,fetchxml,layoutxml&$filter=${filter}&$orderby=name`
+        `?$select=userqueryid,name,returnedtypecode,fetchxml,layoutxml&$filter=${filter}&$orderby=name`,
       );
 
       return result.entities.map((record) => ({
@@ -257,7 +272,9 @@ export class ViewService {
   /**
    * Fetch custom configurations from sprk_gridconfiguration
    */
-  private async fetchCustomConfigurations(entityLogicalName: string): Promise<IViewDefinition[]> {
+  private async fetchCustomConfigurations(
+    entityLogicalName: string,
+  ): Promise<IViewDefinition[]> {
     try {
       const filter = [
         `sprk_entitylogicalname eq '${entityLogicalName}'`,
@@ -266,13 +283,18 @@ export class ViewService {
 
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
         "sprk_gridconfiguration",
-        `?$select=sprk_gridconfigurationid,sprk_name,sprk_entitylogicalname,sprk_viewtype,sprk_savedviewid,sprk_fetchxml,sprk_layoutxml,sprk_configjson,sprk_isdefault,sprk_sortorder,sprk_iconname&$filter=${filter}&$orderby=sprk_sortorder`
+        `?$select=sprk_gridconfigurationid,sprk_name,sprk_entitylogicalname,sprk_viewtype,sprk_savedviewid,sprk_fetchxml,sprk_layoutxml,sprk_configjson,sprk_isdefault,sprk_sortorder,sprk_iconname&$filter=${filter}&$orderby=sprk_sortorder`,
       );
 
-      return result.entities.map((record) => this.mapConfigurationToViewDefinition(record));
+      return result.entities.map((record) =>
+        this.mapConfigurationToViewDefinition(record),
+      );
     } catch (error) {
       // Entity might not exist - this is expected in some environments
-      console.debug("[ViewService] sprk_gridconfiguration not available:", error);
+      console.debug(
+        "[ViewService] sprk_gridconfiguration not available:",
+        error,
+      );
       return [];
     }
   }
@@ -280,7 +302,9 @@ export class ViewService {
   /**
    * Map savedquery record to IViewDefinition
    */
-  private mapSavedQueryToViewDefinition(record: ISavedQueryRecord): IViewDefinition {
+  private mapSavedQueryToViewDefinition(
+    record: ISavedQueryRecord,
+  ): IViewDefinition {
     return {
       id: record.savedqueryid,
       name: record.name,
@@ -296,7 +320,9 @@ export class ViewService {
   /**
    * Map sprk_gridconfiguration record to IViewDefinition
    */
-  private mapConfigurationToViewDefinition(record: Record<string, unknown>): IViewDefinition {
+  private mapConfigurationToViewDefinition(
+    record: Record<string, unknown>,
+  ): IViewDefinition {
     const viewType = record.sprk_viewtype as number;
 
     return {

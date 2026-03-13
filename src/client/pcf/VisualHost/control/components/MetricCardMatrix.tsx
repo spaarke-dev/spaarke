@@ -45,7 +45,12 @@ import type {
 } from "../types";
 import { formatValue } from "../utils/valueFormatters";
 
-export type MatrixJustification = "left" | "left-center" | "center" | "right-center" | "right";
+export type MatrixJustification =
+  | "left"
+  | "left-center"
+  | "center"
+  | "right-center"
+  | "right";
 
 export interface IMetricCardMatrixProps {
   /** Title displayed above the card grid */
@@ -107,7 +112,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
  * Resolve icon component from config icon name string
  */
 function resolveIcon(
-  iconName: string | undefined
+  iconName: string | undefined,
 ): React.ComponentType<{ className?: string }> | null {
   if (!iconName) return null;
   const normalized = iconName.toLowerCase().trim();
@@ -120,7 +125,7 @@ function resolveIcon(
  */
 function getIconForDataPoint(
   dp: IAggregatedDataPoint,
-  iconMap?: Record<string, string>
+  iconMap?: Record<string, string>,
 ): React.ComponentType<{ className?: string }> | null {
   if (!iconMap) return null;
   // Try formatted label first (e.g., "Guidelines")
@@ -195,7 +200,7 @@ function getTokenSetColors(tokenSet: ColorTokenSet): ICardColorTokens {
  */
 function resolveCardColors(
   dp: IAggregatedDataPoint,
-  config?: ICardConfig
+  config?: ICardConfig,
 ): ICardColorTokens {
   if (!config) return {};
 
@@ -213,7 +218,8 @@ function resolveCardColors(
     }
 
     case "valueThreshold": {
-      if (!config.colorThresholds || config.colorThresholds.length === 0) return {};
+      if (!config.colorThresholds || config.colorThresholds.length === 0)
+        return {};
       // Find matching threshold for this data point's value
       const normalizedValue = dp.value;
       for (const threshold of config.colorThresholds) {
@@ -254,7 +260,7 @@ function resolveDescription(
   template: string | undefined,
   dp: IAggregatedDataPoint,
   formattedValue: string,
-  _totalRecords?: number
+  _totalRecords?: number,
 ): string | undefined {
   if (!template) return undefined;
   return template
@@ -381,7 +387,7 @@ const useStyles = makeStyles({
  */
 function sortDataPoints(
   points: IAggregatedDataPoint[],
-  sortBy: string
+  sortBy: string,
 ): IAggregatedDataPoint[] {
   const sorted = [...points];
   switch (sortBy) {
@@ -456,13 +462,17 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   // Grid layout: responsive auto-fill or fixed columns
   const cardMinWidth = CARD_SIZE_MAP[effectiveCardSize] || CARD_SIZE_MAP.medium;
   const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: effectiveColumns && effectiveColumns > 0
-      ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
-      : `repeat(auto-fill, minmax(${cardMinWidth}, 1fr))`,
+    gridTemplateColumns:
+      effectiveColumns && effectiveColumns > 0
+        ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
+        : `repeat(auto-fill, minmax(${cardMinWidth}, 1fr))`,
     justifyItems:
-      justification === "center" || justification === "left-center" || justification === "right-center"
+      justification === "center" ||
+      justification === "left-center" ||
+      justification === "right-center"
         ? "center"
-        : justification === "right" ? "end"
+        : justification === "right"
+          ? "end"
           : "stretch",
     alignContent: "start", // Prevent vertical stretching — no whitespace below cards
   };
@@ -480,7 +490,11 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
       {showTitle && title && (
         <Text
           className={styles.title}
-          style={effectiveTitleFontSize ? { fontSize: effectiveTitleFontSize } : undefined}
+          style={
+            effectiveTitleFontSize
+              ? { fontSize: effectiveTitleFontSize }
+              : undefined
+          }
         >
           {title}
         </Text>
@@ -488,14 +502,21 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
       <div className={styles.grid} style={gridStyle}>
         {sortedPoints.map((dp, idx) => {
           // Per-field valueFormat takes priority over global config
-          const dpFormat: ValueFormatType = dp.valueFormat ?? effectiveValueFormat;
-          const formattedVal = formatValue(dp.value, dpFormat, effectiveNullDisplay);
+          const dpFormat: ValueFormatType =
+            dp.valueFormat ?? effectiveValueFormat;
+          const formattedVal = formatValue(
+            dp.value,
+            dpFormat,
+            effectiveNullDisplay,
+          );
           const colorTokens = resolveCardColors(dp, config);
           const IconComponent = getIconForDataPoint(dp, config?.iconMap);
           const description = resolveDescription(
-            dp.value == null ? config?.nullDescription : config?.cardDescription,
+            dp.value == null
+              ? config?.nullDescription
+              : config?.cardDescription,
             dp,
-            formattedVal
+            formattedVal,
           );
 
           return (
@@ -506,12 +527,16 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 styles.card,
                 effectiveShowAccentBar && styles.cardWithAccentBar,
                 effectiveCompact && styles.cardCompact,
-                effectiveCompact && effectiveShowAccentBar && styles.cardCompactWithAccentBar,
-                isInteractive && styles.cardInteractive
+                effectiveCompact &&
+                  effectiveShowAccentBar &&
+                  styles.cardCompactWithAccentBar,
+                isInteractive && styles.cardInteractive,
               )}
               style={{
                 aspectRatio: effectiveAspectRatio,
-                ...(colorTokens.cardBackground ? { backgroundColor: colorTokens.cardBackground } : undefined),
+                ...(colorTokens.cardBackground
+                  ? { backgroundColor: colorTokens.cardBackground }
+                  : undefined),
               }}
               onClick={isInteractive ? () => handleCardClick(dp) : undefined}
               tabIndex={isInteractive ? 0 : undefined}
@@ -538,7 +563,11 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 {IconComponent && (
                   <span
                     className={styles.iconSlot}
-                    style={colorTokens.iconColor ? { color: colorTokens.iconColor } : undefined}
+                    style={
+                      colorTokens.iconColor
+                        ? { color: colorTokens.iconColor }
+                        : undefined
+                    }
                     aria-hidden="true"
                   >
                     <IconComponent />
@@ -547,9 +576,13 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                 <Text
                   className={mergeClasses(
                     styles.cardValue,
-                    effectiveCardSize === "large" && styles.cardValueLarge
+                    effectiveCardSize === "large" && styles.cardValueLarge,
                   )}
-                  style={colorTokens.valueText ? { color: colorTokens.valueText } : undefined}
+                  style={
+                    colorTokens.valueText
+                      ? { color: colorTokens.valueText }
+                      : undefined
+                  }
                   aria-live="polite"
                 >
                   {formattedVal}
@@ -560,7 +593,11 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
               {description && (
                 <Text
                   className={styles.cardDescription}
-                  style={colorTokens.valueText ? { color: colorTokens.valueText, opacity: 0.8 } : undefined}
+                  style={
+                    colorTokens.valueText
+                      ? { color: colorTokens.valueText, opacity: 0.8 }
+                      : undefined
+                  }
                 >
                   {description}
                 </Text>
