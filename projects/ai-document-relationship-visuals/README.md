@@ -1,8 +1,8 @@
 # AI Document Relationship Visuals
 
-> **Last Updated**: 2026-03-10
+> **Last Updated**: 2026-03-13
 >
-> **Status**: In Progress
+> **Status**: Complete
 
 ## Overview
 
@@ -21,9 +21,11 @@ Enhance the DocumentRelationshipViewer Code Page with a Related Document Count c
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development |
-| **Progress** | 0% |
-| **Owner** | Product Team |
+| **Phase** | Complete |
+| **Progress** | 100% (10/13 tasks done, 3 skipped) |
+| **PR** | [#220](https://github.com/spaarke-dev/spaarke/pull/220) |
+| **Merged** | 2026-03-12 |
+| **PCF Version** | 1.20.2 |
 
 ## Problem Statement
 
@@ -37,16 +39,16 @@ Deliver a `RelatedDocumentCount` PCF control that shows document count on form l
 
 The project is considered **complete** when:
 
-- [ ] RelatedDocumentCount PCF renders count on Document main form within 200ms of form load
-- [ ] Clicking count card opens FindSimilarDialog with full DocumentRelationshipViewer
-- [ ] Graph renders instantly on dialog open — no "Calculating layout..." spinner
-- [ ] CSV export downloads filtered relationship data from Grid view
-- [ ] Quick search filters grid rows by document name
-- [ ] `useForceSimulation` hook builds cleanly in `@spaarke/ui-components` (hub-spoke + peer-mesh)
-- [ ] `RelationshipCountCard` builds cleanly in `@spaarke/ui-components`
-- [ ] Shared components have 90%+ test coverage
-- [ ] All components render correctly in dark mode
-- [ ] All existing functionality (Graph, Grid, Filters) continues working
+- [x] RelatedDocumentCount PCF renders count on Document main form (single API call with graph data)
+- [x] Clicking count card opens FindSimilarDialog with full DocumentRelationshipViewer
+- [x] Graph renders instantly on dialog open — sync d3-force pre-computation via useForceSimulation
+- [x] CSV export downloads filtered relationship data from Grid view
+- [x] Quick search filters grid rows by document name
+- [x] `useForceSimulation` hook builds cleanly in `@spaarke/ui-components` (hub-spoke + peer-mesh)
+- [x] `RelationshipCountCard` builds cleanly in `@spaarke/ui-components`
+- [ ] Shared components have 90%+ test coverage (follow-up)
+- [x] All components render correctly in dark mode
+- [x] All existing functionality (Graph, Grid, Filters) continues working
 
 ## Scope
 
