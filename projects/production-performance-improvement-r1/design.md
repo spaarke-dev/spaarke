@@ -1,8 +1,8 @@
 # Production Performance Improvement R1 — Design Specification
 
-> **Version**: 1.0
-> **Date**: 2026-02-17
-> **Status**: Draft — Ready for Review
+> **Version**: 2.0
+> **Date**: 2026-03-11
+> **Status**: Draft — Expanded for Beta Readiness
 > **Author**: Development Team
 
 ---
@@ -11,15 +11,23 @@
 
 The Spaarke platform exhibits slow response times across BFF API interactions with SharePoint Embedded (Microsoft Graph), Azure AI services, and Dataverse. Analysis reveals that the root causes are not development-only issues — they are architectural gaps in caching, connection management, query optimization, and infrastructure configuration that will persist into production without targeted intervention.
 
-This project delivers production-readiness improvements across three domains:
+This project delivers production-readiness improvements across **seven domains**:
 
 1. **BFF API Performance** — Implement the Redis caching layers prescribed by ADR-009 but not yet built, optimize Graph client management, and add response caching for the highest-traffic call patterns.
 
 2. **Dataverse Performance** — Fix over-fetching queries (`ColumnSet(true)` / missing `$select`), add request batching, resolve thread-safety issues in the WebAPI client, and optimize PCF control data loading patterns.
 
-3. **Azure Infrastructure** — Right-size service tiers for production, enable VNet and private endpoints, configure autoscaling, and establish deployment slot strategy.
+3. **Azure Infrastructure** — Correct development-grade Bicep defaults (B1 App Service, Basic Redis, basic AI Search) to production tiers, enable VNet and private endpoints, configure autoscaling, and establish deployment slot strategy.
 
-The combined effect targets a **60-80% reduction in typical API response times** and establishes the infrastructure foundation for production deployment.
+4. **CI/CD Pipeline** — Re-enable tests, add IaC deployment, establish environment promotion with approval gates.
+
+5. **AI Pipeline Optimization** — Address the #1 user complaint (45+ second analysis times) by parallelizing RAG searches, caching extracted document text, adding timeouts, and tuning OpenAI parameters.
+
+6. **Code Quality & Production Readiness** — Secure 5 unauthenticated endpoint groups, implement 37 missing authorization filters, remove ~5,500 lines of obsolete handler code, and fix mock services returning empty data.
+
+7. **Logging & Observability** — Guard 100 files with unprotected JSON serialization in log calls, remove development debug tags, batch loop logging, and tune per-service log levels.
+
+The combined effect targets a **60-80% reduction in typical API response times**, a **40-60% reduction in AI analysis times** on repeat analyses, and resolves **critical security gaps** blocking beta user access.
 
 ---
 
@@ -55,16 +63,64 @@ User Request (e.g., list files, open document)
 | N+1 query in field mapping profile load | 2 sequential calls instead of `$expand` | Field mapping operations |
 | Multiple PCF controls on same form make duplicate queries | No cross-control cache or deduplication | Every form load with 3+ controls |
 
-### 2.3 Azure Infrastructure — Service Tier Gaps
+### 2.3 AI Analysis Pipeline — Latency Breakdown
 
-| Service | Dev (Live) | Prod (IaC) | Gap |
-|---------|-----------|-------------|-----|
-| App Service | Unknown (legacy) | P1v3 | No autoscaling, no deployment slots configured |
-| Redis | Unknown | Premium P1 (6 GB) | No VNet injection, no data persistence, no clustering |
-| Azure OpenAI | 10K TPM (gpt-4o-mini) | 200K TPM | Dev is severely throttled; prod needs PTU evaluation |
-| AI Search | Standard, 1 replica | Standard2, 2 replicas | Deprecated index consuming storage; Model 2 on Basic (no semantic search) |
-| Service Bus | Standard | Standard | Legacy queue names, no duplicate detection |
-| All Services | Public endpoints | Public endpoints | No VNet, no private endpoints, no network isolation |
+The #1 user performance complaint. Even small files take 45+ seconds:
+
+```
+AI Analysis Request (e.g., clause analysis on 5KB PDF)
+  → Document Retrieval .............. 100-200ms   ← Dataverse metadata query
+  → Document Intelligence .......... 5-30s       ← WaitUntil.Completed, NO timeout, NO cache
+  → RAG Knowledge Search ........... 6-9s        ← SEQUENTIAL (3 sources × 2-3s each)
+  → Prompt Building ................ 50-200ms    ← Local string assembly
+  → OpenAI Streaming ............... 10-40s      ← Model inference (MaxOutputTokens=1000)
+  → Finalization ................... 1-3s        ← Dataverse persist + job queue
+                                     ────────
+  Total:                             ~21-79s (typical: 45s+)
+```
+
+**Key findings**: Document text extraction is never cached (re-extracts on every analysis). RAG searches are sequential, not parallel. No timeout on Document Intelligence — a stuck request blocks indefinitely.
+
+### 2.4 Code Quality — Accumulated Technical Debt
+
+The BFF API is **~75,000 lines across 524 files**, built incrementally across multiple AI-directed projects:
+
+| Issue | Count | Severity |
+|-------|-------|----------|
+| Unauthenticated endpoints (marked TEMPORARY) | 5 endpoint groups | **CRITICAL — security** |
+| Missing authorization filters (TODO Task 033) | 37 TODOs | **CRITICAL — security** |
+| Obsolete handlers still registered in DI | 6 handlers (~5,500 lines) | High — dead code, DI bloat |
+| God class (ScopeResolverService) | 2,538 lines, 39 public methods | High — maintainability |
+| Mock/stub services returning empty data | 3 services | High — user-facing bugs |
+| Console.WriteLine in production code | 18 calls | Medium — observability gap |
+| Commented-out code | 331 files | Medium — maintainability |
+| TODO/FIXME comments | 65 items | Medium — unfinished work |
+
+### 2.5 Logging — Volume and Performance Impact
+
+**3,113 logging calls across 223 files**:
+
+| Pattern | Count | Performance Impact |
+|---------|-------|--------------------|
+| `JsonSerializer.Serialize()` in log calls (no level guard) | 100 files | 10-20% overhead from unnecessary allocations |
+| `[DEBUG]` tags in LogError/LogInformation | 7 instances | Noise in production logs |
+| Per-item logging inside loops | 20 files | O(n) log volume for batch operations |
+| Methods with 5+ log statements | 172 methods | Chatty traces complicate debugging |
+| LogInformation calls (many should be LogDebug) | 1,099 | Excessive production log volume |
+
+### 2.6 Azure Infrastructure — Service Tier Gaps
+
+**UPDATED**: Bicep audit reveals Model 2 defaults are **development-grade**, not production-ready:
+
+| Service | Model 2 Bicep Default | Required for Beta | Gap |
+|---------|----------------------|-------------------|-----|
+| App Service | **B1 (Basic)** | S1+ (Standard) | B1 has no SLA, shared CPU, can't scale |
+| Redis | **Basic C0 (250MB)** | Standard C1+ (1GB) | No HA, no persistence, evicts at 10+ users |
+| AI Search | **basic** | standard | Basic lacks semantic search at scale, no HA |
+| Azure OpenAI | 10K TPM (dev) / 120 TPM (Bicep) | ≥200K TPM | Severely throttled; capacity mismatch in docs vs code |
+| AI Search Replicas | 1 | 2+ | No redundancy; unavailable if node fails |
+| Service Bus | Standard | Standard | OK for beta |
+| All Services | Public endpoints | Public endpoints | Acceptable for beta; private endpoints for production |
 
 ### 2.4 CI/CD Pipeline
 
@@ -118,13 +174,37 @@ User Request (e.g., list files, open document)
 - OIDC-based authentication for all deployment environments
 - Deployment slot swap strategy for production
 
+**Domain E: AI Pipeline Optimization**
+- Parallelize RAG knowledge source searches (sequential → `Task.WhenAll`)
+- Cache extracted document text in Redis (eliminate repeat Document Intelligence calls)
+- Add Document Intelligence timeout and cancellation
+- Tune OpenAI parameters (MaxOutputTokens, model selection per action complexity)
+- Cache RAG search results with document+query composite keys
+
+**Domain F: Code Quality & Production Readiness**
+- Remove or secure 5 unauthenticated API endpoint groups (marked TEMPORARY)
+- Implement 37 missing authorization filters in OfficeEndpoints (Task 033 TODOs)
+- Remove 6 obsolete tool handlers (~5,500 lines) or complete JPS migration
+- Refactor ScopeResolverService god class (39 public methods → focused services)
+- Replace mock/stub Workspace services with real implementations or remove endpoints
+- Fix localhost CORS fallback to fail-fast in production
+- Replace 18 `Console.WriteLine` calls in Program.cs with structured logging
+- Remove commented-out code and resolve critical TODO/FIXME items
+
+**Domain G: Logging & Observability Optimization**
+- Guard all `JsonSerializer.Serialize()` log calls with `IsEnabled()` checks (100 files)
+- Remove `[DEBUG]` tags from production log messages (7 instances)
+- Move per-item loop logging to batch summaries (20 files)
+- Tune per-service log levels for production vs development
+- Demote verbose `LogInformation` calls to `LogDebug` where appropriate
+- Remove string allocations from log parameters (Substring, concatenation)
+
 ### 3.2 Out of Scope
 
 - PCF React 16 remediation (separate project: `pcf-react-16-remediation`)
 - Full VNet hub-spoke topology for multi-region deployment
 - Azure Front Door / CDN integration
 - Database-level Dataverse optimization (index creation requires Microsoft support)
-- Application-level code refactoring beyond performance fixes
 - New feature development
 - Load testing / performance benchmarking (recommended as follow-up project)
 
@@ -214,9 +294,24 @@ Add paging cookie support to `GetDocumentsByContainerAsync` and any other unboun
 
 ### Domain C: Azure Infrastructure
 
-#### C1. Network Isolation (Priority 0 — Security)
+#### C0. Bicep Tier Corrections (Priority 0 — Beta Blocker)
 
-Currently, **all Azure services use public endpoints with no network restrictions**. This is the single most critical production gap.
+The Model 2 Bicep template (`infrastructure/bicep/stacks/model2-full.bicep`) defaults to development-grade tiers. These must be corrected before any beta deployment:
+
+| Parameter | Current Default | Required Default | File:Line |
+|-----------|----------------|------------------|-----------|
+| `appServiceSku` | `B1` | `S1` | `model2-full.bicep:31` |
+| Redis `sku` | `Basic` | `Standard` | `model2-full.bicep:114` |
+| Redis `capacity` | `0` (C0, 250MB) | `1` (C1, 1GB) | `model2-full.bicep:115` |
+| `aiSearchSku` | `basic` | `standard` | `model2-full.bicep:35` |
+| AI Search `replicaCount` | `1` | `2` | `model2-full.bicep:261` |
+| OpenAI `gpt-4o-mini` capacity | `120` | `200+` | `model2-full.bicep:241` |
+
+**Effort**: 30 minutes (parameter changes + redeploy).
+
+#### C1. Network Isolation (Post-Beta — Security)
+
+Currently, **all Azure services use public endpoints with no network restrictions**. This is acceptable for initial beta but must be addressed before broader production access.
 
 **Deliverables**:
 - Create VNet with 3 subnets: `snet-app` (App Service integration), `snet-redis` (Redis VNet injection), `snet-pe` (private endpoints)
@@ -309,6 +404,242 @@ Configure staging deployment slot on P1v3 plan:
 
 ---
 
+### Domain E: AI Pipeline Optimization
+
+The AI analysis pipeline is the **#1 user performance complaint** (45+ seconds for small files). Root causes are sequential processing, missing caches, and no timeouts on external AI services.
+
+#### E1. Parallelize RAG Knowledge Searches
+
+The `AnalysisOrchestrationService.ProcessRagKnowledgeAsync()` searches RAG knowledge sources **sequentially** in a `foreach` loop. Each Azure AI Search query takes 2-3 seconds.
+
+```csharp
+// Current (sequential — ~8 seconds for 3 sources):
+foreach (var source in knowledge)
+{
+    var searchResult = await _ragService.SearchAsync(ragQuery.SearchText, searchOptions, ct);
+}
+
+// Fix (parallel — ~3 seconds for 3 sources):
+var searchTasks = knowledge.Select(source => SearchSourceAsync(source, ct));
+var results = await Task.WhenAll(searchTasks);
+```
+
+**Expected impact**: Saves 5-8 seconds per analysis with multiple knowledge sources.
+
+#### E2. Cache Extracted Document Text
+
+Document Intelligence extraction (5-30 seconds) runs on **every analysis** of the same document, even when the document hasn't changed. Cache the extracted text in Redis using document ID + ETag versioning.
+
+| Cache Target | Key Pattern | TTL | Invalidation |
+|-------------|-------------|-----|--------------|
+| Extracted text (Doc Intelligence) | `sdap:ai:text:{driveId}:{itemId}:v{etag}` | 24 hr | ETag-versioned keys auto-expire |
+| Native text (UTF-8 read) | `sdap:ai:text:{driveId}:{itemId}:v{etag}` | 24 hr | Same pattern, different extractor |
+
+**Expected impact**: Eliminates 5-30 seconds on repeat analysis of same document (common workflow: user runs multiple analysis types on same file).
+
+#### E3. Document Intelligence Timeout & Resilience
+
+`TextExtractorService.ExtractViaDocIntelAsync()` uses `WaitUntil.Completed` with **no timeout**. A stuck Document Intelligence request blocks the analysis indefinitely.
+
+**Fixes**:
+- Add 30-second timeout via `CancellationTokenSource.CreateLinkedTokenSource()`
+- Add circuit breaker (Polly) for Document Intelligence calls
+- Return graceful degradation message if extraction times out
+
+#### E4. OpenAI Parameter Tuning
+
+| Parameter | Current | Proposed | Impact |
+|-----------|---------|----------|--------|
+| `MaxOutputTokens` | 1000 | 500 (configurable per action) | Saves 2-5 seconds on inference |
+| `Temperature` | 0.3 | 0.3 (no change) | — |
+| Model selection | Always `gpt-4o-mini` | Per-action: simple → `gpt-4o-mini`, complex → `gpt-4o` | Better quality/speed tradeoff |
+
+#### E5. Cache RAG Search Results
+
+Cache RAG search results by document+query composite key to avoid redundant Azure AI Search calls when the same document is analyzed multiple times with similar queries.
+
+| Cache Target | Key Pattern | TTL | Notes |
+|-------------|-------------|-----|-------|
+| RAG search results | `sdap:ai:rag:{indexName}:{queryHash}` | 15 min | Short TTL; results may change with index updates |
+
+**Expected impact**: Saves 2-8 seconds on repeat/similar analyses.
+
+#### AI Analysis — Before vs. After
+
+| Step | Current | After Optimization |
+|------|---------|-------------------|
+| Document text extraction | 5-30s (Doc Intelligence) | **~5ms** (cached) or 5-30s (first run) |
+| RAG knowledge search (3 sources) | 6-9s (sequential) | **2-3s** (parallel) |
+| OpenAI inference | 10-40s | **8-25s** (reduced output tokens) |
+| **Total (first analysis)** | **21-79s** | **~15-58s** |
+| **Total (repeat analysis, cached)** | **21-79s** | **~10-28s** |
+
+---
+
+### Domain F: Code Quality & Production Readiness
+
+Code audit reveals **critical security gaps and dead code** accumulated across multiple AI-directed development projects. These must be resolved before beta user access.
+
+#### F1. Secure Unauthenticated Endpoints (CRITICAL — Security Blocker)
+
+**5 API endpoint groups** are marked `TEMPORARY` with `.AllowAnonymous()`:
+
+| Endpoint Group | File | Line | Status |
+|---------------|------|------|--------|
+| `/api/ai/playbook-builder` | `Api/Ai/AiPlaybookBuilderEndpoints.cs` | 24 | `.AllowAnonymous()` |
+| `/api/ai/playbooks` | `Api/Ai/PlaybookEndpoints.cs` | 20 | `.AllowAnonymous()` |
+| `/api/ai/playbooks/{id}/nodes` | `Api/Ai/NodeEndpoints.cs` | 19 | `.AllowAnonymous()` |
+| `/api/ai/playbooks/{id}/...` | `Api/Ai/PlaybookRunEndpoints.cs` | 25 | `.AllowAnonymous()` |
+| `/api/ai/playbooks/runs` | `Api/Ai/PlaybookRunEndpoints.cs` | 29 | `.AllowAnonymous()` |
+
+**Fix**: Restore `.RequireAuthorization()` and implement MSAL auth or API key authentication for PlaybookBuilderHost PCF control.
+
+#### F2. Implement Missing Authorization Filters (CRITICAL)
+
+**37 TODO comments** in `Api/Office/OfficeEndpoints.cs` reference unimplemented authorization filters:
+
+```csharp
+// TODO: Task 033 - .AddOfficeAuthFilter()
+// TODO: Task 033 - .AddJobOwnershipFilter()
+```
+
+**Fix**: Implement `OfficeAuthFilter` and `JobOwnershipFilter` endpoint filters per ADR-008 pattern, or apply existing authorization patterns from other endpoint groups.
+
+#### F3. Remove Obsolete Tool Handlers (~5,500 lines)
+
+6 tool handlers marked `[Obsolete("Use GenericAnalysisHandler with JPS configuration")]` are still registered in DI and referenced by name in orchestration services:
+
+| Handler | Lines | Status |
+|---------|-------|--------|
+| `ClauseAnalyzerHandler.cs` | 932 | Obsolete, still registered |
+| `DateExtractorHandler.cs` | 809 | Obsolete, still registered |
+| `EntityExtractorHandler.cs` | ~800 | Obsolete, **still referenced in AnalysisOrchestrationService** |
+| `FinancialCalculatorHandler.cs` | 929 | Obsolete, still registered |
+| `RiskDetectorHandler.cs` | 932 | Obsolete, still registered |
+| `ClauseComparisonHandler.cs` | 958 | Likely obsolete, not decorated |
+
+**Fix**: Verify all JPS configurations exist for each handler, remove handlers, update DI registrations, remove string-based references in orchestration services.
+
+#### F4. Refactor ScopeResolverService God Class
+
+`Services/Ai/ScopeResolverService.cs` — **2,538 lines, 39 public methods** — violates single responsibility:
+
+**Split into**:
+- `AnalysisActionService` — CRUD for Actions
+- `AnalysisSkillService` — CRUD for Skills
+- `AnalysisKnowledgeService` — CRUD for Knowledge
+- `AnalysisToolService` — CRUD for Tools
+- `ScopeResolverService` — scope resolution only (original purpose)
+
+#### F5. Replace Mock Workspace Services
+
+Several Workspace services return empty/mock data with TODO comments:
+
+| Service | File | Issue |
+|---------|------|-------|
+| `WorkspaceAiService` | `Services/Workspace/WorkspaceAiService.cs:103` | TODO: Replace with real Dataverse query |
+| `TodoGenerationService` | `Services/Workspace/TodoGenerationService.cs` | 8 TODOs for Dataverse queries |
+| `PortfolioService` | `Services/Workspace/PortfolioService.cs:242` | Mock implementations |
+
+**Fix**: Implement real Dataverse queries or remove endpoints from production builds (conditional compilation).
+
+#### F6. Production Safety Fixes
+
+| Issue | File | Fix |
+|-------|------|-----|
+| Localhost CORS fallback | `Program.cs:809-820` | Change to fail-fast (throw) if no CORS origins configured |
+| 18 `Console.WriteLine` calls | `Program.cs:385-720` | Replace with `ILogger` structured logging |
+| Debug endpoints accessible | Various `/debug/*` routes | Exclude via `#if DEBUG` or environment check |
+| Scorecard endpoint anonymous | `ScorecardCalculatorEndpoints.cs:25` | Implement API key or service auth |
+
+---
+
+### Domain G: Logging & Observability Optimization
+
+The BFF API contains **3,113 logging calls across 223 files**. While structured logging is used correctly (no string interpolation), there are performance-impacting patterns and development artifacts that affect both performance and maintainability.
+
+#### G1. Guard Serialization in Log Calls (CRITICAL — Performance)
+
+**100 files** use `JsonSerializer.Serialize()` inside log calls without checking if the log level is enabled:
+
+```csharp
+// Current (allocates even when Debug is disabled):
+_logger.LogDebug("Tool result: {Data}", JsonSerializer.Serialize(toolResult));
+
+// Fix (zero-cost when Debug is disabled):
+if (_logger.IsEnabled(LogLevel.Debug))
+    _logger.LogDebug("Tool result: {Data}", JsonSerializer.Serialize(toolResult));
+```
+
+**Top offenders**: `BuilderToolExecutor.cs` (14 calls), `OfficeService.cs` (5), `DocumentCheckoutService.cs` (4), `AnalysisOrchestrationService.cs` (4).
+
+**Expected impact**: Eliminates 10-20% overhead from unnecessary heap allocations in hot paths.
+
+#### G2. Remove Development Log Tags
+
+**7 instances** of `[DEBUG]` prefix in production log messages (all in `Program.cs`):
+
+```csharp
+// Current:
+logger.LogError(ex, "[DEBUG] Error peeking office DLQ");
+
+// Fix: Move to LogDebug or remove entirely
+logger.LogDebug(ex, "Error peeking office DLQ");
+```
+
+#### G3. Batch Loop Logging
+
+**20 files** emit per-item logs inside `foreach` loops. Example from `IncomingAssociationResolver.cs`:
+
+```csharp
+// Current (logs per regex pattern per email):
+foreach (var pattern in MatterReferencePatterns)
+{
+    _logger.LogDebug("Extracted reference '{Reference}' from subject '{Subject}'", ...);
+}
+
+// Fix (batch summary):
+_logger.LogDebug("Tested {PatternCount} patterns against subject, {MatchCount} matched",
+    patterns.Length, matches.Count);
+```
+
+#### G4. Production Log Level Configuration
+
+Current `appsettings.json` runs at `Information` level for all namespaces. Add per-service tuning:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.Graph": "Warning",
+      "Sprk.Bff.Api.Services.Ai.ScopeResolverService": "Warning",
+      "Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService": "Warning",
+      "Sprk.Bff.Api.Infrastructure.Graph.DriveItemOperations": "Warning"
+    }
+  }
+}
+```
+
+**Top 3 chattiest services** (combined 330 log statements): `ScopeResolverService` (142), `AnalysisOrchestrationService` (106), `DriveItemOperations` (82).
+
+#### G5. Remove String Allocations from Log Parameters
+
+Replace string operations in log parameters with cheap alternatives:
+
+```csharp
+// Current (allocates substring on every call):
+_logger.LogInformation("Body preview: {Preview}",
+    request.Email.Body?.Substring(0, 50) ?? "(empty)");
+
+// Fix (no allocation):
+_logger.LogInformation("Body present: {HasBody}, Length: {Length}",
+    !string.IsNullOrEmpty(request.Email.Body), request.Email.Body?.Length ?? 0);
+```
+
+---
+
 ## 5. Expected Performance Impact
 
 ### Before vs. After — Typical Hot Paths
@@ -358,36 +689,62 @@ Configure staging deployment slot on P1v3 plan:
 
 ## 6. Priority and Phasing
 
-### Phase 1: Quick Wins (Highest Impact, Lowest Risk)
+### Phase 1: Beta Blockers (Must Complete Before User Access)
 
 | Item | Domain | Effort | Impact |
 |------|--------|--------|--------|
+| **C0. Bicep tier corrections** | Infrastructure | Low | **CRITICAL** — system fails at 10+ users without this |
+| **F1. Secure unauthenticated endpoints** | Code Quality | Medium | **CRITICAL** — security blocker for any user access |
+| **F2. Implement authorization filters** | Code Quality | Medium | **CRITICAL** — 37 unprotected Office endpoints |
+| B3. Thread-safety fixes | Dataverse | Low | **Critical** — correctness bug under concurrent load |
+| F6. Production safety fixes | Code Quality | Low | High — CORS fallback, Console.WriteLine, debug endpoints |
+
+### Phase 2: Quick Performance Wins (Highest Impact, Lowest Risk)
+
+| Item | Domain | Effort | Impact |
+|------|--------|--------|--------|
+| **E1. Parallelize RAG searches** | AI Pipeline | Low | **High** — saves 5-8s per analysis |
+| **E3. Document Intelligence timeout** | AI Pipeline | Low | **High** — prevents infinite waits |
+| **E4. OpenAI parameter tuning** | AI Pipeline | Config | Medium — saves 2-5s per analysis |
 | B1. Explicit column selection | Dataverse | Low | Medium — reduces payload 60-80% |
-| B3. Thread-safety fixes | Dataverse | Low | Critical — correctness bug |
 | A3. GraphServiceClient pooling | BFF API | Low | Low-Medium — reduces object allocation |
 | A4. Debug endpoint removal | BFF API | Low | Low — security and cleanliness |
-| C8. AI Search cleanup | Infrastructure | Low | Low — cost savings |
+| G2. Remove [DEBUG] log tags | Logging | Low | Low — log hygiene |
 
-### Phase 2: Core Caching (Highest Impact, Moderate Effort)
+### Phase 3: Core Caching (Highest Impact, Moderate Effort)
 
 | Item | Domain | Effort | Impact |
 |------|--------|--------|--------|
+| **E2. Cache extracted document text** | AI Pipeline | Medium | **High** — saves 5-30s on repeat analysis |
 | A1. Graph metadata cache | BFF API | Medium | **High** — 90%+ latency reduction on cached ops |
 | A2. Authorization data cache | BFF API | Medium | **High** — eliminates biggest per-request cost |
+| **E5. Cache RAG search results** | AI Pipeline | Medium | Medium — saves 2-8s on repeat queries |
 | B2. Request batching | Dataverse | Medium | Medium — reduces round-trips |
 | B4. Pagination support | Dataverse | Low | Medium — prevents data loss at scale |
 
-### Phase 3: Infrastructure Hardening
+### Phase 4: Code Quality & Logging (Maintainability)
 
 | Item | Domain | Effort | Impact |
 |------|--------|--------|--------|
-| C1. Network isolation (VNet + PE) | Infrastructure | High | **Critical** — security requirement for production |
+| **G1. Guard serialization in log calls** | Logging | Medium | Medium — 10-20% overhead reduction in hot paths |
+| **G3. Batch loop logging** | Logging | Low | Low-Medium — reduces log noise |
+| **G4. Production log level config** | Logging | Low | Low — operational clarity |
+| **G5. Remove string allocations in logs** | Logging | Low | Low — micro-optimization |
+| **F3. Remove obsolete handlers** | Code Quality | Medium | Medium — removes ~5,500 lines dead code |
+| **F5. Replace mock Workspace services** | Code Quality | Medium | Medium — prevents user-facing empty results |
+| C8. AI Search cleanup | Infrastructure | Low | Low — cost savings |
+
+### Phase 5: Infrastructure Hardening
+
+| Item | Domain | Effort | Impact |
+|------|--------|--------|--------|
+| C1. Network isolation (VNet + PE) | Infrastructure | High | **Critical** — security for broader production |
 | C2. Autoscaling | Infrastructure | Medium | High — availability under load |
 | C3. Deployment slots | Infrastructure | Medium | High — zero-downtime deploys |
 | C4. Redis hardening | Infrastructure | Medium | Medium — durability and security |
 | C5-C7. Service hardening | Infrastructure | Medium | Medium — security posture |
 
-### Phase 4: CI/CD Maturity
+### Phase 6: CI/CD Maturity & Refactoring
 
 | Item | Domain | Effort | Impact |
 |------|--------|--------|--------|
@@ -395,6 +752,7 @@ Configure staging deployment slot on P1v3 plan:
 | D2. IaC deployment | CI/CD | Medium | High — repeatable infrastructure |
 | D3. Environment promotion | CI/CD | Medium | High — controlled releases |
 | D4. Slot integration | CI/CD | Low | Medium — zero-downtime in CI/CD |
+| **F4. Refactor ScopeResolverService** | Code Quality | High | Medium — maintainability (post-beta) |
 
 ---
 
@@ -408,6 +766,12 @@ Configure staging deployment slot on P1v3 plan:
 | `$batch` support varies across Dataverse operations | Low | Medium | Test each batch scenario; fall back to parallel `Task.WhenAll` where batch fails |
 | Autoscaling costs exceed budget | Medium | Low | Set max instance count; configure alerts at 70% of max |
 | Deployment slot swap causes cold start | Medium | Medium | Enable warm-up endpoint (`/healthz`) in slot configuration |
+| Removing obsolete handlers breaks existing analysis actions | High | Medium | Verify JPS configuration exists for each handler before removal; keep handler code in git history |
+| Parallel RAG searches overwhelm AI Search | Low | Low | AI Search Standard with 2 replicas handles concurrent queries; add semaphore if needed |
+| Auth filter implementation breaks existing Office integrations | High | Medium | Test each endpoint with Office Add-in before removing AllowAnonymous; staged rollout |
+| Cached document text becomes stale after re-upload | Low | Low | ETag-versioned cache keys auto-invalidate when document changes |
+| Beta users hit OpenAI rate limits | High | Medium | Verify actual TPM capacity; implement client-side retry with backoff; monitor token burn rate |
+| Infrastructure tier upgrades increase monthly costs | Medium | High | Standard C1 Redis +$50/mo, Standard AI Search +$250/mo, S1 App Service +$70/mo — total ~$370/mo increase; budget approval needed |
 
 ---
 
@@ -426,6 +790,15 @@ Configure staging deployment slot on P1v3 plan:
 | SC-09 | CI/CD pipeline runs tests before deployment | Pass | Pipeline execution logs |
 | SC-10 | No thread-safety issues in Dataverse client | 0 issues | Code review + load test |
 | SC-11 | No debug endpoints in non-dev environments | 0 endpoints | Environment-conditional build verification |
+| SC-12 | AI analysis time (repeat, cached text) | < 30s p95 | Application Insights custom telemetry |
+| SC-13 | AI analysis time (first run, small file) | < 45s p95 | Application Insights |
+| SC-14 | Zero unauthenticated endpoints in production | 0 instances | Code search for `.AllowAnonymous()` |
+| SC-15 | All authorization filters implemented | 0 TODO Task 033 | Code search |
+| SC-16 | Zero obsolete handlers in DI | 0 `[Obsolete]` handlers registered | Code review |
+| SC-17 | Zero unguarded JSON serialization in logs | 0 instances | Code search for `Serialize` in log calls without `IsEnabled` guard |
+| SC-18 | Bicep defaults production-grade | All tiers ≥ Standard | Bicep parameter audit |
+| SC-19 | Document text cache hit rate (repeat analysis) | > 80% | Redis metrics |
+| SC-20 | Zero `Console.WriteLine` in production code | 0 instances | Code search |
 
 ---
 
@@ -433,12 +806,18 @@ Configure staging deployment slot on P1v3 plan:
 
 | Dependency | Type | Status | Notes |
 |------------|------|--------|-------|
-| Redis (production instance) | Infrastructure | Available via Bicep | Premium P1 already defined |
-| Azure VNet | Infrastructure | Not created | Requires Bicep deployment |
-| App Service P1v3 plan | Infrastructure | Defined in Bicep | Not yet deployed for production |
+| Redis (production instance) | Infrastructure | Available via Bicep | **Requires tier upgrade from Basic to Standard** |
+| Azure VNet | Infrastructure | Not created | Requires Bicep deployment (Phase 5) |
+| App Service plan | Infrastructure | Defined in Bicep | **Requires upgrade from B1 to S1** |
+| AI Search | Infrastructure | Defined in Bicep | **Requires upgrade from basic to standard** |
+| Azure OpenAI capacity | Infrastructure | Partially configured | **Requires TPM verification and increase** |
 | ADR-009 (Redis-first caching) | Architecture | Approved | Provides caching patterns |
 | ADR-003 (Authorization) | Architecture | Approved | Defines cacheable vs non-cacheable boundaries |
 | ADR-007 (SpeFileStore facade) | Architecture | Approved | All Graph caching goes through facade |
+| ADR-008 (Endpoint filters) | Architecture | Approved | Pattern for F1/F2 authorization filter implementation |
+| ADR-013 (AI Architecture) | Architecture | Approved | Guides E1-E5 AI pipeline changes |
+| JPS migration completeness | Code | In Progress | F3 (remove obsolete handlers) depends on all JPS configs existing |
+| Task 033 (Office auth filters) | Code | Not Started | F2 depends on filter implementation design |
 
 ---
 
@@ -455,12 +834,16 @@ Configure staging deployment slot on P1v3 plan:
 
 | Change | Cost Effect |
 |--------|------------|
-| Redis Premium P1 (6 GB) | ~$250/month (already budgeted in Bicep) |
-| App Service P1v3 with autoscale (2-10 instances) | $146-$730/month based on load |
-| VNet + Private Endpoints | ~$50-100/month for endpoint hours |
-| AI Search Standard2 with 2 replicas | ~$500/month (already budgeted) |
-| Reduced Azure OpenAI calls (caching) | **Savings** — fewer redundant calls |
+| Redis Basic C0 → Standard C1 (1 GB) | +$50/month (from ~$17 to ~$67) |
+| App Service B1 → S1 (Standard) | +$70/month (from ~$55 to ~$125) |
+| AI Search basic → standard (2 replicas) | +$500/month (from ~$75 to ~$575) |
+| VNet + Private Endpoints (Phase 5) | ~$50-100/month for endpoint hours |
+| Azure OpenAI capacity increase (120 → 200+ TPM) | Marginal (~$0 unless PTU) |
+| Reduced Azure OpenAI calls (E2/E5 caching) | **Savings** — fewer redundant calls |
+| Reduced Document Intelligence calls (E2 text caching) | **Savings** — major; $1.50/1000 pages avoided on repeat analysis |
 | Reduced Dataverse API calls (batching) | **Savings** — fewer round-trips |
+| Reduced AI Search calls (E5 RAG caching) | **Savings** — fewer search units consumed |
+| **Net monthly increase for beta** | **~$620/month** (infrastructure tiers + VNet) |
 
 ### Security
 

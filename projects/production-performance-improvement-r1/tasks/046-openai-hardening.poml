@@ -1,0 +1,37 @@
+<task id="PPI-046" project="Production Performance Improvement R1">
+  <metadata>
+    <title>OpenAI Capacity + Network Hardening (C7)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, openai, security</tags>
+    <parallel-group>P5-B</parallel-group>
+    <dependencies>040 (C1 - VNet)</dependencies>
+  </metadata>
+
+  <prompt>Verify and increase OpenAI TPM capacity, restrict network access, remove deprecated embedding deployment, document model upgrade strategy.</prompt>
+  <role>Azure infrastructure engineer with OpenAI expertise</role>
+  <goal>OpenAI capacity verified at 200+ TPM, network restricted, deprecated deployments removed.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="ADR-013">Rate limit AI endpoints</constraint></constraints>
+  <knowledge><topic>openai, azure-networking</topic><files><file>.claude/constraints/ai.md</file><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Verify actual TPM capacity">Run `az cognitiveservices account deployment list`.</step>
+    <step order="2" name="Increase if needed">Update Bicep to 200+ TPM for gpt-4o-mini.</step>
+    <step order="3" name="Restrict network access">Add private endpoint, disable public access.</step>
+    <step order="4" name="Remove deprecated deployment">Remove text-embedding-3-small if deprecated.</step>
+    <step order="5" name="Document model upgrade strategy">Add notes to infrastructure docs.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs><output type="code">infrastructure/bicep/modules/openai.bicep (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">OpenAI TPM verified at 200+</criterion>
+    <criterion testable="true">Network restricted via private endpoint</criterion>
+    <criterion testable="true">Deprecated deployments removed</criterion>
+  </acceptance-criteria>
+</task>

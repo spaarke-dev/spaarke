@@ -1,0 +1,74 @@
+<task id="PPI-014" project="Production Performance Improvement R1">
+  <metadata>
+    <title>GraphServiceClient Singleton Pooling (A3)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2</phase>
+    <domain>A</domain>
+    <tags>bff-api, graph, performance</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace per-call GraphServiceClient instantiation in GraphClientFactory.ForApp() with a cached
+    singleton for app-only operations. The HttpClient is already pooled via IHttpClientFactory, but
+    the credential and auth provider objects are recreated unnecessarily on every call.
+  </prompt>
+
+  <role>Senior .NET developer with Microsoft Graph SDK and DI expertise</role>
+
+  <goal>
+    GraphServiceClient for app-only operations is a singleton. Credential and auth provider created
+    once. Per-user (OBO) clients remain per-request.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-007">All Graph operations through SpeFileStore facade</constraint>
+    <constraint source="ADR-010">DI minimalism — register concretes</constraint>
+    <constraint source="project">OBO (per-user) clients must remain per-request</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>graph-sdk, di, singleton</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review GraphClientFactory">
+      Read GraphClientFactory.cs. Identify ForApp() and ForUser() methods.
+    </step>
+    <step order="2" name="Cache app-only GraphServiceClient">
+      Use Lazy&lt;GraphServiceClient&gt; or singleton pattern for app-only client.
+    </step>
+    <step order="3" name="Verify OBO clients unchanged">
+      Ensure per-user (OBO) clients are still created per-request.
+    </step>
+    <step order="4" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App-only GraphServiceClient is singleton/cached</criterion>
+    <criterion testable="true">OBO clients remain per-request</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

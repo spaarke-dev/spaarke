@@ -1,0 +1,64 @@
+<task id="PPI-036" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Delete Deprecated AI Search Index (C8)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>4</phase>
+    <domain>C</domain>
+    <tags>infrastructure, ai-search, cleanup</tags>
+    <parallel-group>P4-ALL</parallel-group>
+    <dependencies>Phase 3 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Delete the deprecated spaarke-knowledge-index (1536-dim, replaced by v2 index). This saves
+    storage costs and eliminates confusion about which index is active.
+  </prompt>
+
+  <role>Azure infrastructure engineer with AI Search expertise</role>
+
+  <goal>
+    Deprecated AI Search index deleted. Only current v2 index remains.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Verify v2 index is active and no code references deprecated index</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-search</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify no code references deprecated index">
+      Search codebase for "spaarke-knowledge-index". Ensure zero active references.
+    </step>
+    <step order="2" name="Delete deprecated index">
+      Use `az search index delete` to remove the deprecated index.
+    </step>
+    <step order="3" name="Verify v2 index unaffected">
+      Confirm v2 index is still operational.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for AI Search operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Deprecated AI Search index deleted</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deprecated spaarke-knowledge-index no longer exists</criterion>
+    <criterion testable="true">V2 index is operational</criterion>
+    <criterion testable="true">Zero code references to deprecated index</criterion>
+  </acceptance-criteria>
+</task>

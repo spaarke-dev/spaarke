@@ -1,0 +1,36 @@
+<task id="PPI-044" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Key Vault Hardening (C5)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, security</tags>
+    <parallel-group>P5-B</parallel-group>
+    <dependencies>040 (C1 - VNet)</dependencies>
+  </metadata>
+
+  <prompt>Restrict Key Vault network access to VNet + App Service outbound IPs. Enable secret rotation. Audit role assignments.</prompt>
+  <role>Azure infrastructure engineer</role>
+  <goal>Key Vault hardened with network restrictions, rotation policy, and least-privilege access.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="project">Must not break App Service access to secrets</constraint></constraints>
+  <knowledge><topic>keyvault, azure-security</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Restrict network access">Add VNet rules and App Service outbound IPs.</step>
+    <step order="2" name="Enable secret rotation">Configure rotation policy for client secrets.</step>
+    <step order="3" name="Audit role assignments">Verify least privilege.</step>
+    <step order="4" name="Validate">Run `az bicep build`.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs><output type="code">infrastructure/bicep/modules/keyvault.bicep (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Network access restricted to VNet</criterion>
+    <criterion testable="true">Secret rotation policy enabled</criterion>
+    <criterion testable="true">Least-privilege role assignments</criterion>
+  </acceptance-criteria>
+</task>

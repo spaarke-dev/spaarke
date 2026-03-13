@@ -1,0 +1,66 @@
+<task id="PPI-041" project="Production Performance Improvement R1">
+  <metadata>
+    <title>App Service Autoscaling (C2)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, autoscaling</tags>
+    <parallel-group>P5-A</parallel-group>
+    <dependencies>Phase 4 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Configure App Service autoscaling rules based on CPU, memory, and HTTP queue metrics.
+    Min 2 instances for availability, max 10 for cost control.
+  </prompt>
+
+  <role>Azure infrastructure engineer with autoscaling expertise</role>
+
+  <goal>Autoscaling configured and validated. Scale-out triggers verified.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="bicep">infrastructure/bicep/stacks/model2-full.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Max 10 instances for cost control</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-autoscaling</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create autoscale Bicep module">
+      Define autoscale rules: CPU >70% for 5min → scale out, CPU &lt;30% for 10min → scale in.
+    </step>
+    <step order="2" name="Add memory and HTTP queue rules">
+      Memory >80% → scale out. HTTP queue >100 for 2min → scale out.
+    </step>
+    <step order="3" name="Set min/max/default instances">
+      Min: 2, Max: 10, Default: 2.
+    </step>
+    <step order="4" name="Validate Bicep">
+      Run `az bicep build`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/autoscale.bicep (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Autoscale rules configured for CPU, memory, HTTP queue</criterion>
+    <criterion testable="true">Min 2, Max 10 instances</criterion>
+    <criterion testable="true">Bicep validates</criterion>
+  </acceptance-criteria>
+</task>

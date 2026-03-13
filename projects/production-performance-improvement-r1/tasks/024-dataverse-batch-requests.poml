@@ -1,0 +1,73 @@
+<task id="PPI-024" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Dataverse Request Batching (B2)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <domain>B</domain>
+    <tags>bff-api, dataverse, performance</tags>
+    <parallel-group>P3-C</parallel-group>
+    <dependencies>013 (B1 - explicit columns)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement $batch OData endpoint usage for operations that currently make multiple sequential
+    Dataverse calls: scorecard calculation (3 KPI queries), field mapping profiles (2 calls),
+    and multi-entity authorization checks.
+  </prompt>
+
+  <role>Senior .NET developer with Dataverse WebAPI and OData $batch expertise</role>
+
+  <goal>
+    Multi-query operations use $batch to reduce round-trips. Scorecard: 3 calls → 1.
+    Field mapping: 2 calls → 1 (or $expand). Overall 50-60% latency reduction for batched ops.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseWebApiService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">$batch support varies — test each scenario; fall back to Task.WhenAll if batch fails</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, odata-batch</topic>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify batch candidates">
+      Find all multi-query operations (scorecard, field mapping, multi-entity auth).
+    </step>
+    <step order="2" name="Implement $batch helper">
+      Create helper method in DataverseWebApiService for building and sending $batch requests.
+    </step>
+    <step order="3" name="Convert scorecard to batch">
+      Replace 3 sequential KPI queries with single $batch request.
+    </step>
+    <step order="4" name="Convert field mapping to $expand">
+      Replace 2 sequential calls with single call using $expand.
+    </step>
+    <step order="5" name="Test and verify">
+      Run `dotnet build` and `dotnet test`. Verify batch responses parse correctly.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseWebApiService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scorecard calculation uses $batch (3 queries → 1 request)</criterion>
+    <criterion testable="true">Field mapping uses $expand (2 calls → 1)</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

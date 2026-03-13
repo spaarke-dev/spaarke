@@ -1,0 +1,40 @@
+<task id="PPI-043" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Redis VNet Injection + RDB Persistence (C4)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, redis, security</tags>
+    <parallel-group>P5-B</parallel-group>
+    <dependencies>040 (C1 - VNet)</dependencies>
+  </metadata>
+
+  <prompt>Enable Redis VNet injection, RDB persistence, and configure eviction policy.</prompt>
+
+  <role>Azure infrastructure engineer</role>
+  <goal>Redis hardened with VNet injection, persistence, and proper eviction policy.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="ADR-009">Redis-first caching</constraint></constraints>
+
+  <knowledge><topic>redis, azure-networking</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Configure VNet injection">Add Redis to snet-redis subnet.</step>
+    <step order="2" name="Enable RDB persistence">Configure snapshot every 15 minutes.</step>
+    <step order="3" name="Set eviction policy">Configure allkeys-lru.</step>
+    <step order="4" name="Disable public access">Remove public endpoint after VNet injection verified.</step>
+    <step order="5" name="Validate Bicep">Run `az bicep build`.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs><output type="code">infrastructure/bicep/modules/redis.bicep (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Redis in VNet subnet</criterion>
+    <criterion testable="true">RDB persistence enabled (15-min snapshots)</criterion>
+    <criterion testable="true">Eviction policy allkeys-lru</criterion>
+    <criterion testable="true">Public access disabled</criterion>
+  </acceptance-criteria>
+</task>

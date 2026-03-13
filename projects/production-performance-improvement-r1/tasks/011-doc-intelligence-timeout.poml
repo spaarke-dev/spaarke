@@ -1,0 +1,88 @@
+<task id="PPI-011" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Document Intelligence Timeout and Circuit Breaker (E3)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <domain>E</domain>
+    <tags>bff-api, ai, resilience</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    TextExtractorService.ExtractViaDocIntelAsync() uses WaitUntil.Completed with NO timeout.
+    A stuck Document Intelligence request blocks the analysis indefinitely. Add a 30-second timeout
+    via linked CancellationToken and a Polly circuit breaker for resilience.
+  </prompt>
+
+  <role>Senior .NET developer with Polly resilience patterns and Azure AI services expertise</role>
+
+  <goal>
+    Document Intelligence calls have a 30-second timeout. Circuit breaker opens after 3 consecutive
+    failures. Graceful degradation message returned on timeout. No analysis blocks indefinitely.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI features extend BFF</constraint>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings, not document content</constraint>
+    <constraint source="project">Return user-friendly degradation message on timeout</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>resilience, circuit-breaker, document-intelligence</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>.claude/patterns/api/text-extraction.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Http/ResilientHttpHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate WaitUntil.Completed call">
+      Read TextExtractorService.cs (~line 519). Find the Document Intelligence call without timeout.
+    </step>
+    <step order="2" name="Add 30-second timeout">
+      Create linked CancellationTokenSource with 30-second timeout.
+      Pass linked token to Document Intelligence operation.
+    </step>
+    <step order="3" name="Add Polly circuit breaker">
+      Configure circuit breaker: break after 3 consecutive failures, 60-second break duration.
+      Follow pattern from ResilientHttpHandler.cs.
+    </step>
+    <step order="4" name="Add graceful degradation">
+      On timeout: return user-friendly message explaining extraction took too long.
+      On circuit open: return message explaining service temporarily unavailable.
+    </step>
+    <step order="5" name="Add configuration">
+      Add DocumentIntelligenceOptions with TimeoutSeconds (default 30) and CircuitBreakerThreshold.
+    </step>
+    <step order="6" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs (modified/created)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document Intelligence calls have 30-second timeout</criterion>
+    <criterion testable="true">Circuit breaker configured with Polly</criterion>
+    <criterion testable="true">Graceful degradation message on timeout</criterion>
+    <criterion testable="true">Timeout configurable via DocumentIntelligenceOptions</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

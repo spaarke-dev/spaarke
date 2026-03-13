@@ -1,0 +1,81 @@
+<task id="PPI-004" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Production Safety Fixes (F6)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <domain>F</domain>
+    <tags>bff-api, security, production-readiness, beta-blocker</tags>
+    <parallel-group>P1-B</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix production safety issues in Program.cs and related files:
+    1. Replace localhost CORS fallback (lines 809-820) with fail-fast (throw if no CORS origins configured)
+    2. Replace 18 Console.WriteLine calls with ILogger structured logging
+    3. Exclude debug endpoints from non-development environments via environment check
+    4. Fix scorecard endpoint anonymous access
+  </prompt>
+
+  <role>Senior .NET developer with ASP.NET Core middleware and logging expertise</role>
+
+  <goal>
+    Zero Console.WriteLine in production code. CORS fails fast without config. Debug endpoints
+    excluded from non-dev. All changes build and pass tests.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Program.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for auth, not middleware</constraint>
+    <constraint source="project">Must not break development workflow (debug endpoints still work in dev)</constraint>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings, never content</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>asp-net-core, logging, cors</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Fix CORS fallback">
+      Replace localhost fallback with InvalidOperationException throw when no CORS origins configured.
+    </step>
+    <step order="2" name="Replace Console.WriteLine calls">
+      Replace all 18 Console.WriteLine calls in Program.cs with appropriate ILogger calls.
+      Use LogInformation for startup messages, LogWarning for config issues.
+    </step>
+    <step order="3" name="Exclude debug endpoints in non-dev">
+      Wrap debug endpoint registrations with `if (app.Environment.IsDevelopment())`.
+    </step>
+    <step order="4" name="Fix scorecard endpoint auth">
+      Add appropriate authorization to scorecard endpoint.
+    </step>
+    <step order="5" name="Verify build and tests">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero Console.WriteLine in Program.cs (code search)</criterion>
+    <criterion testable="true">CORS throws InvalidOperationException without configured origins</criterion>
+    <criterion testable="true">Debug endpoints excluded in non-Development environments</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

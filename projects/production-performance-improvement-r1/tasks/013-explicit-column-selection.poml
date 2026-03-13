@@ -1,0 +1,79 @@
+<task id="PPI-013" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Replace ColumnSet(true) with Explicit Columns (B1)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <domain>B</domain>
+    <tags>bff-api, dataverse, performance</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace all ColumnSet(true) usage (6 methods) with explicit column lists. Also add $select
+    to all WebAPI queries missing it. ColumnSet(true) returns 30-60+ columns when only 5-10 are
+    needed, causing 3-5x payload overhead on every query.
+  </prompt>
+
+  <role>Senior .NET developer with Dataverse SDK and WebAPI query optimization expertise</role>
+
+  <goal>
+    Zero ColumnSet(true) in production code. All queries use explicit column selection.
+    60-80% reduction in Dataverse response payload sizes.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseServiceClientImpl.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-002">Dataverse operations should be efficient</constraint>
+    <constraint source="project">Must not break callers — ensure all used fields are included</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, query-optimization</topic>
+    <files>
+      <file>.claude/constraints/data.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseServiceClientImpl.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit ColumnSet(true) usage">
+      Search codebase for ColumnSet(true). List all 6 methods and their callers.
+    </step>
+    <step order="2" name="Determine required columns per method">
+      For each method, trace callers to identify which columns are actually used.
+    </step>
+    <step order="3" name="Replace with explicit column sets">
+      Replace each ColumnSet(true) with new ColumnSet("field1", "field2", ...).
+    </step>
+    <step order="4" name="Add $select to WebAPI queries">
+      Find WebAPI queries missing $select. Add explicit field lists.
+    </step>
+    <step order="5" name="Verify no ColumnSet(true) remains">
+      Code search for ColumnSet(true) — must be zero.
+    </step>
+    <step order="6" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseServiceClientImpl.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero ColumnSet(true) in production code</criterion>
+    <criterion testable="true">All WebAPI queries include $select</criterion>
+    <criterion testable="true">All callers still receive required fields</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

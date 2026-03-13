@@ -1,0 +1,65 @@
+<task id="PPI-031" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Batch Loop Logging (G3)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>4</phase>
+    <domain>G</domain>
+    <tags>bff-api, logging, performance</tags>
+    <parallel-group>P4-ALL</parallel-group>
+    <dependencies>Phase 3 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Move per-item logging inside foreach loops to batch summaries in 20 files. Currently O(n) log
+    volume for batch operations (e.g., IncomingAssociationResolver logs per regex pattern per email).
+    Replace with batch summary: "Tested {N} patterns, {M} matched".
+  </prompt>
+
+  <role>.NET developer with structured logging expertise</role>
+
+  <goal>
+    Per-item loop logging replaced with batch summaries in all 20 files. Log volume reduced
+    proportional to batch sizes.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Log identifiers and sizes, not content</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>logging</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify per-item logging in loops">
+      Search for log calls inside foreach/for loops across codebase.
+    </step>
+    <step order="2" name="Replace with batch summaries">
+      For each loop: collect counts/summaries, log once after loop with aggregate data.
+    </step>
+    <step order="3" name="Build and test">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~20 files with loop logging (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No per-item log calls inside loops (batch summaries instead)</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

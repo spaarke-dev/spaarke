@@ -1,0 +1,83 @@
+<task id="PPI-023" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Authorization Data Snapshot Cache (A2)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <domain>A</domain>
+    <tags>bff-api, auth, caching, redis</tags>
+    <parallel-group>P3-B</parallel-group>
+    <dependencies>Phase 2 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Cache authorization DATA (user roles, team memberships, resource access) in Redis while
+    computing authorization DECISIONS fresh per request. This eliminates 50-200ms Dataverse
+    overhead on every request. Critical distinction: cache the data, never the decision.
+  </prompt>
+
+  <role>Senior .NET developer with authorization architecture and Redis caching expertise</role>
+
+  <goal>
+    Authorization data snapshots cached in Redis. Authorization overhead drops from 50-200ms to
+    &lt;10ms on cache hit. Decisions always computed fresh per-request per ADR-003.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="pattern">src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-003">Cache data NOT decisions. UAC snapshots per-request only.</constraint>
+    <constraint source="ADR-009">IDistributedCache, ETag-versioned keys, tenant-scoped</constraint>
+    <constraint source="project">Short TTLs for security sensitivity (2min roles/teams, 60s resource access)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>authorization, redis-caching</topic>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Caching/DistributedCacheExtensions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify authorization data sources">
+      Find where user roles, team memberships, and resource access are queried from Dataverse.
+    </step>
+    <step order="2" name="Implement user role cache">
+      Cache user role assignments: key `sdap:auth:roles:{userOid}`, TTL 2 min.
+    </step>
+    <step order="3" name="Implement team membership cache">
+      Cache user team memberships: key `sdap:auth:teams:{userOid}`, TTL 2 min.
+    </step>
+    <step order="4" name="Implement resource access cache">
+      Cache per-resource access data: key `sdap:auth:access:{userOid}:{resourceId}`, TTL 60s.
+    </step>
+    <step order="5" name="Verify decisions still computed fresh">
+      Ensure authorization decisions use cached data but compute results per-request.
+    </step>
+    <step order="6" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (authorization service files modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User roles cached with 2-min TTL</criterion>
+    <criterion testable="true">Team memberships cached with 2-min TTL</criterion>
+    <criterion testable="true">Resource access data cached with 60-sec TTL</criterion>
+    <criterion testable="true">Authorization decisions still computed fresh per-request</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

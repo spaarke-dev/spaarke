@@ -1,0 +1,82 @@
+<task id="PPI-010" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Parallelize RAG Knowledge Searches (E1)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <domain>E</domain>
+    <tags>bff-api, ai, performance</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Convert sequential RAG knowledge source searches in AnalysisOrchestrationService.ProcessRagKnowledgeAsync()
+    from a foreach loop to parallel execution via Task.WhenAll. Currently each Azure AI Search query takes
+    2-3 seconds and they run sequentially (3 sources = 6-9s). Parallel execution reduces to ~3s.
+  </prompt>
+
+  <role>Senior .NET developer with async/parallel programming and Azure AI Search expertise</role>
+
+  <goal>
+    RAG searches execute in parallel. 3-source search completes in ~3s instead of ~9s. Must add
+    SemaphoreSlim to prevent overwhelming AI Search (per ADR constraint: no unbounded Task.WhenAll
+    on throttled services).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Extend BFF, not separate service</constraint>
+    <constraint source="spec">MUST NOT allow unbounded Task.WhenAll on throttled services — add semaphore</constraint>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings, not content</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-pipeline, parallel-async</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate sequential RAG loop">
+      Read AnalysisOrchestrationService.cs, find ProcessRagKnowledgeAsync method (~line 764).
+      Identify the sequential foreach loop over knowledge sources.
+    </step>
+    <step order="2" name="Implement parallel search">
+      Replace foreach with LINQ Select + Task.WhenAll. Add SemaphoreSlim(maxConcurrency: 5)
+      to prevent overwhelming AI Search.
+    </step>
+    <step order="3" name="Add timing telemetry">
+      Add Stopwatch-based logging to compare sequential vs parallel timings.
+    </step>
+    <step order="4" name="Handle errors gracefully">
+      If one source fails, continue with others. Log failed source, don't fail entire analysis.
+    </step>
+    <step order="5" name="Test and verify">
+      Run `dotnet build` and `dotnet test`. Verify existing AI tests pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RAG searches execute in parallel via Task.WhenAll</criterion>
+    <criterion testable="true">SemaphoreSlim limits concurrent AI Search queries</criterion>
+    <criterion testable="true">Individual source failures don't fail entire analysis</criterion>
+    <criterion testable="true">Timing telemetry logs parallel execution duration</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,65 @@
+<task id="PPI-025" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Pagination Support for Unbounded Queries (B4)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3</phase>
+    <domain>B</domain>
+    <tags>bff-api, dataverse, correctness</tags>
+    <parallel-group>P3-C</parallel-group>
+    <dependencies>013 (B1 - explicit columns)</dependencies>
+  </metadata>
+
+  <prompt>
+    Add paging cookie support to GetDocumentsByContainerAsync and any other unbounded Dataverse
+    queries. Without pagination, results are silently truncated at the 5,000-record page limit.
+  </prompt>
+
+  <role>.NET developer with Dataverse query pagination expertise</role>
+
+  <goal>
+    All unbounded queries support pagination via paging cookie. No silent data truncation.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseServiceClientImpl.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Must handle paging cookie for Dataverse 5,000-record limit</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, pagination</topic>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify unbounded queries">
+      Search for queries that could return 5,000+ records without pagination.
+    </step>
+    <step order="2" name="Implement paging cookie support">
+      Add paging cookie handling to iterate through all pages.
+    </step>
+    <step order="3" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseServiceClientImpl.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GetDocumentsByContainerAsync supports paging cookie</criterion>
+    <criterion testable="true">No queries silently truncate at 5,000 records</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

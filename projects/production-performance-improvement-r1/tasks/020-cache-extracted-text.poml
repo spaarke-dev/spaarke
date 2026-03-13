@@ -1,0 +1,87 @@
+<task id="PPI-020" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Cache Extracted Document Text (E2)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <domain>E</domain>
+    <tags>bff-api, ai, caching, redis</tags>
+    <parallel-group>P3-A</parallel-group>
+    <dependencies>010 (E1 - RAG parallelization)</dependencies>
+  </metadata>
+
+  <prompt>
+    Document Intelligence extraction (5-30 seconds) runs on every analysis even when the document
+    hasn't changed. Cache extracted text in Redis using docId + ETag versioning. This eliminates
+    the biggest latency bottleneck for repeat analyses of the same document.
+  </prompt>
+
+  <role>Senior .NET developer with Redis caching and Azure AI services expertise</role>
+
+  <goal>
+    Extracted document text cached in Redis with key `sdap:ai:text:{driveId}:{itemId}:v{etag}`
+    and 24-hour TTL. Repeat analysis of same document skips Document Intelligence entirely.
+    Cache hit rate target: >80%.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+    <file purpose="pattern">src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs</file>
+    <file purpose="pattern">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/DistributedCacheExtensions.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Use IDistributedCache (Redis). ETag-versioned keys. No L1 cache.</constraint>
+    <constraint source="ADR-015">Do not cache document content in logs — only identifiers and sizes</constraint>
+    <constraint source="project">Cache key must include ETag for auto-invalidation on document change</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>redis-caching, text-extraction</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/distributed-cache.md</file>
+      <file>.claude/patterns/api/text-extraction.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Caching/DistributedCacheExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Caching/CacheMetrics.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review TextExtractorService">
+      Read TextExtractorService.cs. Identify extraction entry point and where to add cache layer.
+    </step>
+    <step order="2" name="Implement cache-aside pattern">
+      Before calling Document Intelligence: check Redis for cached text.
+      After extraction: store result in Redis with ETag-versioned key and 24h TTL.
+      Follow GraphTokenCache pattern.
+    </step>
+    <step order="3" name="Add cache metrics">
+      Use CacheMetrics to track hit/miss rates for document text cache.
+    </step>
+    <step order="4" name="Handle large documents">
+      For documents with extracted text > 1MB, consider compression or skip caching.
+    </step>
+    <step order="5" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Extracted text cached in Redis with ETag-versioned key</criterion>
+    <criterion testable="true">24-hour TTL on cached text</criterion>
+    <criterion testable="true">Cache hit skips Document Intelligence call entirely</criterion>
+    <criterion testable="true">Cache metrics track hit/miss rates</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

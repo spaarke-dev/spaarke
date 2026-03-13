@@ -1,0 +1,82 @@
+<task id="PPI-040" project="Production Performance Improvement R1">
+  <metadata>
+    <title>VNet Creation + Private Endpoints (C1)</title>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, networking, security</tags>
+    <parallel-group>P5-A</parallel-group>
+    <dependencies>Phase 4 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Create VNet with 3 subnets and deploy private endpoints for all Azure services. This establishes
+    network isolation required for production security. Deploy private endpoints alongside public
+    first, test, then disable public access.
+  </prompt>
+
+  <role>Azure infrastructure engineer with VNet, private endpoints, and Bicep expertise</role>
+
+  <goal>
+    VNet deployed with snet-app, snet-redis, snet-pe subnets. Private endpoints for Key Vault,
+    Storage, Service Bus, OpenAI, AI Search, Document Intelligence. All services accessible via
+    private endpoints.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="bicep">infrastructure/bicep/stacks/model2-full.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Single App Service runtime</constraint>
+    <constraint source="project">Deploy private endpoints alongside public first — test before disabling public</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-networking, private-endpoints</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>infrastructure/bicep/stacks/model2-full.bicep</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Design VNet and subnet layout">
+      Create Bicep module for VNet with 3 subnets and appropriate CIDR ranges.
+    </step>
+    <step order="2" name="Create private endpoint Bicep modules">
+      Create modules for each service's private endpoint.
+    </step>
+    <step order="3" name="Enable App Service VNet integration">
+      Configure App Service to use snet-app for outbound traffic.
+    </step>
+    <step order="4" name="Add NSG rules">
+      Configure Network Security Groups for inter-service communication.
+    </step>
+    <step order="5" name="Deploy and test">
+      Deploy via Bicep. Verify all services reachable via private endpoints.
+    </step>
+    <step order="6" name="Validate Bicep">
+      Run `az bicep build` and `az deployment group what-if`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for deployment and validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/vnet.bicep (new)</output>
+    <output type="code">infrastructure/bicep/modules/private-endpoints.bicep (new)</output>
+    <output type="code">infrastructure/bicep/stacks/model2-full.bicep (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">VNet deployed with 3 subnets</criterion>
+    <criterion testable="true">Private endpoints created for all 6 services</criterion>
+    <criterion testable="true">App Service VNet integration enabled</criterion>
+    <criterion testable="true">Bicep validates successfully</criterion>
+  </acceptance-criteria>
+</task>

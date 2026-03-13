@@ -1,0 +1,77 @@
+<task id="PPI-090" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>wrap-up</phase>
+    <domain>all</domain>
+    <tags>project-management, documentation</tags>
+    <parallel-group>none</parallel-group>
+    <dependencies>All tasks complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Finalize the project: update README status to Complete, verify all graduation criteria are met,
+    create lessons-learned.md, archive project artifacts, and prepare for merge-to-master.
+  </prompt>
+
+  <role>Project manager and technical writer</role>
+
+  <goal>
+    Project marked complete. All graduation criteria verified. Lessons learned documented.
+    Ready for merge-to-master.
+  </goal>
+
+  <inputs>
+    <file purpose="readme">projects/production-performance-improvement-r1/README.md</file>
+    <file purpose="task-index">projects/production-performance-improvement-r1/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">All 22 success criteria must be verified</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-management</topic>
+    <files>
+      <file>projects/production-performance-improvement-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">
+      Check TASK-INDEX.md — all tasks must be ✅.
+    </step>
+    <step order="2" name="Verify graduation criteria">
+      Check each criterion in README.md against actual state.
+    </step>
+    <step order="3" name="Update README status">
+      Set Status to Complete. Check all graduation criteria boxes.
+    </step>
+    <step order="4" name="Create lessons-learned.md">
+      Document key learnings, what went well, what could improve.
+    </step>
+    <step order="5" name="Clean up notes directory">
+      Remove scratch files. Keep handoffs and important notes.
+    </step>
+    <step order="6" name="Prepare for merge">
+      Run /repo-cleanup. Recommend /merge-to-master.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/production-performance-improvement-r1/README.md (updated to Complete)</output>
+    <output type="docs">projects/production-performance-improvement-r1/notes/lessons-learned.md (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks marked ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">All graduation criteria verified and checked</criterion>
+    <criterion testable="true">README status is Complete</criterion>
+    <criterion testable="true">Lessons-learned.md created</criterion>
+  </acceptance-criteria>
+</task>

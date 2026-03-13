@@ -1,0 +1,44 @@
+<task id="PPI-051" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Bicep IaC Deployment in CI/CD (D2)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>6</phase>
+    <domain>D</domain>
+    <tags>ci-cd, bicep, infrastructure</tags>
+    <parallel-group>P6-A</parallel-group>
+    <dependencies>Phase 5 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Add Bicep infrastructure deployment step to CI/CD pipeline using environment-specific parameter
+    files (dev.bicepparam, staging.bicepparam, prod.bicepparam). Include what-if preview step.
+  </prompt>
+
+  <role>DevOps engineer with Bicep and GitHub Actions expertise</role>
+
+  <goal>Infrastructure deployable via CI/CD with parameter files and what-if preview.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="project">Include what-if preview before actual deployment</constraint></constraints>
+  <knowledge><topic>bicep, ci-cd</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Create parameter files">Create dev.bicepparam, staging.bicepparam, prod.bicepparam.</step>
+    <step order="2" name="Add Bicep deployment step">Add `az deployment group create` to workflow.</step>
+    <step order="3" name="Add what-if preview">Add `--what-if` step before actual deployment.</step>
+    <step order="4" name="Configure OIDC auth">Set up OIDC-based auth for Azure deployment.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs>
+    <output type="code">.github/workflows/ (modified)</output>
+    <output type="code">infrastructure/bicep/stacks/*.bicepparam (created)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Parameter files exist for all 3 environments</criterion>
+    <criterion testable="true">What-if preview runs before deployment</criterion>
+    <criterion testable="true">OIDC auth configured</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,91 @@
+<task id="PPI-005" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Implement 37 Office Authorization Filters (F2)</title>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <phase>1</phase>
+    <domain>F</domain>
+    <tags>bff-api, auth, endpoint-filters, beta-blocker</tags>
+    <parallel-group>P1-C</parallel-group>
+    <dependencies>Task 033 design (OfficeAuthFilter + JobOwnershipFilter patterns)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement 37 authorization filters in OfficeEndpoints.cs currently marked as TODO Task 033.
+    Two filter types are needed: OfficeAuthFilter (validates user access to Office resources) and
+    JobOwnershipFilter (validates user owns the processing job). Follow the ADR-008 endpoint filter
+    pattern used in FileAccessEndpoints.cs.
+  </prompt>
+
+  <role>Senior .NET developer with ASP.NET Core endpoint filter and authorization expertise</role>
+
+  <goal>
+    All 37 TODO Task 033 comments resolved. OfficeAuthFilter and JobOwnershipFilter implemented
+    and applied to all Office endpoints. Zero unprotected Office endpoints.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file purpose="pattern">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization, not middleware</constraint>
+    <constraint source="ADR-003">Cache auth data, compute decisions fresh per-request</constraint>
+    <constraint source="project">Must not break existing Office Add-in integration</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>endpoint-filters, authorization</topic>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit TODO Task 033 comments">
+      Search OfficeEndpoints.cs for all TODO Task 033 comments. Categorize by filter type needed.
+    </step>
+    <step order="2" name="Design OfficeAuthFilter">
+      Create endpoint filter that validates user has access to the referenced Office resource.
+      Follow pattern from FileAccessEndpoints authorization filter.
+    </step>
+    <step order="3" name="Design JobOwnershipFilter">
+      Create endpoint filter that validates user owns the referenced processing job.
+    </step>
+    <step order="4" name="Implement both filters">
+      Create filter classes in appropriate namespace. Register in DI.
+    </step>
+    <step order="5" name="Apply filters to all 37 endpoints">
+      Replace each TODO Task 033 with the appropriate .AddEndpointFilter() call.
+    </step>
+    <step order="6" name="Test filters">
+      Write unit tests for both filters. Verify endpoints return 403 for unauthorized access.
+    </step>
+    <step order="7" name="Verify no TODO Task 033 remains">
+      Code search for remaining TODO Task 033 — must be zero.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/OfficeAuthFilter.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/JobOwnershipFilter.cs (new)</output>
+    <output type="test">tests/ (filter unit tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero TODO Task 033 comments in codebase</criterion>
+    <criterion testable="true">OfficeAuthFilter validates user access to Office resources</criterion>
+    <criterion testable="true">JobOwnershipFilter validates user owns the processing job</criterion>
+    <criterion testable="true">All 37 endpoints have appropriate authorization filters</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

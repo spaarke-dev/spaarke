@@ -1,0 +1,71 @@
+<task id="PPI-030" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Guard Serialization in Log Calls (G1)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <domain>G</domain>
+    <tags>bff-api, logging, performance</tags>
+    <parallel-group>P4-ALL</parallel-group>
+    <dependencies>Phase 3 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Guard all JsonSerializer.Serialize() calls in log statements with _logger.IsEnabled() checks
+    across 100 files. Unguarded serialization causes 10-20% overhead from heap allocations even when
+    the log level is disabled. Top offenders: BuilderToolExecutor (14), OfficeService (5),
+    DocumentCheckoutService (4), AnalysisOrchestrationService (4).
+  </prompt>
+
+  <role>.NET developer with structured logging optimization expertise</role>
+
+  <goal>
+    Zero unguarded JsonSerializer.Serialize() in log calls. All wrapped with IsEnabled() checks.
+    Eliminates unnecessary heap allocations in production hot paths.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings, not document content</constraint>
+    <constraint source="project">Must not change log output when level IS enabled</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>logging, performance</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Search for unguarded serialization">
+      Grep for `JsonSerializer.Serialize` in log calls without preceding IsEnabled check.
+    </step>
+    <step order="2" name="Guard each instance">
+      Wrap each with `if (_logger.IsEnabled(LogLevel.XXX))` check matching the log level used.
+    </step>
+    <step order="3" name="Verify zero remain">
+      Re-search to confirm all instances guarded.
+    </step>
+    <step order="4" name="Build and test">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~100 files with log serialization (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero unguarded JsonSerializer.Serialize in log calls</criterion>
+    <criterion testable="true">All guards use correct LogLevel matching the log call</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

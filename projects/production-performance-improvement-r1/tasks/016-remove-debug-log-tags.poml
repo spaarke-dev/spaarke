@@ -1,0 +1,66 @@
+<task id="PPI-016" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Remove [DEBUG] Log Tags (G2)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <domain>G</domain>
+    <tags>bff-api, logging, cleanup</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove 7 instances of [DEBUG] prefix from production log messages. These are development artifacts
+    that add noise to production logs. Either move to LogDebug level or remove the prefix.
+  </prompt>
+
+  <role>.NET developer with structured logging expertise</role>
+
+  <goal>
+    Zero [DEBUG] tags in production log messages. Messages moved to appropriate log level.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>logging</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Search for [DEBUG] tags">
+      Grep for "[DEBUG]" in log messages across the codebase.
+    </step>
+    <step order="2" name="Fix each instance">
+      Move to LogDebug level or remove the [DEBUG] prefix. Adjust message accordingly.
+    </step>
+    <step order="3" name="Verify zero remain">
+      Re-search to confirm zero [DEBUG] tags.
+    </step>
+    <step order="4" name="Build and test">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Various files with [DEBUG] log messages (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero [DEBUG] tags in log messages (code search)</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>
