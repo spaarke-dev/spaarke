@@ -143,6 +143,15 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
             .AddScheme<AuthenticationSchemeOptions, FakeAuthHandler>(
                 FakeAuthHandler.SchemeName, _ => { });
 
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme. This forces the
+            // fake authentication handler to be used throughout the request pipeline.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = FakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = FakeAuthHandler.SchemeName;
+            });
+
             // ---------------------------------------------------------------
             // HOSTED SERVICES: Remove background workers that depend on
             // services not fully configured in the test environment.

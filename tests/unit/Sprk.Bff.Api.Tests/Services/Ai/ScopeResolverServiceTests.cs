@@ -167,9 +167,9 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         var skillId = Guid.NewGuid();
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            [$"sprk_analysisskills({skillId})"] = (HttpStatusCode.OK, new
             {
-                sprk_promptfragmentid = skillId,
+                sprk_analysisskillid = skillId,
                 sprk_name = "Contract Analysis",
                 sprk_description = "Analyzes contract clauses",
                 sprk_promptfragment = "You are a contract analysis expert",
@@ -305,7 +305,7 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         var missingSkillId = Guid.NewGuid();
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({missingSkillId})"] = (HttpStatusCode.NotFound, null)
+            [$"sprk_analysisskills({missingSkillId})"] = (HttpStatusCode.NotFound, null)
         });
 
         // Act
@@ -367,14 +367,14 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
 
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({foundSkillId})"] = (HttpStatusCode.OK, new
+            [$"sprk_analysisskills({foundSkillId})"] = (HttpStatusCode.OK, new
             {
-                sprk_promptfragmentid = foundSkillId,
+                sprk_analysisskillid = foundSkillId,
                 sprk_name = "Found Skill",
                 sprk_promptfragment = "Found skill fragment",
                 sprk_SkillTypeId = new { sprk_name = "General" }
             }),
-            [$"sprk_promptfragments({missingSkillId})"] = (HttpStatusCode.NotFound, null),
+            [$"sprk_analysisskills({missingSkillId})"] = (HttpStatusCode.NotFound, null),
             [$"sprk_analysisknowledges({foundKnowledgeId})"] = (HttpStatusCode.OK, new
             {
                 sprk_analysisknowledgeid = foundKnowledgeId,
@@ -418,9 +418,9 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
 
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            [$"sprk_analysisskills({skillId})"] = (HttpStatusCode.OK, new
             {
-                sprk_promptfragmentid = skillId,
+                sprk_analysisskillid = skillId,
                 sprk_name = "Parallel Skill",
                 sprk_promptfragment = "Skill prompt",
                 sprk_SkillTypeId = new { sprk_name = "Legal Analysis" }
@@ -472,13 +472,13 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
 
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({skill1})"] = (HttpStatusCode.OK, new
+            [$"sprk_analysisskills({skill1})"] = (HttpStatusCode.OK, new
             {
-                sprk_promptfragmentid = skill1,
+                sprk_analysisskillid = skill1,
                 sprk_name = "Skill One",
                 sprk_promptfragment = "Fragment one"
             }),
-            [$"sprk_promptfragments({skill2Missing})"] = (HttpStatusCode.NotFound, null),
+            [$"sprk_analysisskills({skill2Missing})"] = (HttpStatusCode.NotFound, null),
             [$"sprk_analysisknowledges({knowledge1})"] = (HttpStatusCode.OK, new
             {
                 sprk_analysisknowledgeid = knowledge1,
@@ -526,9 +526,9 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         var skillId = Guid.NewGuid();
         SetupHttpResponses(new Dictionary<string, (HttpStatusCode, object?)>
         {
-            [$"sprk_promptfragments({skillId})"] = (HttpStatusCode.OK, new
+            [$"sprk_analysisskills({skillId})"] = (HttpStatusCode.OK, new
             {
-                sprk_promptfragmentid = skillId,
+                sprk_analysisskillid = skillId,
                 sprk_name = "Logged Skill",
                 sprk_promptfragment = "Fragment"
             })
@@ -564,7 +564,7 @@ public class ScopeResolverServiceTests : IDisposable
     private readonly Mock<ILogger<ScopeResolverService>> _loggerMock;
     private readonly ScopeResolverService _service;
 
-    // Known stub action IDs from ScopeResolverService
+    // Well-known action IDs for Dataverse-backed action tests
     private static readonly Guid SummarizeActionId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid ReviewAgreementActionId = Guid.Parse("00000000-0000-0000-0000-000000000002");
 
@@ -585,6 +585,9 @@ public class ScopeResolverServiceTests : IDisposable
         _configurationMock.Setup(c => c["TENANT_ID"]).Returns("test-tenant-id");
         _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
+
+        // Setup URL-based HTTP mock routing for Dataverse Web API calls
+        SetupDefaultHttpResponses();
 
         // Create Analysis*Service instances as named variables so we can bypass auth on each
         var actionService = new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>());
@@ -610,6 +613,132 @@ public class ScopeResolverServiceTests : IDisposable
         SetFakeToken(skillService, typeof(DataverseHttpServiceBase), fakeToken);
         SetFakeToken(knowledgeService, typeof(DataverseHttpServiceBase), fakeToken);
         SetFakeToken(toolService, typeof(DataverseHttpServiceBase), fakeToken);
+    }
+
+    /// <summary>
+    /// Sets up default URL-based HTTP mock routing so that GetAction, ListActions, ListSkills,
+    /// ListKnowledge, and ListTools all return appropriate mock data for the search and
+    /// get-by-ID tests. Previously these tests relied on in-memory stub data that no longer exists.
+    /// </summary>
+    private void SetupDefaultHttpResponses()
+    {
+        _httpMessageHandlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var uri = request.RequestUri!.ToString();
+
+                // --- Single-entity GET by ID ---
+
+                if (uri.Contains($"sprk_analysisactions({SummarizeActionId})"))
+                    return JsonResponse(new
+                    {
+                        sprk_analysisactionid = SummarizeActionId,
+                        sprk_name = "Summarize Document",
+                        sprk_description = "Summarizes documents for quick review",
+                        sprk_systemprompt = "You are a document summarization assistant. Provide thorough, accurate summaries.",
+                        sprk_ActionTypeId = new { sprk_name = "01 - Summary" }
+                    });
+
+                if (uri.Contains($"sprk_analysisactions({ReviewAgreementActionId})"))
+                    return JsonResponse(new
+                    {
+                        sprk_analysisactionid = ReviewAgreementActionId,
+                        sprk_name = "Review Agreement",
+                        sprk_description = "Reviews legal agreements for compliance",
+                        sprk_systemprompt = "You are a legal document review assistant. Identify key clauses and risks.",
+                        sprk_ActionTypeId = new { sprk_name = "02 - Review" }
+                    });
+
+                // Unknown action ID -> NotFound (service returns null)
+                if (uri.Contains("sprk_analysisactions(") && !uri.Contains("?$select"))
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+
+                // --- Collection queries (ListActions, ListSkills, ListKnowledge, ListTools) ---
+
+                if (uri.Contains("sprk_analysisactions?"))
+                    return FilteredCollectionResponse(uri, new object[]
+                    {
+                        new { sprk_analysisactionid = SummarizeActionId, sprk_name = "Summarize Document", sprk_description = "Summarizes documents", sprk_systemprompt = "Summarize.", sprk_ActionTypeId = new { sprk_name = "01 - Summary" } },
+                        new { sprk_analysisactionid = ReviewAgreementActionId, sprk_name = "Review Agreement", sprk_description = "Reviews legal agreements", sprk_systemprompt = "Review legal.", sprk_ActionTypeId = new { sprk_name = "02 - Review" } }
+                    });
+
+                if (uri.Contains("sprk_analysisskills?"))
+                    return FilteredCollectionResponse(uri, new object[]
+                    {
+                        new { sprk_analysisskillid = Guid.NewGuid(), sprk_name = "Legal Analysis", sprk_description = "Analyzes legal documents", sprk_promptfragment = "Legal expert", sprk_SkillTypeId = new { sprk_name = "Legal" } },
+                        new { sprk_analysisskillid = Guid.NewGuid(), sprk_name = "Risk Assessment", sprk_description = "Identifies risks in documents", sprk_promptfragment = "Risk analyst", sprk_SkillTypeId = new { sprk_name = "Risk Management" } }
+                    });
+
+                if (uri.Contains("sprk_analysisknowledges?"))
+                    return FilteredCollectionResponse(uri, new object[]
+                    {
+                        new { sprk_analysisknowledgeid = Guid.NewGuid(), sprk_name = "Company Standards", sprk_description = "Internal compliance standards", sprk_content = "Standards content", sprk_KnowledgeTypeId = new { sprk_name = "Standards" } },
+                        new { sprk_analysisknowledgeid = Guid.NewGuid(), sprk_name = "Industry Regulations", sprk_description = "Regulatory requirements", sprk_content = "Regulation content", sprk_KnowledgeTypeId = new { sprk_name = "Regulations" } }
+                    });
+
+                if (uri.Contains("sprk_analysistools?"))
+                    return FilteredCollectionResponse(uri, new object[]
+                    {
+                        new { sprk_analysistoolid = Guid.NewGuid(), sprk_name = "Entity Extractor", sprk_description = "Extracts named entities", sprk_handlerclass = "EntityExtractorHandler", sprk_ToolTypeId = new { sprk_name = "Extraction" } },
+                        new { sprk_analysistoolid = Guid.NewGuid(), sprk_name = "Risk Detector", sprk_description = "Detects risk indicators", sprk_handlerclass = "RiskDetectorHandler", sprk_ToolTypeId = new { sprk_name = "Analysis" } },
+                        new { sprk_analysistoolid = Guid.NewGuid(), sprk_name = "Document Classifier", sprk_description = "Classifies document types", sprk_handlerclass = "DocumentClassifierHandler", sprk_ToolTypeId = new { sprk_name = "Classification" } }
+                    });
+
+                // --- Node scope relationship queries (return empty for ResolveNodeScopesAsync) ---
+                if (uri.Contains("sprk_playbooknodes("))
+                    return JsonResponse(new { value = Array.Empty<object>() });
+
+                // Default: 404 for unmatched
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            });
+    }
+
+    private static HttpResponseMessage JsonResponse(object body)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(body),
+                System.Text.Encoding.UTF8,
+                "application/json")
+        };
+    }
+
+    /// <summary>
+    /// Simulates server-side OData filtering by extracting the $filter contains() text
+    /// from the URL and filtering the mock data accordingly. Also respects $top for pagination.
+    /// </summary>
+    private static HttpResponseMessage FilteredCollectionResponse(string uri, object[] allItems)
+    {
+        IEnumerable<object> filtered = allItems;
+
+        // Extract contains(sprk_name, 'SearchText') from the URL
+        var containsMatch = System.Text.RegularExpressions.Regex.Match(
+            Uri.UnescapeDataString(uri), @"contains\(sprk_name,\s*'([^']+)'\)");
+        if (containsMatch.Success)
+        {
+            var searchText = containsMatch.Groups[1].Value;
+            filtered = allItems.Where(item =>
+            {
+                var json = JsonSerializer.Serialize(item);
+                return json.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        // Respect $top for pagination
+        var topMatch = System.Text.RegularExpressions.Regex.Match(uri, @"\$top=(\d+)");
+        if (topMatch.Success && int.TryParse(topMatch.Groups[1].Value, out var top))
+        {
+            filtered = filtered.Take(top);
+        }
+
+        var items = filtered.ToArray();
+        return JsonResponse(new { value = items });
     }
 
     /// <summary>
@@ -708,7 +837,7 @@ public class ScopeResolverServiceTests : IDisposable
     #region GetActionAsync Tests
 
     [Fact]
-    public async Task GetActionAsync_KnownSummarizeAction_ReturnsStubAction()
+    public async Task GetActionAsync_KnownSummarizeAction_ReturnsAction()
     {
         // Act
         var result = await _service.GetActionAsync(SummarizeActionId, CancellationToken.None);
@@ -722,7 +851,7 @@ public class ScopeResolverServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetActionAsync_KnownReviewAction_ReturnsStubAction()
+    public async Task GetActionAsync_KnownReviewAction_ReturnsAction()
     {
         // Act
         var result = await _service.GetActionAsync(ReviewAgreementActionId, CancellationToken.None);
@@ -736,7 +865,7 @@ public class ScopeResolverServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetActionAsync_UnknownAction_ReturnsDefaultAction()
+    public async Task GetActionAsync_UnknownAction_ReturnsNull()
     {
         // Arrange
         var unknownId = Guid.NewGuid();
@@ -744,37 +873,31 @@ public class ScopeResolverServiceTests : IDisposable
         // Act
         var result = await _service.GetActionAsync(unknownId, CancellationToken.None);
 
-        // Assert
-        result.Should().NotBeNull();
-        result!.Id.Should().Be(unknownId);
-        result.Name.Should().Be("Default Analysis");
-        result.SystemPrompt.Should().Contain("AI assistant");
-        result.SortOrder.Should().Be(0);
+        // Assert - Dataverse-backed service returns null for unknown IDs
+        result.Should().BeNull();
     }
 
     [Fact]
-    public async Task GetActionAsync_DefaultAction_HasValidSystemPrompt()
+    public async Task GetActionAsync_KnownAction_HasValidSystemPrompt()
     {
-        // Arrange
-        var unknownId = Guid.NewGuid();
-
         // Act
-        var result = await _service.GetActionAsync(unknownId, CancellationToken.None);
+        var result = await _service.GetActionAsync(SummarizeActionId, CancellationToken.None);
 
         // Assert
+        result.Should().NotBeNull();
         result!.SystemPrompt.Should().NotBeNullOrEmpty();
         result.SystemPrompt.Should().Contain("thorough");
         result.SystemPrompt.Should().Contain("accurate");
     }
 
     [Fact]
-    public async Task GetActionAsync_StubActions_HaveRequiredFields()
+    public async Task GetActionAsync_Actions_HaveRequiredFields()
     {
         // Act
         var summarize = await _service.GetActionAsync(SummarizeActionId, CancellationToken.None);
         var review = await _service.GetActionAsync(ReviewAgreementActionId, CancellationToken.None);
 
-        // Assert - All stub actions should have required fields
+        // Assert - All actions should have required fields
         summarize!.Id.Should().NotBeEmpty();
         summarize.Name.Should().NotBeNullOrEmpty();
         summarize.SystemPrompt.Should().NotBeNullOrEmpty();
@@ -1134,7 +1257,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var skillId = Guid.NewGuid();
         var skillResponse = new
         {
-            sprk_promptfragmentid = skillId,
+            sprk_analysisskillid = skillId,
             sprk_name = "Test Skill",
             sprk_description = "A test skill description",
             sprk_promptfragment = "Do something specific",
@@ -1175,7 +1298,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var skillId = Guid.NewGuid();
         var skillResponse = new
         {
-            sprk_promptfragmentid = skillId,
+            sprk_analysisskillid = skillId,
             sprk_name = "Risk Assessment Skill",
             sprk_promptfragment = "Identify risks",
             sprk_SkillTypeId = new { sprk_name = "Risk Management" }
@@ -1197,7 +1320,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var skillId = Guid.NewGuid();
         var skillResponse = new
         {
-            sprk_promptfragmentid = skillId,
+            sprk_analysisskillid = skillId,
             sprk_name = "Generic Skill",
             sprk_promptfragment = "Do generic work"
         };
@@ -1222,7 +1345,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var knowledgeId = Guid.NewGuid();
         var knowledgeResponse = new
         {
-            sprk_contentid = knowledgeId,
+            sprk_analysisknowledgeid = knowledgeId,
             sprk_name = "Test Knowledge",
             sprk_description = "A test knowledge description",
             sprk_content = "This is the knowledge content",
@@ -1262,7 +1385,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var knowledgeId = Guid.NewGuid();
         var knowledgeResponse = new
         {
-            sprk_contentid = knowledgeId,
+            sprk_analysisknowledgeid = knowledgeId,
             sprk_name = "Company Standards",
             sprk_content = "Standard content",
             sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
@@ -1285,7 +1408,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var deploymentId = Guid.NewGuid();
         var knowledgeResponse = new
         {
-            sprk_contentid = knowledgeId,
+            sprk_analysisknowledgeid = knowledgeId,
             sprk_name = "Industry Regulations",
             sprk_content = "Regulation content",
             sprk_deploymentid = deploymentId,
@@ -1310,7 +1433,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var deploymentId = Guid.NewGuid();
         var knowledgeResponse = new
         {
-            sprk_contentid = knowledgeId,
+            sprk_analysisknowledgeid = knowledgeId,
             sprk_name = "RAG Knowledge",
             sprk_deploymentid = deploymentId,
             sprk_KnowledgeTypeId = new { sprk_name = "rag" }
@@ -1336,7 +1459,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var actionId = Guid.NewGuid();
         var actionResponse = new
         {
-            sprk_systempromptid = actionId,
+            sprk_analysisactionid = actionId,
             sprk_name = "Test Action",
             sprk_description = "A test action description",
             sprk_systemprompt = "You are an analysis assistant.",
@@ -1376,7 +1499,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var actionId = Guid.NewGuid();
         var actionResponse = new
         {
-            sprk_systempromptid = actionId,
+            sprk_analysisactionid = actionId,
             sprk_name = "Extraction Action",
             sprk_systemprompt = "Extract entities",
             sprk_ActionTypeId = new { sprk_name = "05 - Classification" }
@@ -1398,7 +1521,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var actionId = Guid.NewGuid();
         var actionResponse = new
         {
-            sprk_systempromptid = actionId,
+            sprk_analysisactionid = actionId,
             sprk_name = "Custom Action",
             sprk_systemprompt = "Do custom work",
             sprk_ActionTypeId = new { sprk_name = "CustomType" }
@@ -1420,7 +1543,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var actionId = Guid.NewGuid();
         var actionResponse = new
         {
-            sprk_systempromptid = actionId,
+            sprk_analysisactionid = actionId,
             sprk_name = "Action Without Type",
             sprk_systemprompt = "Analyze documents"
         };
@@ -1441,7 +1564,7 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         var actionId = Guid.NewGuid();
         var actionResponse = new
         {
-            sprk_systempromptid = actionId,
+            sprk_analysisactionid = actionId,
             sprk_name = "Action Without Prompt"
         };
         SetupHttpResponse(HttpStatusCode.OK, actionResponse);

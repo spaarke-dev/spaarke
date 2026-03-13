@@ -177,6 +177,15 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             .AddScheme<AuthenticationSchemeOptions, IntegrationTestFakeAuthHandler>(
                 IntegrationTestFakeAuthHandler.SchemeName, _ => { });
 
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme. This forces the
+            // fake authentication handler to be used throughout the request pipeline.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = IntegrationTestFakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = IntegrationTestFakeAuthHandler.SchemeName;
+            });
+
             // ---------------------------------------------------------------
             // HOSTED SERVICES: Remove background workers that depend on
             // external services (ServiceBus, AI, etc.) not available in tests.
