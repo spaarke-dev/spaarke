@@ -35,11 +35,13 @@ public static class OfficeEndpoints
             .WithTags("Office")
             .RequireAuthorization();
 
+        var env = app.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+
         // Health check endpoint for Office add-ins
         MapHealthEndpoints(group);
 
         // Save endpoints (email, attachment, document)
-        MapSaveEndpoints(group);
+        MapSaveEndpoints(group, env);
 
         // Job status endpoints
         MapJobEndpoints(group);
@@ -102,55 +104,57 @@ public static class OfficeEndpoints
     /// Applies OfficeAuthFilter for authentication, EntityAccessFilter for target entity access,
     /// and OfficeRateLimitFilter for rate limiting (10 requests/minute/user per spec.md).
     /// </summary>
-    private static void MapSaveEndpoints(RouteGroupBuilder group)
+    private static void MapSaveEndpoints(RouteGroupBuilder group, IWebHostEnvironment env)
     {
-        // DEBUG: Raw body capture endpoint to diagnose 400 errors
-        // TODO: Remove after debugging is complete
-        group.MapPost("/save-debug", async (HttpContext context, ILogger<Program> logger) =>
+        // DEBUG: Raw body capture endpoint to diagnose 400 errors (Development only)
+        if (env.IsDevelopment())
         {
-            context.Request.EnableBuffering();
-            context.Request.Body.Position = 0;
-            using var reader = new StreamReader(context.Request.Body);
-            var body = await reader.ReadToEndAsync();
-            logger.LogInformation("DEBUG /office/save-debug: Raw request body ({Length} bytes): {Body}",
-                body.Length, body);
+            group.MapPost("/save-debug", async (HttpContext context, ILogger<Program> logger) =>
+            {
+                context.Request.EnableBuffering();
+                context.Request.Body.Position = 0;
+                using var reader = new StreamReader(context.Request.Body);
+                var body = await reader.ReadToEndAsync();
+                logger.LogInformation("DEBUG /office/save-debug: Raw request body ({Length} bytes): {Body}",
+                    body.Length, body);
 
-            try
-            {
-                var options = new System.Text.Json.JsonSerializerOptions
+                try
                 {
-                    PropertyNameCaseInsensitive = true
-                };
-                var request = System.Text.Json.JsonSerializer.Deserialize<SaveRequest>(body, options);
-                logger.LogInformation("DEBUG /office/save-debug: Deserialization succeeded. ContentType={ContentType}",
-                    request?.ContentType);
-                return Results.Ok(new
+                    var options = new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    var request = System.Text.Json.JsonSerializer.Deserialize<SaveRequest>(body, options);
+                    logger.LogInformation("DEBUG /office/save-debug: Deserialization succeeded. ContentType={ContentType}",
+                        request?.ContentType);
+                    return Results.Ok(new
+                    {
+                        success = true,
+                        contentType = request?.ContentType.ToString(),
+                        hasEmail = request?.Email != null,
+                        hasAttachment = request?.Attachment != null,
+                        hasDocument = request?.Document != null,
+                        hasTargetEntity = request?.TargetEntity != null
+                    });
+                }
+                catch (System.Text.Json.JsonException ex)
                 {
-                    success = true,
-                    contentType = request?.ContentType.ToString(),
-                    hasEmail = request?.Email != null,
-                    hasAttachment = request?.Attachment != null,
-                    hasDocument = request?.Document != null,
-                    hasTargetEntity = request?.TargetEntity != null
-                });
-            }
-            catch (System.Text.Json.JsonException ex)
-            {
-                logger.LogError(ex, "DEBUG /office/save-debug: JSON deserialization failed");
-                return Results.Ok(new
-                {
-                    success = false,
-                    error = ex.Message,
-                    innerError = ex.InnerException?.Message,
-                    path = ex.Path,
-                    lineNumber = ex.LineNumber,
-                    bodyPreview = body.Length > 500 ? body[..500] + "..." : body
-                });
-            }
-        })
-            .WithName("OfficeSaveDebug")
-            .WithDescription("DEBUG: Diagnostic endpoint to test request body parsing")
-            .AllowAnonymous(); // Allow anonymous for testing
+                    logger.LogError(ex, "DEBUG /office/save-debug: JSON deserialization failed");
+                    return Results.Ok(new
+                    {
+                        success = false,
+                        error = ex.Message,
+                        innerError = ex.InnerException?.Message,
+                        path = ex.Path,
+                        lineNumber = ex.LineNumber,
+                        bodyPreview = body.Length > 500 ? body[..500] + "..." : body
+                    });
+                }
+            })
+                .WithName("OfficeSaveDebug")
+                .WithDescription("DEBUG: Diagnostic endpoint to test request body parsing (Development only)")
+                .AllowAnonymous();
+        }
 
         // POST /office/save - Submit email, attachment, or document for saving
         // Authorization: OfficeAuthFilter validates user authentication,

@@ -92,6 +92,12 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 minimum = 0.0,
                 maximum = 1.0,
                 @default = 0.3
+            },
+            model = new
+            {
+                type = "string",
+                description = "Model deployment name override (e.g., gpt-4o-mini, gpt-4o). Defaults to ToolHandlerModel.",
+                @enum = new[] { "gpt-4o-mini", "gpt-4o", "o1-mini" }
             }
         },
         required = new[] { "operation" }
@@ -126,7 +132,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             new ToolParameterDefinition("prompt_template", "Custom prompt template (uses {document} and {parameters} placeholders)", ToolParameterType.String, Required: false),
             new ToolParameterDefinition("output_schema", "JSON schema for expected output structure", ToolParameterType.Object, Required: false),
             new ToolParameterDefinition("max_tokens", "Maximum tokens for AI response", ToolParameterType.Integer, Required: false, DefaultValue: 2000),
-            new ToolParameterDefinition("temperature", "AI temperature (0.0-1.0)", ToolParameterType.Decimal, Required: false, DefaultValue: 0.3)
+            new ToolParameterDefinition("temperature", "AI temperature (0.0-1.0)", ToolParameterType.Decimal, Required: false, DefaultValue: 0.3),
+            new ToolParameterDefinition("model", "Model deployment name override (gpt-4o-mini, gpt-4o)", ToolParameterType.String, Required: false)
         },
         ConfigurationSchema: ConfigSchema);
 
@@ -264,9 +271,16 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             var inputTokens = EstimateTokens(prompt);
             var useStructuredOutput = rendered.JsonSchema != null;
 
+            // Resolve per-action model and maxOutputTokens overrides.
+            // Priority: JPS config.Model > ToolHandlerModel (from ModelSelectorOptions)
+            var actionModel = config.Model ?? _modelSelectorOptions.ToolHandlerModel;
+            // Priority: JPS config.MaxTokens > ToolExecutionContext.MaxTokens > global default
+            var actionMaxTokens = config.MaxTokens ?? (context.MaxTokens != 4096 ? context.MaxTokens : (int?)null);
+
             _logger.LogDebug(
-                "Executing generic tool with operation: {Operation}, format: {Format}, structuredOutput: {StructuredOutput}, estimated tokens: {Tokens}",
-                config.Operation, rendered.Format, useStructuredOutput, inputTokens);
+                "Executing generic tool with operation: {Operation}, format: {Format}, structuredOutput: {StructuredOutput}, " +
+                "model: {Model}, maxTokens: {MaxTokens}, estimated input tokens: {Tokens}",
+                config.Operation, rendered.Format, useStructuredOutput, actionModel, actionMaxTokens, inputTokens);
 
             // Execute AI call — use constrained decoding when JPS defines a JSON Schema,
             // otherwise fall back to standard text completion.
@@ -277,19 +291,23 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 var schemaName = rendered.SchemaName ?? "prompt_response";
 
                 _logger.LogInformation(
-                    "Using structured output (response_format: json_schema) for analysis {AnalysisId}, schema: {SchemaName}",
-                    context.AnalysisId, schemaName);
+                    "Using structured output (response_format: json_schema) for analysis {AnalysisId}, schema: {SchemaName}, model: {Model}",
+                    context.AnalysisId, schemaName, actionModel);
 
                 response = await _openAiClient.GetStructuredCompletionRawAsync(
                     prompt,
                     schemaBinaryData,
                     schemaName,
+                    model: actionModel,
+                    maxOutputTokens: actionMaxTokens,
                     cancellationToken: cancellationToken);
             }
             else
             {
                 response = await _openAiClient.GetCompletionAsync(
                     prompt,
+                    model: actionModel,
+                    maxOutputTokens: actionMaxTokens,
                     cancellationToken: cancellationToken);
             }
 
@@ -307,12 +325,12 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 ModelCalls = 1,
-                ModelName = _modelSelectorOptions.DefaultModel
+                ModelName = actionModel
             };
 
             _logger.LogInformation(
-                "Generic tool execution complete for {AnalysisId}: {Operation} in {Duration}ms",
-                context.AnalysisId, config.Operation, stopwatch.ElapsedMilliseconds);
+                "Generic tool execution complete for {AnalysisId}: {Operation} in {Duration}ms, model={Model}",
+                context.AnalysisId, config.Operation, stopwatch.ElapsedMilliseconds, actionModel);
 
             return ToolResult.Ok(
                 HandlerId,
@@ -434,6 +452,10 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             yield break;
         }
 
+        // Resolve per-action model and maxOutputTokens overrides (same logic as ExecuteAsync).
+        var actionModel = config!.Model ?? _modelSelectorOptions.ToolHandlerModel;
+        var actionMaxTokens = config.MaxTokens ?? (context.MaxTokens != 4096 ? context.MaxTokens : (int?)null);
+
         string response;
         if (useStructuredOutput)
         {
@@ -449,13 +471,15 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.AnalysisId, tool.Name, schemaName, rendered.Format, schemaJsonString);
 
             _logger.LogInformation(
-                "Using structured output (response_format: json_schema) for streaming analysis {AnalysisId}, schema: {SchemaName}",
-                context.AnalysisId, schemaName);
+                "Using structured output (response_format: json_schema) for streaming analysis {AnalysisId}, schema: {SchemaName}, model: {Model}",
+                context.AnalysisId, schemaName, actionModel);
 
             response = await _openAiClient.GetStructuredCompletionRawAsync(
                 prompt!,
                 schemaBinaryData,
                 schemaName,
+                model: actionModel,
+                maxOutputTokens: actionMaxTokens,
                 cancellationToken: cancellationToken);
 
             yield return new ToolStreamEvent.Token(response);
@@ -465,7 +489,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             // Standard streaming path for non-structured output
             var responseBuilder = new StringBuilder();
 
-            await foreach (var token in _openAiClient.StreamCompletionAsync(prompt!, cancellationToken: cancellationToken))
+            await foreach (var token in _openAiClient.StreamCompletionAsync(
+                prompt!, model: actionModel, maxOutputTokens: actionMaxTokens, cancellationToken: cancellationToken))
             {
                 responseBuilder.Append(token);
                 yield return new ToolStreamEvent.Token(token);
@@ -790,4 +815,11 @@ internal class GenericToolConfig
 
     /// <summary>AI temperature (0.0-1.0).</summary>
     public double? Temperature { get; set; } = 0.3;
+
+    /// <summary>
+    /// Optional model deployment name override (e.g., "gpt-4o-mini", "gpt-4o").
+    /// When null, uses ModelSelectorOptions.ToolHandlerModel (default: gpt-4o-mini).
+    /// Simple/fast actions should use gpt-4o-mini; complex actions can override to gpt-4o.
+    /// </summary>
+    public string? Model { get; set; }
 }

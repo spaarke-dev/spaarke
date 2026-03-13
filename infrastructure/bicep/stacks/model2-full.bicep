@@ -28,11 +28,11 @@ param containerTypeId string = ''
 
 @description('App Service Plan SKU')
 @allowed(['B1', 'B2', 'S1', 'S2', 'P1v3'])
-param appServiceSku string = 'B1'
+param appServiceSku string = 'S1'
 
 @description('Azure AI Search SKU')
 @allowed(['basic', 'standard', 'standard2'])
-param aiSearchSku string = 'basic'
+param aiSearchSku string = 'standard'
 
 @description('SPE container/drive ID for communication email archival')
 param communicationArchiveContainerId string = ''
@@ -97,6 +97,9 @@ module keyVault '../modules/key-vault.bicep' = {
   params: {
     keyVaultName: '${baseName}-kv'
     location: location
+    enableNetworkRestrictions: enableVnet
+    allowedSubnetIds: enableVnet ? [vnet.outputs.snetAppId] : []
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
     tags: tags
   }
 }
@@ -108,11 +111,14 @@ module keyVault '../modules/key-vault.bicep' = {
 module redis '../modules/redis.bicep' = {
   scope: rg
   name: 'redis-${baseName}'
+  dependsOn: enableVnet ? [vnet] : []
   params: {
     redisName: '${baseName}-redis'
     location: location
-    sku: 'Basic'
-    capacity: 0
+    sku: enableVnet ? 'Premium' : 'Standard'
+    capacity: 1
+    subnetId: enableVnet ? vnet.outputs.snetRedisId : ''
+    enableRdbPersistence: enableVnet  // RDB persistence when Premium (VNet-injected)
     tags: tags
   }
 }
@@ -145,6 +151,9 @@ module storage '../modules/storage-account.bicep' = {
     location: location
     sku: 'Standard_LRS'
     containers: ['temp-files', 'document-processing', 'ai-chunks']
+    disableSharedKeyAccess: enableVnet  // Only disable shared keys when VNet is active (RBAC ready)
+    allowedSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
+    appServicePrincipalId: bffApi.outputs.appServicePrincipalId
     tags: tags
   }
 }
@@ -174,6 +183,7 @@ module bffApi '../modules/app-service.bicep' = {
     location: location
     keyVaultName: keyVault.outputs.keyVaultName
     enableManagedIdentity: true
+    vnetIntegrationSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
     appSettings: {
       // Dataverse configuration
       DATAVERSE_URL: dataverseUrl
@@ -218,6 +228,56 @@ module bffApi '../modules/app-service.bicep' = {
 }
 
 // ============================================================================
+// KEY VAULT RBAC — App Service Secrets Access
+// Deployed after App Service so managed identity principal ID is available.
+// Grants "Key Vault Secrets User" (read-only) for Key Vault reference resolution.
+// ============================================================================
+
+var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+
+module kvRbacAppService '../modules/role-assignment-keyvault.bicep' = {
+  scope: rg
+  name: 'kvRbac-${baseName}'
+  params: {
+    keyVaultName: keyVault.outputs.keyVaultName
+    principalId: bffApi.outputs.appServicePrincipalId
+    roleDefinitionId: keyVaultSecretsUserRoleId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ============================================================================
+// AUTOSCALING (App Service Plan)
+// ============================================================================
+
+@description('Enable autoscaling for the App Service Plan')
+param enableAutoscaling bool = true
+
+@description('Minimum instance count for autoscaling')
+@minValue(1)
+@maxValue(20)
+param autoscaleMinInstances int = 2
+
+@description('Maximum instance count for autoscaling')
+@minValue(1)
+@maxValue(20)
+param autoscaleMaxInstances int = 10
+
+module autoscale '../modules/autoscale.bicep' = if (enableAutoscaling) {
+  scope: rg
+  name: 'autoscale-${baseName}'
+  params: {
+    autoscaleSettingName: '${baseName}-autoscale'
+    appServicePlanId: appServicePlan.outputs.planId
+    location: location
+    minInstanceCount: autoscaleMinInstances
+    maxInstanceCount: autoscaleMaxInstances
+    defaultInstanceCount: autoscaleMinInstances
+    tags: tags
+  }
+}
+
+// ============================================================================
 // AI SERVICES
 // ============================================================================
 
@@ -227,6 +287,8 @@ module openAi '../modules/openai.bicep' = {
   params: {
     openAiName: '${baseName}-openai'
     location: location
+    // Network hardening: disable public access when VNet + private endpoints are active
+    disablePublicNetworkAccess: enableVnet
     deployments: [
       {
         name: 'gpt-4o'
@@ -238,7 +300,7 @@ module openAi '../modules/openai.bicep' = {
         name: 'gpt-4o-mini'
         model: 'gpt-4o-mini'
         version: '2024-07-18'
-        capacity: 120
+        capacity: 200 // >= 200 TPM required for beta scale
       }
       {
         name: 'text-embedding-3-large'
@@ -246,6 +308,7 @@ module openAi '../modules/openai.bicep' = {
         version: '1'
         capacity: 200
       }
+      // text-embedding-3-small removed (deprecated, replaced by text-embedding-3-large)
     ]
     tags: tags
   }
@@ -258,7 +321,7 @@ module aiSearch '../modules/ai-search.bicep' = {
     searchServiceName: '${baseName}-search'
     location: location
     sku: aiSearchSku
-    replicaCount: 1
+    replicaCount: 2
     partitionCount: 1
     semanticSearch: 'standard'
     tags: tags
@@ -287,6 +350,12 @@ param enableAiFoundry bool = false
 @allowed(['Basic', 'Standard'])
 param aiFoundrySku string = 'Basic'
 
+@description('Enable VNet and private endpoints for network isolation')
+param enableVnet bool = false
+
+@description('VNet address space CIDR')
+param vnetAddressPrefix string = '10.0.0.0/16'
+
 @description('Enable AI Monitoring Dashboard deployment')
 param enableMonitoringDashboard bool = true
 
@@ -307,6 +376,40 @@ module aiFoundry '../modules/ai-foundry-hub.bicep' = if (enableAiFoundry) {
     aiSearchResourceId: aiSearch.outputs.searchServiceId
     sku: aiFoundrySku
     publicNetworkAccess: 'Enabled'
+    tags: tags
+  }
+}
+
+// ============================================================================
+// VNET + PRIVATE ENDPOINTS (Optional — deploy alongside public first, test,
+// then disable public access on individual services)
+// ============================================================================
+
+module vnet '../modules/vnet.bicep' = if (enableVnet) {
+  scope: rg
+  name: 'vnet-${baseName}'
+  params: {
+    vnetName: '${baseName}-vnet'
+    location: location
+    addressPrefix: vnetAddressPrefix
+    tags: tags
+  }
+}
+
+module privateEndpoints '../modules/private-endpoints.bicep' = if (enableVnet) {
+  scope: rg
+  name: 'privateEndpoints-${baseName}'
+  params: {
+    baseName: baseName
+    location: location
+    vnetId: enableVnet ? vnet.outputs.vnetId : ''
+    privateEndpointSubnetId: enableVnet ? vnet.outputs.snetPeId : ''
+    keyVaultId: keyVault.outputs.keyVaultId
+    storageAccountId: storage.outputs.storageAccountId
+    serviceBusId: serviceBus.outputs.serviceBusId
+    openAiId: openAi.outputs.openAiId
+    aiSearchId: aiSearch.outputs.searchServiceId
+    docIntelligenceId: docIntelligence.outputs.docIntelligenceId
     tags: tags
   }
 }
@@ -385,3 +488,14 @@ output aiFoundryPortalUrl string = enableAiFoundry ? aiFoundry.outputs.aiFoundry
 // Dashboard
 output dashboardId string = enableMonitoringDashboard ? aiDashboard.outputs.dashboardId : ''
 output dashboardName string = enableMonitoringDashboard ? aiDashboard.outputs.dashboardName : ''
+
+// Autoscaling
+output autoscaleEnabled bool = enableAutoscaling
+output autoscaleSettingId string = enableAutoscaling ? autoscale.outputs.autoscaleSettingId : ''
+
+// VNet + Private Endpoints (when enabled)
+output vnetEnabled bool = enableVnet
+output vnetId string = enableVnet ? vnet.outputs.vnetId : ''
+output snetAppId string = enableVnet ? vnet.outputs.snetAppId : ''
+output snetRedisId string = enableVnet ? vnet.outputs.snetRedisId : ''
+output snetPeId string = enableVnet ? vnet.outputs.snetPeId : ''

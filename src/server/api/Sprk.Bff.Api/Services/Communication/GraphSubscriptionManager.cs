@@ -386,23 +386,22 @@ public sealed class GraphSubscriptionManager : BackgroundService
                 orphans.Count, allSubs.Value.Count, correlationId);
 
             var deleted = 0;
+            var alreadyGone = 0;
+            var deleteFailed = 0;
             foreach (var orphan in orphans)
             {
                 try
                 {
                     await graphClient.Subscriptions[orphan.Id].DeleteAsync(cancellationToken: ct);
                     deleted++;
-                    _logger.LogInformation(
-                        "Deleted orphaned subscription {SubscriptionId} (resource: {Resource}), " +
-                        "correlation {CorrelationId}",
-                        orphan.Id, orphan.Resource, correlationId);
                 }
                 catch (ODataError odataEx) when (odataEx.ResponseStatusCode == 404)
                 {
-                    _logger.LogDebug("Orphan subscription {SubscriptionId} already gone (404)", orphan.Id);
+                    alreadyGone++;
                 }
                 catch (Exception ex)
                 {
+                    deleteFailed++;
                     _logger.LogWarning(ex,
                         "Failed to delete orphan subscription {SubscriptionId}, correlation {CorrelationId}",
                         orphan.Id, correlationId);
@@ -410,8 +409,8 @@ public sealed class GraphSubscriptionManager : BackgroundService
             }
 
             _logger.LogInformation(
-                "Orphan cleanup complete: {Deleted}/{Total} deleted, correlation {CorrelationId}",
-                deleted, orphans.Count, correlationId);
+                "Orphan cleanup complete: {Deleted} deleted, {AlreadyGone} already gone, {Failed} failed out of {Total}, correlation {CorrelationId}",
+                deleted, alreadyGone, deleteFailed, orphans.Count, correlationId);
         }
         catch (Exception ex)
         {

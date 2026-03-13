@@ -1,7 +1,7 @@
 <task id="PPI-044" project="Production Performance Improvement R1">
   <metadata>
     <title>Key Vault Hardening (C5)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>5</phase>
     <domain>C</domain>

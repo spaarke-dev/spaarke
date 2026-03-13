@@ -52,6 +52,7 @@ public record CircuitBreakerInfo
 /// - AzureOpenAI: Chat completions, embeddings
 /// - AzureAISearch: RAG queries, indexing
 /// - MicrosoftGraph: SPE operations
+/// - DocumentIntelligence: PDF/DOCX text extraction
 /// </remarks>
 public class CircuitBreakerRegistry : ICircuitBreakerRegistry
 {
@@ -67,6 +68,7 @@ public class CircuitBreakerRegistry : ICircuitBreakerRegistry
     public const string AzureOpenAI = "AzureOpenAI";
     public const string AzureAISearch = "AzureAISearch";
     public const string MicrosoftGraph = "MicrosoftGraph";
+    public const string DocumentIntelligence = "DocumentIntelligence";
 
     public CircuitBreakerRegistry(ILogger<CircuitBreakerRegistry> logger)
     {

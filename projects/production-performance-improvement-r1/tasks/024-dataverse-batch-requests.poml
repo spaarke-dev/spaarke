@@ -1,7 +1,7 @@
 <task id="PPI-024" project="Production Performance Improvement R1">
   <metadata>
     <title>Dataverse Request Batching (B2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>3</phase>
     <domain>B</domain>

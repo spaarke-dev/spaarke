@@ -1,7 +1,7 @@
 <task id="PPI-001" project="Production Performance Improvement R1">
   <metadata>
     <title>Bicep Tier Corrections (C0)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <domain>C</domain>

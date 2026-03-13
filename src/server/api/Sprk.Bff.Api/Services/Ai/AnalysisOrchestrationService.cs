@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -50,9 +52,22 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IStorageRetryPolicy _storageRetryPolicy;
     private readonly AnalysisOptions _options;
+    private readonly IDistributedCache _cache;
+    private readonly CacheMetrics? _cacheMetrics;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
     private readonly AiTelemetry? _telemetry;
     private readonly JobSubmissionService? _jobSubmissionService;
+
+    /// <summary>
+    /// TTL for cached RAG search results. Short TTL ensures index updates are reflected quickly.
+    /// </summary>
+    private static readonly TimeSpan RagCacheTtl = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Limits concurrent RAG searches to prevent overwhelming Azure AI Search.
+    /// Per ADR-013: no unbounded Task.WhenAll on throttled services.
+    /// </summary>
+    private static readonly SemaphoreSlim _ragSearchSemaphore = new(5);
 
     // In-memory store for Phase 1 (will be replaced with Dataverse in Task 032)
     private static readonly Dictionary<Guid, AnalysisInternalModel> _analysisStore = new();
@@ -73,9 +88,11 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         INodeService nodeService,
         IHttpContextAccessor httpContextAccessor,
         IStorageRetryPolicy storageRetryPolicy,
+        IDistributedCache cache,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
         AiTelemetry? telemetry = null,
+        CacheMetrics? cacheMetrics = null,
         JobSubmissionService? jobSubmissionService = null)
     {
         _dataverseService = dataverseService;
@@ -93,9 +110,11 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _nodeService = nodeService;
         _httpContextAccessor = httpContextAccessor;
         _storageRetryPolicy = storageRetryPolicy;
+        _cache = cache;
         _options = options.Value;
         _logger = logger;
         _telemetry = telemetry;
+        _cacheMetrics = cacheMetrics;
         _jobSubmissionService = jobSubmissionService;
     }
 
@@ -106,7 +125,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // CRITICAL FIX: If PlaybookId is provided, delegate to ExecutePlaybookAsync
-        // which executes each tool in the playbook (SummaryHandler, EntityExtractorHandler, etc.)
+        // which executes each tool in the playbook (SummaryHandler, GenericAnalysisHandler, etc.)
         // and stores structured outputs in Dataverse Document fields.
         // Without this delegation, the method just does a raw OpenAI call that doesn't use tools.
         if (request.PlaybookId.HasValue)
@@ -759,22 +778,20 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             "Built RAG query: searchText length={SearchTextLength}, filter={Filter}",
             ragQuery.SearchText.Length, ragQuery.FilterExpression);
 
-        var processedKnowledge = new List<AnalysisKnowledge>();
+        // Separate non-RAG sources (pass through) from RAG sources (search in parallel)
+        var nonRagSources = knowledge.Where(k => k.Type != KnowledgeType.RagIndex).ToList();
 
-        foreach (var source in knowledge)
+        // Execute RAG searches in parallel with semaphore throttling.
+        // Previously sequential: 3 sources x 2-3s each = 6-9s. Now parallel: ~3s.
+        var parallelStopwatch = Stopwatch.StartNew();
+
+        var ragSearchTasks = ragSources.Select(async source =>
         {
-            if (source.Type != KnowledgeType.RagIndex)
-            {
-                // Keep non-RAG sources as-is
-                processedKnowledge.Add(source);
-                continue;
-            }
-
+            await _ragSearchSemaphore.WaitAsync(cancellationToken);
             try
             {
-                // Search RAG index using the structured RagQuery.
-                // KnowledgeSourceId filtering is applied via the existing RagSearchOptions path
-                // (the RagQuery overload handles tenant + doc type; source scoping uses options).
+                var sourceStopwatch = Stopwatch.StartNew();
+
                 var searchOptions = new RagSearchOptions
                 {
                     TenantId = tenantId,
@@ -790,12 +807,19 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 _logger.LogDebug("Searching RAG index for knowledge source {SourceId}: {SourceName}",
                     source.Id, source.Name);
 
-                var searchResult = await _ragService.SearchAsync(ragQuery.SearchText, searchOptions, cancellationToken);
+                // Cache-aside pattern for RAG search results (ADR-009: Redis-first caching).
+                // Key: sdap:ai:rag:{knowledgeSourceId}:{queryHash}, TTL: 15 minutes.
+                var ragCacheKey = ComputeRagCacheKey(source.Id.ToString(), ragQuery.SearchText);
+                var searchResult = await GetOrSearchRagCacheAsync(
+                    ragCacheKey, ragQuery.SearchText, searchOptions, cancellationToken);
+
+                sourceStopwatch.Stop();
 
                 if (searchResult.Results.Count == 0)
                 {
-                    _logger.LogDebug("No RAG results found for knowledge source {SourceId}", source.Id);
-                    continue; // Skip this source if no results
+                    _logger.LogDebug("No RAG results found for knowledge source {SourceId} in {Duration}ms",
+                        source.Id, sourceStopwatch.ElapsedMilliseconds);
+                    return (AnalysisKnowledge?)null;
                 }
 
                 // Convert RAG results to inline knowledge content
@@ -810,29 +834,44 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                     ragContent.AppendLine();
                 }
 
-                // Replace RAG source with inline source containing search results
                 var inlineSource = source with
                 {
                     Type = KnowledgeType.Inline,
                     Content = ragContent.ToString()
                 };
 
-                processedKnowledge.Add(inlineSource);
-
                 _logger.LogInformation(
-                    "RAG search for {SourceName} returned {ResultCount} results in {Duration}ms",
-                    source.Name, searchResult.Results.Count, searchResult.SearchDurationMs);
+                    "RAG search for {SourceName} returned {ResultCount} results in {SourceDuration}ms",
+                    source.Name, searchResult.Results.Count, sourceStopwatch.ElapsedMilliseconds);
+
+                return (AnalysisKnowledge?)inlineSource;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to search RAG index for knowledge source {SourceId}: {SourceName}",
                     source.Id, source.Name);
-                // Continue without this knowledge source rather than failing the analysis
+                // Return null — individual source failures don't fail the entire analysis
+                return (AnalysisKnowledge?)null;
             }
-        }
+            finally
+            {
+                _ragSearchSemaphore.Release();
+            }
+        }).ToArray();
 
-        _logger.LogDebug("Processed {OriginalCount} knowledge sources into {ProcessedCount} sources",
-            knowledge.Length, processedKnowledge.Count);
+        var ragResults = await Task.WhenAll(ragSearchTasks);
+        parallelStopwatch.Stop();
+
+        // Combine non-RAG sources with successful RAG results (filter out nulls from failures/empty)
+        var processedKnowledge = nonRagSources
+            .Concat(ragResults.Where(r => r is not null).Cast<AnalysisKnowledge>())
+            .ToList();
+
+        _logger.LogInformation(
+            "Processed {RagCount} RAG sources in parallel in {TotalDuration}ms ({SuccessCount} succeeded, {FailedCount} failed/empty). Total knowledge: {ProcessedCount}",
+            ragSources.Length, parallelStopwatch.ElapsedMilliseconds,
+            ragResults.Count(r => r is not null), ragResults.Count(r => r is null),
+            processedKnowledge.Count);
 
         return processedKnowledge.ToArray();
     }
@@ -852,6 +891,87 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         return user.FindFirstValue("tid") ??
                user.FindFirstValue("http://schemas.microsoft.com/identity/claims/tenantid") ??
                user.FindFirstValue("tenant_id");
+    }
+
+    /// <summary>
+    /// Computes a composite Redis cache key for RAG search results.
+    /// Key pattern: sdap:ai:rag:{knowledgeSourceId}:{SHA256 hash of query text}.
+    /// Per ADR-009: Redis-first caching with structured key hierarchy.
+    /// </summary>
+    /// <param name="knowledgeSourceId">The knowledge source ID for index routing.</param>
+    /// <param name="queryText">The search query text to hash.</param>
+    /// <returns>Composite cache key string.</returns>
+    private static string ComputeRagCacheKey(string knowledgeSourceId, string queryText)
+    {
+        var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(queryText))).ToLowerInvariant();
+        return $"sdap:ai:rag:{knowledgeSourceId}:{queryHash}";
+    }
+
+    /// <summary>
+    /// Cache-aside pattern for RAG search results (ADR-009).
+    /// Checks Redis cache first; on miss, executes the search and caches the result.
+    /// Cache failures are handled gracefully — search proceeds without caching.
+    /// </summary>
+    private async Task<RagSearchResponse> GetOrSearchRagCacheAsync(
+        string cacheKey,
+        string searchText,
+        RagSearchOptions searchOptions,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // Step 1: Try cache
+        try
+        {
+            var cachedJson = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            if (cachedJson is not null)
+            {
+                var cachedResult = JsonSerializer.Deserialize<RagSearchResponse>(cachedJson);
+                if (cachedResult is not null)
+                {
+                    sw.Stop();
+                    _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
+                    _logger.LogDebug("RAG cache HIT for key {CacheKey} in {ElapsedMs}ms",
+                        cacheKey, sw.ElapsedMilliseconds);
+                    return cachedResult;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Cache read failure is non-fatal — fall through to live search
+            _logger.LogWarning(ex, "RAG cache read error for key {CacheKey}, proceeding with live search", cacheKey);
+        }
+
+        sw.Stop();
+        _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, "rag");
+
+        // Step 2: Cache miss — execute live search
+        var searchResult = await _ragService.SearchAsync(searchText, searchOptions, cancellationToken);
+
+        // Step 3: Store result in cache (fire-and-forget style, don't block on cache write)
+        try
+        {
+            var json = JsonSerializer.Serialize(searchResult);
+            await _cache.SetStringAsync(
+                cacheKey,
+                json,
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = RagCacheTtl
+                },
+                cancellationToken);
+
+            _logger.LogDebug("RAG cache SET for key {CacheKey}, TTL={TtlMinutes}min, results={ResultCount}",
+                cacheKey, RagCacheTtl.TotalMinutes, searchResult.Results.Count);
+        }
+        catch (Exception ex)
+        {
+            // Cache write failure is non-fatal — result was already obtained
+            _logger.LogWarning(ex, "RAG cache write error for key {CacheKey}", cacheKey);
+        }
+
+        return searchResult;
     }
 
     /// <summary>
@@ -894,6 +1014,26 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId}, FileName={FileName})",
                 document.Id, document.GraphDriveId, document.GraphItemId, fileName);
 
+            // Fetch file metadata to get ETag for cache key (ADR-009: Redis-first caching).
+            // ETag ensures cached text is auto-invalidated when the document changes.
+            string? etag = null;
+            try
+            {
+                var metadata = await _speFileStore.GetFileMetadataAsUserAsync(
+                    httpContext,
+                    document.GraphDriveId!,
+                    document.GraphItemId!,
+                    cancellationToken);
+                etag = metadata?.ETag;
+            }
+            catch (Exception ex)
+            {
+                // Metadata fetch failure is non-fatal — proceed without cache
+                _logger.LogWarning(ex,
+                    "Failed to get file metadata for ETag (Document {DocumentId}), proceeding without text extraction cache",
+                    document.Id);
+            }
+
             // Download file from SharePoint Embedded using OBO authentication
             // This ensures the user's token is used for file access (fixes "Access denied" errors)
             // Graph IDs validated as non-empty above, safe to use null-forgiving operator
@@ -915,8 +1055,11 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 "Downloaded document {DocumentId}, stream length: {StreamLength} bytes, extracting text from {FileName}",
                 document.Id, streamLength, fileName);
 
-            // Extract text using TextExtractor
-            var extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+            // Extract text using TextExtractor with Redis cache support (ADR-009).
+            // Cache key: sdap:ai:text:{driveId}:{itemId}:v{etag} with 24h TTL.
+            // Cache hit skips Document Intelligence entirely (saves 5-30s per repeat analysis).
+            var extractionResult = await _textExtractor.ExtractAsync(
+                fileStream, fileName, document.GraphDriveId, document.GraphItemId, etag, cancellationToken);
 
             _logger.LogInformation(
                 "Extraction result for {DocumentId}: Success={Success}, Method={Method}, TextLength={TextLength}, Error={Error}",
@@ -1589,7 +1732,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // 7. Process RAG knowledge sources
         // Build a minimal AnalysisDocumentResult for RagQueryBuilder.
-        // In playbook execution, full entity extraction runs as a tool step (EntityExtractorHandler).
+        // In playbook execution, full entity extraction runs as a tool step (GenericAnalysisHandler).
         // Since that tool hasn't run yet at this stage, we use document text as the summary.
         // Future enhancement: run entity extraction before RAG if available in scope.
         var ragAnalysisContext = new AnalysisDocumentResult
@@ -1853,23 +1996,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                                     outputTypeName, outputText.Length);
                             }
                         }
-                    }
-                }
-                // Map tool result structures to output type names based on handler ID
-                // EntityExtractorHandler → Entities output
-                else if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
-                {
-                    // EntityExtractionResult has "entities" array property
-                    if (root.TryGetProperty("entities", out var entitiesValue) ||
-                        root.TryGetProperty("Entities", out entitiesValue))
-                    {
-                        // Serialize entities array as JSON for storage
-                        var entitiesJson = JsonSerializer.Serialize(entitiesValue);
-                        structuredOutputs["Entities"] = entitiesJson;
-
-                        _logger.LogDebug(
-                            "Extracted Entities output from EntityExtractorHandler: {Length} characters",
-                            entitiesJson.Length);
                     }
                 }
                 // SummaryHandler → TL;DR, Summary, Keywords outputs

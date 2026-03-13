@@ -113,10 +113,9 @@ public class PlaybookSharingService : IPlaybookSharingService
             foreach (var teamId in request.TeamIds)
             {
                 await GrantAccessToTeamAsync(playbookId, teamId, request.AccessRights, cancellationToken);
-                _logger.LogInformation("Shared playbook {PlaybookId} with team {TeamId}", playbookId, teamId);
             }
 
-            // Log audit event
+            // Log audit event with batch summary
             _logger.LogInformation(
                 "Sharing complete: PlaybookId={PlaybookId}, Teams={TeamCount}, OrgWide={OrgWide}, User={UserId}",
                 playbookId, request.TeamIds.Length, request.OrganizationWide, userId);
@@ -167,10 +166,9 @@ public class PlaybookSharingService : IPlaybookSharingService
             foreach (var teamId in request.TeamIds)
             {
                 await RevokeAccessFromTeamAsync(playbookId, teamId, cancellationToken);
-                _logger.LogInformation("Revoked access to playbook {PlaybookId} from team {TeamId}", playbookId, teamId);
             }
 
-            // Log audit event
+            // Log audit event with batch summary
             _logger.LogInformation(
                 "Revoke complete: PlaybookId={PlaybookId}, Teams={TeamCount}, RevokeOrgWide={RevokeOrgWide}, User={UserId}",
                 playbookId, request.TeamIds.Length, request.RevokeOrganizationWide, userId);

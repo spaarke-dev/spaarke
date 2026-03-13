@@ -23,7 +23,7 @@ public interface IToolHandlerRegistry
     /// <summary>
     /// Gets a tool handler by its unique handler ID.
     /// </summary>
-    /// <param name="handlerId">The handler identifier (e.g., "EntityExtractorHandler").</param>
+    /// <param name="handlerId">The handler identifier (e.g., "GenericAnalysisHandler").</param>
     /// <returns>The registered handler, or null if not found.</returns>
     IAnalysisToolHandler? GetHandler(string handlerId);
 

@@ -1,0 +1,370 @@
+name: Deploy Bicep Infrastructure
+
+# Deploys Azure infrastructure via Bicep IaC with what-if preview and OIDC auth.
+# Supports Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks.
+#
+# Usage:
+#   - Push to master: validates Bicep only (no deployment)
+#   - Pull request: validates + what-if preview as PR comment
+#   - Manual dispatch: validates, what-if preview, then deploys on approval
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/bicep/**'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'infrastructure/bicep/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      stack:
+        description: 'Deployment stack'
+        required: true
+        type: choice
+        options:
+          - model1-shared
+          - model2-full
+      deploy:
+        description: 'Actually deploy (false = what-if only)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write       # Required for OIDC federated credentials
+  pull-requests: write   # Required for PR comments (what-if output)
+
+concurrency:
+  group: deploy-infra-${{ github.event.inputs.environment || 'validate' }}
+  cancel-in-progress: false  # Never cancel infrastructure deployments
+
+env:
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+jobs:
+  # ============================================================================
+  # Stage 1: Validate Bicep templates (runs on every trigger)
+  # ============================================================================
+  validate:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Azure CLI
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: echo "Azure CLI ready"
+
+      - name: Lint Bicep templates
+        run: |
+          echo "## Bicep Lint Results" >> $GITHUB_STEP_SUMMARY
+          LINT_ERRORS=0
+
+          for file in $(find infrastructure/bicep -name '*.bicep' -not -path '*/node_modules/*'); do
+            echo "Linting: $file"
+            if ! az bicep lint --file "$file" 2>&1; then
+              echo "| $file | FAILED |" >> $GITHUB_STEP_SUMMARY
+              LINT_ERRORS=$((LINT_ERRORS + 1))
+            else
+              echo "| $file | OK |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          if [ $LINT_ERRORS -gt 0 ]; then
+            echo "::error::$LINT_ERRORS Bicep file(s) failed linting"
+            exit 1
+          fi
+
+          echo "All Bicep files passed linting" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build Bicep templates
+        run: |
+          # Compile all stack files to verify they produce valid ARM templates
+          for stack in infrastructure/bicep/stacks/*.bicep; do
+            echo "Building: $stack"
+            az bicep build --file "$stack" --stdout > /dev/null
+          done
+          echo "All stacks compiled successfully"
+
+      - name: Validate parameter files
+        run: |
+          echo "## Parameter File Validation" >> $GITHUB_STEP_SUMMARY
+
+          # Verify parameter files exist for all environments
+          MISSING=0
+
+          for env_name in dev staging prod; do
+            # Model 1 shared params
+            if [ -f "infrastructure/bicep/parameters/${env_name}.bicepparam" ]; then
+              echo "| Model 1 - ${env_name} | Found |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Model 1 - ${env_name} | **MISSING** |" >> $GITHUB_STEP_SUMMARY
+              MISSING=$((MISSING + 1))
+            fi
+
+            # Model 2 full params
+            if [ -f "infrastructure/bicep/stacks/${env_name}.bicepparam" ]; then
+              echo "| Model 2 - ${env_name} | Found |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Model 2 - ${env_name} | **MISSING** |" >> $GITHUB_STEP_SUMMARY
+              MISSING=$((MISSING + 1))
+            fi
+          done
+
+          if [ $MISSING -gt 0 ]; then
+            echo "::warning::$MISSING parameter file(s) missing"
+          fi
+
+  # ============================================================================
+  # Stage 2: What-If Preview (runs on PR or manual dispatch)
+  # ============================================================================
+  what-if:
+    name: What-If Preview (${{ github.event.inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve stack and parameters
+        id: resolve
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          STACK="${{ github.event.inputs.stack || 'model2-full' }}"
+
+          if [ "$STACK" = "model1-shared" ]; then
+            TEMPLATE="infrastructure/bicep/stacks/model1-shared.bicep"
+            PARAMS="infrastructure/bicep/parameters/${ENV}.bicepparam"
+            SCOPE="subscription"
+            LOCATION="eastus"
+          else
+            TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
+            PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
+            SCOPE="subscription"
+            LOCATION="eastus"
+          fi
+
+          echo "template=$TEMPLATE" >> $GITHUB_OUTPUT
+          echo "params=$PARAMS" >> $GITHUB_OUTPUT
+          echo "scope=$SCOPE" >> $GITHUB_OUTPUT
+          echo "location=$LOCATION" >> $GITHUB_OUTPUT
+          echo "env=$ENV" >> $GITHUB_OUTPUT
+          echo "stack=$STACK" >> $GITHUB_OUTPUT
+
+          echo "### Deployment Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Stack | $STACK |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | $ENV |" >> $GITHUB_STEP_SUMMARY
+          echo "| Template | $TEMPLATE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameters | $PARAMS |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run What-If preview
+        id: whatif
+        run: |
+          echo "Running what-if preview..."
+
+          WHAT_IF_OUTPUT=$(az deployment sub what-if \
+            --location "${{ steps.resolve.outputs.location }}" \
+            --template-file "${{ steps.resolve.outputs.template }}" \
+            --parameters "${{ steps.resolve.outputs.params }}" \
+            --result-format FullResourcePayloads \
+            --no-pretty-print 2>&1) || true
+
+          # Save output for PR comment
+          echo "$WHAT_IF_OUTPUT" > /tmp/whatif-output.txt
+
+          # Truncate for step summary (GitHub has a 1MB limit)
+          echo "### What-If Preview Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -c 65000 /tmp/whatif-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment What-If on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('/tmp/whatif-output.txt', 'utf8');
+            const truncated = output.length > 60000
+              ? output.substring(0, 60000) + '\n\n... (truncated, see workflow run for full output)'
+              : output;
+
+            const env = '${{ steps.resolve.outputs.env }}';
+            const stack = '${{ steps.resolve.outputs.stack }}';
+
+            const body = `## Infrastructure What-If Preview
+
+            **Stack:** \`${stack}\` | **Environment:** \`${env}\`
+
+            <details>
+            <summary>What-If Results (click to expand)</summary>
+
+            \`\`\`
+            ${truncated}
+            \`\`\`
+
+            </details>
+
+            > This is a preview only. No changes have been applied.
+            > To deploy, run the workflow manually with **deploy: true**.`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('Infrastructure What-If Preview')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  # ============================================================================
+  # Stage 3: Deploy (manual dispatch only, with deploy=true)
+  # ============================================================================
+  deploy:
+    name: Deploy Infrastructure (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: what-if
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve stack and parameters
+        id: resolve
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          STACK="${{ github.event.inputs.stack }}"
+
+          if [ "$STACK" = "model1-shared" ]; then
+            TEMPLATE="infrastructure/bicep/stacks/model1-shared.bicep"
+            PARAMS="infrastructure/bicep/parameters/${ENV}.bicepparam"
+          else
+            TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
+            PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
+          fi
+
+          echo "template=$TEMPLATE" >> $GITHUB_OUTPUT
+          echo "params=$PARAMS" >> $GITHUB_OUTPUT
+          echo "env=$ENV" >> $GITHUB_OUTPUT
+          echo "stack=$STACK" >> $GITHUB_OUTPUT
+
+      - name: Deploy infrastructure
+        run: |
+          echo "Deploying ${{ steps.resolve.outputs.stack }} to ${{ steps.resolve.outputs.env }}..."
+
+          az deployment sub create \
+            --location eastus \
+            --template-file "${{ steps.resolve.outputs.template }}" \
+            --parameters "${{ steps.resolve.outputs.params }}" \
+            --name "bicep-${{ steps.resolve.outputs.env }}-$(date +%Y%m%d%H%M%S)" \
+            --verbose
+
+          echo "Deployment completed successfully"
+
+      - name: Verify deployment
+        run: |
+          ENV="${{ steps.resolve.outputs.env }}"
+          STACK="${{ steps.resolve.outputs.stack }}"
+
+          echo "### Deployment Verification" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$STACK" = "model1-shared" ]; then
+            RG="rg-spaarke-shared-${ENV}"
+          else
+            # Model 2 RG naming from model2-full.bicep: rg-spaarke-{customerId}-{environment}
+            RG=$(az deployment sub show \
+              --name "bicep-${ENV}-*" \
+              --query "properties.outputs.resourceGroupName.value" \
+              --output tsv 2>/dev/null || echo "unknown")
+          fi
+
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | ${RG} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${ENV} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stack | ${STACK} |" >> $GITHUB_STEP_SUMMARY
+
+          # List deployed resources
+          if [ "$RG" != "unknown" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### Deployed Resources" >> $GITHUB_STEP_SUMMARY
+            az resource list --resource-group "$RG" --output table >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          fi
+
+  # ============================================================================
+  # Summary
+  # ============================================================================
+  summary:
+    name: Infrastructure Summary
+    runs-on: ubuntu-latest
+    needs: [validate, what-if, deploy]
+    if: always()
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## Bicep Infrastructure Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ needs.validate.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| What-If Preview | ${{ needs.what-if.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy | ${{ needs.deploy.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY

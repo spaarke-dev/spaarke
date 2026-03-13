@@ -1,7 +1,7 @@
 <task id="PPI-036" project="Production Performance Improvement R1">
   <metadata>
     <title>Delete Deprecated AI Search Index (C8)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>4</phase>
     <domain>C</domain>

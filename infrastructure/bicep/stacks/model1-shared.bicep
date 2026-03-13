@@ -217,6 +217,7 @@ module openAi '../modules/openai.bicep' = {
   params: {
     openAiName: '${baseName}-openai'
     location: location
+    // TODO: Wire disablePublicNetworkAccess when model1 gets VNet support
     deployments: [
       {
         name: 'gpt-4o'
@@ -228,7 +229,7 @@ module openAi '../modules/openai.bicep' = {
         name: 'gpt-4o-mini'
         model: 'gpt-4o-mini'
         version: '2024-07-18'
-        capacity: 200
+        capacity: 200 // >= 200 TPM required for beta scale
       }
       {
         name: 'text-embedding-3-large'
@@ -236,6 +237,7 @@ module openAi '../modules/openai.bicep' = {
         version: '1'
         capacity: 350
       }
+      // text-embedding-3-small removed (deprecated, replaced by text-embedding-3-large)
     ]
     tags: tags
   }

@@ -1,7 +1,7 @@
 <task id="PPI-015" project="Production Performance Improvement R1">
   <metadata>
     <title>Debug Endpoint Removal (A4)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2</phase>
     <domain>A</domain>

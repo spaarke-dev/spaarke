@@ -1,4 +1,9 @@
-name: Deploy to Staging
+name: Deploy to Staging (Legacy)
+
+# DEPRECATED: This workflow is superseded by deploy-promote.yml which provides
+# full environment promotion with approval gates: dev → staging → prod.
+# This workflow is retained for backward compatibility during the transition.
+# Use deploy-promote.yml for new deployments.
 
 on:
   workflow_dispatch:

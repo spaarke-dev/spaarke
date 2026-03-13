@@ -22,4 +22,11 @@ jobs:
     - name: Build
       run: dotnet build --no-restore
     - name: Test
-      run: echo "Tests temporarily disabled - test project needs interface updates"
+      run: dotnet test --no-build --logger trx --results-directory ./TestResults
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: test-results
+        path: ./TestResults/

@@ -13,11 +13,16 @@ public class ContainerOperations
 {
     private readonly IGraphClientFactory _factory;
     private readonly ILogger<ContainerOperations> _logger;
+    private readonly GraphMetadataCache? _metadataCache;
 
-    public ContainerOperations(IGraphClientFactory factory, ILogger<ContainerOperations> logger)
+    public ContainerOperations(
+        IGraphClientFactory factory,
+        ILogger<ContainerOperations> logger,
+        GraphMetadataCache? metadataCache = null)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metadataCache = metadataCache; // Optional: cache can be null if not configured
     }
 
     public async Task<ContainerDto?> CreateContainerAsync(
@@ -85,6 +90,19 @@ public class ContainerOperations
         activity?.SetTag("operation", "GetContainerDrive");
         activity?.SetTag("containerId", containerId);
 
+        // Cache-aside: check Redis first (ADR-009, 24h TTL for stable mappings)
+        if (_metadataCache != null)
+        {
+            var cached = await _metadataCache.GetContainerDriveAsync(containerId);
+            if (cached != null)
+            {
+                _logger.LogDebug("Returning cached drive mapping for container {ContainerId}", containerId);
+                activity?.SetTag("cache.result", "hit");
+                return cached;
+            }
+            activity?.SetTag("cache.result", "miss");
+        }
+
         _logger.LogInformation("Getting drive for container {ContainerId}", containerId);
 
         try
@@ -103,11 +121,19 @@ public class ContainerOperations
             _logger.LogInformation("Successfully retrieved drive {DriveId} for container {ContainerId}",
                 drive.Id, containerId);
 
-            return new ContainerDto(
+            var containerDrive = new ContainerDto(
                 drive.Id!,
                 drive.Name ?? "Unknown",
                 drive.Description,
                 drive.CreatedDateTime ?? DateTimeOffset.UtcNow);
+
+            // Cache the stable container-to-drive mapping (24h TTL)
+            if (_metadataCache != null)
+            {
+                await _metadataCache.SetContainerDriveAsync(containerId, containerDrive);
+            }
+
+            return containerDrive;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {

@@ -166,13 +166,6 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                     var renderedValue = _templateEngine.Render(mapping.Value, templateContext);
                     var coercedValue = CoerceFieldValue(mapping, renderedValue, _logger);
                     updatePayload[mapping.Field] = coercedValue;
-
-                    _logger.LogDebug(
-                        "Field '{Field}' (type={Type}): template='{Template}' → coerced={CoercedType}",
-                        mapping.Field,
-                        mapping.Type,
-                        mapping.Value,
-                        coercedValue?.GetType().Name ?? "null");
                 }
             }
             else if (config.Fields is { Count: > 0 })

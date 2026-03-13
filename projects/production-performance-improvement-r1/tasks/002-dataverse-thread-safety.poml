@@ -1,7 +1,7 @@
 <task id="PPI-002" project="Production Performance Improvement R1">
   <metadata>
     <title>DataverseWebApiService Thread-Safety Fixes (B3)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1</phase>
     <domain>B</domain>

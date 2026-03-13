@@ -1,7 +1,7 @@
 <task id="PPI-052" project="Production Performance Improvement R1">
   <metadata>
     <title>Environment Promotion with Approval Gates (D3)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>6</phase>
     <domain>D</domain>

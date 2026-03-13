@@ -665,8 +665,11 @@ public class DocumentCheckoutService
             ["statuscode"] = StatusCheckedOut
         };
 
-        _logger.LogDebug("CreateFileVersionAsync: POST to {EntitySet} with payload: {Payload}",
-            FileVersionEntitySet, System.Text.Json.JsonSerializer.Serialize(payload));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("CreateFileVersionAsync: POST to {EntitySet} with payload: {Payload}",
+                FileVersionEntitySet, System.Text.Json.JsonSerializer.Serialize(payload));
+        }
 
         var response = await _httpClient.PostAsJsonAsync(FileVersionEntitySet, payload, ct);
 
@@ -707,8 +710,11 @@ public class DocumentCheckoutService
             ["sprk_checkedindate"] = null
         };
 
-        _logger.LogDebug("UpdateDocumentCheckoutStatusAsync: PATCH {EntitySet}({DocumentId}) with payload: {Payload}",
-            DocumentEntitySet, documentId, System.Text.Json.JsonSerializer.Serialize(payload));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("UpdateDocumentCheckoutStatusAsync: PATCH {EntitySet}({DocumentId}) with payload: {Payload}",
+                DocumentEntitySet, documentId, System.Text.Json.JsonSerializer.Serialize(payload));
+        }
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{DocumentEntitySet}({documentId})",
@@ -742,8 +748,11 @@ public class DocumentCheckoutService
             ["statuscode"] = StatusCheckedIn
         };
 
-        _logger.LogDebug("UpdateFileVersionCheckInAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
-            FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("UpdateFileVersionCheckInAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
+                FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
+        }
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{FileVersionEntitySet}({fileVersionId})",
@@ -777,8 +786,11 @@ public class DocumentCheckoutService
             payload["statecode"] = stateCode.Value;
         }
 
-        _logger.LogDebug("UpdateFileVersionStatusAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
-            FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("UpdateFileVersionStatusAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
+                FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
+        }
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{FileVersionEntitySet}({fileVersionId})",

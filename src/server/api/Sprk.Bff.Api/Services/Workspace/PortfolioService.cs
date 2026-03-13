@@ -1,5 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -51,6 +55,7 @@ internal sealed class MatterRecord
 public class PortfolioService
 {
     private readonly IDistributedCache _cache;
+    private readonly IDataverseService _dataverseService;
     private readonly ILogger<PortfolioService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -62,10 +67,15 @@ public class PortfolioService
     /// Initializes a new instance of <see cref="PortfolioService"/>.
     /// </summary>
     /// <param name="cache">Distributed cache (Redis) for portfolio data.</param>
+    /// <param name="dataverseService">Dataverse service for querying matter records.</param>
     /// <param name="logger">Logger for diagnostics.</param>
-    public PortfolioService(IDistributedCache cache, ILogger<PortfolioService> logger)
+    public PortfolioService(
+        IDistributedCache cache,
+        IDataverseService dataverseService,
+        ILogger<PortfolioService> logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -239,78 +249,94 @@ public class PortfolioService
     /// Queries matter records from Dataverse for the specified user.
     /// </summary>
     /// <remarks>
-    /// TODO: Replace mock implementation with actual Dataverse query.
-    ///
-    /// Query should retrieve matters where the user is the responsible attorney or
-    /// is a member of the matter team. Use OData filter:
-    ///   $filter=sprk_responsibleattorneyid/systemuserid eq '{userId}'
-    ///          or sprk_MatterTeamMembers/any(t: t/systemuserid eq '{userId}')
-    ///
-    /// Fields to select:
-    ///   sprk_matterid, sprk_name, sprk_invoicedamount, sprk_budgetamount,
-    ///   sprk_overdueeventcount, statecode
-    ///
-    /// Active filter: statecode eq 0 (Active)
-    ///
-    /// Example implementation using IOrganizationServiceAsync2 or HttpClient to
-    /// Dataverse Web API:
-    ///   var url = $"sprk_matters?$select=sprk_matterid,sprk_name,sprk_invoicedamount," +
-    ///             $"sprk_budgetamount,sprk_overdueeventcount,statecode" +
-    ///             $"&$filter=statecode eq 0";
+    /// Queries sprk_matter with explicit column selection (ADR-002 efficiency):
+    ///   sprk_matterid, sprk_name, sprk_totalspend, sprk_totalbudget, sprk_overdueeventcount, statecode
+    /// Filters: statecode eq 0 (Active) and _ownerid_value eq userId.
     /// </remarks>
-    private Task<IReadOnlyList<MatterRecord>> QueryMattersFromDataverseAsync(
+    private async Task<IReadOnlyList<MatterRecord>> QueryMattersFromDataverseAsync(
         string userId,
         CancellationToken ct)
     {
-        // TODO: Inject IDataverseService or HttpClient and execute the actual query.
-        // The Dataverse client will be wired in once the matter entity schema is finalized.
-        // See: projects/home-corporate-workspace-r1/spec.md § Dataverse Schema
-
-        _logger.LogInformation(
-            "TODO: Querying matters from Dataverse. UserId={UserId} — returning mock data.",
+        _logger.LogDebug(
+            "Querying matters from Dataverse. UserId={UserId}",
             userId);
 
-        // Mock data — replace with real Dataverse query
-        var mockMatters = new List<MatterRecord>
+        var serviceClient = GetServiceClient();
+
+        var query = new QueryExpression("sprk_matter")
         {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Matter A",
-                InvoicedAmount = 125_000m,
-                BudgetAmount = 150_000m,
-                OverdueEventCount = 0,
-                IsActive = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Matter B (at risk — over budget)",
-                InvoicedAmount = 92_000m,
-                BudgetAmount = 100_000m,
-                OverdueEventCount = 0,
-                IsActive = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Matter C (at risk — overdue events)",
-                InvoicedAmount = 40_000m,
-                BudgetAmount = 200_000m,
-                OverdueEventCount = 3,
-                IsActive = true
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Matter D (closed — excluded from metrics)",
-                InvoicedAmount = 500_000m,
-                BudgetAmount = 450_000m,
-                OverdueEventCount = 0,
-                IsActive = false
-            }
+            ColumnSet = new ColumnSet(
+                "sprk_matterid",
+                "sprk_name",
+                "sprk_totalspend",
+                "sprk_totalbudget",
+                "sprk_overdueeventcount",
+                "statecode")
         };
 
-        return Task.FromResult<IReadOnlyList<MatterRecord>>(mockMatters);
+        // Active matters only
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+
+        // Owned by the specified user (matches LegalWorkspace client-side filter pattern)
+        if (Guid.TryParse(userId, out var userGuid))
+        {
+            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+        }
+
+        EntityCollection results;
+        try
+        {
+            results = await serviceClient.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to query matters from Dataverse. UserId={UserId}",
+                userId);
+
+            // Return empty list on failure — graceful empty state (constraint)
+            return Array.Empty<MatterRecord>();
+        }
+
+        var matters = new List<MatterRecord>(results.Entities.Count);
+
+        foreach (var entity in results.Entities)
+        {
+            var totalSpend = entity.GetAttributeValue<Money>("sprk_totalspend")?.Value ?? 0m;
+            var totalBudget = entity.GetAttributeValue<Money>("sprk_totalbudget")?.Value ?? 0m;
+            var overdueCount = entity.GetAttributeValue<int?>("sprk_overdueeventcount") ?? 0;
+            var stateCode = entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
+
+            matters.Add(new MatterRecord
+            {
+                Id = entity.Id,
+                Name = entity.GetAttributeValue<string>("sprk_name") ?? string.Empty,
+                InvoicedAmount = totalSpend,
+                BudgetAmount = totalBudget,
+                OverdueEventCount = overdueCount,
+                IsActive = stateCode == 0
+            });
+        }
+
+        _logger.LogDebug(
+            "Queried {Count} matters from Dataverse. UserId={UserId}",
+            matters.Count,
+            userId);
+
+        return matters;
+    }
+
+    /// <summary>
+    /// Get the underlying ServiceClient from the IDataverseService implementation.
+    /// Required for generic SDK operations (QueryExpression) not exposed on the interface.
+    /// </summary>
+    private ServiceClient GetServiceClient()
+    {
+        if (_dataverseService is DataverseServiceClientImpl impl)
+            return impl.OrganizationService;
+
+        throw new InvalidOperationException(
+            $"PortfolioService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
+            $"Actual type: {_dataverseService.GetType().Name}.");
     }
 }

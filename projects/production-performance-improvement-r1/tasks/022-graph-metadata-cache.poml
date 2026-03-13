@@ -1,7 +1,7 @@
 <task id="PPI-022" project="Production Performance Improvement R1">
   <metadata>
     <title>Graph Metadata Cache (A1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <phase>3</phase>
     <domain>A</domain>

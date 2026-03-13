@@ -1,7 +1,7 @@
 <task id="PPI-033" project="Production Performance Improvement R1">
   <metadata>
     <title>Remove String Allocations from Log Parameters (G5)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>4</phase>
     <domain>G</domain>

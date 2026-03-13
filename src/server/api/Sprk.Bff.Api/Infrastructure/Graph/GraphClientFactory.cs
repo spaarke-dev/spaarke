@@ -24,6 +24,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     private readonly string? _clientId;
     private readonly string? _clientSecret;
     private readonly IConfidentialClientApplication _cca;
+    private readonly Lazy<GraphServiceClient> _appOnlyClient;
 
     public GraphClientFactory(
         IHttpClientFactory httpClientFactory,
@@ -46,10 +47,10 @@ public sealed class GraphClientFactory : IGraphClientFactory
             throw new InvalidOperationException("API_APP_ID not configured");
         var clientSecret = configuration["API_CLIENT_SECRET"]; // Optional if no OBO endpoints yet
 
-        _logger.LogInformation("Configuring ConfidentialClientApplication with API_APP_ID (masked): ...{Suffix}",
-            apiAppId?.Length > 8 ? apiAppId.Substring(apiAppId.Length - 8) : apiAppId);
-        _logger.LogInformation("Using TENANT_ID (masked): ...{Suffix}",
-            tenantId?.Length > 8 ? tenantId.Substring(tenantId.Length - 8) : tenantId);
+        _logger.LogInformation("Configuring ConfidentialClientApplication with API_APP_ID length: {AppIdLength}",
+            apiAppId?.Length ?? 0);
+        _logger.LogInformation("Using TENANT_ID length: {TenantIdLength}",
+            tenantId?.Length ?? 0);
         _logger.LogInformation("Client secret configured: {HasSecret}", !string.IsNullOrWhiteSpace(clientSecret));
 
         var builder = ConfidentialClientApplicationBuilder
@@ -60,6 +61,12 @@ public sealed class GraphClientFactory : IGraphClientFactory
             builder = builder.WithClientSecret(clientSecret);
 
         _cca = builder.Build();
+
+        // PPI-014: Cache app-only GraphServiceClient as a singleton.
+        // The credential and auth provider are stateless and thread-safe,
+        // so they can be created once and reused across all app-only calls.
+        // OBO (per-user) clients remain per-request.
+        _appOnlyClient = new Lazy<GraphServiceClient>(CreateAppOnlyClient);
     }
 
     /// <summary>
@@ -108,9 +115,9 @@ public sealed class GraphClientFactory : IGraphClientFactory
     {
         // Log configuration for debugging OBO issues
         _logger.LogInformation("OBO Token Exchange - CCA configured with ClientId from API_APP_ID");
-        _logger.LogDebug("Token length: {TokenLength}, First 20 chars: {TokenPrefix}",
-            userAccessToken?.Length ?? 0,
-            userAccessToken?.Length > 20 ? userAccessToken.Substring(0, 20) : userAccessToken);
+        _logger.LogDebug("Token present: {HasToken}, Token length: {TokenLength}",
+            !string.IsNullOrEmpty(userAccessToken),
+            userAccessToken?.Length ?? 0);
 
         // Decode and log token claims for debugging
         try
@@ -219,12 +226,17 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// This method wraps CreateAppOnlyClient with a clearer name.
     /// Use for platform/admin operations (container creation, background jobs).
     /// </remarks>
+    /// <remarks>
+    /// PPI-014: Returns a cached singleton GraphServiceClient for app-only operations.
+    /// The credential and auth provider are created once via Lazy&lt;T&gt; and reused,
+    /// eliminating per-call allocation of ClientSecretCredential and AzureIdentityAuthenticationProvider.
+    /// OBO (per-user) clients remain per-request since they depend on user tokens.
+    /// </remarks>
     public GraphServiceClient ForApp()
     {
-        _logger.LogDebug("ForApp called - using app-only authentication");
+        _logger.LogDebug("ForApp called - returning cached app-only client");
 
-        // Delegate to existing app-only implementation
-        return CreateAppOnlyClient();
+        return _appOnlyClient.Value;
     }
 
     /// <summary>

@@ -82,11 +82,10 @@ public class OfficeService : IOfficeService
         if (request.ContentType == SaveContentType.Email && request.Email != null)
         {
             _logger.LogInformation(
-                "[EMAIL BODY DEBUG] Subject={Subject}, HasBody={HasBody}, BodyLength={BodyLength}, BodyPreview={BodyPreview}",
+                "[EMAIL BODY DEBUG] Subject={Subject}, HasBody={HasBody}, BodyLength={BodyLength}",
                 request.Email.Subject,
                 !string.IsNullOrEmpty(request.Email.Body),
-                request.Email.Body?.Length ?? 0,
-                request.Email.Body?.Substring(0, Math.Min(50, request.Email.Body?.Length ?? 0)) ?? "(empty)");
+                request.Email.Body?.Length ?? 0);
         }
 
         // Fetch email body and attachments from Graph API if missing

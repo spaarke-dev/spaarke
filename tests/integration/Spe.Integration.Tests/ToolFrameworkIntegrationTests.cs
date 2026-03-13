@@ -62,10 +62,8 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
         var handlerIds = registry.GetRegisteredHandlerIds();
 
         // Assert
-        handlerIds.Should().Contain("EntityExtractorHandler",
-            "EntityExtractorHandler should be discovered via assembly scanning");
-        handlerIds.Should().Contain("ClauseAnalyzerHandler",
-            "ClauseAnalyzerHandler should be discovered via assembly scanning");
+        handlerIds.Should().Contain("GenericAnalysisHandler",
+            "GenericAnalysisHandler should be discovered via assembly scanning");
         handlerIds.Should().Contain("DocumentClassifierHandler",
             "DocumentClassifierHandler should be discovered via assembly scanning");
 
@@ -88,7 +86,7 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
 
         // Assert
         handlerCount.Should().BeGreaterThanOrEqualTo(3,
-            "At minimum, EntityExtractor, ClauseAnalyzer, and DocumentClassifier handlers should be registered");
+            "At minimum, GenericAnalysis, DocumentClassifier, and Summary handlers should be registered");
 
         _output.WriteLine($"Total enabled handlers: {handlerCount}");
     }
@@ -98,51 +96,25 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
     #region Step 2: Tool Registration Tests
 
     [Fact]
-    public void EntityExtractorHandler_IsAvailableAndCorrectlyConfigured()
+    public void GenericAnalysisHandler_IsAvailableAndCorrectlyConfigured()
     {
         // Arrange
         using var scope = _fixture.Services.CreateScope();
         var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
 
         // Act
-        var handler = registry.GetHandler("EntityExtractorHandler");
-        var isAvailable = registry.IsHandlerAvailable("EntityExtractorHandler");
+        var handler = registry.GetHandler("GenericAnalysisHandler");
+        var isAvailable = registry.IsHandlerAvailable("GenericAnalysisHandler");
 
         // Assert
-        handler.Should().NotBeNull("EntityExtractorHandler should be retrievable");
-        isAvailable.Should().BeTrue("EntityExtractorHandler should be available");
-        handler!.HandlerId.Should().Be("EntityExtractorHandler");
-        handler.SupportedToolTypes.Should().Contain(ToolType.EntityExtractor);
+        handler.Should().NotBeNull("GenericAnalysisHandler should be retrievable");
+        isAvailable.Should().BeTrue("GenericAnalysisHandler should be available");
+        handler!.HandlerId.Should().Be("GenericAnalysisHandler");
         handler.Metadata.Should().NotBeNull();
         handler.Metadata.Name.Should().NotBeNullOrEmpty();
         handler.Metadata.Version.Should().NotBeNullOrEmpty();
 
-        _output.WriteLine($"EntityExtractorHandler:");
-        _output.WriteLine($"  Name: {handler.Metadata.Name}");
-        _output.WriteLine($"  Version: {handler.Metadata.Version}");
-        _output.WriteLine($"  Supported Types: {string.Join(", ", handler.SupportedToolTypes)}");
-        _output.WriteLine($"  Parameters: {handler.Metadata.Parameters.Count}");
-    }
-
-    [Fact]
-    public void ClauseAnalyzerHandler_IsAvailableAndCorrectlyConfigured()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-        var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
-
-        // Act
-        var handler = registry.GetHandler("ClauseAnalyzerHandler");
-        var isAvailable = registry.IsHandlerAvailable("ClauseAnalyzerHandler");
-
-        // Assert
-        handler.Should().NotBeNull("ClauseAnalyzerHandler should be retrievable");
-        isAvailable.Should().BeTrue("ClauseAnalyzerHandler should be available");
-        handler!.HandlerId.Should().Be("ClauseAnalyzerHandler");
-        handler.SupportedToolTypes.Should().Contain(ToolType.ClauseAnalyzer);
-        handler.Metadata.Should().NotBeNull();
-
-        _output.WriteLine($"ClauseAnalyzerHandler:");
+        _output.WriteLine($"GenericAnalysisHandler:");
         _output.WriteLine($"  Name: {handler.Metadata.Name}");
         _output.WriteLine($"  Version: {handler.Metadata.Version}");
         _output.WriteLine($"  Supported Types: {string.Join(", ", handler.SupportedToolTypes)}");
@@ -182,18 +154,12 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
         var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
 
         // Act
-        var entityExtractors = registry.GetHandlersByType(ToolType.EntityExtractor);
-        var clauseAnalyzers = registry.GetHandlersByType(ToolType.ClauseAnalyzer);
         var documentClassifiers = registry.GetHandlersByType(ToolType.DocumentClassifier);
 
         // Assert
-        entityExtractors.Should().NotBeEmpty("Should have EntityExtractor handlers");
-        clauseAnalyzers.Should().NotBeEmpty("Should have ClauseAnalyzer handlers");
         documentClassifiers.Should().NotBeEmpty("Should have DocumentClassifier handlers");
 
         _output.WriteLine($"Handlers by type:");
-        _output.WriteLine($"  EntityExtractor: {entityExtractors.Count} handler(s)");
-        _output.WriteLine($"  ClauseAnalyzer: {clauseAnalyzers.Count} handler(s)");
         _output.WriteLine($"  DocumentClassifier: {documentClassifiers.Count} handler(s)");
     }
 
@@ -279,36 +245,15 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
     #region Step 4: Tool Validation Tests
 
     [Fact]
-    public void EntityExtractorHandler_ValidatesContext()
+    public void GenericAnalysisHandler_ValidatesContext()
     {
         // Arrange
         using var scope = _fixture.Services.CreateScope();
         var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
-        var handler = registry.GetHandler("EntityExtractorHandler")!;
+        var handler = registry.GetHandler("GenericAnalysisHandler")!;
 
         var validContext = CreateTestContext("This is a test document with some content.");
-        var tool = CreateTestTool(ToolType.EntityExtractor);
-
-        // Act
-        var result = handler.Validate(validContext, tool);
-
-        // Assert
-        result.IsValid.Should().BeTrue("Valid context should pass validation");
-        result.Errors.Should().BeEmpty();
-
-        _output.WriteLine($"Validation result: {(result.IsValid ? "VALID" : "INVALID")}");
-    }
-
-    [Fact]
-    public void ClauseAnalyzerHandler_ValidatesContext()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-        var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
-        var handler = registry.GetHandler("ClauseAnalyzerHandler")!;
-
-        var validContext = CreateTestContext("This is a contract document with various clauses.");
-        var tool = CreateTestTool(ToolType.ClauseAnalyzer);
+        var tool = CreateTestTool(ToolType.Custom);
 
         // Act
         var result = handler.Validate(validContext, tool);
@@ -406,26 +351,22 @@ Date: January 1, 2024       Date: January 1, 2024
 
         var context = CreateTestContext(sampleContract);
 
-        // Act - Validate with all handlers
-        var entityExtractor = registry.GetHandler("EntityExtractorHandler")!;
-        var clauseAnalyzer = registry.GetHandler("ClauseAnalyzerHandler")!;
+        // Act - Validate with remaining handlers
+        var genericAnalysis = registry.GetHandler("GenericAnalysisHandler")!;
         var documentClassifier = registry.GetHandler("DocumentClassifierHandler")!;
 
-        var entityResult = entityExtractor.Validate(context, CreateTestTool(ToolType.EntityExtractor));
-        var clauseResult = clauseAnalyzer.Validate(context, CreateTestTool(ToolType.ClauseAnalyzer));
+        var genericResult = genericAnalysis.Validate(context, CreateTestTool(ToolType.Custom));
         var classifierResult = documentClassifier.Validate(context, CreateTestTool(ToolType.DocumentClassifier));
 
         // Assert
-        entityResult.IsValid.Should().BeTrue("EntityExtractor should validate successfully");
-        clauseResult.IsValid.Should().BeTrue("ClauseAnalyzer should validate successfully");
+        genericResult.IsValid.Should().BeTrue("GenericAnalysisHandler should validate successfully");
         classifierResult.IsValid.Should().BeTrue("DocumentClassifier should validate successfully");
 
         _output.WriteLine("Multi-handler validation results:");
-        _output.WriteLine($"  EntityExtractor: {(entityResult.IsValid ? "PASS" : "FAIL")}");
-        _output.WriteLine($"  ClauseAnalyzer: {(clauseResult.IsValid ? "PASS" : "FAIL")}");
+        _output.WriteLine($"  GenericAnalysisHandler: {(genericResult.IsValid ? "PASS" : "FAIL")}");
         _output.WriteLine($"  DocumentClassifier: {(classifierResult.IsValid ? "PASS" : "FAIL")}");
         _output.WriteLine($"\nDocument length: {sampleContract.Length} characters");
-        _output.WriteLine($"Tool composition: All 3 handlers validated same document successfully");
+        _output.WriteLine($"Tool composition: Handlers validated same document successfully");
     }
 
     [Fact]
@@ -436,10 +377,10 @@ Date: January 1, 2024       Date: January 1, 2024
         var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
 
         var testDocument = "This is a test document for Acme Corporation.";
-        var previousEntityResult = ToolResult.Ok(
-            "EntityExtractorHandler",
+        var previousResult = ToolResult.Ok(
+            "GenericAnalysisHandler",
             Guid.NewGuid(),
-            "Entity Extractor",
+            "Entity Extraction",
             new { entities = new[] { new { name = "Acme Corporation", type = "Organization" } } },
             "Found 1 entity",
             0.95);
@@ -456,22 +397,22 @@ Date: January 1, 2024       Date: January 1, 2024
             },
             PreviousResults = new Dictionary<string, ToolResult>
             {
-                ["EntityExtractorHandler"] = previousEntityResult
+                ["GenericAnalysisHandler"] = previousResult
             }
         };
 
         // Act - Next handler can access previous results
-        var clauseAnalyzer = registry.GetHandler("ClauseAnalyzerHandler")!;
-        var validationResult = clauseAnalyzer.Validate(contextWithPreviousResults, CreateTestTool(ToolType.ClauseAnalyzer));
+        var documentClassifier = registry.GetHandler("DocumentClassifierHandler")!;
+        var validationResult = documentClassifier.Validate(contextWithPreviousResults, CreateTestTool(ToolType.DocumentClassifier));
 
         // Assert
-        contextWithPreviousResults.PreviousResults.Should().ContainKey("EntityExtractorHandler");
-        contextWithPreviousResults.PreviousResults["EntityExtractorHandler"].Success.Should().BeTrue();
+        contextWithPreviousResults.PreviousResults.Should().ContainKey("GenericAnalysisHandler");
+        contextWithPreviousResults.PreviousResults["GenericAnalysisHandler"].Success.Should().BeTrue();
         validationResult.IsValid.Should().BeTrue();
 
         _output.WriteLine("Tool composition with previous results:");
-        _output.WriteLine($"  Previous result from: EntityExtractorHandler");
-        _output.WriteLine($"  Previous result success: {previousEntityResult.Success}");
+        _output.WriteLine($"  Previous result from: GenericAnalysisHandler");
+        _output.WriteLine($"  Previous result success: {previousResult.Success}");
         _output.WriteLine($"  Next handler validation: {(validationResult.IsValid ? "PASS" : "FAIL")}");
     }
 
@@ -534,9 +475,9 @@ Date: January 1, 2024       Date: January 1, 2024
         var registry = scope.ServiceProvider.GetRequiredService<IToolHandlerRegistry>();
 
         // Act
-        var handler1 = registry.GetHandler("ENTITYEXTRACTORHANDLER");
-        var handler2 = registry.GetHandler("entityextractorhandler");
-        var handler3 = registry.GetHandler("EntityExtractorHandler");
+        var handler1 = registry.GetHandler("GENERICANALYSISHANDLER");
+        var handler2 = registry.GetHandler("genericanalysishandler");
+        var handler3 = registry.GetHandler("GenericAnalysisHandler");
 
         // Assert
         handler1.Should().NotBeNull();

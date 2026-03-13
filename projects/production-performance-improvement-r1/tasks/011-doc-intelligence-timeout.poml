@@ -1,7 +1,7 @@
 <task id="PPI-011" project="Production Performance Improvement R1">
   <metadata>
     <title>Document Intelligence Timeout and Circuit Breaker (E3)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2</phase>
     <domain>E</domain>

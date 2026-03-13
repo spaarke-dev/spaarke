@@ -150,13 +150,7 @@ public sealed class ToolHandlerRegistry : IToolHandlerRegistry
                 }
             }
 
-            var status = _disabledHandlers.Contains(handlerId) ? "disabled" : "enabled";
-            _logger.LogDebug(
-                "Registered handler {HandlerId} ({Type}) - {Status}, supports: [{ToolTypes}]",
-                handlerId,
-                handler.GetType().Name,
-                status,
-                string.Join(", ", handler.SupportedToolTypes));
+            // Per-handler logging removed — see batch summary below
         }
 
         _logger.LogInformation(

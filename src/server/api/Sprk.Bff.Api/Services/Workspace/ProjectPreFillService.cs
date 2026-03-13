@@ -153,6 +153,9 @@ public class ProjectPreFillService
     {
         var allExtractedText = new StringBuilder();
         var stagingContainerId = _configuration["SharePointEmbedded:StagingContainerId"];
+        var filesExtracted = 0;
+        var filesFailed = 0;
+        var filesSkipped = 0;
 
         foreach (var file in files)
         {
@@ -163,10 +166,7 @@ public class ProjectPreFillService
 
             if (!_textExtractor.IsSupported(extension))
             {
-                _logger.LogWarning(
-                    "Text extractor does not support extension '{Extension}' for file '{FileName}'. " +
-                    "This file will be skipped. RequestId={RequestId}",
-                    extension, fileName, requestId);
+                filesSkipped++;
                 continue;
             }
 
@@ -188,12 +188,7 @@ public class ProjectPreFillService
                         buffer,
                         cancellationToken);
 
-                    if (uploadResult != null)
-                    {
-                        _logger.LogDebug(
-                            "Staged file '{FileName}' to SPE path '{StagingPath}'. RequestId={RequestId}",
-                            fileName, stagingPath, requestId);
-                    }
+                    // Staging result tracked in batch summary below
 
                     buffer.Position = 0;
                     extractionResult = await _textExtractor.ExtractAsync(buffer, fileName, cancellationToken);
@@ -221,14 +216,17 @@ public class ProjectPreFillService
                 allExtractedText.AppendLine($"===== Document: {fileName} =====");
                 allExtractedText.AppendLine(extractionResult.Text);
                 allExtractedText.AppendLine();
+                filesExtracted++;
             }
             else
             {
-                _logger.LogWarning(
-                    "Text extraction failed for '{FileName}': {Error}. RequestId={RequestId}",
-                    fileName, extractionResult.ErrorMessage, requestId);
+                filesFailed++;
             }
         }
+
+        _logger.LogDebug(
+            "Text extraction batch complete: {Extracted} succeeded, {Failed} failed, {Skipped} unsupported out of {Total} files. RequestId={RequestId}",
+            filesExtracted, filesFailed, filesSkipped, files.Count, requestId);
 
         return allExtractedText.ToString();
     }

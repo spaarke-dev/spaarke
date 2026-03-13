@@ -1,6 +1,6 @@
 # Task Index — Production Performance Improvement R1
 
-> **Last Updated**: 2026-03-11
+> **Last Updated**: 2026-03-13
 > **Total Tasks**: 35 + 1 wrap-up
 > **Parallel Execution**: Enabled — see Parallel Groups below
 
@@ -16,74 +16,74 @@
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 001 | Bicep tier corrections | C | 🔲 | P1-A | None |
-| 002 | DataverseWebApiService thread-safety fixes | B | 🔲 | P1-A | None |
-| 003 | Secure unauthenticated AI endpoints | F | 🔲 | P1-B | None |
-| 004 | Production safety fixes (CORS, Console.WriteLine, debug) | F | 🔲 | P1-B | None |
+| 001 | Bicep tier corrections | C | ✅ | P1-A | None |
+| 002 | DataverseWebApiService thread-safety fixes | B | ✅ | P1-A | None |
+| 003 | Secure unauthenticated AI endpoints | F | ✅ | P1-B | None |
+| 004 | Production safety fixes (CORS, Console.WriteLine, debug) | F | ✅ | P1-B | None |
 | 005 | Implement 37 Office authorization filters | F | 🔲 | P1-C | Task 033 design |
 
 ### Phase 2: Quick Performance Wins
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 010 | Parallelize RAG knowledge searches | E | 🔲 | P2-ALL | Phase 1 |
-| 011 | Document Intelligence timeout + circuit breaker | E | 🔲 | P2-ALL | Phase 1 |
-| 012 | OpenAI parameter tuning | E | 🔲 | P2-ALL | Phase 1 |
-| 013 | Replace ColumnSet(true) with explicit columns | B | 🔲 | P2-ALL | Phase 1 |
-| 014 | GraphServiceClient singleton pooling | A | 🔲 | P2-ALL | Phase 1 |
-| 015 | Debug endpoint removal | A | 🔲 | P2-ALL | Phase 1 |
-| 016 | Remove [DEBUG] log tags | G | 🔲 | P2-ALL | Phase 1 |
+| 010 | Parallelize RAG knowledge searches | E | ✅ | P2-ALL | Phase 1 |
+| 011 | Document Intelligence timeout + circuit breaker | E | ✅ | P2-ALL | Phase 1 |
+| 012 | OpenAI parameter tuning | E | ✅ | P2-ALL | Phase 1 |
+| 013 | Replace ColumnSet(true) with explicit columns | B | ✅ | P2-ALL | Phase 1 |
+| 014 | GraphServiceClient singleton pooling | A | ✅ | P2-ALL | Phase 1 |
+| 015 | Debug endpoint removal | A | ✅ | P2-ALL | Phase 1 |
+| 016 | Remove [DEBUG] log tags | G | ✅ | P2-ALL | Phase 1 |
 
 ### Phase 3: Core Caching
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 020 | Cache extracted document text | E | 🔲 | P3-A | 010 (E1) |
-| 021 | Cache RAG search results | E | 🔲 | P3-A | 010 (E1) |
-| 022 | Graph metadata cache | A | 🔲 | P3-B | Phase 2 |
-| 023 | Authorization data snapshot cache | A | 🔲 | P3-B | Phase 2 |
-| 024 | Dataverse request batching ($batch) | B | 🔲 | P3-C | 013 (B1) |
-| 025 | Pagination support for unbounded queries | B | 🔲 | P3-C | 013 (B1) |
+| 020 | Cache extracted document text | E | ✅ | P3-A | 010 (E1) |
+| 021 | Cache RAG search results | E | ✅ | P3-A | 010 (E1) |
+| 022 | Graph metadata cache | A | ✅ | P3-B | Phase 2 |
+| 023 | Authorization data snapshot cache | A | ✅ | P3-B | Phase 2 |
+| 024 | Dataverse request batching ($batch) | B | ✅ | P3-C | 013 (B1) |
+| 025 | Pagination support for unbounded queries | B | ✅ | P3-C | 013 (B1) |
 
 ### Phase 4: Code Quality, Logging & Workspace
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 030 | Guard serialization in log calls | G | 🔲 | P4-ALL | Phase 3 |
-| 031 | Batch loop logging | G | 🔲 | P4-ALL | Phase 3 |
-| 032 | Production log level configuration | G | 🔲 | P4-ALL | Phase 3 |
-| 033 | Remove string allocations from log parameters | G | 🔲 | P4-ALL | Phase 3 |
-| 034 | Remove obsolete tool handlers | F | 🔲 | P4-ALL | Phase 3 |
-| 035 | Implement real Workspace Dataverse queries | F | 🔲 | P4-ALL | Phase 3 |
-| 036 | Delete deprecated AI Search index | C | 🔲 | P4-ALL | Phase 3 |
+| 030 | Guard serialization in log calls | G | ✅ | P4-ALL | Phase 3 |
+| 031 | Batch loop logging | G | ✅ | P4-ALL | Phase 3 |
+| 032 | Production log level configuration | G | ✅ | P4-ALL | Phase 3 |
+| 033 | Remove string allocations from log parameters | G | ✅ | P4-ALL | Phase 3 |
+| 034 | Remove obsolete tool handlers | F | ✅ | P4-ALL | Phase 3 |
+| 035 | Implement real Workspace Dataverse queries | F | ✅ | P4-ALL | Phase 3 |
+| 036 | Delete deprecated AI Search index | C | ✅ | P4-ALL | Phase 3 |
 
 ### Phase 5: Infrastructure Hardening
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 040 | VNet creation + private endpoints | C | 🔲 | P5-A | Phase 4 |
-| 041 | App Service autoscaling | C | 🔲 | P5-A | Phase 4 |
-| 042 | Deployment slot configuration | C | 🔲 | P5-A | Phase 4 |
-| 043 | Redis VNet injection + RDB persistence | C | 🔲 | P5-B | 040 |
-| 044 | Key Vault hardening | C | 🔲 | P5-B | 040 |
-| 045 | Storage account hardening | C | 🔲 | P5-B | 040 |
-| 046 | OpenAI capacity + network hardening | C | 🔲 | P5-B | 040 |
+| 040 | VNet creation + private endpoints | C | ✅ | P5-A | Phase 4 |
+| 041 | App Service autoscaling | C | ✅ | P5-A | Phase 4 |
+| 042 | Deployment slot configuration | C | ✅ | P5-A | Phase 4 |
+| 043 | Redis VNet injection + RDB persistence | C | ✅ | P5-B | 040 |
+| 044 | Key Vault hardening | C | ✅ | P5-B | 040 |
+| 045 | Storage account hardening | C | ✅ | P5-B | 040 |
+| 046 | OpenAI capacity + network hardening | C | ✅ | P5-B | 040 |
 
 ### Phase 6: CI/CD Maturity & Refactoring
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 050 | Test suite re-enablement | D | 🔲 | P6-A | Phase 5 |
-| 051 | Bicep IaC deployment in CI/CD | D | 🔲 | P6-A | Phase 5 |
-| 052 | Environment promotion with approval gates | D | 🔲 | P6-B | 051 |
-| 053 | Deployment slot swap in CI/CD | D | 🔲 | P6-B | 042, 051 |
-| 054 | Refactor ScopeResolverService god class | F | 🔲 | P6-A | Phase 5 |
+| 050 | Test suite re-enablement | D | ✅ | P6-A | Phase 5 |
+| 051 | Bicep IaC deployment in CI/CD | D | ✅ | P6-A | Phase 5 |
+| 052 | Environment promotion with approval gates | D | ✅ | P6-B | 051 |
+| 053 | Deployment slot swap in CI/CD | D | ✅ | P6-B | 042, 051 |
+| 054 | Refactor ScopeResolverService god class | F | ✅ | P6-A | Phase 5 |
 
 ### Wrap-Up
 
 | # | Task | Domain | Status | Parallel Group | Dependencies |
 |---|------|--------|--------|---------------|-------------|
-| 090 | Project wrap-up | — | 🔲 | — | All tasks |
+| 090 | Project wrap-up | — | ✅ | — | All tasks |
 
 ## Parallel Execution Groups
 

@@ -1,7 +1,7 @@
 <task id="PPI-040" project="Production Performance Improvement R1">
   <metadata>
     <title>VNet Creation + Private Endpoints (C1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>8 hours</estimated-effort>
     <phase>5</phase>
     <domain>C</domain>

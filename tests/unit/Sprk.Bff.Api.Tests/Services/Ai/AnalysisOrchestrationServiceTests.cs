@@ -455,8 +455,8 @@ public class AnalysisOrchestrationServiceTests
         // Create scopes with tools
         var tools = new[]
         {
-            new AnalysisTool { Id = tool1Id, Name = "Entity Extractor", HandlerClass = "EntityExtractorHandler" },
-            new AnalysisTool { Id = tool2Id, Name = "Risk Detector", HandlerClass = "RiskDetectorHandler" }
+            new AnalysisTool { Id = tool1Id, Name = "Entity Extractor", HandlerClass = "GenericAnalysisHandler" },
+            new AnalysisTool { Id = tool2Id, Name = "Risk Detector", HandlerClass = "GenericAnalysisHandler" }
         };
         var scopes = new ResolvedScopes([], [], tools);
 
@@ -562,8 +562,8 @@ public class AnalysisOrchestrationServiceTests
         };
         var tools = new[]
         {
-            new AnalysisTool { Id = Guid.NewGuid(), Name = "Entity Extractor", HandlerClass = "EntityExtractorHandler" },
-            new AnalysisTool { Id = Guid.NewGuid(), Name = "Clause Analyzer", HandlerClass = "ClauseAnalyzerHandler" }
+            new AnalysisTool { Id = Guid.NewGuid(), Name = "Entity Extractor", HandlerClass = "GenericAnalysisHandler" },
+            new AnalysisTool { Id = Guid.NewGuid(), Name = "Clause Analyzer", HandlerClass = "GenericAnalysisHandler" }
         };
         var scopes = new ResolvedScopes(skills, knowledge, tools);
 

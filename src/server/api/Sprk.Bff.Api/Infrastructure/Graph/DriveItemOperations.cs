@@ -13,11 +13,16 @@ public class DriveItemOperations
 {
     private readonly IGraphClientFactory _factory;
     private readonly ILogger<DriveItemOperations> _logger;
+    private readonly GraphMetadataCache? _metadataCache;
 
-    public DriveItemOperations(IGraphClientFactory factory, ILogger<DriveItemOperations> logger)
+    public DriveItemOperations(
+        IGraphClientFactory factory,
+        ILogger<DriveItemOperations> logger,
+        GraphMetadataCache? metadataCache = null)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metadataCache = metadataCache; // Optional: cache can be null if not configured
     }
 
     public async Task<IList<FileHandleDto>> ListChildrenAsync(
@@ -29,6 +34,19 @@ public class DriveItemOperations
         activity?.SetTag("operation", "ListChildren");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
+
+        // Cache-aside: check Redis first (ADR-009)
+        if (_metadataCache != null)
+        {
+            var cached = await _metadataCache.GetFolderListingAsync(driveId, itemId);
+            if (cached != null)
+            {
+                _logger.LogDebug("Returning cached folder listing for drive {DriveId}, item {ItemId}", driveId, itemId);
+                activity?.SetTag("cache.result", "hit");
+                return cached;
+            }
+            activity?.SetTag("cache.result", "miss");
+        }
 
         _logger.LogInformation("Listing children in drive {DriveId}, item {ItemId}", driveId, itemId);
 
@@ -63,7 +81,7 @@ public class DriveItemOperations
             var result = page.Value;
             _logger.LogInformation("Found {Count} children in drive {DriveId}", result.Count, driveId);
 
-            return result.Select(item => new FileHandleDto(
+            var items = result.Select(item => new FileHandleDto(
                 item.Id!,
                 item.Name!,
                 item.ParentReference?.Id,
@@ -73,6 +91,14 @@ public class DriveItemOperations
                 item.ETag,
                 item.Folder != null,
                 item.WebUrl)).ToList();
+
+            // Cache the result (2min TTL)
+            if (_metadataCache != null)
+            {
+                await _metadataCache.SetFolderListingAsync(driveId, itemId, items);
+            }
+
+            return items;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -166,6 +192,15 @@ public class DriveItemOperations
                 .DeleteAsync(cancellationToken: ct);
 
             _logger.LogInformation("Successfully deleted file {ItemId}", itemId);
+
+            // Invalidate caches after deletion
+            if (_metadataCache != null)
+            {
+                await _metadataCache.InvalidateFileMetadataAsync(driveId, itemId);
+                // Invalidate parent folder listing (root since we don't know parent here)
+                await _metadataCache.InvalidateFolderListingAsync(driveId, null);
+            }
+
             return true;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
@@ -200,6 +235,19 @@ public class DriveItemOperations
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
 
+        // Cache-aside: check Redis first (ADR-009)
+        if (_metadataCache != null)
+        {
+            var cached = await _metadataCache.GetFileMetadataAsync(driveId, itemId);
+            if (cached != null)
+            {
+                _logger.LogDebug("Returning cached metadata for file {ItemId} in drive {DriveId}", itemId, driveId);
+                activity?.SetTag("cache.result", "hit");
+                return cached;
+            }
+            activity?.SetTag("cache.result", "miss");
+        }
+
         _logger.LogInformation("Getting metadata for file {ItemId} from drive {DriveId}", itemId, driveId);
 
         try
@@ -217,7 +265,7 @@ public class DriveItemOperations
 
             _logger.LogInformation("Successfully retrieved metadata for file {ItemId}", itemId);
 
-            return new FileHandleDto(
+            var metadata = new FileHandleDto(
                 item.Id!,
                 item.Name!,
                 item.ParentReference?.Id,
@@ -227,6 +275,14 @@ public class DriveItemOperations
                 item.ETag,
                 item.Folder != null,
                 item.WebUrl);
+
+            // Cache the result with ETag-versioned key (5min TTL)
+            if (_metadataCache != null)
+            {
+                await _metadataCache.SetFileMetadataAsync(driveId, itemId, metadata);
+            }
+
+            return metadata;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -561,6 +617,13 @@ public class DriveItemOperations
             _logger.LogInformation("Updated item {ItemId}: name={Name}, parentRef={ParentRef}",
                 itemId, updatedItem.Name, request.ParentReferenceId);
 
+            // Invalidate caches after update (metadata and listing may be stale)
+            if (_metadataCache != null)
+            {
+                await _metadataCache.InvalidateFileMetadataAsync(driveId, itemId);
+                await _metadataCache.InvalidateFolderListingAsync(driveId, null);
+            }
+
             return new DriveItemDto(
                 Id: updatedItem.Id!,
                 Name: updatedItem.Name!,
@@ -619,6 +682,14 @@ public class DriveItemOperations
                 .DeleteAsync(cancellationToken: ct);
 
             _logger.LogInformation("Deleted item {ItemId} from drive {DriveId}", itemId, driveId);
+
+            // Invalidate caches after deletion
+            if (_metadataCache != null)
+            {
+                await _metadataCache.InvalidateFileMetadataAsync(driveId, itemId);
+                await _metadataCache.InvalidateFolderListingAsync(driveId, null);
+            }
+
             return true;
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 404)

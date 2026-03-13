@@ -99,8 +99,8 @@ public class BuilderAgentService : IBuilderAgentService
                 var result = await _openAiClient.GetChatCompletionWithToolsAsync(
                     messages,
                     tools,
-                    DefaultModel,
-                    cancellationToken);
+                    model: DefaultModel,
+                    cancellationToken: cancellationToken);
 
                 // If no tool calls, we're done - return the content
                 if (!result.HasToolCalls)
@@ -305,11 +305,6 @@ public class BuilderAgentService : IBuilderAgentService
         CanvasState canvasState,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug(
-            "Executing tool call: {ToolName}, Id: {ToolCallId}",
-            toolCall.FunctionName,
-            toolCall.Id);
-
         // Parse the tool call - convert OpenAI types to our types
         var argumentsString = toolCall.FunctionArguments.ToString();
         var arguments = JsonDocument.Parse(argumentsString);

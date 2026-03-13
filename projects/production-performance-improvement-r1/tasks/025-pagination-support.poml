@@ -1,7 +1,7 @@
 <task id="PPI-025" project="Production Performance Improvement R1">
   <metadata>
     <title>Pagination Support for Unbounded Queries (B4)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>3</phase>
     <domain>B</domain>

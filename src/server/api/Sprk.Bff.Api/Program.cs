@@ -33,6 +33,10 @@ using Sprk.Bff.Api.Workers.Office;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Startup logger for service registration diagnostics (before app.Build())
+var startupLoggerFactory = LoggerFactory.Create(config => config.AddConsole());
+var startupLog = startupLoggerFactory.CreateLogger("Startup");
+
 // ---- Configuration Validation ----
 
 // Register and validate configuration options with fail-fast behavior
@@ -317,8 +321,7 @@ if (redisEnabled)
         options.TimestampFormat = "HH:mm:ss ";
     });
 
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogInformation(
+    startupLog.LogInformation(
         "Distributed cache: Redis enabled with instance name '{InstanceName}'",
         builder.Configuration["Redis:InstanceName"] ?? "sdap:");
 }
@@ -328,8 +331,7 @@ else
     builder.Services.AddDistributedMemoryCache();
 
 
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogWarning(
+    startupLog.LogWarning(
         "Distributed cache: Using in-memory cache (not distributed). " +
         "This should ONLY be used in local development.");
 }
@@ -382,11 +384,11 @@ if (documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.OpenAiClient>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextExtractor>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.TextExtractorService>());
-    Console.WriteLine("✓ Document Intelligence services enabled");
+    startupLog.LogInformation("Document Intelligence services enabled");
 }
 else
 {
-    Console.WriteLine("⚠ Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
+    startupLog.LogWarning("Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
 }
 
 // ============================================================================
@@ -400,7 +402,12 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.AnalysisOptions.SectionName));
 
     // Analysis services - all scoped due to SpeFileStore dependency
-    // NOTE: ScopeResolverService requires HttpClient, so must use AddHttpClient (not AddScoped)
+    // PPI-054: ScopeResolverService decomposed into 4 focused services + thin orchestrator.
+    // Each service requires its own HttpClient for Dataverse API calls.
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisActionService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisSkillService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisKnowledgeService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisToolService>();
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeManagementService, Sprk.Bff.Api.Services.Ai.ScopeManagementService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
@@ -524,11 +531,11 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
         // VisualizationService - Document relationship visualization using vector similarity
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
-        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache + visualization + file indexing)");
+        startupLog.LogInformation("RAG services enabled (hybrid search + embedding cache + visualization + file indexing)");
     }
     else
     {
-        Console.WriteLine("⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
+        startupLog.LogWarning("RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
     }
 
     // TextChunkingService - Splits documents into chunks for RAG indexing and AI tool handlers
@@ -542,7 +549,7 @@ if (analysisEnabled && documentIntelligenceEnabled)
     if (toolFrameworkOptions.GetValue<bool>("Enabled", true))
     {
         builder.Services.AddToolFramework(builder.Configuration);
-        Console.WriteLine("✓ Tool framework enabled");
+        startupLog.LogInformation("Tool framework enabled");
     }
     else
     {
@@ -552,31 +559,31 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Services.Configure<Sprk.Bff.Api.Configuration.ToolFrameworkOptions>(
             builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName));
         builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry, Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>();
-        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
+        startupLog.LogWarning("Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
     }
 
     // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
     builder.Services.AddSemanticSearch();
-    Console.WriteLine("✓ Semantic search enabled");
+    startupLog.LogInformation("Semantic search enabled");
 
     // Record Search - Hybrid search for Dataverse entity records (Matters, Projects, Invoices)
     builder.Services.AddRecordSearch();
-    Console.WriteLine("✓ Record search enabled (index: spaarke-records-index)");
+    startupLog.LogInformation("Record search enabled (index: spaarke-records-index)");
 
     // AI Platform Foundation — DocumentParserRouter, LlamaParseClient, SemanticDocumentChunker, RagQueryBuilder
     // (AIPL-010, AIPL-011, AIPL-012 — Workstream A: Retrieval Foundation)
     builder.Services.AddAiModule(builder.Configuration);
-    Console.WriteLine("✓ AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
+    startupLog.LogInformation("AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
 
-    Console.WriteLine("✓ Analysis services enabled");
+    startupLog.LogInformation("Analysis services enabled");
 }
 else if (!documentIntelligenceEnabled)
 {
-    Console.WriteLine("⚠ Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
+    startupLog.LogWarning("Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
 }
 else
 {
-    Console.WriteLine("⚠ Analysis services disabled (Analysis:Enabled = false)");
+    startupLog.LogWarning("Analysis services disabled (Analysis:Enabled = false)");
 }
 
 // ============================================================================
@@ -590,11 +597,11 @@ if (recordMatchingEnabled)
         sp.GetRequiredService<Sprk.Bff.Api.Services.RecordMatching.DataverseIndexSyncService>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService,
         Sprk.Bff.Api.Services.RecordMatching.RecordMatchService>();
-    Console.WriteLine("✓ Record Matching services enabled (index: {0})", builder.Configuration["DocumentIntelligence:AiSearchIndexName"] ?? "spaarke-records-index");
+    startupLog.LogInformation("Record Matching services enabled (index: {IndexName})", builder.Configuration["DocumentIntelligence:AiSearchIndexName"] ?? "spaarke-records-index");
 }
 else
 {
-    Console.WriteLine("⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
+    startupLog.LogWarning("Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
 }
 
 // ============================================================================
@@ -640,7 +647,7 @@ builder.Services.AddHttpClient("DataversePolling")
         client.Timeout = TimeSpan.FromSeconds(30);
     });
 
-Console.WriteLine("✓ Email-to-Document conversion services registered");
+startupLog.LogInformation("Email-to-Document conversion services registered");
 
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
@@ -714,11 +721,11 @@ builder.Services.Configure<LlamaParseOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<AiSearchOptions>(builder.Configuration.GetSection("AiSearch"));
 
 builder.Logging.AddConsole();
-Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
-Console.WriteLine("✓ Email polling backup service configured");
-Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
-Console.WriteLine("✓ Embedding migration service registered (enable via config)");
-Console.WriteLine("✓ Scheduled RAG indexing service registered (enable via config)");
+startupLog.LogInformation("Job processing configured with Service Bus (queue: sdap-jobs)");
+startupLog.LogInformation("Email polling backup service configured");
+startupLog.LogInformation("Document vector backfill service registered (enable via config)");
+startupLog.LogInformation("Embedding migration service registered (enable via config)");
+startupLog.LogInformation("Scheduled RAG indexing service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -804,31 +811,14 @@ var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get
 var isTestOrDevelopment = builder.Environment.IsDevelopment() ||
                           builder.Environment.EnvironmentName == "Testing";
 
-// Validate configuration
+// Validate configuration - FAIL-FAST in ALL environments (no localhost fallback)
 if (allowedOrigins == null || allowedOrigins.Length == 0)
 {
-    // In development/testing, allow localhost as fallback
-    if (isTestOrDevelopment)
-    {
-        var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-        logger.LogWarning(
-            "CORS: No allowed origins configured. Falling back to localhost (development only).");
-
-        allowedOrigins = new[]
-        {
-            "http://localhost:3000",
-            "http://localhost:3001",
-            "http://127.0.0.1:3000"
-        };
-    }
-    else
-    {
-        // FAIL-CLOSED: Throw exception in non-development environments
-        throw new InvalidOperationException(
-            $"CORS configuration is missing or empty in {builder.Environment.EnvironmentName} environment. " +
-            "Configure 'Cors:AllowedOrigins' with explicit origin URLs. " +
-            "CORS will NOT fall back to AllowAnyOrigin for security reasons.");
-    }
+    throw new InvalidOperationException(
+        $"CORS configuration is missing or empty in {builder.Environment.EnvironmentName} environment. " +
+        "Configure 'Cors:AllowedOrigins' with explicit origin URLs. " +
+        "For local development, add localhost origins to appsettings.Development.json. " +
+        "CORS will NOT fall back to AllowAnyOrigin or localhost for security reasons.");
 }
 
 // Reject wildcard configuration (security violation)
@@ -857,13 +847,10 @@ foreach (var origin in allowedOrigins)
 }
 
 // Log allowed origins for audit trail
-{
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogInformation(
-        "CORS: Configured with {OriginCount} allowed origins: {Origins}",
-        allowedOrigins.Length,
-        string.Join(", ", allowedOrigins));
-}
+startupLog.LogInformation(
+    "CORS: Configured with {OriginCount} allowed origins: {Origins}",
+    allowedOrigins.Length,
+    string.Join(", ", allowedOrigins));
 
 builder.Services.AddCors(options =>
 {
@@ -1136,7 +1123,7 @@ builder.Services
 // Resilient Search Client (for AI Search circuit breaker protection)
 builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.IResilientSearchClient,
     Sprk.Bff.Api.Infrastructure.Resilience.ResilientSearchClient>();
-Console.WriteLine("✓ Circuit breaker registry enabled");
+startupLog.LogInformation("Circuit breaker registry enabled");
 
 var app = builder.Build();
 
@@ -1349,10 +1336,16 @@ app.UseRateLimiter();
 // Health checks endpoints (anonymous for monitoring)
 app.MapHealthChecks("/healthz").AllowAnonymous();
 
-// Dataverse connection test endpoint
+// ============================================================================
+// DEBUG ENDPOINTS - Only available in Development environment
+// ============================================================================
+if (app.Environment.IsDevelopment())
+{
+
+// Dataverse connection test endpoint (debug-only: exposes connection details and error messages)
 app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 
-// Dataverse CRUD operations test endpoint
+// Dataverse CRUD operations test endpoint (debug-only: performs write operations against Dataverse)
 app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
 // DEBUG: Test document retrieval by ID (string param, not GUID constraint)
@@ -1450,6 +1443,8 @@ app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseSe
     }
 }).AllowAnonymous();
 
+} // end Development-only debug endpoints (healthz/dataverse, healthz/dataverse/crud, healthz/dataverse/doc, debug/document, debug/children)
+
 // Lightweight ping endpoint for warm-up agents (Task 021)
 // Must be fast (<100ms), unauthenticated, and expose no sensitive info
 app.MapGet("/ping", () => Results.Text("pong"))
@@ -1463,14 +1458,19 @@ app.MapGet("/status", () =>
     return TypedResults.Json(new
     {
         service = "Sprk.Bff.Api",
-        version = "1.0.1-debug", // Updated version to verify deployment
-        timestamp = DateTimeOffset.UtcNow,
-        debugEndpoints = new[] { "/healthz/dataverse/doc/{id}" }
+        version = "1.0.1",
+        timestamp = DateTimeOffset.UtcNow
     });
 })
     .AllowAnonymous()
     .WithTags("Health")
     .WithDescription("Service status with metadata (no sensitive info).");
+
+// ============================================================================
+// DEBUG ENDPOINTS (Service Bus queues) - Only available in Development environment
+// ============================================================================
+if (app.Environment.IsDevelopment())
+{
 
 // DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
 app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
@@ -1501,7 +1501,7 @@ app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClie
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "[DEBUG] Error peeking office DLQ");
+        logger.LogError(ex, "Error peeking office DLQ");
         return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
     }
 }).AllowAnonymous();
@@ -1526,7 +1526,7 @@ app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBu
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "[DEBUG] Error peeking office-indexing queue");
+        logger.LogError(ex, "Error peeking office-indexing queue");
         return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
     }
 }).AllowAnonymous();
@@ -1551,7 +1551,7 @@ app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBus
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "[DEBUG] Error peeking office-profile queue");
+        logger.LogError(ex, "Error peeking office-profile queue");
         return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
     }
 }).AllowAnonymous();
@@ -1588,7 +1588,7 @@ app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusC
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "[DEBUG] Error peeking sdap-jobs DLQ");
+        logger.LogError(ex, "Error peeking sdap-jobs DLQ");
         return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
     }
 }).AllowAnonymous();
@@ -1656,7 +1656,7 @@ app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger)
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "[DEBUG] Error listing job handlers");
+        logger.LogError(ex, "Error listing job handlers");
         return Results.Ok(new
         {
             error = ex.Message,
@@ -1731,6 +1731,8 @@ app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<
 
     return Results.Ok(results);
 }).AllowAnonymous();
+
+} // end Development-only debug endpoints (Service Bus queues, job handlers, communication services)
 
 // ---- Endpoint Groups ----
 

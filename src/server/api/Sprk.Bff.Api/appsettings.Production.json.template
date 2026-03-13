@@ -1,0 +1,28 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Warning",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.AspNetCore.Hosting": "Information",
+      "Microsoft.AspNetCore.Diagnostics.HealthChecks": "Warning",
+      "Microsoft.Graph": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information",
+      "Sprk.Bff.Api": "Information",
+      "Sprk.Bff.Api.Services.Ai.ScopeResolverService": "Warning",
+      "Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService": "Warning",
+      "Sprk.Bff.Api.Infrastructure.Graph.DriveItemOperations": "Warning",
+      "System.Net.Http.HttpClient": "Warning",
+      "Azure.Core": "Warning",
+      "Azure.Identity": "Warning"
+    },
+    "ApplicationInsights": {
+      "LogLevel": {
+        "Default": "Warning",
+        "Sprk.Bff.Api": "Information",
+        "Sprk.Bff.Api.Services.Ai.ScopeResolverService": "Warning",
+        "Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService": "Warning",
+        "Sprk.Bff.Api.Infrastructure.Graph.DriveItemOperations": "Warning"
+      }
+    }
+  }
+}

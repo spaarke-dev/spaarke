@@ -21,6 +21,7 @@ public class DataverseWebApiService : IDataverseService
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<DataverseWebApiService> _logger;
+    private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
     private readonly string _entitySetName = "sprk_documents";
 
@@ -61,25 +62,100 @@ public class DataverseWebApiService : IDataverseService
         _logger.LogInformation("Initialized Dataverse Web API service for {ApiUrl}", _apiUrl);
     }
 
-    private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Thread-safe token refresh using SemaphoreSlim with double-check locking.
+    /// Returns the current valid token for use in per-request Authorization headers.
+    /// </summary>
+    private async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default)
     {
-        if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+        // Fast path: token is still valid (no lock needed)
+        if (_currentToken != null && _currentToken.Value.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
         {
+            return _currentToken.Value.Token;
+        }
+
+        // Slow path: acquire semaphore for token refresh (30s timeout to prevent deadlocks)
+        if (!await _tokenSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken))
+        {
+            throw new TimeoutException("Timed out waiting for Dataverse token refresh");
+        }
+
+        try
+        {
+            // Double-check: another thread may have refreshed while we waited
+            if (_currentToken != null && _currentToken.Value.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+            {
+                return _currentToken.Value.Token;
+            }
+
             var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
             _currentToken = await _credential.GetTokenAsync(
                 new TokenRequestContext(new[] { scope }),
                 cancellationToken);
 
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
-
             _logger.LogDebug("Refreshed Dataverse access token");
+            return _currentToken.Value.Token;
         }
+        finally
+        {
+            _tokenSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates an HttpRequestMessage with per-request Authorization and standard OData headers.
+    /// This avoids mutating shared DefaultRequestHeaders on the HttpClient.
+    /// </summary>
+    private async Task<HttpRequestMessage> CreateAuthenticatedRequestAsync(
+        HttpMethod method, string url, CancellationToken cancellationToken = default)
+    {
+        var token = await GetAccessTokenAsync(cancellationToken);
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return request;
+    }
+
+    /// <summary>
+    /// Sends a GET request with per-request auth headers.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendGetAsync(string url, CancellationToken ct = default)
+    {
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+        return await _httpClient.SendAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Sends a POST request with JSON body and per-request auth headers.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendPostAsJsonAsync<T>(string url, T payload, CancellationToken ct = default)
+    {
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, url, ct);
+        request.Content = JsonContent.Create(payload);
+        return await _httpClient.SendAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Sends a PATCH request with JSON body and per-request auth headers.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendPatchAsJsonAsync<T>(string url, T payload, CancellationToken ct = default)
+    {
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, ct);
+        request.Content = JsonContent.Create(payload);
+        return await _httpClient.SendAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Sends a DELETE request with per-request auth headers.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendDeleteAsync(string url, CancellationToken ct = default)
+    {
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, url, ct);
+        return await _httpClient.SendAsync(request, ct);
     }
 
     public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new
         {
@@ -91,7 +167,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Creating document: {Name}", request.Name);
 
-        var response = await _httpClient.PostAsJsonAsync(_entitySetName, payload, ct);
+        var response = await SendPostAsJsonAsync(_entitySetName, payload, ct);
         response.EnsureSuccessStatusCode();
 
         // Extract ID from OData-EntityId header: ...sprk_documents(guid)
@@ -108,7 +184,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(id, out var guid))
         {
@@ -124,7 +200,7 @@ public class DataverseWebApiService : IDataverseService
         try
         {
             // Request formatted values for lookup field display names
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -157,7 +233,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(id, out var guid))
         {
@@ -170,7 +246,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -207,7 +283,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(id, out var guid))
         {
@@ -220,7 +296,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -254,7 +330,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new Dictionary<string, object>
         {
@@ -269,7 +345,7 @@ public class DataverseWebApiService : IDataverseService
             payload["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
         }
 
-        var response = await _httpClient.PostAsJsonAsync("sprk_analysises", payload, ct);
+        var response = await SendPostAsJsonAsync("sprk_analysises", payload, ct);
         response.EnsureSuccessStatusCode();
 
         var location = response.Headers.Location?.ToString();
@@ -291,7 +367,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new Dictionary<string, object>
         {
@@ -310,7 +386,7 @@ public class DataverseWebApiService : IDataverseService
             payload["sprk_sortorder"] = output.SortOrder.Value;
         }
 
-        var response = await _httpClient.PostAsJsonAsync("sprk_analysisoutputs", payload, ct);
+        var response = await SendPostAsJsonAsync("sprk_analysisoutputs", payload, ct);
         response.EnsureSuccessStatusCode();
 
         var location = response.Headers.Location?.ToString();
@@ -331,7 +407,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(documentId, out var guid))
         {
@@ -347,7 +423,7 @@ public class DataverseWebApiService : IDataverseService
             }
         }
 
-        var response = await _httpClient.PatchAsJsonAsync($"sprk_documents({guid})", payload, ct);
+        var response = await SendPatchAsJsonAsync($"sprk_documents({guid})", payload, ct);
         response.EnsureSuccessStatusCode();
 
         _logger.LogInformation("[DATAVERSE-API] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
@@ -361,7 +437,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(id, out var guid))
         {
@@ -457,7 +533,7 @@ public class DataverseWebApiService : IDataverseService
                 id, string.Join(", ", emailFieldsInPayload));
         }
 
-        var response = await _httpClient.PatchAsJsonAsync(url, payload, ct);
+        var response = await SendPatchAsJsonAsync(url, payload, ct);
 
         // Log response status and any error details
         if (!response.IsSuccessStatusCode)
@@ -475,7 +551,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task DeleteDocumentAsync(string id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(id, out var guid))
         {
@@ -485,7 +561,7 @@ public class DataverseWebApiService : IDataverseService
         var url = $"{_entitySetName}({guid})";
         _logger.LogInformation("Deleting document: {Id}", id);
 
-        var response = await _httpClient.DeleteAsync(url, ct);
+        var response = await SendDeleteAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         _logger.LogInformation("Document deleted successfully: {Id}", id);
@@ -493,7 +569,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (!Guid.TryParse(containerId, out _))
         {
@@ -506,7 +582,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogDebug("Querying documents by container: {ContainerId}", containerId);
 
-        var response = await _httpClient.GetAsync(url, ct);
+        var response = await SendGetAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -517,7 +593,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<DocumentAccessLevel> GetUserAccessAsync(string userId, string documentId, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         // For now, return FullControl - actual implementation would query Dataverse security
         // This would use RetrievePrincipalAccess function in Web API
@@ -529,10 +605,8 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<bool> TestConnectionAsync()
     {
-        await EnsureAuthenticatedAsync();
-
         // Simple WhoAmI request
-        var response = await _httpClient.GetAsync("WhoAmI");
+        var response = await SendGetAsync("WhoAmI");
         response.EnsureSuccessStatusCode();
 
         _logger.LogInformation("Dataverse connection test successful");
@@ -543,11 +617,9 @@ public class DataverseWebApiService : IDataverseService
     {
         try
         {
-            await EnsureAuthenticatedAsync();
-
             // Test query
             var url = $"{_entitySetName}?$top=1";
-            var response = await _httpClient.GetAsync(url);
+            var response = await SendGetAsync(url);
             response.EnsureSuccessStatusCode();
 
             _logger.LogInformation("Dataverse document operations test successful");
@@ -684,7 +756,7 @@ public class DataverseWebApiService : IDataverseService
     /// </summary>
     public async Task<DocumentEntity?> GetDocumentByEmailLookupAsync(Guid emailId, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         // OData filter for email lookup (lookup value is stored as _sprk_email_value)
         // and IsEmailArchive=true (main .eml document, not attachments)
@@ -695,7 +767,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -727,7 +799,7 @@ public class DataverseWebApiService : IDataverseService
     /// </summary>
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         // OData filter for parent document lookup (lookup value is stored as _sprk_parentdocument_value)
         var filter = $"_sprk_parentdocument_value eq {parentDocumentId}";
@@ -737,7 +809,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -797,7 +869,7 @@ public class DataverseWebApiService : IDataverseService
         string entityDisplayName,
         CancellationToken ct)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var filter = $"{lookupField} eq {lookupValue}";
         if (excludeDocumentId.HasValue)
@@ -811,7 +883,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -842,7 +914,7 @@ public class DataverseWebApiService : IDataverseService
     /// <inheritdoc />
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByConversationIndexAsync(string conversationIndexPrefix, Guid? excludeDocumentId = null, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         // ConversationIndex prefix match: first 44 chars identify the thread root
         // Use startswith for matching all emails in the same thread
@@ -858,7 +930,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -992,7 +1064,7 @@ public class DataverseWebApiService : IDataverseService
         int top = 50,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         // Build OData query
         var filters = new List<string>();
@@ -1025,7 +1097,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -1047,7 +1119,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var url = $"sprk_events({id})?$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,_sprk_regardingaccount_value,_sprk_regardinganalysis_value,_sprk_regardingcontact_value,_sprk_regardinginvoice_value,_sprk_regardingmatter_value,_sprk_regardingproject_value,_sprk_regardingbudget_value,_sprk_regardingworkassignment_value,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,sprk_remindat,_sprk_relatedevent_value,sprk_relatedeventtype,sprk_relatedeventoffsettype,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)";
 
@@ -1055,7 +1127,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -1082,7 +1154,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new Dictionary<string, object?>
         {
@@ -1122,7 +1194,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Creating event: {Name}", request.Name);
 
-        var response = await _httpClient.PostAsJsonAsync("sprk_events", payload, ct);
+        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
         response.EnsureSuccessStatusCode();
 
         var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
@@ -1141,7 +1213,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new Dictionary<string, object?>();
 
@@ -1181,7 +1253,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Updating event: {Id}", id);
 
-        var response = await _httpClient.PatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event updated: {Id}", id);
@@ -1189,7 +1261,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var payload = new Dictionary<string, object?>
         {
@@ -1206,7 +1278,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Updating event status: {Id} -> {StatusCode}", id, statusCode);
 
-        var response = await _httpClient.PatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event status updated: {Id}", id);
@@ -1214,7 +1286,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var url = $"sprk_eventlogs?$filter=_sprk_event_value eq {eventId}&$select=sprk_eventlogid,sprk_eventlogname,_sprk_event_value,sprk_action,sprk_description,createdon,_createdby_value&$orderby=createdon desc";
 
@@ -1222,7 +1294,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -1243,7 +1315,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var logName = $"Event Log - {EventLogAction.GetDisplayName(action)} - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
 
@@ -1257,7 +1329,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Creating event log for event {EventId}: {Action}", eventId, EventLogAction.GetDisplayName(action));
 
-        var response = await _httpClient.PostAsJsonAsync("sprk_eventlogs", payload, ct);
+        var response = await SendPostAsJsonAsync("sprk_eventlogs", payload, ct);
         response.EnsureSuccessStatusCode();
 
         var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
@@ -1275,7 +1347,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var filterQuery = activeOnly ? "$filter=statecode eq 0&" : "";
         var url = $"sprk_eventtypes?{filterQuery}$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate&$orderby=sprk_name asc";
@@ -1284,7 +1356,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1302,7 +1374,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var url = $"sprk_eventtypes({id})?$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate";
 
@@ -1310,7 +1382,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -1338,7 +1410,7 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var url = "sprk_fieldmappingprofiles?$filter=sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description&$orderby=sprk_name asc";
 
@@ -1346,7 +1418,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1367,7 +1439,7 @@ public class DataverseWebApiService : IDataverseService
         string targetEntity,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var url = $"sprk_fieldmappingprofiles?$filter=sprk_sourceentity eq '{sourceEntity}' and sprk_targetentity eq '{targetEntity}' and sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description";
 
@@ -1375,7 +1447,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1401,7 +1473,7 @@ public class DataverseWebApiService : IDataverseService
         bool activeOnly = true,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var filterQuery = activeOnly
             ? $"$filter=_sprk_fieldmappingprofile_value eq {profileId} and sprk_isactive eq true&"
@@ -1413,7 +1485,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1435,7 +1507,7 @@ public class DataverseWebApiService : IDataverseService
         string[] fields,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
         var selectFields = string.Join(",", fields);
@@ -1445,7 +1517,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -1490,7 +1562,7 @@ public class DataverseWebApiService : IDataverseService
         Guid parentRecordId,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var entitySetName = await GetEntitySetNameAsync(childEntityLogicalName, ct);
         var primaryKey = $"{childEntityLogicalName}id";
@@ -1500,7 +1572,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1525,7 +1597,7 @@ public class DataverseWebApiService : IDataverseService
         Dictionary<string, object?> fields,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         if (fields.Count == 0)
         {
@@ -1537,7 +1609,7 @@ public class DataverseWebApiService : IDataverseService
 
         _logger.LogInformation("Updating record fields: {Entity}({Id}), {FieldCount} fields", entityLogicalName, recordId, fields.Count);
 
-        var response = await _httpClient.PatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
+        var response = await SendPatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -1566,7 +1638,7 @@ public class DataverseWebApiService : IDataverseService
         int top = 0,
         CancellationToken ct = default)
     {
-        await EnsureAuthenticatedAsync(ct);
+
 
         var entitySetName = await GetEntitySetNameAsync("sprk_kpiassessment", ct);
 
@@ -1590,7 +1662,7 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1613,6 +1685,116 @@ public class DataverseWebApiService : IDataverseService
         {
             _logger.LogError(ex, "Error querying KPI assessments for {ParentField}={ParentId}", parentLookupField, parentId);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Batch-query KPI assessments for multiple performance areas using Task.WhenAll.
+    /// The Web API implementation uses parallel queries (the SDK implementation uses
+    /// ExecuteMultipleRequest for true single-round-trip batching).
+    /// Falls back gracefully — same API contract as DataverseServiceClientImpl.
+    /// </summary>
+    public async Task<Dictionary<int, KpiAssessmentRecord[]>> BatchQueryKpiAssessmentsAsync(
+        Guid parentId,
+        string parentLookupField,
+        int[] performanceAreas,
+        int top = 0,
+        CancellationToken ct = default)
+    {
+        if (performanceAreas.Length == 0)
+            return new Dictionary<int, KpiAssessmentRecord[]>();
+
+        _logger.LogDebug(
+            "Batch querying KPI assessments for {ParentField}={ParentId}, areas=[{Areas}]",
+            parentLookupField, parentId, string.Join(",", performanceAreas));
+
+        var tasks = performanceAreas.Select(area =>
+            QueryKpiAssessmentsAsync(parentId, parentLookupField, area, top, ct));
+
+        var results = await Task.WhenAll(tasks);
+
+        var batchResult = new Dictionary<int, KpiAssessmentRecord[]>();
+        for (var i = 0; i < performanceAreas.Length; i++)
+        {
+            batchResult[performanceAreas[i]] = results[i];
+        }
+
+        _logger.LogDebug(
+            "Batch KPI query complete: {AreaCount} areas, {TotalRecords} total records",
+            performanceAreas.Length,
+            batchResult.Values.Sum(a => a.Length));
+
+        return batchResult;
+    }
+
+    /// <summary>
+    /// Get a field mapping profile with its rules in a single request using $expand.
+    /// Eliminates the second Dataverse call for rules by expanding the 1:N relationship
+    /// inline. Falls back to sequential calls if $expand fails.
+    /// </summary>
+    public async Task<FieldMappingProfileEntity?> GetFieldMappingProfileWithRulesAsync(
+        string sourceEntity,
+        string targetEntity,
+        bool activeRulesOnly = true,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting field mapping profile with rules via $expand: {Source} -> {Target}",
+            sourceEntity, targetEntity);
+
+        try
+        {
+            // Use $expand to include related field mapping rules in a single request.
+            // sprk_fieldmappingprofile_fieldmappingrule is the 1:N navigation property name.
+            var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
+            var ruleFilter = activeRulesOnly ? ";$filter=sprk_isactive eq true" : "";
+            var ruleOrderBy = ";$orderby=sprk_executionorder asc";
+
+            var url = $"sprk_fieldmappingprofiles?$filter=sprk_sourceentity eq '{sourceEntity}' and sprk_targetentity eq '{targetEntity}' and sprk_isactive eq true" +
+                      $"&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description" +
+                      $"&$expand=sprk_fieldmappingprofile_fieldmappingrule({ruleSelect}{ruleFilter}{ruleOrderBy})";
+
+            var response = await SendGetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null || data.Value.Count == 0)
+                return null;
+
+            var profile = MapToFieldMappingProfileEntity(data.Value[0]);
+
+            // Extract expanded rules from the response
+            if (data.Value[0].TryGetValue("sprk_fieldmappingprofile_fieldmappingrule", out var rulesElement)
+                && rulesElement.ValueKind == JsonValueKind.Array)
+            {
+                var rules = new List<FieldMappingRuleEntity>();
+                foreach (var ruleJson in rulesElement.EnumerateArray())
+                {
+                    var ruleDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(ruleJson.GetRawText());
+                    if (ruleDict != null)
+                    {
+                        rules.Add(MapToFieldMappingRuleEntity(ruleDict));
+                    }
+                }
+                profile.Rules = rules;
+            }
+            else
+            {
+                profile.Rules = new List<FieldMappingRuleEntity>();
+            }
+
+            _logger.LogDebug(
+                "Retrieved profile {ProfileName} with {RuleCount} rules via $expand",
+                profile.Name, profile.Rules.Count);
+
+            return profile;
+        }
+        catch (Exception ex)
+        {
+            // Fall back to sequential calls if $expand fails
+            _logger.LogWarning(ex,
+                "$expand failed for field mapping profile, falling back to sequential calls");
+
+            return await GetFieldMappingProfileAsync(sourceEntity, targetEntity, ct);
         }
     }
 

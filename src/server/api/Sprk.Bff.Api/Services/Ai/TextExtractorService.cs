@@ -1,27 +1,107 @@
+using System.Diagnostics;
 using System.Text;
 using Azure;
 using Azure.AI.DocumentIntelligence;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using MsgReader.Outlook;
+using Polly;
+using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Telemetry;
+using ResilienceCircuitState = Sprk.Bff.Api.Infrastructure.Resilience.CircuitState;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
 /// Service for extracting text from documents.
 /// Handles native text formats directly; PDF/DOCX require Document Intelligence (Task 060).
+/// Document Intelligence calls are protected by a configurable timeout and Polly circuit breaker.
+/// Supports Redis caching of extracted text with ETag-versioned keys (ADR-009).
 /// </summary>
 public class TextExtractorService : ITextExtractor
 {
     private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<TextExtractorService> _logger;
+    private readonly ICircuitBreakerRegistry? _circuitRegistry;
+    private readonly IDistributedCache? _cache;
+    private readonly CacheMetrics? _cacheMetrics;
+    private readonly AsyncCircuitBreakerPolicy _docIntelCircuitBreaker;
 
-    public TextExtractorService(IOptions<DocumentIntelligenceOptions> options, ILogger<TextExtractorService> logger)
+    /// <summary>
+    /// Cache key prefix for extracted document text.
+    /// Full key format: sdap:ai:text:{driveId}:{itemId}:v{etag}
+    /// </summary>
+    private const string CacheKeyPrefix = "sdap:ai:text";
+
+    /// <summary>
+    /// Cache type identifier for metrics tracking.
+    /// </summary>
+    private const string CacheType = "text-extraction";
+
+    /// <summary>
+    /// Maximum extracted text size to cache (1 MB). Larger results are skipped to avoid
+    /// Redis memory pressure. Documents exceeding this threshold are always re-extracted.
+    /// </summary>
+    private const int MaxCacheableTextBytes = 1_048_576;
+
+    /// <summary>
+    /// TTL for cached extracted text. 24 hours balances cache hit rate with freshness.
+    /// ETag in the key ensures stale content is never served when documents change.
+    /// </summary>
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
+
+    public TextExtractorService(
+        IOptions<DocumentIntelligenceOptions> options,
+        ILogger<TextExtractorService> logger,
+        ICircuitBreakerRegistry? circuitRegistry = null,
+        IDistributedCache? cache = null,
+        CacheMetrics? cacheMetrics = null)
     {
         _options = options.Value;
         _logger = logger;
+        _circuitRegistry = circuitRegistry;
+        _cache = cache;
+        _cacheMetrics = cacheMetrics;
+
+        // Register circuit breaker for Document Intelligence
+        _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.DocumentIntelligence);
+
+        // Build Polly circuit breaker: opens after N consecutive failures, breaks for M seconds
+        _docIntelCircuitBreaker = Policy
+            .Handle<Exception>()
+            .CircuitBreakerAsync(
+                exceptionsAllowedBeforeBreaking: _options.DocIntelCircuitBreakerThreshold,
+                durationOfBreak: TimeSpan.FromSeconds(_options.DocIntelCircuitBreakerBreakSeconds),
+                onBreak: (exception, duration) =>
+                {
+                    _logger.LogError(
+                        "Document Intelligence circuit breaker OPENED after {Threshold} consecutive failures. Breaking for {Duration}s. Last error: {Error}",
+                        _options.DocIntelCircuitBreakerThreshold,
+                        duration.TotalSeconds,
+                        exception.Message);
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.DocumentIntelligence,
+                        ResilienceCircuitState.Open,
+                        duration);
+                },
+                onReset: () =>
+                {
+                    _logger.LogInformation("Document Intelligence circuit breaker RESET - service recovered");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.DocumentIntelligence,
+                        ResilienceCircuitState.Closed);
+                },
+                onHalfOpen: () =>
+                {
+                    _logger.LogInformation("Document Intelligence circuit breaker HALF-OPEN - testing availability");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.DocumentIntelligence,
+                        ResilienceCircuitState.HalfOpen);
+                });
     }
 
     /// <summary>
@@ -63,6 +143,141 @@ public class TextExtractorService : ITextExtractor
             ExtractionMethod.Email => await ExtractEmailAsync(fileStream, fileName, cancellationToken),
             _ => TextExtractionResult.NotSupported(extension)
         };
+    }
+
+    /// <summary>
+    /// Extract text from a file stream with Redis cache support (ADR-009).
+    /// When driveId, itemId, and etag are provided, extracted text is cached in Redis
+    /// with key <c>sdap:ai:text:{driveId}:{itemId}:v{etag}</c> and 24-hour TTL.
+    /// Cache hit skips extraction entirely. ETag in key ensures auto-invalidation on document change.
+    /// </summary>
+    public async Task<TextExtractionResult> ExtractAsync(
+        Stream fileStream,
+        string fileName,
+        string? driveId,
+        string? itemId,
+        string? etag,
+        CancellationToken cancellationToken = default)
+    {
+        // If cache identifiers are incomplete, fall back to non-cached extraction
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(etag) || _cache == null)
+        {
+            _logger.LogDebug(
+                "Cache identifiers incomplete or cache unavailable, extracting without cache (DriveId={DriveId}, ItemId={ItemId}, HasETag={HasETag})",
+                driveId ?? "(null)", itemId ?? "(null)", !string.IsNullOrEmpty(etag));
+            return await ExtractAsync(fileStream, fileName, cancellationToken);
+        }
+
+        // Sanitize ETag (remove surrounding quotes if present, common in HTTP headers)
+        var sanitizedEtag = etag.Trim('"');
+        var cacheKey = $"{CacheKeyPrefix}:{driveId}:{itemId}:v{sanitizedEtag}";
+
+        // Try cache lookup first (cache-aside pattern per ADR-009)
+        var cachedResult = await TryGetFromCacheAsync(cacheKey, cancellationToken);
+        if (cachedResult != null)
+        {
+            return cachedResult;
+        }
+
+        // Cache miss — perform extraction
+        var result = await ExtractAsync(fileStream, fileName, cancellationToken);
+
+        // Cache successful results (skip failures, vision-required, and oversized text)
+        if (result.Success && result.Text != null && !result.IsVisionRequired)
+        {
+            await TrySetInCacheAsync(cacheKey, result, cancellationToken);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Try to retrieve cached extraction result from Redis.
+    /// Returns null on cache miss or error (graceful degradation).
+    /// </summary>
+    private async Task<TextExtractionResult?> TryGetFromCacheAsync(
+        string cacheKey,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var cachedText = await _cache!.GetStringAsync(cacheKey, cancellationToken);
+            sw.Stop();
+
+            if (cachedText != null)
+            {
+                _logger.LogDebug(
+                    "Text extraction cache HIT for key {CacheKey} ({CharCount} chars, {LatencyMs:F1}ms)",
+                    cacheKey, cachedText.Length, sw.Elapsed.TotalMilliseconds);
+                _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
+
+                // Reconstruct a successful result from cached text.
+                // We don't cache EmailMetadata — email extraction is fast and metadata is rarely reused.
+                return TextExtractionResult.Succeeded(cachedText, TextExtractionMethod.Native);
+            }
+
+            _logger.LogDebug(
+                "Text extraction cache MISS for key {CacheKey} ({LatencyMs:F1}ms)",
+                cacheKey, sw.Elapsed.TotalMilliseconds);
+            _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogWarning(ex,
+                "Error reading text extraction cache for key {CacheKey}, proceeding with extraction",
+                cacheKey);
+            _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
+            return null; // Graceful degradation — cache failure should not block extraction
+        }
+    }
+
+    /// <summary>
+    /// Try to store extraction result in Redis cache.
+    /// Skips documents with extracted text exceeding 1 MB to avoid Redis memory pressure.
+    /// Errors are logged but do not propagate (caching is optimization, not requirement).
+    /// </summary>
+    private async Task TrySetInCacheAsync(
+        string cacheKey,
+        TextExtractionResult result,
+        CancellationToken cancellationToken)
+    {
+        if (result.Text == null) return;
+
+        // Skip caching for large documents (> 1 MB) to avoid Redis memory pressure
+        var textByteSize = Encoding.UTF8.GetByteCount(result.Text);
+        if (textByteSize > MaxCacheableTextBytes)
+        {
+            _logger.LogDebug(
+                "Skipping cache for key {CacheKey}: text size {SizeKB:F0}KB exceeds {MaxKB}KB limit",
+                cacheKey, textByteSize / 1024.0, MaxCacheableTextBytes / 1024);
+            return;
+        }
+
+        try
+        {
+            await _cache!.SetStringAsync(
+                cacheKey,
+                result.Text,
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = CacheTtl
+                },
+                cancellationToken);
+
+            _logger.LogDebug(
+                "Cached extracted text for key {CacheKey} ({CharCount} chars, {SizeKB:F0}KB, TTL={TtlHours}h)",
+                cacheKey, result.Text.Length, textByteSize / 1024.0, CacheTtl.TotalHours);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Error caching extracted text for key {CacheKey}, extraction result still returned",
+                cacheKey);
+            // Don't throw — caching is optimization, not requirement
+        }
     }
 
     /// <summary>
@@ -474,6 +689,7 @@ public class TextExtractorService : ITextExtractor
     /// <summary>
     /// Extract text from PDF/DOCX files using Azure Document Intelligence.
     /// Uses the prebuilt-read model for general document text extraction.
+    /// Protected by a configurable timeout (default 30s) and Polly circuit breaker.
     /// </summary>
     private async Task<TextExtractionResult> ExtractViaDocIntelAsync(
         Stream fileStream,
@@ -492,6 +708,55 @@ public class TextExtractorService : ITextExtractor
                 TextExtractionMethod.DocumentIntelligence);
         }
 
+        // Check circuit breaker state before making the call
+        if (_docIntelCircuitBreaker.CircuitState == Polly.CircuitBreaker.CircuitState.Open)
+        {
+            _logger.LogWarning(
+                "Document Intelligence circuit breaker is OPEN. Skipping extraction for {FileName}",
+                fileName);
+            return TextExtractionResult.Failed(
+                "Document text extraction is temporarily unavailable due to repeated service failures. Please try again in a few minutes.",
+                TextExtractionMethod.DocumentIntelligence);
+        }
+
+        try
+        {
+            // Execute within circuit breaker policy
+            return await _docIntelCircuitBreaker.ExecuteAsync(async (ct) =>
+            {
+                return await ExtractViaDocIntelCoreAsync(fileStream, fileName, ct);
+            }, cancellationToken);
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning(
+                "Document Intelligence circuit breaker rejected request for {FileName}",
+                fileName);
+            return TextExtractionResult.Failed(
+                "Document text extraction is temporarily unavailable due to repeated service failures. Please try again in a few minutes.",
+                TextExtractionMethod.DocumentIntelligence);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Timeout from linked token, not user cancellation
+            _logger.LogWarning(
+                "Document Intelligence extraction timed out after {Timeout}s for {FileName}",
+                _options.DocIntelTimeoutSeconds, fileName);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            return TextExtractionResult.Failed(
+                $"Document text extraction took too long (exceeded {_options.DocIntelTimeoutSeconds}s timeout). The document may be very large or complex. Please try again later.",
+                TextExtractionMethod.DocumentIntelligence);
+        }
+    }
+
+    /// <summary>
+    /// Core Document Intelligence extraction logic, called within circuit breaker and timeout protection.
+    /// </summary>
+    private async Task<TextExtractionResult> ExtractViaDocIntelCoreAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
         try
         {
             // Check file size before processing
@@ -504,25 +769,36 @@ public class TextExtractorService : ITextExtractor
                     TextExtractionMethod.DocumentIntelligence);
             }
 
-            _logger.LogDebug("Starting Document Intelligence extraction for {FileName}", fileName);
+            _logger.LogDebug(
+                "Starting Document Intelligence extraction for {FileName} (timeout: {Timeout}s)",
+                fileName, _options.DocIntelTimeoutSeconds);
 
             // Create client
-            var credential = new AzureKeyCredential(_options.DocIntelKey);
-            var client = new DocumentIntelligenceClient(new Uri(_options.DocIntelEndpoint), credential);
+            var credential = new AzureKeyCredential(_options.DocIntelKey!);
+            var client = new DocumentIntelligenceClient(new Uri(_options.DocIntelEndpoint!), credential);
 
             // Read stream to BinaryData (required by SDK)
             using var memoryStream = new MemoryStream();
             await fileStream.CopyToAsync(memoryStream, cancellationToken);
             var binaryData = BinaryData.FromBytes(memoryStream.ToArray());
 
-            // Analyze document using prebuilt-read model
+            // Create linked CancellationToken with configurable timeout
+            using var timeoutCts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(_options.DocIntelTimeoutSeconds));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, timeoutCts.Token);
+
+            // Analyze document using prebuilt-read model with timeout-protected token
             var operation = await client.AnalyzeDocumentAsync(
                 WaitUntil.Completed,
                 "prebuilt-read",
                 binaryData,
-                cancellationToken: cancellationToken);
+                cancellationToken: linkedCts.Token);
 
             var result = operation.Value;
+
+            // Record success with circuit breaker registry
+            _circuitRegistry?.RecordSuccess(CircuitBreakerRegistry.DocumentIntelligence);
 
             // Extract text - prefer Content (for native DOCX/digital PDFs) over Pages/Lines (for scanned docs)
             string text;
@@ -584,8 +860,18 @@ public class TextExtractorService : ITextExtractor
 
             return TextExtractionResult.Succeeded(text, TextExtractionMethod.DocumentIntelligence);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Timeout from the linked token — rethrow so outer handler catches it
+            _logger.LogWarning(
+                "Document Intelligence extraction timed out after {Timeout}s for {FileName}",
+                _options.DocIntelTimeoutSeconds, fileName);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            throw;
+        }
         catch (RequestFailedException ex) when (ex.Status == 400)
         {
+            // 400 errors are client-side (bad document) — don't count toward circuit breaker
             _logger.LogWarning(ex, "Document Intelligence could not process {FileName} - invalid or unsupported format", fileName);
             return TextExtractionResult.Failed(
                 "The document format is invalid or unsupported by Document Intelligence.",
@@ -595,16 +881,16 @@ public class TextExtractorService : ITextExtractor
         {
             _logger.LogError(ex, "Document Intelligence API error for {FileName}: {Status} {Code}",
                 fileName, ex.Status, ex.ErrorCode);
-            return TextExtractionResult.Failed(
-                $"Document Intelligence service error: {ex.Message}",
-                TextExtractionMethod.DocumentIntelligence);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            // Rethrow so circuit breaker tracks it
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to extract text from {FileName} using Document Intelligence", fileName);
-            return TextExtractionResult.Failed(
-                $"Failed to extract text: {ex.Message}",
-                TextExtractionMethod.DocumentIntelligence);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            // Rethrow so circuit breaker tracks it
+            throw;
         }
     }
 

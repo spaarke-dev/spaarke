@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -726,66 +728,115 @@ public sealed class TodoGenerationService : BackgroundService
     /// Queries active matters where utilizationpercent exceeds the configured threshold.
     /// </summary>
     /// <remarks>
-    /// TODO: Replace with a targeted Dataverse OData query once a generic query path is
-    /// available on <see cref="IDataverseService"/>. The ideal query:
-    /// <code>
-    /// GET sprk_matters?$select=sprk_matterid,sprk_name,sprk_utilizationpercent
-    ///     &amp;$filter=statecode eq 0
-    ///              and sprk_utilizationpercent gt {threshold}
-    /// </code>
+    /// Uses QueryExpression via ServiceClient to query:
+    ///   sprk_matter where statecode eq 0 and sprk_utilizationpercent gt {threshold}
+    /// Explicit column selection per ADR-002.
     /// </remarks>
-    private Task<IEnumerable<MatterScanRecord>> QueryMattersOverBudgetAsync(CancellationToken ct)
+    private async Task<IEnumerable<MatterScanRecord>> QueryMattersOverBudgetAsync(CancellationToken ct)
     {
-        _logger.LogInformation(
-            "TODO: querying matters over budget from Dataverse — returning empty list (stub).");
+        var serviceClient = GetServiceClient();
 
-        // Stub: returns empty list until a generic query method is exposed.
-        // The real implementation would query:
-        //   sprk_matters?$select=sprk_matterid,sprk_name,sprk_utilizationpercent
-        //               &$filter=statecode eq 0 and sprk_utilizationpercent gt {threshold}
-        return Task.FromResult(Enumerable.Empty<MatterScanRecord>());
+        var query = new QueryExpression("sprk_matter")
+        {
+            ColumnSet = new ColumnSet("sprk_matterid", "sprk_name", "sprk_utilizationpercent"),
+            TopCount = 100
+        };
+
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        query.Criteria.AddCondition(
+            "sprk_utilizationpercent", ConditionOperator.GreaterThan, _options.BudgetAlertThresholdPercent);
+
+        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
+
+        return results.Entities.Select(e => new MatterScanRecord
+        {
+            Id = e.Id,
+            Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty,
+            UtilizationPercent = e.GetAttributeValue<decimal?>("sprk_utilizationpercent") ?? 0m
+        });
     }
 
     /// <summary>
-    /// Queries pending invoice records (sprk_invoice where status is 'Pending').
+    /// Queries pending invoice records (sprk_invoice where status is Active and statuscode eq 1 / Pending).
     /// </summary>
     /// <remarks>
-    /// TODO: Replace with a targeted Dataverse OData query. The ideal query:
-    /// <code>
-    /// GET sprk_invoices?$select=sprk_invoiceid,sprk_name
-    ///     &amp;$filter=statecode eq 0 and statuscode eq 1
-    /// </code>
+    /// Uses QueryExpression via ServiceClient to query:
+    ///   sprk_invoice where statecode eq 0 and statuscode eq 1
+    /// Explicit column selection per ADR-002.
     /// </remarks>
-    private Task<IEnumerable<InvoiceScanRecord>> QueryPendingInvoicesAsync(CancellationToken ct)
+    private async Task<IEnumerable<InvoiceScanRecord>> QueryPendingInvoicesAsync(CancellationToken ct)
     {
-        _logger.LogInformation(
-            "TODO: querying pending invoices from Dataverse — returning empty list (stub).");
+        var serviceClient = GetServiceClient();
 
-        return Task.FromResult(Enumerable.Empty<InvoiceScanRecord>());
+        var query = new QueryExpression("sprk_invoice")
+        {
+            ColumnSet = new ColumnSet("sprk_invoiceid", "sprk_name"),
+            TopCount = 100
+        };
+
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
+        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 1); // Pending
+
+        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
+
+        return results.Entities.Select(e => new InvoiceScanRecord
+        {
+            Id = e.Id,
+            Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty
+        });
     }
 
     /// <summary>
-    /// Queries task-type events assigned to the service account.
+    /// Queries task-type events assigned to any user that are open/active.
+    /// Scans sprk_event records where sprk_todoflag is false (not already a to-do),
+    /// statecode is Active, and statuscode is Open (3).
     /// </summary>
     /// <remarks>
-    /// TODO: Replace with a targeted Dataverse OData query. The ideal query:
-    /// <code>
-    /// GET sprk_events?$select=sprk_eventid,sprk_eventname
-    ///     &amp;$filter=statecode eq 0 and sprk_eventtype eq 'Task'
-    ///              and _ownerid_value eq {serviceAccountId}
-    /// </code>
+    /// Uses QueryExpression via ServiceClient.
+    /// Explicit column selection per ADR-002.
+    /// Task-type events are identified by statuscode=Open and not being to-do items themselves.
     /// </remarks>
-    private Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
+    private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
-        _logger.LogInformation(
-            "TODO: querying assigned tasks from Dataverse — returning empty list (stub).");
+        var serviceClient = GetServiceClient();
 
-        return Task.FromResult(Enumerable.Empty<TaskScanRecord>());
+        var query = new QueryExpression("sprk_event")
+        {
+            ColumnSet = new ColumnSet("sprk_eventid", "sprk_eventname"),
+            TopCount = 100
+        };
+
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
+        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 3); // Open
+        // Exclude events that are already to-do items
+        query.Criteria.AddCondition("sprk_todoflag", ConditionOperator.NotEqual, true);
+
+        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
+
+        return results.Entities.Select(e => new TaskScanRecord
+        {
+            Id = e.Id,
+            Subject = e.GetAttributeValue<string>("sprk_eventname") ?? string.Empty
+        });
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Get the underlying ServiceClient from the IDataverseService implementation.
+    /// Required for generic SDK operations (QueryExpression) not exposed on the interface.
+    /// </summary>
+    private ServiceClient GetServiceClient()
+    {
+        if (_dataverse is DataverseServiceClientImpl impl)
+            return impl.OrganizationService;
+
+        throw new InvalidOperationException(
+            $"TodoGenerationService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
+            $"Actual type: {_dataverse?.GetType().Name ?? "null"}.");
+    }
 
     /// <summary>
     /// Calculates the delay until the next configured start-hour UTC.

@@ -1,7 +1,7 @@
 <task id="PPI-020" project="Production Performance Improvement R1">
   <metadata>
     <title>Cache Extracted Document Text (E2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>3</phase>
     <domain>E</domain>

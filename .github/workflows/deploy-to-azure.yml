@@ -42,7 +42,14 @@ jobs:
       run: dotnet build --no-restore --configuration Release
 
     - name: Test
-      run: echo "Tests temporarily disabled - test project needs interface updates"
+      run: dotnet test --no-build --configuration Release --logger trx --results-directory ./TestResults
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: test-results
+        path: ./TestResults/
 
     - name: Publish API
       run: dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish
@@ -66,7 +73,10 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Deploy Monitoring Infrastructure
+    # NOTE: Full infrastructure is now deployed via deploy-infrastructure.yml
+    # using Bicep IaC with environment-specific parameter files and what-if preview.
+    # This legacy monitoring step is retained for backward compatibility.
+    - name: Deploy Monitoring Infrastructure (Legacy)
       uses: azure/arm-deploy@v2
       with:
         resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}

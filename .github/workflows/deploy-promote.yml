@@ -1,0 +1,429 @@
+name: Environment Promotion
+
+# Promotes a deployment through environments: dev → staging → prod.
+# - dev → staging: automatic after successful dev deployment + smoke tests
+# - staging → prod: requires manual approval via GitHub environment protection rules
+#
+# Prerequisites:
+#   1. GitHub environments configured: dev, staging, prod
+#   2. prod environment has "Required reviewers" protection rule
+#   3. OIDC federated credentials configured for each environment
+#   4. Environment-specific secrets set (see .github/ENVIRONMENTS.md)
+#
+# Usage:
+#   - Triggered after successful SDAP CI build on master
+#   - Manual dispatch to promote a specific artifact version
+#   - Can target a single environment (skip earlier stages)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target environment to promote to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      artifact_run_id:
+        description: 'Workflow run ID for deployment artifacts (blank = latest successful CI)'
+        required: false
+        type: string
+      skip_smoke_tests:
+        description: 'Skip smoke tests (emergency hotfix only)'
+        required: false
+        type: boolean
+        default: false
+
+  workflow_run:
+    workflows: ["SDAP CI"]
+    types:
+      - completed
+    branches:
+      - master
+
+permissions:
+  contents: read
+  id-token: write        # Required for OIDC federated credentials
+  actions: read           # Required to download artifacts from triggering workflow
+  deployments: write      # Required for deployment status updates
+
+concurrency:
+  group: promote-${{ github.event.inputs.target_environment || 'pipeline' }}
+  cancel-in-progress: false  # Never cancel active deployments
+
+env:
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  DOTNET_VERSION: '8.x'
+
+jobs:
+  # ============================================================================
+  # Gate: Determine promotion path and validate prerequisites
+  # ============================================================================
+  plan:
+    name: Plan Promotion
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      deploy_dev: ${{ steps.plan.outputs.deploy_dev }}
+      deploy_staging: ${{ steps.plan.outputs.deploy_staging }}
+      deploy_prod: ${{ steps.plan.outputs.deploy_prod }}
+      artifact_run_id: ${{ steps.plan.outputs.artifact_run_id }}
+      promotion_path: ${{ steps.plan.outputs.promotion_path }}
+
+    steps:
+      - name: Determine promotion path
+        id: plan
+        run: |
+          TARGET="${{ github.event.inputs.target_environment || 'dev' }}"
+          ARTIFACT_RUN="${{ github.event.inputs.artifact_run_id || github.event.workflow_run.id }}"
+
+          echo "artifact_run_id=${ARTIFACT_RUN}" >> $GITHUB_OUTPUT
+
+          # Determine which environments to deploy based on target
+          case "$TARGET" in
+            dev)
+              echo "deploy_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_staging=false" >> $GITHUB_OUTPUT
+              echo "deploy_prod=false" >> $GITHUB_OUTPUT
+              echo "promotion_path=dev" >> $GITHUB_OUTPUT
+              ;;
+            staging)
+              echo "deploy_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_staging=true" >> $GITHUB_OUTPUT
+              echo "deploy_prod=false" >> $GITHUB_OUTPUT
+              echo "promotion_path=dev → staging" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "deploy_dev=true" >> $GITHUB_OUTPUT
+              echo "deploy_staging=true" >> $GITHUB_OUTPUT
+              echo "deploy_prod=true" >> $GITHUB_OUTPUT
+              echo "promotion_path=dev → staging → prod" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+          # For automatic triggers (workflow_run), only deploy to dev
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "deploy_dev=true" >> $GITHUB_OUTPUT
+            echo "deploy_staging=false" >> $GITHUB_OUTPUT
+            echo "deploy_prod=false" >> $GITHUB_OUTPUT
+            echo "promotion_path=dev (auto)" >> $GITHUB_OUTPUT
+          fi
+
+          echo "### Promotion Plan" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${TARGET} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact Run | ${ARTIFACT_RUN} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Stage 1: Deploy to Dev (automatic)
+  # ============================================================================
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: plan
+    if: needs.plan.outputs.deploy_dev == 'true'
+    environment:
+      name: dev
+      url: https://${{ secrets.DEV_APP_NAME }}.azurewebsites.net
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download deployment artifacts
+        uses: dawidd6/action-download-artifact@v14
+        with:
+          workflow: sdap-ci.yml
+          run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          name: deployment-packages
+          path: ./artifacts
+          if_no_artifact_found: error
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy API to Dev
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.DEV_APP_NAME }}
+          package: ./artifacts/api
+
+      - name: Smoke tests (Dev)
+        if: github.event.inputs.skip_smoke_tests != 'true'
+        run: |
+          APP_URL="https://${{ secrets.DEV_APP_NAME }}.azurewebsites.net"
+          MAX_ATTEMPTS=10
+          ATTEMPT=0
+
+          echo "Running smoke tests against ${APP_URL}..."
+
+          # Wait for app to start
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/ping" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Ping check passed (attempt ${ATTEMPT})"
+              break
+            fi
+
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: HTTP ${HTTP_CODE}, waiting 15s..."
+            sleep 15
+          done
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Ping check failed after ${MAX_ATTEMPTS} attempts"
+            exit 1
+          fi
+
+          # Health check
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/healthz")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Health check failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+          echo "Health check passed"
+
+          echo "### Dev Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| /ping | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| /healthz | Passed |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Stage 2: Deploy to Staging (automatic after dev succeeds)
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [plan, deploy-dev]
+    if: needs.plan.outputs.deploy_staging == 'true'
+    environment:
+      name: staging
+      url: https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download deployment artifacts
+        uses: dawidd6/action-download-artifact@v14
+        with:
+          workflow: sdap-ci.yml
+          run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          name: deployment-packages
+          path: ./artifacts
+          if_no_artifact_found: error
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy API to Staging
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.STAGING_APP_NAME }}
+          package: ./artifacts/api
+
+      - name: Smoke tests (Staging)
+        if: github.event.inputs.skip_smoke_tests != 'true'
+        run: |
+          APP_URL="https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net"
+          MAX_ATTEMPTS=10
+          ATTEMPT=0
+
+          echo "Running smoke tests against ${APP_URL}..."
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/ping" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Ping check passed (attempt ${ATTEMPT})"
+              break
+            fi
+
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: HTTP ${HTTP_CODE}, waiting 15s..."
+            sleep 15
+          done
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Ping check failed after ${MAX_ATTEMPTS} attempts"
+            exit 1
+          fi
+
+          # Health check
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/healthz")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Health check failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+          echo "Health check passed"
+
+          echo "### Staging Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| /ping | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| /healthz | Passed |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Integration tests (Staging)
+        if: github.event.inputs.skip_smoke_tests != 'true'
+        run: |
+          # Staging-specific integration validation
+          APP_URL="https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net"
+
+          # Verify CORS headers are properly configured
+          CORS_CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Origin: https://spaarkedev1.crm.dynamics.com" \
+            -H "Access-Control-Request-Method: GET" \
+            -X OPTIONS "${APP_URL}/ping" || echo "000")
+
+          echo "### Staging Integration Checks" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CORS preflight | HTTP ${CORS_CHECK} |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Stage 3: Deploy to Production (requires manual approval)
+  # ============================================================================
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [plan, deploy-staging]
+    if: needs.plan.outputs.deploy_prod == 'true'
+
+    # The 'prod' environment MUST have "Required reviewers" protection rule.
+    # This creates the manual approval gate: staging → prod.
+    # Deployment will pause here until an authorized reviewer approves.
+    environment:
+      name: prod
+      url: https://${{ secrets.PROD_APP_NAME }}.azurewebsites.net
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Pre-deployment checklist
+        run: |
+          echo "### Pre-Deployment Checklist" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This deployment was **manually approved** for production." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dev deployment | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging deployment | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging smoke tests | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manual approval | Granted |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Download deployment artifacts
+        uses: dawidd6/action-download-artifact@v14
+        with:
+          workflow: sdap-ci.yml
+          run_id: ${{ needs.plan.outputs.artifact_run_id }}
+          name: deployment-packages
+          path: ./artifacts
+          if_no_artifact_found: error
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy API to Production
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets.PROD_APP_NAME }}
+          package: ./artifacts/api
+
+      - name: Smoke tests (Production)
+        run: |
+          APP_URL="https://${{ secrets.PROD_APP_NAME }}.azurewebsites.net"
+          MAX_ATTEMPTS=10
+          ATTEMPT=0
+
+          echo "Running production smoke tests against ${APP_URL}..."
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/ping" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Ping check passed (attempt ${ATTEMPT})"
+              break
+            fi
+
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: HTTP ${HTTP_CODE}, waiting 15s..."
+            sleep 15
+          done
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Production ping check failed after ${MAX_ATTEMPTS} attempts"
+            exit 1
+          fi
+
+          # Health check
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${APP_URL}/healthz")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Production health check failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+          echo "Production health check passed"
+
+          echo "### Production Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| /ping | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| /healthz | Passed |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Summary
+  # ============================================================================
+  summary:
+    name: Promotion Summary
+    runs-on: ubuntu-latest
+    needs: [plan, deploy-dev, deploy-staging, deploy-prod]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Environment Promotion Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Promotion Path:** ${{ needs.plan.outputs.promotion_path }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact Run:** ${{ needs.plan.outputs.artifact_run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Status | Protection |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|--------|------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dev | ${{ needs.deploy-dev.result || 'skipped' }} | None (auto-deploy) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging | ${{ needs.deploy-staging.result || 'skipped' }} | None (auto after dev) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prod | ${{ needs.deploy-prod.result || 'skipped' }} | Required reviewers |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall status
+          if [ "${{ needs.deploy-prod.result }}" = "success" ]; then
+            echo "**Result:** Production deployment completed successfully." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-staging.result }}" = "success" ]; then
+            echo "**Result:** Staging deployment completed. Production requires manual approval." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-dev.result }}" = "success" ]; then
+            echo "**Result:** Dev deployment completed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Result:** Deployment pipeline had failures. Check individual stages." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -290,6 +290,10 @@ public class AttachmentClassificationJobHandler : IJobHandler
         CancellationToken ct)
     {
         var matterCandidates = new Dictionary<string, MatterCandidate>();
+        var refMatchCount = 0;
+        var vendorMatchCount = 0;
+        var parentMatchCount = 0;
+        var keywordMatchCount = 0;
 
         // Signal 1: Reference number match (confidence: 0.95)
         if (hints?.MatterReference != null && !string.IsNullOrWhiteSpace(hints.MatterReference))
@@ -310,10 +314,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
                     match.RecordId,
                     0.95,
                     "ReferenceNumberMatch");
-
-                _logger.LogDebug(
-                    "Reference match for document {DocumentId}: Matter {MatterId} via '{Signal}'",
-                    documentId, match.RecordId, "ReferenceNumberMatch");
+                refMatchCount++;
             }
         }
 
@@ -338,10 +339,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
                     match.RecordId,
                     confidence,
                     "VendorOrgMatch");
-
-                _logger.LogDebug(
-                    "Vendor match for document {DocumentId}: Matter {MatterId} via '{Signal}' (confidence: {Confidence})",
-                    documentId, match.RecordId, "VendorOrgMatch", confidence);
+                vendorMatchCount++;
             }
         }
 
@@ -355,10 +353,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
                 parentMatterId,
                 0.90,
                 "ParentEmailContext");
-
-            _logger.LogDebug(
-                "Parent context match for document {DocumentId}: Matter {MatterId} via '{Signal}'",
-                documentId, parentMatterId, "ParentEmailContext");
+            parentMatchCount++;
         }
 
         // Signal 4: Keyword overlap matching (confidence: 0.40-0.60)
@@ -389,12 +384,15 @@ public class AttachmentClassificationJobHandler : IJobHandler
                     match.RecordId,
                     confidence,
                     "KeywordOverlap");
-
-                _logger.LogDebug(
-                    "Keyword match for document {DocumentId}: Matter {MatterId} via '{Signal}' (confidence: {Confidence})",
-                    documentId, match.RecordId, "KeywordOverlap", confidence);
+                keywordMatchCount++;
             }
         }
+
+        _logger.LogDebug(
+            "Entity matching for document {DocumentId}: {RefMatches} reference, {VendorMatches} vendor, " +
+            "{ParentMatches} parent context, {KeywordMatches} keyword matches, {TotalCandidates} unique candidates",
+            documentId, refMatchCount, vendorMatchCount, parentMatchCount, keywordMatchCount,
+            matterCandidates.Count);
 
         // Aggregate and rank candidates
         var rankedSuggestions = matterCandidates.Values

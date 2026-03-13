@@ -1,7 +1,7 @@
 <task id="PPI-046" project="Production Performance Improvement R1">
   <metadata>
     <title>OpenAI Capacity + Network Hardening (C7)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>5</phase>
     <domain>C</domain>

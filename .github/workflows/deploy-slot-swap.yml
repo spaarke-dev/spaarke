@@ -1,0 +1,365 @@
+name: Deploy via Slot Swap
+
+# Zero-downtime deployment using Azure App Service deployment slots.
+#
+# Flow:
+#   1. Build & test the API
+#   2. Deploy to the staging slot
+#   3. Health check the staging slot
+#   4. Manual approval gate
+#   5. Swap staging → production
+#   6. Verify production health
+#
+# Prerequisites:
+#   - Deployment slot "staging" created by infrastructure/bicep/modules/deployment-slot.bicep (task 042)
+#   - GitHub environment "production" with required reviewers configured
+#   - OIDC federated credentials for Azure login
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      skip_tests:
+        description: 'Skip test stage (use for hotfixes only)'
+        required: false
+        type: boolean
+        default: false
+
+  workflow_run:
+    workflows: ["SDAP CI"]
+    types:
+      - completed
+    branches:
+      - master
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC federated credentials
+
+concurrency:
+  group: deploy-slot-swap-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false  # Never cancel deployments mid-swap
+
+env:
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  DOTNET_VERSION: '8.0.x'
+  SLOT_NAME: staging
+
+jobs:
+  # ============================================================================
+  # Stage 1: Build and test
+  # ============================================================================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        if: github.event.inputs.skip_tests != 'true'
+        run: dotnet test --no-build --configuration Release --logger trx --results-directory ./TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always() && github.event.inputs.skip_tests != 'true'
+        with:
+          name: test-results
+          path: ./TestResults/
+
+      - name: Publish API
+        run: dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: api-publish
+          path: ./publish
+          retention-days: 5
+
+  # ============================================================================
+  # Stage 2: Resolve environment configuration
+  # ============================================================================
+  resolve-config:
+    name: Resolve Configuration
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      app_service_name: ${{ steps.resolve.outputs.app_service_name }}
+      resource_group: ${{ steps.resolve.outputs.resource_group }}
+      environment: ${{ steps.resolve.outputs.environment }}
+      slot_url: ${{ steps.resolve.outputs.slot_url }}
+      production_url: ${{ steps.resolve.outputs.production_url }}
+
+    steps:
+      - name: Resolve environment settings
+        id: resolve
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+
+          case "$ENV" in
+            dev)
+              APP_NAME="spe-api-dev-67e2xz"
+              RG="spe-infrastructure-westus2"
+              ;;
+            staging)
+              APP_NAME="${{ secrets.STAGING_APP_NAME }}"
+              RG="${{ secrets.STAGING_RESOURCE_GROUP }}"
+              ;;
+            prod)
+              APP_NAME="${{ secrets.PROD_APP_NAME }}"
+              RG="${{ secrets.PROD_RESOURCE_GROUP }}"
+              ;;
+          esac
+
+          echo "app_service_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "resource_group=$RG" >> $GITHUB_OUTPUT
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "slot_url=https://${APP_NAME}-${SLOT_NAME}.azurewebsites.net" >> $GITHUB_OUTPUT
+          echo "production_url=https://${APP_NAME}.azurewebsites.net" >> $GITHUB_OUTPUT
+
+          echo "### Environment Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | $ENV |" >> $GITHUB_STEP_SUMMARY
+          echo "| App Service | $APP_NAME |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | $RG |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging Slot URL | https://${APP_NAME}-${SLOT_NAME}.azurewebsites.net |" >> $GITHUB_STEP_SUMMARY
+        env:
+          SLOT_NAME: staging
+
+  # ============================================================================
+  # Stage 3: Deploy to staging slot
+  # ============================================================================
+  deploy-to-slot:
+    name: Deploy to Staging Slot
+    runs-on: ubuntu-latest
+    needs: resolve-config
+    environment: ${{ needs.resolve-config.outputs.environment }}
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: api-publish
+          path: ./publish
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to staging slot
+        run: |
+          echo "Deploying to staging slot..."
+
+          az webapp deploy \
+            --resource-group "${{ needs.resolve-config.outputs.resource_group }}" \
+            --name "${{ needs.resolve-config.outputs.app_service_name }}" \
+            --slot "${{ env.SLOT_NAME }}" \
+            --src-path ./publish \
+            --type zip \
+            --async false
+
+          echo "Deployment to staging slot completed"
+
+      - name: Wait for slot warm-up
+        run: |
+          echo "Waiting for staging slot to warm up..."
+          # The deployment-slot.bicep configures WEBSITE_SWAP_WARMUP_PING_PATH=/healthz
+          # Azure will automatically hit this endpoint during deployment.
+          # Additional wait for .NET runtime and DI container initialization.
+          sleep 30
+          echo "Warm-up period completed"
+
+  # ============================================================================
+  # Stage 4: Health check on staging slot
+  # ============================================================================
+  health-check:
+    name: Health Check (Staging Slot)
+    runs-on: ubuntu-latest
+    needs: [resolve-config, deploy-to-slot]
+
+    steps:
+      - name: Health check - /healthz
+        run: |
+          SLOT_URL="${{ needs.resolve-config.outputs.slot_url }}"
+          MAX_ATTEMPTS=10
+          ATTEMPT=0
+
+          echo "Running health check on staging slot: ${SLOT_URL}/healthz"
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}..."
+
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "${SLOT_URL}/healthz" 2>/dev/null) || true
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "Health check passed (HTTP ${HTTP_STATUS})"
+              break
+            fi
+
+            echo "Health check returned HTTP ${HTTP_STATUS}, retrying in 15 seconds..."
+            sleep 15
+          done
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Health check failed after ${MAX_ATTEMPTS} attempts (last status: ${HTTP_STATUS})"
+            exit 1
+          fi
+
+      - name: Health check - /ping
+        run: |
+          SLOT_URL="${{ needs.resolve-config.outputs.slot_url }}"
+
+          echo "Verifying /ping endpoint..."
+          RESPONSE=$(curl -s --connect-timeout 10 --max-time 30 "${SLOT_URL}/ping")
+
+          echo "Ping response: ${RESPONSE}"
+
+          if echo "$RESPONSE" | grep -q "Spe.Bff.Api\|pong\|Sprk.Bff.Api"; then
+            echo "Ping endpoint verified successfully"
+          else
+            echo "::warning::Unexpected ping response — review manually"
+          fi
+
+      - name: Staging slot validation summary
+        run: |
+          echo "### Staging Slot Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| /healthz | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| /ping | Verified |" >> $GITHUB_STEP_SUMMARY
+          echo "| Slot URL | ${{ needs.resolve-config.outputs.slot_url }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Stage 5: Manual approval gate + swap to production
+  # ============================================================================
+  swap-to-production:
+    name: Swap to Production
+    runs-on: ubuntu-latest
+    needs: [resolve-config, health-check]
+    # The "production" GitHub environment MUST have required reviewers configured.
+    # This provides the manual approval gate before the swap executes.
+    environment:
+      name: production
+      url: ${{ needs.resolve-config.outputs.production_url }}
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Swap staging → production
+        run: |
+          echo "Swapping staging slot to production..."
+          echo "App Service: ${{ needs.resolve-config.outputs.app_service_name }}"
+          echo "Resource Group: ${{ needs.resolve-config.outputs.resource_group }}"
+
+          az webapp deployment slot swap \
+            --resource-group "${{ needs.resolve-config.outputs.resource_group }}" \
+            --name "${{ needs.resolve-config.outputs.app_service_name }}" \
+            --slot "${{ env.SLOT_NAME }}" \
+            --target-slot production
+
+          echo "Slot swap completed successfully"
+
+      - name: Verify production health
+        run: |
+          PROD_URL="${{ needs.resolve-config.outputs.production_url }}"
+          MAX_ATTEMPTS=5
+          ATTEMPT=0
+
+          echo "Verifying production health after swap..."
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --connect-timeout 10 \
+              --max-time 30 \
+              "${PROD_URL}/healthz" 2>/dev/null) || true
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "Production health check passed (HTTP ${HTTP_STATUS})"
+              break
+            fi
+
+            echo "Production health check attempt ${ATTEMPT} returned HTTP ${HTTP_STATUS}"
+            sleep 10
+          done
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Production health check failed after swap! Consider rolling back."
+            echo "::error::Rollback command: az webapp deployment slot swap --resource-group ${{ needs.resolve-config.outputs.resource_group }} --name ${{ needs.resolve-config.outputs.app_service_name }} --slot ${{ env.SLOT_NAME }} --target-slot production"
+            exit 1
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "### Slot Swap Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Service | ${{ needs.resolve-config.outputs.app_service_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ needs.resolve-config.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Swap | staging → production |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production URL | ${{ needs.resolve-config.outputs.production_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Rollback**: Re-run this swap to reverse (staging now contains the previous production version)." >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Summary
+  # ============================================================================
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [build, resolve-config, deploy-to-slot, health-check, swap-to-production]
+    if: always()
+
+    steps:
+      - name: Final summary
+        run: |
+          echo "## Slot Swap Deployment Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Test | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Configuration | ${{ needs.resolve-config.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy to Staging Slot | ${{ needs.deploy-to-slot.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ needs.health-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Swap to Production | ${{ needs.swap-to-production.result }} |" >> $GITHUB_STEP_SUMMARY

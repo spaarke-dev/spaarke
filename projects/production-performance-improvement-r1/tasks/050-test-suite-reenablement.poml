@@ -1,7 +1,7 @@
 <task id="PPI-050" project="Production Performance Improvement R1">
   <metadata>
     <title>Test Suite Re-enablement (D1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>6</phase>
     <domain>D</domain>

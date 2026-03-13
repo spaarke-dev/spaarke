@@ -448,7 +448,7 @@ Consultant agrees to maintain confidentiality of all Company information.
 ";
 
         var context = CreateTestContext(sampleContract);
-        var handlersToTest = new[] { "EntityExtractorHandler", "SummaryHandler", "DocumentClassifierHandler" };
+        var handlersToTest = new[] { "GenericAnalysisHandler", "SummaryHandler", "DocumentClassifierHandler" };
 
         // Act & Assert
         _output.WriteLine("Multi-handler composition test:");

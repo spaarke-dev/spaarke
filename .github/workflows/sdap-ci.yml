@@ -87,7 +87,6 @@ jobs:
         run: |
           dotnet test -c ${{ matrix.configuration }} --no-build --logger trx --results-directory ./TestResults `
             --collect:"XPlat Code Coverage" --settings coverlet.runsettings
-        continue-on-error: true  # Don't fail build on test failures during CI hardening phase
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
