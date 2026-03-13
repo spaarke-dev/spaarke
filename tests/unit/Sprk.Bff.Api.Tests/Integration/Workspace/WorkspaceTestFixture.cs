@@ -9,9 +9,12 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Integration.Workspace;
@@ -69,11 +72,15 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 // Graph options (GraphOptions validator)
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
                 ["Dataverse:TenantId"] = "test-tenant-id",
 
                 // ServiceBus options (ServiceBusOptions validator)
@@ -83,18 +90,25 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 // Redis — disabled so Program.cs uses AddDistributedMemoryCache
                 ["Redis:Enabled"] = "false",
 
-                // Document Intelligence — disabled to avoid Azure OpenAI dependencies
-                ["DocumentIntelligence:Enabled"] = "false",
+                // Document Intelligence — enabled so all AI services register
+                ["DocumentIntelligence:Enabled"] = "true",
                 ["DocumentIntelligence:OpenAiEndpoint"] = "https://test.openai.azure.com/",
                 ["DocumentIntelligence:OpenAiKey"] = "test-key",
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
 
-                // Analysis — disabled (requires DocumentIntelligence:Enabled = true)
-                ["Analysis:Enabled"] = "false",
+                // Analysis — enabled so all AI-dependent endpoints can be mapped
+                ["Analysis:Enabled"] = "true",
 
-                // AI Search (required to avoid null-ref in Program.cs service registration)
-                ["DocumentIntelligence:AiSearchEndpoint"] = "",
-                ["DocumentIntelligence:AiSearchKey"] = "",
+                // AI Search (required for IRagService)
+                ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
+                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
+
+                // AzureOpenAI options (required by AiModule for IChatClient)
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+
+                // Record Matching
+                ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
 
                 // AiSearchResilienceOptions defaults (ValidateDataAnnotations)
                 ["AiSearchResilience:MaxRetryAttempts"] = "3",
@@ -154,6 +168,20 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
             })
             .AddScheme<AuthenticationSchemeOptions, FakeAuthHandler>(
                 FakeAuthHandler.SchemeName, _ => { });
+
+            // ---------------------------------------------------------------
+            // HOSTED SERVICES: Remove background workers that depend on
+            // AI services not registered when DocumentIntelligence is disabled.
+            // ---------------------------------------------------------------
+            services.RemoveAll<IHostedService>();
+
+            // ---------------------------------------------------------------
+            // DATAVERSE: Mock to avoid real connection in tests.
+            // ---------------------------------------------------------------
+            var dataverseServiceMock = new Mock<IDataverseService>();
+            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(dataverseServiceMock.Object);
         });
     }
 
