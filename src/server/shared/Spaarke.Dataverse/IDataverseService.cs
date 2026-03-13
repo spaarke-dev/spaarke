@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace Spaarke.Dataverse;
 
@@ -580,6 +581,16 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>First matching sprk_recordtype_ref entity, or null</returns>
     Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Execute a QueryExpression and return the result set.
+    /// Provides testable access to the SDK RetrieveMultiple operation without
+    /// requiring a downcast to the concrete DataverseServiceClientImpl.
+    /// </summary>
+    /// <param name="query">The QueryExpression to execute</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>EntityCollection result</returns>
+    Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
 
     /// <summary>
     /// Looks up a Dataverse systemuser by Azure AD Object ID.

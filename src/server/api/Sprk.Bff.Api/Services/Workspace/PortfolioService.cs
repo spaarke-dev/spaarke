@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -261,8 +260,6 @@ public class PortfolioService
             "Querying matters from Dataverse. UserId={UserId}",
             userId);
 
-        var serviceClient = GetServiceClient();
-
         var query = new QueryExpression("sprk_matter")
         {
             ColumnSet = new ColumnSet(
@@ -286,7 +283,7 @@ public class PortfolioService
         EntityCollection results;
         try
         {
-            results = await serviceClient.RetrieveMultipleAsync(query, ct);
+            results = await _dataverseService.RetrieveMultipleAsync(query, ct);
         }
         catch (Exception ex)
         {
@@ -326,17 +323,4 @@ public class PortfolioService
         return matters;
     }
 
-    /// <summary>
-    /// Get the underlying ServiceClient from the IDataverseService implementation.
-    /// Required for generic SDK operations (QueryExpression) not exposed on the interface.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is DataverseServiceClientImpl impl)
-            return impl.OrganizationService;
-
-        throw new InvalidOperationException(
-            $"PortfolioService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
-            $"Actual type: {_dataverseService.GetType().Name}.");
-    }
 }

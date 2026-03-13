@@ -263,6 +263,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return entity;
     }
 
+    /// <inheritdoc />
+    public async Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
+    {
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        _logger.LogDebug("[DATAVERSE] RetrieveMultiple on {EntityName} returned {Count} records",
+            query.EntityName, results.Entities.Count);
+        return results;
+    }
+
     /// <summary>
     /// Retrieves all pages of results for a QueryExpression using paging cookies.
     /// Dataverse silently truncates results at 5,000 records per page. This method

@@ -180,6 +180,56 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
             // ---------------------------------------------------------------
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+
+            // PortfolioService calls RetrieveMultipleAsync for matter queries.
+            // Return 3 test matters matching assertions in WorkspaceEndpointsTests.
+            var matterA = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterA["sprk_name"] = "Matter A";
+            matterA["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(125_000m);
+            matterA["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(150_000m);
+            matterA["sprk_overdueeventcount"] = 0;
+            matterA["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var matterB = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterB["sprk_name"] = "Matter B (at risk)";
+            matterB["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(92_000m);
+            matterB["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(80_000m);
+            matterB["sprk_overdueeventcount"] = 2;
+            matterB["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var matterC = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterC["sprk_name"] = "Matter C";
+            matterC["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(40_000m);
+            matterC["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(60_000m);
+            matterC["sprk_overdueeventcount"] = 0;
+            matterC["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var entityCollection = new Microsoft.Xrm.Sdk.EntityCollection(
+                new List<Microsoft.Xrm.Sdk.Entity> { matterA, matterB, matterC });
+            dataverseServiceMock
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(entityCollection);
+
+            // RetrieveAsync for AI summary entity description (event/matter/project).
+            dataverseServiceMock
+                .Setup(d => d.RetrieveAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(),
+                    It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_entity", Guid.NewGuid()));
+
+            // GetDocumentAsync for AI summary on sprk_document entity type.
+            dataverseServiceMock
+                .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Spaarke.Dataverse.DocumentEntity
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Name = "Test Document",
+                    FileName = "test.pdf",
+                    ContainerId = Guid.NewGuid().ToString()
+                });
+
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
         });

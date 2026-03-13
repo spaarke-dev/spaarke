@@ -576,13 +576,9 @@ public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
             Encoding.UTF8,
             "application/json");
 
-        // Act
-        var response = await client.GetAsync(
-            $"/api/workspace/events/{eventId}/scores");
-
-        // Minimal API GET with body requires special handling; use custom request
+        // Act — endpoint is POST (MapPost in WorkspaceEndpoints.cs)
         using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Get,
+            HttpMethod.Post,
             $"/api/workspace/events/{eventId}/scores");
         httpRequest.Content = content;
         httpRequest.Headers.Authorization =
@@ -638,7 +634,7 @@ public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
         };
 
         using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Get,
+            HttpMethod.Post,
             $"/api/workspace/events/{routeId}/scores");
         httpRequest.Content = new StringContent(
             JsonSerializer.Serialize(request),
@@ -664,7 +660,7 @@ public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
         var eventId = Guid.NewGuid();
 
         using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Get,
+            HttpMethod.Post,
             $"/api/workspace/events/{eventId}/scores");
         httpRequest.Content = new StringContent(
             JsonSerializer.Serialize(new

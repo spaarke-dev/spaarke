@@ -7,6 +7,7 @@ using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace Spaarke.Dataverse;
 
@@ -2076,5 +2077,11 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "QuerySystemUserByAzureAdOidAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveMultipleAsync is implemented in DataverseServiceClientImpl.");
     }
 }
