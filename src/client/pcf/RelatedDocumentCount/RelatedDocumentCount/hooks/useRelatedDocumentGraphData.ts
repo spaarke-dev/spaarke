@@ -1,11 +1,11 @@
 /**
  * useRelatedDocumentGraphData Hook
  *
- * Fetches the full graph data (nodes + edges) for the mini graph preview.
- * This is the "phase 2" fetch — runs after the fast countOnly fetch completes
- * and only when count > 0.
+ * Single API call that returns both the related document count (from metadata.totalResults)
+ * and the mini graph preview data (nodes + edges). Replaces the previous two-phase
+ * pattern (countOnly fetch → graph fetch) to eliminate one network round-trip.
  *
- * Transforms the full API response into slim MiniGraphNode/MiniGraphEdge types,
+ * Transforms the API response into slim MiniGraphNode/MiniGraphEdge types,
  * limiting to MAX_PREVIEW_NODES for readability in the compact preview.
  *
  * React 16 compatible (useState + useEffect + useCallback + useRef only, per ADR-022).
@@ -61,25 +61,32 @@ interface ApiGraphResponse {
 // ─── Return Type ─────────────────────────────────────────────────────
 
 export interface UseRelatedDocumentGraphDataResult {
+    /** Total count of related documents (from metadata.totalResults). */
+    count: number;
     /** Nodes for the mini graph preview. */
     nodes: MiniGraphNode[];
     /** Edges for the mini graph preview. */
     edges: MiniGraphEdge[];
-    /** Whether graph data is currently being loaded. */
+    /** Whether data is currently being loaded. */
     isLoading: boolean;
     /** Error message, or null if no error. */
     error: string | null;
+    /** Timestamp of the last successful fetch. */
+    lastUpdated: Date | null;
+    /** Manually trigger a re-fetch. */
+    refetch: () => void;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────
 
 /**
- * Fetch full graph data and transform to mini graph format.
+ * Fetch related document data in a single API call.
+ * Returns count (from metadata) and graph preview data (nodes + edges).
  *
  * @param documentId - Source document GUID
  * @param tenantId - Azure AD tenant ID
  * @param apiBaseUrl - BFF API base URL
- * @param enabled - Only fetch when true (after count loaded and count > 0)
+ * @param enabled - Only fetch when true (typically after auth is ready)
  */
 export function useRelatedDocumentGraphData(
     documentId: string,
@@ -87,10 +94,12 @@ export function useRelatedDocumentGraphData(
     apiBaseUrl: string | undefined,
     enabled: boolean
 ): UseRelatedDocumentGraphDataResult {
+    const [count, setCount] = useState(0);
     const [nodes, setNodes] = useState<MiniGraphNode[]>([]);
     const [edges, setEdges] = useState<MiniGraphEdge[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     const mountedRef = useRef(true);
     const fetchIdRef = useRef(0);
@@ -102,8 +111,13 @@ export function useRelatedDocumentGraphData(
         };
     }, []);
 
-    const fetchGraphData = useCallback(async () => {
+    const fetchData = useCallback(async () => {
         if (!enabled || !documentId || documentId.trim() === "") {
+            setCount(0);
+            setNodes([]);
+            setEdges([]);
+            setError(null);
+            setIsLoading(false);
             return;
         }
 
@@ -115,6 +129,8 @@ export function useRelatedDocumentGraphData(
             const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, "");
             const url = `${baseUrl}/api/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ""}limit=20`;
 
+            console.log("[useRelatedDocumentGraphData] Fetching count + graph:", { documentId, url });
+
             const response = await authenticatedFetch(url, {
                 method: "GET",
                 headers: { "Content-Type": "application/json" },
@@ -125,9 +141,18 @@ export function useRelatedDocumentGraphData(
             }
 
             if (!response.ok) {
-                // Non-critical — the count card still works, just no preview
-                console.warn("[useRelatedDocumentGraphData] API returned", response.status);
-                setError(null); // Don't show error for preview — card still has count
+                if (response.status === 404) {
+                    setCount(0);
+                    setNodes([]);
+                    setEdges([]);
+                    setLastUpdated(new Date());
+                    return;
+                }
+                if (response.status === 401 || response.status === 403) {
+                    setError("You don't have permission to view related documents.");
+                    return;
+                }
+                setError("Failed to load related document count.");
                 return;
             }
 
@@ -137,7 +162,19 @@ export function useRelatedDocumentGraphData(
                 return;
             }
 
-            // Transform and limit nodes
+            // Extract count from metadata
+            const total = data.metadata?.totalResults ?? 0;
+            console.log("[useRelatedDocumentGraphData] Got count:", total, "nodes:", data.nodes.length);
+            setCount(total);
+            setLastUpdated(new Date());
+
+            // Transform and limit nodes for mini graph preview
+            if (data.nodes.length === 0) {
+                setNodes([]);
+                setEdges([]);
+                return;
+            }
+
             const sourceNode = data.nodes.find((n) => n.type === "source");
             const others = data.nodes
                 .filter((n) => n.type !== "source")
@@ -176,8 +213,14 @@ export function useRelatedDocumentGraphData(
             if (!mountedRef.current || currentFetchId !== fetchIdRef.current) {
                 return;
             }
-            // Non-critical — log but don't show error in UI
-            console.warn("[useRelatedDocumentGraphData] Failed to fetch graph data:", err);
+
+            console.error("[useRelatedDocumentGraphData] Error:", err);
+
+            if (err instanceof Error && err.message.includes("auth")) {
+                setError("Authentication error. Please refresh the page.");
+            } else {
+                setError("Unable to load related documents. Please try again.");
+            }
         } finally {
             if (mountedRef.current && currentFetchId === fetchIdRef.current) {
                 setIsLoading(false);
@@ -187,9 +230,9 @@ export function useRelatedDocumentGraphData(
 
     useEffect(() => {
         if (enabled) {
-            void fetchGraphData();
+            void fetchData();
         }
-    }, [fetchGraphData, enabled]);
+    }, [fetchData, enabled]);
 
-    return { nodes, edges, isLoading, error };
+    return { count, nodes, edges, isLoading, error, lastUpdated, refetch: fetchData };
 }

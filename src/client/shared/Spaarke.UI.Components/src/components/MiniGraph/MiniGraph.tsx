@@ -124,7 +124,7 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
     const { nodes: positioned, edges: positionedEdges } =
         useForceSimulation(forceNodes, forceEdges, {
             mode: "hub-spoke",
-            ticks: 80,
+            ticks: 50,
             chargeStrength: -200,
             linkDistanceMultiplier: 100,
             collisionRadius: 15,

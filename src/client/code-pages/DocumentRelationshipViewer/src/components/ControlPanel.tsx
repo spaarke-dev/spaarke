@@ -14,7 +14,7 @@
 import React, { useMemo, useCallback, useState } from "react";
 import {
     makeStyles, tokens, Slider, Checkbox, Label, Card,
-    Text, Divider,
+    Text, Divider, Link,
 } from "@fluentui/react-components";
 import { Info20Regular, ChevronDown20Regular, ChevronUp20Regular } from "@fluentui/react-icons";
 
@@ -104,6 +104,17 @@ const useStyles = makeStyles({
     infoTitle: { fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
     infoText: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground2, lineHeight: tokens.lineHeightBase200 },
     sectionLabel: { fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground2, marginBottom: tokens.spacingVerticalXS },
+    sectionHeader: {
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        marginBottom: tokens.spacingVerticalXS,
+    },
+    selectLinks: {
+        display: "flex", gap: tokens.spacingHorizontalXS,
+        fontSize: tokens.fontSizeBase100,
+    },
+    selectLink: {
+        fontSize: tokens.fontSizeBase100, cursor: "pointer",
+    },
 });
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange, viewMode }) => {
@@ -221,7 +232,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettings
 
             {/* Document Types */}
             <div className={styles.section}>
-                <Text className={styles.sectionLabel}>Document Types</Text>
+                <div className={styles.sectionHeader}>
+                    <Text className={styles.sectionLabel}>Document Types</Text>
+                    <div className={styles.selectLinks}>
+                        <Link className={styles.selectLink} onClick={() => onSettingsChange({ ...settings, documentTypes: DOCUMENT_TYPES.map((t) => t.key) as unknown as DocumentTypeKey[] })}>All</Link>
+                        <Text size={100}>|</Text>
+                        <Link className={styles.selectLink} onClick={() => onSettingsChange({ ...settings, documentTypes: [] })}>Clear</Link>
+                    </div>
+                </div>
                 <div className={styles.checkboxGroup}>
                     {DOCUMENT_TYPES.map((type) => (
                         <Checkbox
@@ -239,7 +257,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettings
 
             {/* Relationship Types */}
             <div className={styles.section}>
-                <Text className={styles.sectionLabel}>Relationship Types</Text>
+                <div className={styles.sectionHeader}>
+                    <Text className={styles.sectionLabel}>Relationship Types</Text>
+                    <div className={styles.selectLinks}>
+                        <Link className={styles.selectLink} onClick={() => onSettingsChange({ ...settings, relationshipTypes: RELATIONSHIP_TYPES.map((t) => t.key) as unknown as RelationshipTypeKey[] })}>All</Link>
+                        <Text size={100}>|</Text>
+                        <Link className={styles.selectLink} onClick={() => onSettingsChange({ ...settings, relationshipTypes: [] })}>Clear</Link>
+                    </div>
+                </div>
                 <div className={styles.checkboxGroup}>
                     {RELATIONSHIP_TYPES.map((type) => (
                         <Checkbox

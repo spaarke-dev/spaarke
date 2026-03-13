@@ -9,11 +9,11 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@azure/msal-browser": "^3.30.0",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@xyflow/react": "^12.8.3",
     "d3-force": "^3.0.0",
     "react": "^19.0.0",
@@ -25,6 +25,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/xrm": "^9.0.0",
     "css-loader": "^7.1.2",
+    "esbuild-loader": "^4.4.2",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",

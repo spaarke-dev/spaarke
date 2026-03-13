@@ -15,7 +15,6 @@ import { RelationshipCountCard } from "@spaarke/ui-components/dist/components/Re
 import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
 import { MiniGraph } from "@spaarke/ui-components/dist/components/MiniGraph";
 import { initializeAuth } from "./authInit";
-import { useRelatedDocumentCount } from "./hooks/useRelatedDocumentCount";
 import { useRelatedDocumentGraphData } from "./hooks/useRelatedDocumentGraphData";
 import { IRelatedDocumentCountProps } from "./types";
 
@@ -94,20 +93,9 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         return () => { cancelled = true; };
     }, [apiBaseUrl]);
 
-    // Fetch related document count from BFF API (only after auth is ready)
-    const { count, isLoading, error, lastUpdated, refetch } = useRelatedDocumentCount(
-        isAuthReady ? documentId : "",
-        tenantId,
-        apiBaseUrl
-    );
-
-    // Phase 2: Fetch full graph data for mini preview (only after count loaded and > 0)
-    const { nodes: graphNodes, edges: graphEdges } = useRelatedDocumentGraphData(
-        documentId,
-        tenantId,
-        apiBaseUrl,
-        isAuthReady && !isLoading && count > 0
-    );
+    // Single API call: returns count (from metadata) + graph preview data
+    const { count, nodes: graphNodes, edges: graphEdges, isLoading, error, lastUpdated, refetch } =
+        useRelatedDocumentGraphData(documentId, tenantId, apiBaseUrl, isAuthReady);
 
     // Dialog open/close state
     const [isDialogOpen, setIsDialogOpen] = React.useState(false);
@@ -144,7 +132,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         : null;
 
     return (
-        <div data-pcf-version="1.0.19">
+        <div data-pcf-version="1.20.2">
             <RelationshipCountCard
                 count={count}
                 isLoading={effectiveIsLoading}

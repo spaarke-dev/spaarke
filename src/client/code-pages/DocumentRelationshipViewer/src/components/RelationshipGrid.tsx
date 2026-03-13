@@ -55,6 +55,8 @@ export interface RelationshipGridProps {
     onFilteredRowsChange?: (rows: GridRow[]) => void;
     /** Callback when a row is clicked — opens FilePreviewDialog */
     onRowClick?: (documentId: string, documentName: string) => void;
+    /** Callback when a row is hovered — prefetch preview URL */
+    onRowHover?: (documentId: string) => void;
 }
 
 const useStyles = makeStyles({
@@ -63,6 +65,8 @@ const useStyles = makeStyles({
         height: "100%",
         overflow: "auto",
         backgroundColor: tokens.colorNeutralBackground1,
+        scrollbarWidth: "none",
+        "&::-webkit-scrollbar": { display: "none" },
     },
     grid: {
         width: "100%",
@@ -94,6 +98,9 @@ const useStyles = makeStyles({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
     },
+    sourceBadge: {
+        flexShrink: 0,
+    },
     similarityHigh: { color: tokens.colorStatusSuccessForeground1, fontWeight: tokens.fontWeightSemibold },
     similarityMed: { color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightSemibold },
     similarityLow: { color: tokens.colorStatusWarningForeground1 },
@@ -108,12 +115,6 @@ const useStyles = makeStyles({
         ":hover": {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
-    },
-    previewIcon: {
-        color: tokens.colorNeutralForeground3,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
     },
 });
 
@@ -149,7 +150,7 @@ const getRelationshipBadgeColor = (type: string): "brand" | "success" | "warning
     }
 };
 
-export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searchQuery, onFilteredRowsChange, onRowClick }) => {
+export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searchQuery, onFilteredRowsChange, onRowClick, onRowHover }) => {
     const styles = useStyles();
 
     // Filter out hub nodes (matter/project/invoice/email) — show only documents
@@ -180,6 +181,12 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
         }
     }, [onRowClick]);
 
+    const handleRowHoverInternal = useCallback((row: GridRow) => {
+        if (onRowHover && row.data.documentId) {
+            onRowHover(row.data.documentId);
+        }
+    }, [onRowHover]);
+
     const columns: TableColumnDefinition<GridRow>[] = useMemo(() => [
         createTableColumn<GridRow>({
             columnId: "name",
@@ -190,6 +197,9 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                     <div className={styles.nameCell}>
                         <span className={styles.nameIcon}>{getFileIcon(row.data.fileType ?? "file")}</span>
                         <Text className={styles.nameText} title={row.data.name}>{row.data.name}</Text>
+                        {row.data.isSource && (
+                            <Badge className={styles.sourceBadge} appearance="filled" color="brand" size="small">Source</Badge>
+                        )}
                     </div>
                 </TableCellLayout>
             ),
@@ -263,22 +273,24 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
         createTableColumn<GridRow>({
             columnId: "preview",
             renderHeaderCell: () => "Preview",
-            renderCell: () => (
+            renderCell: (row) => (
                 <TableCellLayout>
-                    <span className={styles.previewIcon}><Eye20Regular /></span>
+                    {row.data.documentId && (
+                        <Eye20Regular style={{ color: tokens.colorBrandForeground1, cursor: "pointer" }} />
+                    )}
                 </TableCellLayout>
             ),
         }),
     ], [styles, handleRowClickInternal]);
 
     const columnSizingOptions: TableColumnSizingOptions = useMemo(() => ({
-        name:         { defaultWidth: 700, minWidth: 300, idealWidth: 700 },
+        name:         { defaultWidth: 600, minWidth: 300, idealWidth: 600 },
         relationship: { defaultWidth: 160, minWidth: 100, idealWidth: 160 },
         similarity:   { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
         type:         { defaultWidth: 100, minWidth: 80,  idealWidth: 100 },
         parent:       { defaultWidth: 180, minWidth: 100, idealWidth: 180 },
         modified:     { defaultWidth: 130, minWidth: 100, idealWidth: 130 },
-        preview:      { defaultWidth: 70,  minWidth: 60,  idealWidth: 70 },
+        preview:      { defaultWidth: 60,  minWidth: 50,  idealWidth: 60 },
     }), []);
 
     if (rows.length === 0) {
@@ -317,6 +329,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({ nodes, searc
                             key={rowId}
                             className={onRowClick ? styles.clickableRow : undefined}
                             onClick={() => handleRowClickInternal(item)}
+                            onMouseEnter={() => handleRowHoverInternal(item)}
                         >
                             {({ renderCell }) => (
                                 <DataGridCell>{renderCell(item)}</DataGridCell>

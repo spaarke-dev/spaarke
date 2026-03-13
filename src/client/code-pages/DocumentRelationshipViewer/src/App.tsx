@@ -47,7 +47,7 @@ import { RelationshipGrid, type GridRow } from "./components/RelationshipGrid";
 // Network and Timeline views available but not in toolbar yet:
 // import { RelationshipNetwork } from "./components/RelationshipNetwork";
 // import { RelationshipTimeline } from "./components/RelationshipTimeline";
-import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, type FilterSettings } from "./components/ControlPanel";
+import { ControlPanel, DEFAULT_FILTER_SETTINGS, DOCUMENT_TYPES, RELATIONSHIP_TYPES, type FilterSettings } from "./components/ControlPanel";
 // NodeActionBar removed — node click now opens FilePreviewDialog
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
 import { initializeAuth, getToken } from "./services/authInit";
@@ -204,6 +204,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [previewInWorkspace, setPreviewInWorkspace] = useState(false);
 
+    // Preview URL cache with TTL — avoids re-fetching on repeated preview of same document.
+    // SPE preview URLs expire after ~15 min; we use 10 min TTL to avoid stale URLs.
+    // Max 50 entries (LRU eviction by insertion order).
+    const previewUrlCacheRef = useRef<Map<string, { url: string; ts: number }>>(new Map());
+    const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+    const CACHE_MAX_SIZE = 50;
+
     // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
     useEffect(() => {
         let cancelled = false;
@@ -268,19 +275,60 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         setPreviewDocumentId(null);
     }, []);
 
-    // FilePreviewDialog callbacks (PCF-style interface)
+    // Helper: get from cache if not expired
+    const getCachedUrl = useCallback((docId: string): string | null => {
+        const entry = previewUrlCacheRef.current.get(docId);
+        if (!entry) return null;
+        if (Date.now() - entry.ts > CACHE_TTL_MS) {
+            previewUrlCacheRef.current.delete(docId);
+            return null;
+        }
+        return entry.url;
+    }, []);
+
+    // Helper: put into cache with LRU eviction
+    const setCachedUrl = useCallback((docId: string, url: string) => {
+        const cache = previewUrlCacheRef.current;
+        // Evict oldest entries if at capacity
+        if (cache.size >= CACHE_MAX_SIZE) {
+            const firstKey = cache.keys().next().value;
+            if (firstKey) cache.delete(firstKey);
+        }
+        cache.set(docId, { url, ts: Date.now() });
+    }, []);
+
+    // Prefetch a preview URL into cache (fire-and-forget, e.g. on hover)
+    const prefetchPreviewUrl = useCallback((docId: string) => {
+        if (!docId || getCachedUrl(docId)) return;
+        void (async () => {
+            try {
+                const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${docId}/preview-url`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const url = data.previewUrl ?? data.url;
+                if (url) setCachedUrl(docId, url);
+            } catch { /* silent prefetch failure */ }
+        })();
+    }, [apiBaseUrl, getCachedUrl, setCachedUrl]);
+
+    // FilePreviewDialog callbacks — checks cache first
     const fetchPreviewUrl = useCallback(async (): Promise<string | null> => {
         if (!previewDocumentId) return null;
+        // Return cached URL immediately if available
+        const cached = getCachedUrl(previewDocumentId);
+        if (cached) return cached;
         try {
             const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${previewDocumentId}/preview-url`);
             if (!res.ok) return null;
             const data = await res.json();
-            return data.previewUrl ?? data.url ?? null;
+            const url = data.previewUrl ?? data.url ?? null;
+            if (url) setCachedUrl(previewDocumentId, url);
+            return url;
         } catch {
             console.error("[FilePreview] Failed to get preview URL:", previewDocumentId);
             return null;
         }
-    }, [previewDocumentId, apiBaseUrl]);
+    }, [previewDocumentId, apiBaseUrl, getCachedUrl, setCachedUrl]);
 
     const handleOpenFile = useCallback((mode: "desktop" | "web") => {
         if (!previewDocumentId) return;
@@ -377,6 +425,79 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     // Use theme from URL param (passed by PCF control) instead of system preference
     const isDarkMode = isDark;
 
+    // Client-side filtering: document types, relationship types, and search query.
+    // NOTE: These useMemo hooks MUST be before any early returns to satisfy
+    // React's Rules of Hooks (hooks must run in the same order every render).
+
+    // Map document type checkbox keys to file extensions they cover
+    const docTypeExtensions = React.useMemo(() => {
+        const map: Record<string, string[]> = {
+            pdf: ["pdf"],
+            docx: ["docx", "doc", "rtf"],
+            xlsx: ["xlsx", "xls", "csv"],
+            pptx: ["pptx", "ppt"],
+            txt: ["txt"],
+            other: ["msg", "eml", "html", "htm", "xml", "json", "zip", "rar", "7z", "jpg", "jpeg", "png", "gif", "svg", "mp4", "avi", "mov", "unknown", "file"],
+        };
+        const allowed = new Set<string>();
+        for (const key of filters.documentTypes) {
+            for (const ext of map[key] ?? []) allowed.add(ext);
+        }
+        return allowed;
+    }, [filters.documentTypes]);
+
+    const allDocTypesSelected = filters.documentTypes.length >= DOCUMENT_TYPES.length;
+    const allRelTypesSelected = filters.relationshipTypes.length >= RELATIONSHIP_TYPES.length;
+
+    // Step 1: Filter edges by relationship type
+    const typeFilteredEdges = React.useMemo(() => {
+        if (allRelTypesSelected) return edges;
+        const allowedRels = new Set<string>(filters.relationshipTypes);
+        return edges.filter((e) => {
+            const relType = e.data?.relationshipType;
+            return relType ? allowedRels.has(relType) : true;
+        });
+    }, [edges, filters.relationshipTypes, allRelTypesSelected]);
+
+    // Step 2: Filter nodes by document type, then remove disconnected non-source nodes
+    const typeFilteredNodes = React.useMemo(() => {
+        if (allDocTypesSelected && allRelTypesSelected) return nodes;
+        const connectedIds = new Set<string>();
+        for (const e of typeFilteredEdges) {
+            connectedIds.add(e.source);
+            connectedIds.add(e.target);
+        }
+        return nodes.filter((n) => {
+            // Always keep source node
+            if (n.data.isSource) return true;
+            // Filter by document type (file extension)
+            if (!allDocTypesSelected) {
+                const ft = (n.data.fileType ?? "unknown").toLowerCase();
+                if (!docTypeExtensions.has(ft)) return false;
+            }
+            // If relationship types are filtered, only keep nodes still connected
+            if (!allRelTypesSelected && !connectedIds.has(n.id)) return false;
+            return true;
+        });
+    }, [nodes, typeFilteredEdges, allDocTypesSelected, allRelTypesSelected, docTypeExtensions]);
+
+    // Step 3: Apply search query filter on top
+    const filteredGraphNodes = React.useMemo(() => {
+        const base = typeFilteredNodes;
+        if (!searchQuery || searchQuery.trim() === "") return base;
+        const query = searchQuery.toLowerCase();
+        return base.filter((n) => n.data.isSource || n.data.name.toLowerCase().includes(query));
+    }, [typeFilteredNodes, searchQuery]);
+
+    const filteredGraphEdges = React.useMemo(() => {
+        const base = typeFilteredEdges;
+        const visibleIds = new Set(filteredGraphNodes.map((n) => n.id));
+        return base.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
+    }, [typeFilteredEdges, filteredGraphNodes]);
+
+    const relatedCount = filteredGraphNodes.filter((n) => !n.data.isSource).length;
+    const edgeCount = filteredGraphEdges.length;
+
     // Missing params error
     if (!documentId || !tenantId) {
         return (
@@ -402,23 +523,6 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
             </div>
         );
     }
-
-    // Filter graph nodes by search query (case-insensitive name match)
-    const filteredGraphNodes = React.useMemo(() => {
-        if (!searchQuery || searchQuery.trim() === "") return nodes;
-        const query = searchQuery.toLowerCase();
-        return nodes.filter((n) => n.data.isSource || n.data.name.toLowerCase().includes(query));
-    }, [nodes, searchQuery]);
-
-    // Filter edges to only include those between visible nodes
-    const filteredGraphEdges = React.useMemo(() => {
-        if (!searchQuery || searchQuery.trim() === "") return edges;
-        const visibleIds = new Set(filteredGraphNodes.map((n) => n.id));
-        return edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
-    }, [edges, filteredGraphNodes, searchQuery]);
-
-    const relatedCount = nodes.filter((n) => !n.data.isSource).length;
-    const edgeCount = edges.length;
 
     return (
         <div className={styles.root}>
@@ -553,11 +657,12 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                         />
                     ) : viewMode === "grid" ? (
                         <RelationshipGrid
-                            nodes={nodes}
+                            nodes={filteredGraphNodes}
                             isDarkMode={isDarkMode}
                             searchQuery={searchQuery}
                             onFilteredRowsChange={handleFilteredRowsChange}
                             onRowClick={handleRowClick}
+                            onRowHover={prefetchPreviewUrl}
                         />
                     ) : null}
                 </div>

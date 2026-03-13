@@ -12,7 +12,9 @@
       "Grep(**)",
       "Skill(*)",
       "Task(*)",
-      "Bash"
+      "Bash",
+      "Read(//c/code_files/spaarke-wt-ai-document-relationship-visuals/src/client/shared/Spaarke.UI.Components/**)",
+      "Bash(xargs -I {} basename {})"
     ]
   }
 }

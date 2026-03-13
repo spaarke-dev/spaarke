@@ -97,46 +97,22 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
     );
 
     // Run synchronous force simulation — positions resolved before first render
-    // Source node defaults to left side of canvas (negative x offset)
     const layoutResult = useForceSimulation(forceNodes, forceEdges, {
         mode: "hub-spoke",
         chargeStrength: layoutOptions?.chargeStrength ?? -1000,
         linkDistanceMultiplier: layoutOptions?.distanceMultiplier ?? 400,
         collisionRadius: layoutOptions?.collisionRadius ?? 100,
-        center: { x: layoutOptions?.centerX ?? -200, y: layoutOptions?.centerY ?? 0 },
+        center: { x: layoutOptions?.centerX ?? 0, y: layoutOptions?.centerY ?? 0 },
     });
 
     // Map positioned output back to @xyflow/react Node format
-    // Post-process: shift so source node is at left, children spread right
     const layoutNodes = useMemo<DocumentNode[]>(() => {
         const posMap = new Map(layoutResult.nodes.map((pn) => [pn.id, pn]));
-
-        // Find the source node position
-        const sourceNode = inputNodes.find((n) => n.data.isSource);
-        const sourcePos = sourceNode ? posMap.get(sourceNode.id) : undefined;
-        const sourceX = sourcePos?.x ?? 0;
-
-        // Find the average x of non-source nodes
-        const nonSourcePositions = inputNodes
-            .filter((n) => !n.data.isSource)
-            .map((n) => posMap.get(n.id)?.x ?? 0);
-        const avgNonSourceX = nonSourcePositions.length > 0
-            ? nonSourcePositions.reduce((a, b) => a + b, 0) / nonSourcePositions.length
-            : sourceX + 200;
-
-        // If source is not already to the left of children, flip x positions around the midpoint
-        const midX = (sourceX + avgNonSourceX) / 2;
-        const needsFlip = sourceX > avgNonSourceX;
-
         return inputNodes.map((node) => {
             const pos = posMap.get(node.id);
-            let x = pos?.x ?? 0;
-            if (needsFlip) {
-                x = midX - (x - midX); // mirror around midpoint
-            }
             return {
                 ...node,
-                position: { x, y: pos?.y ?? 0 },
+                position: { x: pos?.x ?? 0, y: pos?.y ?? 0 },
                 data: { ...node.data, compactMode },
             };
         });
