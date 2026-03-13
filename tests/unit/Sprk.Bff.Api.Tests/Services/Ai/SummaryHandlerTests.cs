@@ -271,7 +271,7 @@ public class SummaryHandlerTests
 
         var jsonResponse = """{"summary": "## Executive Summary\n\nThis is the summary.", "confidence": 0.85}""";
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jsonResponse);
 
         // Act
@@ -301,7 +301,7 @@ public class SummaryHandlerTests
 
         var callCount = 0;
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() =>
             {
                 callCount++;
@@ -326,8 +326,8 @@ public class SummaryHandlerTests
 
         // Mock the OpenAI client to throw when cancellation is requested
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((_, _, ct) => ct.ThrowIfCancellationRequested())
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string?, int?, CancellationToken>((_, _, _, ct) => ct.ThrowIfCancellationRequested())
             .ThrowsAsync(new OperationCanceledException());
 
         cts.Cancel();
@@ -349,7 +349,7 @@ public class SummaryHandlerTests
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("OpenAI service unavailable"));
 
         // Act
@@ -369,7 +369,7 @@ public class SummaryHandlerTests
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Test summary response", "confidence": 0.9}""");
 
         // Act
@@ -411,7 +411,7 @@ This is the executive summary.
         var jsonResponse = $$"""{"summary": "{{structuredSummary.Replace("\n", "\\n").Replace("\"", "\\\"")}}", "confidence": 0.88}""";
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jsonResponse);
 
         // Act
@@ -437,7 +437,7 @@ This is the executive summary.
 
         var summaryText = "This is a test summary with exactly eleven words in it.";
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync($$$"""{"summary": "{{{summaryText}}}", "confidence": 0.9}""");
 
         // Act
@@ -458,7 +458,7 @@ This is the executive summary.
         var tool = CreateTool(configuration: """{"format": "paragraph"}""");
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "This is a paragraph summary.", "confidence": 0.92}""");
 
         // Act
@@ -479,7 +479,7 @@ This is the executive summary.
         var tool = CreateTool(configuration: """{"format": "bullets"}""");
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "- Point 1\n- Point 2\n- Point 3", "confidence": 0.88}""");
 
         // Act
@@ -501,8 +501,8 @@ This is the executive summary.
 
         string capturedPrompt = "";
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) => capturedPrompt = prompt)
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) => capturedPrompt = prompt)
             .ReturnsAsync("""{"summary": "Test summary", "confidence": 0.85}""");
 
         // Act
@@ -522,7 +522,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Summary with context", "confidence": 0.87}""");
 
         // Act
@@ -540,7 +540,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Focused summary", "confidence": 0.9}""");
 
         // Act
@@ -570,7 +570,7 @@ This is the executive summary.
         });
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => responses.Count > 0 ? responses.Dequeue() : """{"summary": "Fallback summary", "confidence": 0.7}""");
 
         // Act
@@ -579,7 +579,7 @@ This is the executive summary.
         // Assert
         Assert.True(result.Success);
         _openAiClientMock.Verify(
-            x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.AtLeast(2));
     }
 
@@ -592,7 +592,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Chunk summary text", "confidence": 0.85}""");
 
         // Act
@@ -616,7 +616,7 @@ This is the executive summary.
         var callCount = 0;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .Returns<string, string?, CancellationToken>((_, _, _) =>
             {
                 callCount++;
@@ -649,8 +649,8 @@ This is the executive summary.
 
         string capturedPrompt = "";
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) => capturedPrompt = prompt)
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) => capturedPrompt = prompt)
             .ReturnsAsync("""{"summary": "Default summary", "confidence": 0.85}""");
 
         // Act
@@ -670,7 +670,7 @@ This is the executive summary.
 
         // Test fallback behavior when JSON parsing fails
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("");
 
         // Act
@@ -693,7 +693,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Summary of document with special characters", "confidence": 0.9}""");
 
         // Act
@@ -712,7 +712,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Summary of multilingual document", "confidence": 0.88}""");
 
         // Act
@@ -730,7 +730,7 @@ This is the executive summary.
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Test summary with confidence", "confidence": 0.92}""");
 
         // Act
@@ -753,7 +753,7 @@ This is the executive summary.
 
         // AI returns confidence > 1.0, should be clamped to 1.0
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Test summary", "confidence": 1.5}""");
 
         // Act
@@ -779,7 +779,7 @@ This is the executive summary.
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(markdownResponse);
 
         // Act

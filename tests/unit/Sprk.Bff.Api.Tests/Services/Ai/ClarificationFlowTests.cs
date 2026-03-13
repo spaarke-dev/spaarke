@@ -67,7 +67,7 @@ public class ClarificationFlowTests
         };
 
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""
                 {
                     "question": "What type of node would you like to add?",
@@ -109,7 +109,7 @@ public class ClarificationFlowTests
         };
 
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("AI service error"));
 
         // Act
@@ -144,7 +144,7 @@ public class ClarificationFlowTests
         };
 
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("AI service error"));
 
         // Act
@@ -248,7 +248,7 @@ public class ClarificationFlowTests
         };
 
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""
                 {
                     "operation": "BUILD",
@@ -304,7 +304,7 @@ public class ClarificationFlowTests
         };
 
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""
                 {
                     "operation": "BUILD",
@@ -328,7 +328,7 @@ public class ClarificationFlowTests
         result.Should().NotBeNull();
         result.Action.Should().Be(IntentAction.AddNode);
         _openAiClientMock.Verify(
-            c => c.GetCompletionAsync(It.Is<string>(s => s.Contains("Condition")), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            c => c.GetCompletionAsync(It.Is<string>(s => s.Contains("Condition")), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -451,7 +451,7 @@ public class ClarificationFlowTests
 
         // Mock low confidence classification
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""
                 {
                     "operation": "CLARIFY",
@@ -503,7 +503,7 @@ public class ClarificationFlowTests
 
         // Mock high confidence classification after context
         _openAiClientMock
-            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""
                 {
                     "operation": "BUILD",

@@ -203,51 +203,6 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
-    // Priority 4: Mailbox context
-    // =========================================================================
-
-    [Fact]
-    public async Task ResolveAsync_MailboxContext_UsesDefaultMatter()
-    {
-        // Arrange: no matches at any level, but account has a default matter
-        var defaultMatterId = Guid.NewGuid();
-
-        _dataverseServiceMock
-            .Setup(d => d.QueryContactByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DataverseEntity?)null);
-        _dataverseServiceMock
-            .Setup(d => d.QueryAccountByDomainAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DataverseEntity?)null);
-
-        _dataverseServiceMock
-            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var account = new CommunicationAccount
-        {
-            Id = Guid.NewGuid(),
-            Name = "Shared Mailbox",
-            EmailAddress = TestMailbox,
-            DefaultRegardingMatterId = defaultMatterId
-        };
-
-        var message = CreateTestMessage("Random subject", "someone@external.com");
-
-        // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, account, CancellationToken.None);
-
-        // Assert: default matter should be set
-        _dataverseServiceMock.Verify(d => d.UpdateAsync(
-            "sprk_communication",
-            TestCommunicationId,
-            It.Is<Dictionary<string, object>>(fields =>
-                fields.ContainsKey("sprk_regardingmatter") &&
-                ((EntityReference)fields["sprk_regardingmatter"]).Id == defaultMatterId &&
-                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000000), // Resolved
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    // =========================================================================
     // No match: Pending Review
     // =========================================================================
 

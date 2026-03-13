@@ -757,6 +757,11 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                     }
 
                     // Get content to memory stream
+                    if (mimePart.Content is null)
+                    {
+                        skippedParts++;
+                        continue;
+                    }
                     var contentStream = new MemoryStream();
                     mimePart.Content.DecodeTo(contentStream);
                     contentStream.Position = 0;

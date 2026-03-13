@@ -59,6 +59,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -93,6 +94,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -131,6 +133,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -167,6 +170,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -205,6 +209,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -240,6 +245,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -272,6 +278,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -297,8 +304,9 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync("""{"intent": "ADD_NODE", "confidence": 0.9}""");
 
@@ -336,8 +344,9 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync("""{"intent": "CREATE_PLAYBOOK", "confidence": 0.95}""");
 
@@ -361,6 +370,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("This is not valid JSON");
 
@@ -382,6 +392,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("invalid response");
 
@@ -400,6 +411,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("oops");
 
@@ -429,6 +441,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -481,6 +494,7 @@ public class IntentClassificationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 

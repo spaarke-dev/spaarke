@@ -265,7 +265,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -299,7 +299,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -331,7 +331,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -355,7 +355,7 @@ public class DocumentClassifierHandlerTests
         cts.Cancel();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         // Act
@@ -374,7 +374,7 @@ public class DocumentClassifierHandlerTests
         var tool = CreateTool();
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("AI service unavailable"));
 
         // Act
@@ -403,7 +403,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -425,7 +425,7 @@ public class DocumentClassifierHandlerTests
         var aiResponse = "This is not valid JSON at all";
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -448,7 +448,7 @@ public class DocumentClassifierHandlerTests
         var aiResponse = """{"category": "Report", "confidence": 0.8}""";
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -476,7 +476,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -504,7 +504,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         _ragServiceMock
@@ -545,7 +545,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         _ragServiceMock
@@ -572,7 +572,7 @@ public class DocumentClassifierHandlerTests
         var aiResponse = """{"category": "Report", "confidence": 0.7}""";
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -584,6 +584,7 @@ public class DocumentClassifierHandlerTests
         _openAiClientMock.Verify(x => x.GetCompletionAsync(
             It.Is<string>(s => s.Contains("[... document truncated ...]")),
             It.IsAny<string?>(),
+            It.IsAny<int?>(),
             It.IsAny<CancellationToken>()));
     }
 
@@ -596,7 +597,7 @@ public class DocumentClassifierHandlerTests
         var aiResponse = """{"category": "NDA", "confidence": 1.5}"""; // Invalid confidence
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act
@@ -625,7 +626,7 @@ public class DocumentClassifierHandlerTests
             """;
 
         _openAiClientMock
-            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
         // Act

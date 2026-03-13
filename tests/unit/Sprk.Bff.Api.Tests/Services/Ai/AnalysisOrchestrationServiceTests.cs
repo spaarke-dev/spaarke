@@ -67,6 +67,8 @@ public class AnalysisOrchestrationServiceTests
         // Create export registry with empty services for basic tests
         _exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
 
+        var distributedCacheMock = new Mock<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+
         _service = new AnalysisOrchestrationService(
             _dataverseServiceMock.Object,
             _speFileOperationsMock.Object,
@@ -83,6 +85,7 @@ public class AnalysisOrchestrationServiceTests
             _nodeServiceMock.Object,
             _httpContextAccessorMock.Object,
             _storageRetryPolicyMock.Object,
+            distributedCacheMock.Object,
             _options,
             _loggerMock.Object);
     }
@@ -643,7 +646,7 @@ public class AnalysisOrchestrationServiceTests
     private void SetupOpenAiStreaming(IEnumerable<string> tokens)
     {
         _openAiClientMock
-            .Setup(x => x.StreamCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.StreamCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .Returns(AsyncEnumerable(tokens));
     }
 

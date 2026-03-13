@@ -48,8 +48,11 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
         _service = new ScopeResolverService(
-            _dataverseServiceMock.Object,
             _playbookServiceMock.Object,
+            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
+            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
+            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
+            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
@@ -564,8 +567,11 @@ public class ScopeResolverServiceTests : IDisposable
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
         _service = new ScopeResolverService(
-            _dataverseServiceMock.Object,
             _playbookServiceMock.Object,
+            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
+            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
+            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
+            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
@@ -1016,8 +1022,11 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
         _service = new ScopeResolverService(
-            _dataverseServiceMock.Object,
             _playbookServiceMock.Object,
+            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
+            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
+            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
+            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
