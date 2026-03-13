@@ -52,7 +52,7 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
 
                 // CORS
-                ["Cors:AllowedOrigins"] = "https://localhost:5173",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
 
                 // Azure AD / UAMI identity
                 ["UAMI_CLIENT_ID"] = "test-client-id",

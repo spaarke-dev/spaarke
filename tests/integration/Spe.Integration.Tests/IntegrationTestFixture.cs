@@ -31,7 +31,7 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
 
                 // CORS
-                ["Cors:AllowedOrigins"] = "https://localhost:5173",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
 
                 // Azure AD / UAMI
                 ["UAMI_CLIENT_ID"] = "test-client-id",

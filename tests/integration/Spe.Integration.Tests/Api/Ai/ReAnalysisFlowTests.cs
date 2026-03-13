@@ -351,7 +351,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("Graph:TenantId", "test-tenant-id");
         builder.UseSetting("Graph:ClientId", "test-client-id");
         builder.UseSetting("Graph:ClientSecret", "test-secret");
-        builder.UseSetting("Cors:AllowedOrigins", "https://localhost:3000");
+        builder.UseSetting("Cors:AllowedOrigins:0", "https://localhost:3000");
         builder.UseSetting("AzureAiSearch:Endpoint", "https://test-search.search.windows.net");
         builder.UseSetting("AzureAiSearch:ApiKey", "test-api-key");
         builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "spaarke-knowledge-index-v2");
