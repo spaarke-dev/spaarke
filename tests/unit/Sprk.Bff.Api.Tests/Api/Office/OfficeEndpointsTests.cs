@@ -533,6 +533,16 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
                 options.Enabled = false;
             });
 
+            // Override Microsoft Identity Web's PostConfigure for auth scheme
+            services.PostConfigure<AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = "Test";
+                options.DefaultChallengeScheme = "Test";
+            });
+
+            // Remove hosted services to prevent SemaphoreSlim dispose race in Release mode
+            services.RemoveAll<IHostedService>();
+
             // Register Office rate limit service
             services.AddSingleton<IOfficeRateLimitService, OfficeRateLimitService>();
 
