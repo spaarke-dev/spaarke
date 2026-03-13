@@ -62,6 +62,8 @@ jobs:
   validate:
     name: Validate Bicep
     runs-on: ubuntu-latest
+    env:
+      AZURE_CONFIG_DIR: /tmp/.azure
 
     steps:
       - name: Checkout
