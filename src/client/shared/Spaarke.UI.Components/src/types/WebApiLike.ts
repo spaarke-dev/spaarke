@@ -86,6 +86,26 @@ export interface IWebApiLike {
 }
 
 /**
+ * Extended WebAPI interface that includes record creation.
+ *
+ * Used by EntityCreationService and other services that need to create
+ * Dataverse records in addition to reading them.
+ */
+export interface IWebApiWithCreate extends IWebApiLike {
+  /**
+   * Creates a new entity record in Dataverse.
+   *
+   * @param entityType - The logical name of the entity (e.g., "sprk_matter")
+   * @param data - Entity payload with field values and @odata.bind lookups
+   * @returns Promise resolving to an object with the created record's GUID
+   */
+  createRecord(
+    entityType: string,
+    data: Record<string, unknown>
+  ): Promise<{ id: string }>;
+}
+
+/**
  * Helper to create IWebApiLike from Xrm.WebApi in Custom Pages
  *
  * @param xrmWebApi - The Xrm.WebApi object from window.parent.Xrm or Xrm global

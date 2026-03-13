@@ -1,3 +1,11 @@
+export { EntityCreationService } from "./EntityCreationService";
+export type {
+  IFileUploadResult,
+  ISpeFileMetadata,
+  IDocumentLinkResult,
+  IUploadProgress,
+  AuthenticatedFetchFn,
+} from "./EntityCreationService";
 export * from "./CommandRegistry";
 export * from "./CommandExecutor";
 export { FieldMappingService } from "./FieldMappingService";
@@ -32,6 +40,18 @@ export type {
   IGridFeatures,
   GridConfigViewType,
 } from "./ConfigurationService";
+export {
+  resolveRecordType,
+  buildRecordUrl,
+  findNavProp,
+  applyResolverFields,
+} from "./PolymorphicResolverService";
+export type {
+  IPolymorphicWebApi,
+  IRecordTypeRef,
+  INavPropEntry,
+  IResolverFieldValues,
+} from "./PolymorphicResolverService";
 export { SprkChatBridge } from "./SprkChatBridge";
 export type {
   SprkChatBridgeEventMap,

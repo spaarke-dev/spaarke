@@ -9,4 +9,5 @@ export * from "./useOptimisticSave";
 export * from "./useWriteMode";
 export * from "./useSseStream";
 export * from "./useAiSummary";
+export * from "./useAiPrefill";
 export * from "./useForceSimulation";

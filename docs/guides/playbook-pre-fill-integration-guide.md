@@ -5,7 +5,7 @@
 > **Audience**: Claude Code sessions working on playbook creation, BFF endpoint wiring, and frontend integration.
 >
 > **Created**: March 5, 2026
-> **Updated**: March 6, 2026 — Added $choices constrained decoding, corrected Dataverse field names
+> **Updated**: March 12, 2026 — Shared library promotion: useAiPrefill hook, findBestLookupMatch utility, AiFieldTag, EntityCreationService DI
 
 ---
 
@@ -247,37 +247,26 @@ The frontend resolves AI display names by searching these Dataverse tables:
 
 ### Fuzzy Match Implementation
 
-Located in `CreateRecordStep.tsx` — the `findBestLookupMatch()` function:
+Located in the shared library at `src/client/shared/Spaarke.UI.Components/src/utils/lookupMatching.ts`:
 
 ```typescript
-function findBestLookupMatch(aiValue: string, candidates: ILookupItem[]): ILookupItem | null {
-  const aiLower = aiValue.toLowerCase().trim();
-  let bestScore = 0;
-  let bestItem: ILookupItem | null = null;
-
-  for (const item of candidates) {
-    const dbLower = item.name.toLowerCase().trim();
-    let score = 0;
-
-    if (dbLower === aiLower)                                         score = 1.0;  // Exact
-    else if (dbLower.startsWith(aiLower) || aiLower.startsWith(dbLower)) score = 0.8;  // Prefix
-    else if (dbLower.includes(aiLower) || aiLower.includes(dbLower))     score = 0.7;  // Contains
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestItem = item;
-    }
-  }
-
-  // Trust single Dataverse result even if score < 0.4
-  if (bestScore < 0.4 && candidates.length === 1) {
-    bestScore = 0.5;
-    bestItem = candidates[0];
-  }
-
-  return bestScore >= 0.4 ? bestItem : null;
-}
+import { findBestLookupMatch } from '@spaarke/ui-components';
+// or: import { findBestLookupMatch } from '../utils/lookupMatching';
 ```
+
+The function scores AI display names against Dataverse lookup results:
+
+```typescript
+function findBestLookupMatch(aiValue: string, candidates: ILookupItem[]): ILookupItem | null
+```
+
+| Score | Condition |
+|-------|-----------|
+| `1.0` | Exact match (case-insensitive) |
+| `0.8` | One string starts with the other |
+| `0.7` | One contains the other |
+| `0.5` | Single result from Dataverse search |
+| `0.4` | Minimum acceptance threshold |
 
 **With $choices**: For constrained fields (matterTypeName, practiceAreaName, projectTypeName), the AI always returns an exact Dataverse value, so `findBestLookupMatch` will always score `1.0` (exact match). The fuzzy matching logic is a safety net, not the primary resolution mechanism.
 
@@ -364,21 +353,91 @@ await foreach (var evt in _playbookService.ExecuteAsync(request, httpContext, ct
 
 ---
 
-## Part 5: Frontend Integration
+## Part 5: Frontend Integration — `useAiPrefill` Hook
 
-### CreateRecordStep (Matter — Implemented)
+All entity wizards use the shared `useAiPrefill` hook from `@spaarke/ui-components`. This eliminates the ~160 LOC of duplicated pre-fill logic that was previously inline in each wizard step.
 
-The matter wizard already has AI pre-fill in `CreateRecordStep.tsx`:
-1. On mount with `uploadedFiles`, sends to `/api/workspace/matters/pre-fill`
-2. Parses response and resolves lookups via `findBestLookupMatch`
-3. Applies to form state with "AI Pre-filled" badges
+### Shared Hook Location
 
-### CreateProjectStep (Project — Planned)
+```
+src/client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill.ts
+```
 
-Follows the same pattern:
-1. Accept `uploadedFiles` prop from `ProjectWizardDialog`
-2. On mount, send files to `POST /api/workspace/projects/pre-fill`
-3. Parse response, resolve lookups, apply to form
+### Usage Pattern
+
+```typescript
+import { useAiPrefill, type IResolvedPrefillFields } from '@spaarke/ui-components';
+
+// 1. Define how to apply resolved fields to your form state
+const handlePrefillApply = useCallback(
+  (resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
+    // Map resolved fields to form dispatch / setState
+    const updates: Partial<IMyFormState> = {};
+    for (const [key, value] of Object.entries(resolved)) {
+      if (typeof value === 'string') {
+        updates[key] = value;
+      } else {
+        // Lookup: set both id and name fields
+        updates[key.replace(/Name$/, 'Id')] = value.id;
+        updates[key] = value.name;
+      }
+    }
+    setFormState(prev => ({ ...prev, ...updates }));
+  },
+  []
+);
+
+// 2. Call the hook with entity-specific configuration
+const prefill = useAiPrefill({
+  endpoint: '/workspace/matters/pre-fill',      // BFF endpoint path
+  uploadedFiles,                                  // From Step 1
+  authenticatedFetch,                             // OBO token fetch
+  bffBaseUrl: getBffBaseUrl(),                    // BFF base URL
+  fieldExtractor: (data) => ({                    // Map AI response → fields
+    textFields: {
+      matterName: data.matterName as string | undefined,
+      summary: data.summary as string | undefined,
+    },
+    lookupFields: {
+      matterTypeName: data.matterTypeName as string | undefined,
+      practiceAreaName: data.practiceAreaName as string | undefined,
+    },
+  }),
+  lookupResolvers: {                              // Dataverse search functions
+    matterTypeName: (v) => searchMatterTypes(webApi, v),
+    practiceAreaName: (v) => searchPracticeAreas(webApi, v),
+  },
+  onApply: handlePrefillApply,                    // Apply resolved values
+  skipIfInitialized: !!hasInitialValues,          // Skip on remount
+  logPrefix: 'CreateMatter',                      // Console log prefix
+});
+
+// 3. Use prefill.status for UI state
+const isLoading = prefill.status === 'loading';
+```
+
+### What the Hook Handles
+
+- Builds `FormData` from `IUploadedFile[]` and POSTs to BFF endpoint
+- Timeout + `AbortController` (default 60s)
+- Cancellation on unmount
+- Double-execution guard (ref-based)
+- Resolves lookup fields via `findBestLookupMatch` + caller's search callbacks
+- Tracks pre-filled field names for `AiFieldTag` display
+
+### What Stays Entity-Specific
+
+- `fieldExtractor` — maps AI response JSON to text/lookup field categories
+- `lookupResolvers` — which Dataverse tables to search per field
+- `onApply` — how resolved values are applied to the entity form state
+- `endpoint` — BFF path for the entity type
+
+### Implemented Wizards
+
+| Wizard | Endpoint | Status |
+|--------|----------|--------|
+| CreateRecordStep (Matter) | `/workspace/matters/pre-fill` | Implemented |
+| CreateProjectStep (Project) | `/workspace/projects/pre-fill` | Implemented |
 
 ---
 
@@ -455,17 +514,45 @@ Follows the same pattern:
 
 ---
 
-## Part 8: Existing Code to Reuse
+## Part 8: Shared Library Components
+
+All reusable pre-fill components live in the shared library (`src/client/shared/Spaarke.UI.Components/`). Entity-specific wizards import from `@spaarke/ui-components`.
+
+### Shared Library (`@spaarke/ui-components`)
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `useAiPrefill` hook | `src/hooks/useAiPrefill.ts` | Reusable pre-fill orchestration (FormData, timeout, lookup resolution) |
+| `findBestLookupMatch()` | `src/utils/lookupMatching.ts` | Fuzzy match AI display names against Dataverse lookups |
+| `AiFieldTag` | `src/components/AiFieldTag/AiFieldTag.tsx` | "AI" sparkle badge for pre-filled form fields |
+| `EntityCreationService` | `src/services/EntityCreationService.ts` | SPE upload, document record creation, AI analysis trigger (DI: constructor-injected `authenticatedFetch` and `bffBaseUrl`) |
+
+### BFF (Server-Side — Copy Pattern)
 
 | Component | Location | Reuse Strategy |
 |-----------|----------|----------------|
-| `MatterPreFillService` | `Services/Workspace/MatterPreFillService.cs` | Copy pattern for `ProjectPreFillService` |
+| `MatterPreFillService` | `Services/Workspace/MatterPreFillService.cs` | Copy pattern for new entity pre-fill services |
 | `LookupChoicesResolver` | `Services/Ai/LookupChoicesResolver.cs` | Automatic — runs in playbook pipeline for any JPS with `$choices` |
 | `PromptSchemaRenderer` | `Services/Ai/PromptSchemaRenderer.cs` | Automatic — renders JPS with resolved `$choices` as enum |
-| `findBestLookupMatch()` | `CreateMatter/CreateRecordStep.tsx` | Copy into `CreateProjectStep.tsx` |
-| `authenticatedFetch` | `services/bffAuthProvider.ts` | Import directly |
-| `getBffBaseUrl()` | `config/bffConfig.ts` | Import directly |
-| `AiFieldTag` component | `CreateMatter/AiFieldTag.tsx` | Import directly for badges |
+
+### Solution-Specific (LegalWorkspace)
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `authenticatedFetch` | `services/bffAuthProvider.ts` | OBO token acquisition — passed to `EntityCreationService` and `useAiPrefill` |
+| `getBffBaseUrl()` | `config/bffConfig.ts` | BFF URL — passed to `EntityCreationService` and `useAiPrefill` |
+
+### Adding Pre-Fill to a New Entity Wizard
+
+1. Create a BFF service (copy `MatterPreFillService` pattern)
+2. Register the endpoint (e.g., `POST /api/workspace/{entity}/pre-fill`)
+3. Create a playbook with `$choices` for constrained fields
+4. In the wizard step component, call `useAiPrefill` with:
+   - `endpoint`: the BFF path
+   - `fieldExtractor`: map AI response to text/lookup fields
+   - `lookupResolvers`: Dataverse search functions per lookup field
+   - `onApply`: apply resolved values to form state
+5. Use `AiFieldTag` on fields that were AI-populated
 
 ---
 

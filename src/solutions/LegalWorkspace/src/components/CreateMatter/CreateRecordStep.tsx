@@ -57,12 +57,10 @@ import {
   searchOrganizationsAsLookup,
   fetchAiDraftSummary,
 } from './matterService';
-// Note: searchContactsAsLookup and searchOrganizationsAsLookup are still imported
-// for AI pre-fill resolution (resolving AI names → Dataverse IDs for form state)
-// even though the lookup UI fields are now in AssignResourcesStep.
 import type { ILookupItem } from '../../types/entities';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/authInit';
+import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -195,56 +193,6 @@ function isFormValid(form: ICreateMatterFormState): boolean {
     form.practiceAreaId !== '' &&
     form.matterName.trim() !== ''
   );
-}
-
-/**
- * Fuzzy-match an AI-generated display name against Dataverse lookup results.
- *
- * Scoring (highest wins, minimum 0.4 to accept):
- *   1.0  — exact match (case-insensitive)
- *   0.8  — one string starts with the other ("Corporate" ↔ "Corporate Law")
- *   0.7  — one string is contained in the other ("Trans" in "Transactional")
- *   0.5  — single result from Dataverse contains() filter (already relevant)
- *
- * Returns null if no candidate scores above threshold.
- */
-function findBestLookupMatch(
-  aiValue: string,
-  candidates: ILookupItem[]
-): ILookupItem | null {
-  if (candidates.length === 0) return null;
-
-  const aiLower = aiValue.toLowerCase().trim();
-
-  let bestScore = 0;
-  let bestItem: ILookupItem | null = null;
-
-  for (const item of candidates) {
-    const dbLower = item.name.toLowerCase().trim();
-    let score = 0;
-
-    if (dbLower === aiLower) {
-      score = 1.0;
-    } else if (dbLower.startsWith(aiLower) || aiLower.startsWith(dbLower)) {
-      score = 0.8;
-    } else if (dbLower.includes(aiLower) || aiLower.includes(dbLower)) {
-      score = 0.7;
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestItem = item;
-    }
-  }
-
-  // If no strong match but Dataverse contains() returned exactly one result,
-  // trust it — the server-side filter already validated relevance.
-  if (bestScore < 0.4 && candidates.length === 1) {
-    bestScore = 0.5;
-    bestItem = candidates[0];
-  }
-
-  return bestScore >= 0.4 ? bestItem : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,176 +339,68 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
-  // ── AI Pre-fill on mount ───────────────────────────────────────────────────
-  // Stable dependency key: join file names into a single string so the effect
-  // doesn't re-run on every render (uploadedFileNames is a new array ref each time).
-  const prefillKey = uploadedFileNames.join('|');
-  // Skip AI pre-fill if we already have initial values from the parent
-  // (remount after navigating back — AI was already run on the first mount).
-  const prefillAttemptedRef = React.useRef(!!hasInitialValues);
-
-  React.useEffect(() => {
-    if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
-      return;
-    }
-
-    prefillAttemptedRef.current = true;
-    let cancelled = false;
-    const abortController = new AbortController();
-
-    const runPrefill = async (): Promise<void> => {
-      dispatch({ type: 'AI_PREFILL_LOADING' });
-
-      // Client-side timeout: 60s (BFF has 45s playbook timeout + text extraction time)
-      const timeoutId = window.setTimeout(() => abortController.abort(), 60_000);
-
-      try {
-        // Send actual files as multipart/form-data (BFF expects IFormFileCollection)
-        const bffBaseUrl = getBffBaseUrl();
-        const formData = new FormData();
-        for (const f of uploadedFiles) {
-          formData.append('files', f.file, f.name);
-        }
-
-        console.info('[CreateMatter] Starting AI pre-fill...', { fileCount: uploadedFiles.length });
-
-        const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
-          method: 'POST',
-          body: formData,
-          signal: abortController.signal,
-          // Note: do NOT set Content-Type header — browser sets it with boundary
-        });
-
-        clearTimeout(timeoutId);
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          console.warn(`[CreateMatter] Pre-fill returned ${response.status}`);
-          dispatch({ type: 'AI_PREFILL_ERROR' });
-          return;
-        }
-
-        // BFF returns flat PreFillResponse; map to IAiPrefillFields
-        const data = await response.json();
-        console.info('[CreateMatter] Pre-fill response:', data);
-
-        if (cancelled) return;
-
-        const fields: IAiPrefillFields = {};
-        // BFF may return either old field names (matterType/practiceArea) or
-        // new names (matterTypeName/practiceAreaName) — handle both
-        const aiMatterType = data.matterTypeName || data.matterType;
-        const aiPracticeArea = data.practiceAreaName || data.practiceArea;
-        if (aiMatterType) fields.matterTypeName = aiMatterType;
-        if (aiPracticeArea) fields.practiceAreaName = aiPracticeArea;
-        if (data.matterName) fields.matterName = data.matterName;
-        if (data.summary) fields.summary = data.summary;
-
-        // Person / org fields from AI
-        const aiAttorney = data.assignedAttorneyName;
-        const aiParalegal = data.assignedParalegalName;
-        const aiOutsideCounsel = data.assignedOutsideCounselName;
-        if (aiAttorney) fields.assignedAttorneyName = aiAttorney;
-        if (aiParalegal) fields.assignedParalegalName = aiParalegal;
-        if (aiOutsideCounsel) fields.assignedOutsideCounselName = aiOutsideCounsel;
-
-        // Resolve AI display names to Dataverse lookup IDs so LookupField
-        // renders them as selected chips (LookupField needs both id + name).
-        // Uses fuzzy matching since AI output won't always exactly match
-        // Dataverse values (e.g. AI says "Transactional", DB has "Transactional Law").
-        const resolvePromises: Promise<void>[] = [];
-
-        if (aiMatterType && webApi) {
-          resolvePromises.push(
-            searchMatterTypes(webApi, aiMatterType).then((results) => {
-              const best = findBestLookupMatch(aiMatterType, results);
-              if (best) {
-                fields.matterTypeId = best.id;
-                fields.matterTypeName = best.name;
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiPracticeArea && webApi) {
-          resolvePromises.push(
-            searchPracticeAreas(webApi, aiPracticeArea).then((results) => {
-              const best = findBestLookupMatch(aiPracticeArea, results);
-              if (best) {
-                fields.practiceAreaId = best.id;
-                fields.practiceAreaName = best.name;
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiAttorney && webApi) {
-          resolvePromises.push(
-            searchContactsAsLookup(webApi, aiAttorney).then((results) => {
-              const best = findBestLookupMatch(aiAttorney, results);
-              if (best) {
-                fields.assignedAttorneyId = best.id;
-                fields.assignedAttorneyName = best.name;
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiParalegal && webApi) {
-          resolvePromises.push(
-            searchContactsAsLookup(webApi, aiParalegal).then((results) => {
-              const best = findBestLookupMatch(aiParalegal, results);
-              if (best) {
-                fields.assignedParalegalId = best.id;
-                fields.assignedParalegalName = best.name;
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiOutsideCounsel && webApi) {
-          resolvePromises.push(
-            searchOrganizationsAsLookup(webApi, aiOutsideCounsel).then((results) => {
-              const best = findBestLookupMatch(aiOutsideCounsel, results);
-              if (best) {
-                fields.assignedOutsideCounselId = best.id;
-                fields.assignedOutsideCounselName = best.name;
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        await Promise.all(resolvePromises);
-
-        if (cancelled) return;
-
-        if (Object.keys(fields).length > 0) {
-          dispatch({ type: 'APPLY_AI_PREFILL', fields });
-        }
-
-        dispatch({ type: 'AI_PREFILL_SUCCESS' });
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (!cancelled) {
-          if (abortController.signal.aborted) {
-            console.warn('[CreateMatter] Pre-fill timed out after 60s');
-          } else {
-            console.warn('[CreateMatter] Pre-fill failed:', err);
-          }
-          dispatch({ type: 'AI_PREFILL_ERROR' });
+  // ── AI Pre-fill via shared hook ────────────────────────────────────────────
+  const handlePrefillApply = React.useCallback(
+    (resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
+      const fields: IAiPrefillFields = {};
+      for (const [key, value] of Object.entries(resolved)) {
+        if (typeof value === 'string') {
+          (fields as Record<string, string>)[key] = value;
+        } else {
+          // Lookup resolved: set both id and name fields
+          // e.g., matterTypeName → { id, name } → set matterTypeId + matterTypeName
+          const idKey = key.replace(/Name$/, 'Id');
+          (fields as Record<string, string>)[idKey] = value.id;
+          (fields as Record<string, string>)[key] = value.name;
         }
       }
-    };
+      if (Object.keys(fields).length > 0) {
+        dispatch({ type: 'APPLY_AI_PREFILL', fields });
+      }
+      dispatch({ type: 'AI_PREFILL_SUCCESS' });
+    },
+    []
+  );
 
-    void runPrefill();
+  const prefill = useAiPrefill({
+    endpoint: PREFILL_PATH,
+    uploadedFiles,
+    authenticatedFetch,
+    bffBaseUrl: getBffBaseUrl(),
+    fieldExtractor: (data) => ({
+      textFields: {
+        matterName: data.matterName as string | undefined,
+        summary: data.summary as string | undefined,
+      },
+      lookupFields: {
+        // BFF may return old or new field names — handle both
+        matterTypeName: (data.matterTypeName || data.matterType) as string | undefined,
+        practiceAreaName: (data.practiceAreaName || data.practiceArea) as string | undefined,
+        assignedAttorneyName: data.assignedAttorneyName as string | undefined,
+        assignedParalegalName: data.assignedParalegalName as string | undefined,
+        assignedOutsideCounselName: data.assignedOutsideCounselName as string | undefined,
+      },
+    }),
+    lookupResolvers: {
+      matterTypeName: (v) => searchMatterTypes(webApi, v),
+      practiceAreaName: (v) => searchPracticeAreas(webApi, v),
+      assignedAttorneyName: (v) => searchContactsAsLookup(webApi, v),
+      assignedParalegalName: (v) => searchContactsAsLookup(webApi, v),
+      assignedOutsideCounselName: (v) => searchOrganizationsAsLookup(webApi, v),
+    },
+    onApply: handlePrefillApply,
+    skipIfInitialized: !!hasInitialValues,
+    logPrefix: 'CreateMatter',
+  });
 
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillKey]);
+  // Sync hook status with reducer for loading/error states
+  React.useEffect(() => {
+    if (prefill.status === 'loading') {
+      dispatch({ type: 'AI_PREFILL_LOADING' });
+    } else if (prefill.status === 'error') {
+      dispatch({ type: 'AI_PREFILL_ERROR' });
+    }
+  }, [prefill.status]);
 
   // ── Lookup search callbacks (stable refs) ──────────────────────────────────
 

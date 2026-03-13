@@ -152,7 +152,7 @@ export class MatterService {
     private readonly _webApi: IWebApi,
     private readonly _containerId?: string
   ) {
-    this._entityService = new EntityCreationService(_webApi);
+    this._entityService = new EntityCreationService(_webApi, authenticatedFetch, getBffBaseUrl());
   }
 
   /**
@@ -214,9 +214,9 @@ export class MatterService {
     const lookups: Array<{ col: string; entitySet: string; guid: string }> = [];
     if (form.matterTypeId) lookups.push({ col: 'sprk_mattertype', entitySet: 'sprk_mattertype_refs', guid: form.matterTypeId });
     if (form.practiceAreaId) lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
-    if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney', entitySet: 'contacts', guid: form.assignedAttorneyId });
-    if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal', entitySet: 'contacts', guid: form.assignedParalegalId });
-    if (form.assignedOutsideCounselId) lookups.push({ col: 'sprk_assignedoutsidecounsel', entitySet: 'sprk_organizations', guid: form.assignedOutsideCounselId });
+    if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney1', entitySet: 'contacts', guid: form.assignedAttorneyId });
+    if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal1', entitySet: 'contacts', guid: form.assignedParalegalId });
+    if (form.assignedOutsideCounselId) lookups.push({ col: 'sprk_assignedlawfirm1', entitySet: 'sprk_organizations', guid: form.assignedOutsideCounselId });
 
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
@@ -333,7 +333,7 @@ export class MatterService {
     navPropMap: Record<string, string>
   ): Promise<{ success: boolean; warning?: string }> {
     try {
-      const navProp = _resolveNavProp(navPropMap, 'sprk_assignedoutsidecounsel');
+      const navProp = _resolveNavProp(navPropMap, 'sprk_assignedlawfirm1');
       const updatePayload: WebApiEntity = {
         [`${navProp}@odata.bind`]: `/contacts(${input.contactId})`,
       };

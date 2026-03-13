@@ -70,10 +70,10 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
   },
-  /** Fixed 4-column card grid (2 rows × 4 cols = 8 items max). */
+  /** Fixed 3-column card grid (2 rows × 3 cols = 6 items max). */
   innerGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: tokens.spacingHorizontalM,
   },
   item: {
@@ -226,18 +226,20 @@ export interface IActivityFeedListProps {
   /** Called when the user clicks the Edit action. */
   onEdit?: (eventId: string) => void;
   /**
-   * When true, renders items in a 4-column × 2-row card grid (max 8 items)
+   * When true, renders items in a 3-column × 2-row card grid (max 6 items)
    * instead of the default virtualized vertical list.
    */
   gridLayout?: boolean;
+  /** When true, hides the overflow menu on each card (grid mode). */
+  hideOverflowMenu?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/** Maximum items shown in grid layout mode (4 cols × 2 rows). */
-const GRID_MAX_ITEMS = 8;
+/** Maximum items shown in grid layout mode (3 cols × 2 rows). */
+const GRID_MAX_ITEMS = 6;
 
 export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   events,
@@ -248,6 +250,7 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
   onTeams,
   onEdit,
   gridLayout = false,
+  hideOverflowMenu = false,
 }) => {
   const styles = useStyles();
 
@@ -323,6 +326,7 @@ export const ActivityFeedList: React.FC<IActivityFeedListProps> = ({
               onEmail={onEmail}
               onTeams={onTeams}
               onEdit={onEdit}
+              hideOverflowMenu={hideOverflowMenu}
             />
           ))}
         </div>

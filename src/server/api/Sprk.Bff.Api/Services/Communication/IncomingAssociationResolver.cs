@@ -126,19 +126,9 @@ public sealed class IncomingAssociationResolver
             return;
         }
 
-        // ── Priority 4: Mailbox context (default regarding matter) ──────────────
-        if (account?.DefaultRegardingMatterId is { } defaultMatterId && defaultMatterId != Guid.Empty)
-        {
-            fields["sprk_regardingmatter"] = new EntityReference("sprk_matter", defaultMatterId);
-
-            _logger.LogInformation(
-                "Association resolved via mailbox context for communication {CommunicationId} | DefaultMatter: {MatterId}",
-                communicationId, defaultMatterId);
-            await ApplyAssociationAsync(communicationId, fields, AssociationStatusResolved, ct);
-            return;
-        }
-
         // ── No match: flag as Pending Review ────────────────────────────────────
+        // Unassociated emails remain unassociated and surface for manual review.
+        // No default-matter fallback — shared mailboxes are not matter-specific.
         _logger.LogInformation(
             "No association found for communication {CommunicationId}. Setting status to Pending Review.",
             communicationId);
@@ -172,12 +162,11 @@ public sealed class IncomingAssociationResolver
                 "Found In-Reply-To header: {InReplyTo} for message {GraphMessageId}",
                 inReplyTo, graphMessageId);
 
-            // Look up parent communication by the In-Reply-To message ID
-            // The In-Reply-To header contains an internet message ID (e.g., <ABC@contoso.com>),
-            // but sprk_graphmessageid stores the Graph message ID. We need to search
-            // by sprk_internetmessageid if available, or fall back.
-            // For simplicity, try matching against sprk_graphmessageid first.
-            var parentComm = await _dataverseService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
+            // Look up parent communication by the In-Reply-To internet message ID.
+            // In-Reply-To contains an RFC 2822 internet message ID (e.g., <ABC@contoso.com>).
+            // Search sprk_internetmessageid first (exact match), fall back to sprk_graphmessageid.
+            var parentComm = await _dataverseService.GetCommunicationByInternetMessageIdAsync(inReplyTo, ct)
+                             ?? await _dataverseService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
             if (parentComm is null)
             {
                 _logger.LogDebug("No parent communication found for In-Reply-To: {InReplyTo}", inReplyTo);
@@ -361,6 +350,7 @@ public sealed class IncomingAssociationResolver
 
     /// <summary>
     /// Updates the sprk_communication record with resolved association fields and status.
+    /// Also populates the Polymorphic Resolver fields (ADR-024) for cross-entity views.
     /// </summary>
     private async Task ApplyAssociationAsync(
         Guid communicationId,
@@ -370,6 +360,12 @@ public sealed class IncomingAssociationResolver
     {
         fields["sprk_associationstatus"] = new OptionSetValue(associationStatus);
 
+        // Populate polymorphic resolver fields from the primary regarding entity
+        if (associationStatus == AssociationStatusResolved)
+        {
+            await PopulateResolverFieldsAsync(fields, ct);
+        }
+
         await _dataverseService.UpdateAsync("sprk_communication", communicationId, fields, ct);
 
         _logger.LogDebug(
@@ -377,6 +373,171 @@ public sealed class IncomingAssociationResolver
             communicationId, associationStatus == AssociationStatusResolved ? "Resolved" : "PendingReview",
             fields.Count);
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Polymorphic Resolver (ADR-024)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Entity-specific regarding fields in priority order for determining the primary record.
+    /// Business entities first (matter, project, etc.), then people/orgs.
+    /// </summary>
+    private static readonly (string FieldName, string EntityLogicalName)[] RegardingFieldPriority =
+    [
+        ("sprk_regardingmatter", "sprk_matter"),
+        ("sprk_regardingproject", "sprk_project"),
+        ("sprk_regardinginvoice", "sprk_invoice"),
+        ("sprk_regardingworkassignment", "sprk_workassignment"),
+        ("sprk_regardingbudget", "sprk_budget"),
+        ("sprk_regardinganalysis", "sprk_analysis"),
+        ("sprk_regardingorganization", "sprk_organization"),
+        ("sprk_regardingperson", "contact"),
+    ];
+
+    /// <summary>
+    /// In-memory cache for sprk_recordtype_ref lookups (entity logical name → GUID + display name).
+    /// Populated lazily, lives for the lifetime of the singleton service.
+    /// </summary>
+    private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
+
+    /// <summary>
+    /// Populates the 4 denormalized resolver fields based on the highest-priority
+    /// entity-specific regarding field that was set.
+    ///
+    /// Fields set:
+    ///   - sprk_regardingrecordtype  (Lookup → sprk_recordtype_ref)
+    ///   - sprk_regardingrecordid    (Text — parent GUID)
+    ///   - sprk_regardingrecordname  (Text — parent display name)
+    ///   - sprk_regardingrecordurl   (URL — clickable link to parent record)
+    /// </summary>
+    private async Task PopulateResolverFieldsAsync(
+        Dictionary<string, object> fields,
+        CancellationToken ct)
+    {
+        // Find the primary regarding entity (highest priority field that was set)
+        EntityReference? primaryRef = null;
+        string? primaryEntityLogicalName = null;
+
+        foreach (var (fieldName, entityLogicalName) in RegardingFieldPriority)
+        {
+            if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
+            {
+                primaryRef = entityRef;
+                primaryEntityLogicalName = entityLogicalName;
+                break;
+            }
+        }
+
+        if (primaryRef is null || primaryEntityLogicalName is null)
+            return;
+
+        try
+        {
+            // Set sprk_regardingrecordid (GUID as text)
+            var cleanId = primaryRef.Id.ToString("D").ToLowerInvariant();
+            fields["sprk_regardingrecordid"] = cleanId;
+
+            // Set sprk_regardingrecordname (display name from the EntityReference or retrieve)
+            var recordName = primaryRef.Name;
+            if (string.IsNullOrEmpty(recordName))
+            {
+                // EntityReference.Name may not always be populated; try to retrieve it
+                try
+                {
+                    var nameField = GetPrimaryNameField(primaryEntityLogicalName);
+                    if (nameField is not null)
+                    {
+                        var record = await _dataverseService.RetrieveAsync(
+                            primaryEntityLogicalName, primaryRef.Id, [nameField], ct);
+                        recordName = record.GetAttributeValue<string>(nameField) ?? "";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not retrieve name for {Entity} {Id}",
+                        primaryEntityLogicalName, primaryRef.Id);
+                }
+            }
+            fields["sprk_regardingrecordname"] = recordName ?? "";
+
+            // Set sprk_regardingrecordurl
+            fields["sprk_regardingrecordurl"] = BuildRecordUrl(primaryEntityLogicalName, cleanId);
+
+            // Set sprk_regardingrecordtype (Lookup to sprk_recordtype_ref)
+            var recordTypeRef = await ResolveRecordTypeRefAsync(primaryEntityLogicalName, ct);
+            if (recordTypeRef.HasValue)
+            {
+                fields["sprk_regardingrecordtype"] = new EntityReference(
+                    "sprk_recordtype_ref", recordTypeRef.Value.Id)
+                {
+                    Name = recordTypeRef.Value.DisplayName
+                };
+            }
+
+            _logger.LogDebug(
+                "Populated resolver fields: Entity={Entity}, Name={Name}, RecordType={RecordType}",
+                primaryEntityLogicalName, recordName ?? "(unknown)",
+                recordTypeRef?.DisplayName ?? "(not found)");
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal — resolver fields are for display, not critical data
+            _logger.LogWarning(ex, "Failed to populate resolver fields for {Entity}", primaryEntityLogicalName);
+        }
+    }
+
+    /// <summary>
+    /// Resolve the sprk_recordtype_ref GUID for an entity logical name. Cached.
+    /// </summary>
+    private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
+        string entityLogicalName, CancellationToken ct)
+    {
+        if (_recordTypeRefCache.TryGetValue(entityLogicalName, out var cached))
+            return cached;
+
+        var record = await _dataverseService.QueryRecordTypeRefAsync(entityLogicalName, ct);
+        if (record is not null)
+        {
+            var entry = (
+                Id: record.Id,
+                DisplayName: record.GetAttributeValue<string>("sprk_recorddisplayname") ?? entityLogicalName
+            );
+            _recordTypeRefCache[entityLogicalName] = entry;
+            return entry;
+        }
+
+        _recordTypeRefCache[entityLogicalName] = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Build a Dataverse record URL for the resolver.
+    /// Uses the Dataverse environment base URL from the service client connection.
+    /// </summary>
+    private static string BuildRecordUrl(string entityLogicalName, string recordId)
+    {
+        // On the server side we don't have Xrm context, but we know the org URL
+        // from the service client. Use a relative URL that works in model-driven apps.
+        return $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
+    }
+
+    /// <summary>
+    /// Map entity logical name to its primary name attribute.
+    /// </summary>
+    private static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_mattername",
+        "sprk_project" => "sprk_projectname",
+        "sprk_invoice" => "sprk_name",
+        "sprk_event" => "sprk_eventname",
+        "sprk_workassignment" => "sprk_name",
+        "sprk_budget" => "sprk_name",
+        "sprk_analysis" => "sprk_name",
+        "sprk_organization" => "sprk_name",
+        "contact" => "fullname",
+        "account" => "name",
+        _ => null,
+    };
 
     // ═════════════════════════════════════════════════════════════════════════════
     // Helpers

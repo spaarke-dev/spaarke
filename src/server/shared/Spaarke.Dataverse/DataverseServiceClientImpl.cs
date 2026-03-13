@@ -1863,6 +1863,25 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.Count > 0 ? results.Entities[0] : null;
     }
 
+    public async Task<Entity?> GetCommunicationByInternetMessageIdAsync(string internetMessageId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_communication by InternetMessageId for thread matching: {InternetMessageId}", internetMessageId);
+
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_communicationid", "sprk_regardingmatter",
+                "sprk_regardingorganization", "sprk_regardingperson",
+                "sprk_associationstatus"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_internetmessageid", ConditionOperator.Equal, internetMessageId));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
     public async Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default)
     {
         _logger.LogDebug("Querying contact by email: {Email}", emailAddress);
@@ -1915,6 +1934,49 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_recordtype_ref by logical name: {EntityLogicalName}", entityLogicalName);
+
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_recordlogicalname", ConditionOperator.Equal, entityLogicalName));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying systemuser by Azure AD OID: {AzureAdOid}", azureAdObjectId);
+
+        var query = new QueryExpression("systemuser")
+        {
+            ColumnSet = new ColumnSet("systemuserid"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdObjectId));
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        if (results.Entities.Count == 0)
+        {
+            _logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdObjectId);
+            return null;
+        }
+
+        var systemUserId = results.Entities[0].Id;
+        _logger.LogDebug("Mapped Azure AD OID {AzureAdOid} to Dataverse systemuserid {SystemUserId}",
+            azureAdObjectId, systemUserId);
+        return systemUserId;
     }
 
     public void Dispose()

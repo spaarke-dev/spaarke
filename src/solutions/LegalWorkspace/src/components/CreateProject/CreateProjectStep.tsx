@@ -51,6 +51,7 @@ import type { IWebApi } from '../../types/xrm';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import { getBffBaseUrl } from '../../config/bffConfig';
 import { authenticatedFetch } from '../../services/authInit';
+import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -185,46 +186,6 @@ function isFormValid(form: ICreateProjectFormState): boolean {
   return form.projectName.trim() !== '';
 }
 
-/**
- * Fuzzy-match an AI-generated display name against Dataverse lookup results.
- * Same scoring as CreateRecordStep: 1.0 exact, 0.8 prefix, 0.7 contains, 0.5 single, 0.4 threshold.
- */
-function findBestLookupMatch(
-  aiValue: string,
-  candidates: ILookupItem[]
-): ILookupItem | null {
-  if (candidates.length === 0) return null;
-
-  const aiLower = aiValue.toLowerCase().trim();
-  let bestScore = 0;
-  let bestItem: ILookupItem | null = null;
-
-  for (const item of candidates) {
-    const dbLower = item.name.toLowerCase().trim();
-    let score = 0;
-
-    if (dbLower === aiLower) {
-      score = 1.0;
-    } else if (dbLower.startsWith(aiLower) || aiLower.startsWith(dbLower)) {
-      score = 0.8;
-    } else if (dbLower.includes(aiLower) || aiLower.includes(dbLower)) {
-      score = 0.7;
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestItem = item;
-    }
-  }
-
-  if (bestScore < 0.4 && candidates.length === 1) {
-    bestScore = 0.5;
-    bestItem = candidates[0];
-  }
-
-  return bestScore >= 0.4 ? bestItem : null;
-}
-
 // ---------------------------------------------------------------------------
 // CreateProjectStep (exported)
 // ---------------------------------------------------------------------------
@@ -276,167 +237,71 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formState]);
 
-  // ── AI Pre-fill on mount ───────────────────────────────────────────────
-  const prefillAttemptedRef = React.useRef(!!hasInitialValues);
+  // ── AI Pre-fill via shared hook ────────────────────────────────────────
+  const handlePrefillApply = React.useCallback(
+    (resolved: IResolvedPrefillFields, prefilledFieldNames: string[]) => {
+      const updates: Partial<ICreateProjectFormState> = {};
+      const pfFields = new Set<keyof ICreateProjectFormState>();
 
-  React.useEffect(() => {
-    if (uploadedFiles.length === 0 || prefillAttemptedRef.current) {
-      return;
-    }
-
-    prefillAttemptedRef.current = true;
-    let cancelled = false;
-    const abortController = new AbortController();
-
-    const runPrefill = async (): Promise<void> => {
-      setAiState({ status: 'loading', prefilledFields: new Set() });
-
-      const timeoutId = window.setTimeout(() => abortController.abort(), 60_000);
-
-      try {
-        const bffBaseUrl = getBffBaseUrl();
-        const formData = new FormData();
-        for (const f of uploadedFiles) {
-          formData.append('files', f.file, f.name);
-        }
-
-        console.info('[CreateProject] Starting AI pre-fill...', { fileCount: uploadedFiles.length });
-
-        const response = await authenticatedFetch(`${bffBaseUrl}${PREFILL_PATH}`, {
-          method: 'POST',
-          body: formData,
-          signal: abortController.signal,
-        });
-
-        clearTimeout(timeoutId);
-        if (cancelled) return;
-
-        if (!response.ok) {
-          console.warn(`[CreateProject] Pre-fill returned ${response.status}`);
-          setAiState({ status: 'error', prefilledFields: new Set() });
-          return;
-        }
-
-        const data = await response.json();
-        console.info('[CreateProject] Pre-fill response:', data);
-        if (cancelled) return;
-
-        // Map BFF response fields to form state updates
-        const updates: Partial<ICreateProjectFormState> = {};
-        const prefilledFields = new Set<keyof ICreateProjectFormState>();
-
-        const aiProjectType = data.projectTypeName;
-        const aiPracticeArea = data.practiceAreaName;
-        const aiAttorney = data.assignedAttorneyName;
-        const aiParalegal = data.assignedParalegalName;
-        const aiOutsideCounsel = data.assignedOutsideCounselName;
-
-        if (data.projectName) {
-          updates.projectName = data.projectName;
-          prefilledFields.add('projectName');
-        }
-        if (data.description) {
-          updates.description = data.description;
-          prefilledFields.add('description');
-        }
-
-        // Fuzzy-resolve lookup fields against Dataverse
-        const resolvePromises: Promise<void>[] = [];
-
-        if (aiProjectType && webApi) {
-          resolvePromises.push(
-            serviceRef.current.searchProjectTypes(aiProjectType).then((results) => {
-              const best = findBestLookupMatch(aiProjectType, results);
-              if (best) {
-                updates.projectTypeId = best.id;
-                updates.projectTypeName = best.name;
-                prefilledFields.add('projectTypeId');
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiPracticeArea && webApi) {
-          resolvePromises.push(
-            serviceRef.current.searchPracticeAreas(aiPracticeArea).then((results) => {
-              const best = findBestLookupMatch(aiPracticeArea, results);
-              if (best) {
-                updates.practiceAreaId = best.id;
-                updates.practiceAreaName = best.name;
-                prefilledFields.add('practiceAreaId');
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiAttorney && webApi) {
-          resolvePromises.push(
-            serviceRef.current.searchContacts(aiAttorney).then((results) => {
-              const best = findBestLookupMatch(aiAttorney, results);
-              if (best) {
-                updates.assignedAttorneyId = best.id;
-                updates.assignedAttorneyName = best.name;
-                prefilledFields.add('assignedAttorneyId');
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiParalegal && webApi) {
-          resolvePromises.push(
-            serviceRef.current.searchContacts(aiParalegal).then((results) => {
-              const best = findBestLookupMatch(aiParalegal, results);
-              if (best) {
-                updates.assignedParalegalId = best.id;
-                updates.assignedParalegalName = best.name;
-                prefilledFields.add('assignedParalegalId');
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        if (aiOutsideCounsel && webApi) {
-          resolvePromises.push(
-            serviceRef.current.searchOrganizations(aiOutsideCounsel).then((results) => {
-              const best = findBestLookupMatch(aiOutsideCounsel, results);
-              if (best) {
-                updates.assignedOutsideCounselId = best.id;
-                updates.assignedOutsideCounselName = best.name;
-                prefilledFields.add('assignedOutsideCounselId');
-              }
-            }).catch(() => { /* keep display name only */ })
-          );
-        }
-
-        await Promise.all(resolvePromises);
-        if (cancelled) return;
-
-        if (Object.keys(updates).length > 0) {
-          setFormState((prev) => ({ ...prev, ...updates }));
-        }
-
-        setAiState({ status: 'success', prefilledFields });
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (!cancelled) {
-          if (abortController.signal.aborted) {
-            console.warn('[CreateProject] Pre-fill timed out after 60s');
-          } else {
-            console.warn('[CreateProject] Pre-fill failed:', err);
-          }
-          setAiState({ status: 'error', prefilledFields: new Set() });
+      for (const [key, value] of Object.entries(resolved)) {
+        if (typeof value === 'string') {
+          (updates as Record<string, string>)[key] = value;
+          pfFields.add(key as keyof ICreateProjectFormState);
+        } else {
+          // Lookup resolved: set both id and name fields
+          const idKey = key.replace(/Name$/, 'Id');
+          (updates as Record<string, string>)[idKey] = value.id;
+          (updates as Record<string, string>)[key] = value.name;
+          pfFields.add(idKey as keyof ICreateProjectFormState);
         }
       }
-    };
 
-    void runPrefill();
+      if (Object.keys(updates).length > 0) {
+        setFormState((prev) => ({ ...prev, ...updates }));
+      }
+      setAiState({ status: 'success', prefilledFields: pfFields });
+    },
+    []
+  );
 
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadedFiles.length]);
+  const prefill = useAiPrefill({
+    endpoint: PREFILL_PATH,
+    uploadedFiles,
+    authenticatedFetch,
+    bffBaseUrl: getBffBaseUrl(),
+    fieldExtractor: (data) => ({
+      textFields: {
+        projectName: data.projectName as string | undefined,
+        description: data.description as string | undefined,
+      },
+      lookupFields: {
+        projectTypeName: data.projectTypeName as string | undefined,
+        practiceAreaName: data.practiceAreaName as string | undefined,
+        assignedAttorneyName: data.assignedAttorneyName as string | undefined,
+        assignedParalegalName: data.assignedParalegalName as string | undefined,
+        assignedOutsideCounselName: data.assignedOutsideCounselName as string | undefined,
+      },
+    }),
+    lookupResolvers: {
+      projectTypeName: (v) => serviceRef.current.searchProjectTypes(v),
+      practiceAreaName: (v) => serviceRef.current.searchPracticeAreas(v),
+      assignedAttorneyName: (v) => serviceRef.current.searchContacts(v),
+      assignedParalegalName: (v) => serviceRef.current.searchContacts(v),
+      assignedOutsideCounselName: (v) => serviceRef.current.searchOrganizations(v),
+    },
+    onApply: handlePrefillApply,
+    skipIfInitialized: !!hasInitialValues,
+    logPrefix: 'CreateProject',
+  });
+
+  // Sync hook status with local AI state for loading/error display
+  React.useEffect(() => {
+    if (prefill.status === 'loading') {
+      setAiState({ status: 'loading', prefilledFields: new Set() });
+    } else if (prefill.status === 'error') {
+      setAiState({ status: 'error', prefilledFields: new Set() });
+    }
+  }, [prefill.status]);
 
   // ── Lookup search callbacks (stable refs) ──────────────────────────────
 

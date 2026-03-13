@@ -1,9 +1,11 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Graph.Users.Item.SendMail;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -12,25 +14,36 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <summary>
 /// Tests send and/or read capabilities for a communication account
 /// and persists verification results to Dataverse.
+/// When read verification succeeds on a receive-enabled account, automatically
+/// creates a Graph webhook subscription so inbound email processing starts immediately.
 /// Registered as concrete type in AddCommunicationModule() per ADR-010.
 /// </summary>
 public sealed class MailboxVerificationService
 {
+    private static readonly TimeSpan SubscriptionLifetime = TimeSpan.FromDays(3);
+
     private readonly IGraphClientFactory _graphClientFactory;
     private readonly IDataverseService _dataverseService;
     private readonly CommunicationAccountService _accountService;
     private readonly ILogger<MailboxVerificationService> _logger;
+    private readonly string _notificationUrl;
+    private readonly string _clientState;
 
     public MailboxVerificationService(
         IGraphClientFactory graphClientFactory,
         IDataverseService dataverseService,
         CommunicationAccountService accountService,
+        IOptions<CommunicationOptions> communicationOptions,
         ILogger<MailboxVerificationService> logger)
     {
         _graphClientFactory = graphClientFactory;
         _dataverseService = dataverseService;
         _accountService = accountService;
         _logger = logger;
+
+        var options = communicationOptions?.Value ?? throw new ArgumentNullException(nameof(communicationOptions));
+        _notificationUrl = options.WebhookNotificationUrl;
+        _clientState = options.WebhookClientState;
     }
 
     /// <summary>
@@ -118,9 +131,17 @@ public sealed class MailboxVerificationService
         // 5. Update Dataverse with results
         await UpdateVerificationResultAsync(accountId, overallStatus, verifiedAt, failureReason, ct);
 
+        // 6. If read verification passed, create Graph webhook subscription for inbound email
+        bool subscriptionCreated = false;
+        if (readVerified == true && account.ReceiveEnabled)
+        {
+            subscriptionCreated = await TryCreateGraphSubscriptionAsync(accountId, account.EmailAddress, ct);
+        }
+
         _logger.LogInformation(
-            "Mailbox verification completed for account {AccountId} ({Email}): {Status} | Send={Send}, Read={Read}",
-            accountId, account.EmailAddress, overallStatus, sendVerified, readVerified);
+            "Mailbox verification completed for account {AccountId} ({Email}): {Status} | " +
+            "Send={Send}, Read={Read}, SubscriptionCreated={SubscriptionCreated}",
+            accountId, account.EmailAddress, overallStatus, sendVerified, readVerified, subscriptionCreated);
 
         return new VerificationResult
         {
@@ -130,6 +151,7 @@ public sealed class MailboxVerificationService
             VerifiedAt = verifiedAt,
             SendCapabilityVerified = sendVerified,
             ReadCapabilityVerified = readVerified,
+            SubscriptionCreated = subscriptionCreated,
             FailureReason = failureReason
         };
     }
@@ -301,5 +323,55 @@ public sealed class MailboxVerificationService
                 : null,
             VerificationMessage = entity.GetAttributeValue<string>("sprk_verificationmessage")
         };
+    }
+
+    /// <summary>
+    /// Creates a Graph webhook subscription for the account's mailbox.
+    /// The subscription notifies our webhook endpoint when new emails arrive.
+    /// Best-effort: verification succeeds even if subscription creation fails
+    /// (GraphSubscriptionManager will create it on its next cycle).
+    /// </summary>
+    private async Task<bool> TryCreateGraphSubscriptionAsync(
+        Guid accountId, string emailAddress, CancellationToken ct)
+    {
+        try
+        {
+            var graphClient = _graphClientFactory.ForApp();
+            var expirationDateTime = DateTimeOffset.UtcNow.Add(SubscriptionLifetime);
+
+            var subscription = new Subscription
+            {
+                ChangeType = "created",
+                NotificationUrl = _notificationUrl,
+                Resource = $"users/{emailAddress}/mailFolders/Inbox/messages",
+                ExpirationDateTime = expirationDateTime,
+                ClientState = _clientState
+            };
+
+            var result = await graphClient.Subscriptions.PostAsync(subscription, cancellationToken: ct);
+
+            _logger.LogInformation(
+                "Created Graph subscription {SubscriptionId} for account {AccountId} ({Email}), expires {Expiry}",
+                result!.Id, accountId, emailAddress, result.ExpirationDateTime);
+
+            // Persist subscription info to Dataverse account record
+            var fields = new Dictionary<string, object>
+            {
+                ["sprk_graphsubscriptionid"] = result.Id!,
+                ["sprk_graphsubscriptionexpiry"] = result.ExpirationDateTime!.Value.UtcDateTime,
+                ["sprk_graphsubscriptionstatus"] = new OptionSetValue(100000000) // Active
+            };
+            await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to create Graph subscription for account {AccountId} ({Email}) during verification. " +
+                "GraphSubscriptionManager will create it on its next cycle.",
+                accountId, emailAddress);
+            return false;
+        }
     }
 }

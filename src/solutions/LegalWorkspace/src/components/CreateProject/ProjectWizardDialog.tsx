@@ -1,76 +1,47 @@
 /**
  * ProjectWizardDialog.tsx
- * Multi-step wizard dialog for "Create New Project".
+ * Thin wrapper around CreateRecordWizard for "Create New Project".
  *
- * Steps mirror the Create New Matter wizard (WizardDialog.tsx):
- *   0 — Add file(s)       (FileUploadZone + UploadedFileList)
- *   1 — Create record     (CreateProjectStep)
- *   2 — Next Steps        (NextStepsStep — checkbox card selection)
- *   3+ — Follow-on steps  (AssignCounselStep, DraftSummaryStep, SendEmailStep)
- *        Injected dynamically based on card selections in Step 2.
+ * Provides only:
+ *   - Entity-specific form step (CreateProjectStep)
+ *   - Finish handler (ProjectService.createProject + EntityCreationService for files)
+ *   - Search callbacks (contacts, organizations, users)
+ *   - Email template builders
  *
- * Finish handler:
- *   1. Creates sprk_project record via ProjectService
- *   2. Uploads files to SPE via EntityCreationService
- *   3. Creates sprk_document records linked to the project
- *   4. Queues AI Document Profile analysis for each document
- *   5. Executes follow-on actions (assign counsel, draft summary, send email)
- *
- * Delegates all shell concerns to WizardShell.
+ * All generic wizard mechanics (file upload, follow-on steps, state
+ * management) are handled by the shared CreateRecordWizard component.
  *
  * Default export enables React.lazy() dynamic import for bundle-size
  * optimization (same pattern as WizardDialog.tsx).
  */
 import * as React from 'react';
-import {
-  Text,
-  Button,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import {
+  CreateRecordWizard,
+  type ICreateRecordWizardConfig,
+  type IFinishContext,
+} from '../../../../../client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard';
 
-import { FileUploadZone } from '../CreateMatter/FileUploadZone';
-import { UploadedFileList } from '../CreateMatter/UploadedFileList';
-import type { IUploadedFile, IFileValidationError } from '../CreateMatter/wizardTypes';
-import {
-  NextStepsStep,
-  FollowOnActionId,
-  FOLLOW_ON_STEP_ID_MAP,
-  FOLLOW_ON_STEP_LABEL_MAP,
-} from '../CreateMatter/NextStepsStep';
-import { AssignResourcesStep } from '../CreateMatter/AssignResourcesStep';
-import { DraftSummaryStep } from '../CreateMatter/DraftSummaryStep';
-import type { IRecipientItem } from '../CreateMatter/RecipientField';
-import {
-  SendEmailStep,
-  buildDefaultEmailSubject,
-  buildDefaultEmailBody,
-} from '../CreateMatter/SendEmailStep';
-import {
-  searchContactsAsLookup,
-  searchOrganizationsAsLookup,
-  searchUsersAsLookup,
-} from '../CreateMatter/matterService';
+import type { IWizardSuccessConfig } from '../../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes';
 
 import { CreateProjectStep } from './CreateProjectStep';
 import { ProjectService } from './projectService';
 import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
+import {
+  searchContactsAsLookup,
+  searchOrganizationsAsLookup,
+  searchUsersAsLookup,
+} from '../CreateMatter/matterService';
+
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
-import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -84,175 +55,31 @@ interface IProjectWizardDialogProps {
 }
 
 // ---------------------------------------------------------------------------
-// File state reducer (same pattern as Create Matter wizard)
-// ---------------------------------------------------------------------------
-
-interface IFileState {
-  uploadedFiles: IUploadedFile[];
-  validationErrors: IFileValidationError[];
-}
-
-type FileAction =
-  | { type: 'ADD_FILES'; files: IUploadedFile[] }
-  | { type: 'REMOVE_FILE'; fileId: string }
-  | { type: 'SET_VALIDATION_ERRORS'; errors: IFileValidationError[] }
-  | { type: 'CLEAR_VALIDATION_ERRORS' }
-  | { type: 'RESET' };
-
-function fileReducer(state: IFileState, action: FileAction): IFileState {
-  switch (action.type) {
-    case 'ADD_FILES': {
-      const existing = new Set(
-        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
-      );
-      const newFiles = action.files.filter(
-        (f) => !existing.has(`${f.name}::${f.sizeBytes}`)
-      );
-      return {
-        ...state,
-        uploadedFiles: [...state.uploadedFiles, ...newFiles],
-        validationErrors: [],
-      };
-    }
-    case 'REMOVE_FILE':
-      return {
-        ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
-      };
-    case 'SET_VALIDATION_ERRORS':
-      return { ...state, validationErrors: action.errors };
-    case 'CLEAR_VALIDATION_ERRORS':
-      return { ...state, validationErrors: [] };
-    case 'RESET':
-      return { uploadedFiles: [], validationErrors: [] };
-    default:
-      return state;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  stepTitle: {
-    color: tokens.colorNeutralForeground1,
-    marginBottom: tokens.spacingVerticalXS,
-  },
-  stepSubtitle: {
-    color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
-  },
-  errorBar: {
-    flexShrink: 0,
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Canonical order for dynamic follow-on steps
-// ---------------------------------------------------------------------------
-
-const FOLLOW_ON_CANONICAL_ORDER = [
-  'followon-assign-counsel',
-  'followon-draft-summary',
-  'followon-send-email',
-];
-
-// ---------------------------------------------------------------------------
 // ProjectWizardDialog
 // ---------------------------------------------------------------------------
 
 const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClose, webApi }) => {
-  const styles = useStyles();
-  const shellRef = React.useRef<IWizardShellHandle>(null);
-
-  // ── Domain file state ───────────────────────────────────────────────────
-  const [fileState, fileDispatch] = React.useReducer(fileReducer, {
-    uploadedFiles: [],
-    validationErrors: [],
-  });
-
-  // ── Step 2 state ────────────────────────────────────────────────────────
+  // ── Entity-specific form state ──────────────────────────────────────────
   const [formValid, setFormValid] = React.useState(false);
   const [formValues, setFormValues] = React.useState<ICreateProjectFormState>(EMPTY_PROJECT_FORM);
+  const formValuesRef = React.useRef(formValues);
+  formValuesRef.current = formValues;
 
-  // ── Step 3: Next Steps selection ────────────────────────────────────────
-  const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
-
-  // ── Assign Resources state (notify toggle — UI only, not wired) ────────
-  const [notifyResources, setNotifyResources] = React.useState(false);
-
-  // ── Draft Summary state ─────────────────────────────────────────────────
-  const [summaryText, setSummaryText] = React.useState('');
-  const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
-  const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
-
-  // ── Send Email state ────────────────────────────────────────────────────
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
-
-  // ── SPE container ID (resolved from user's Business Unit) ───────────────
-  const [speContainerId, setSpeContainerId] = React.useState('');
-
-  React.useEffect(() => {
-    if (open && webApi) {
-      getSpeContainerIdFromBusinessUnit(webApi).then((id) => {
-        setSpeContainerId(id);
-      });
-    }
-  }, [open, webApi]);
-
-  // ── Reset domain state on open ──────────────────────────────────────────
+  // Reset form state on open
   React.useEffect(() => {
     if (open) {
-      fileDispatch({ type: 'RESET' });
       setFormValid(false);
       setFormValues(EMPTY_PROJECT_FORM);
-      setSelectedActions([]);
-      setNotifyResources(false);
-      setSummaryText('');
-      setRecipients([]);
-      setCcRecipients([]);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
     }
   }, [open]);
 
-  // ── Refs for dynamic step closures (prevents stale closure bug) ─────────
-  const formValuesRef = React.useRef(formValues);
-  formValuesRef.current = formValues;
-  const notifyResourcesRef = React.useRef(notifyResources);
-  notifyResourcesRef.current = notifyResources;
-  const summaryTextRef = React.useRef(summaryText);
-  summaryTextRef.current = summaryText;
-  const recipientsRef = React.useRef(recipients);
-  recipientsRef.current = recipients;
-  const ccRecipientsRef = React.useRef(ccRecipients);
-  ccRecipientsRef.current = ccRecipients;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
-
-  // ── Stable search callbacks ─────────────────────────────────────────────
-  const handleSearchAttorneys = React.useCallback(
-    (query: string) => searchContactsAsLookup(webApi, query),
-    [webApi]
-  );
-  const handleSearchParalegals = React.useCallback(
-    (query: string) => searchContactsAsLookup(webApi, query),
-    [webApi]
-  );
-  const handleSearchOutsideCounsel = React.useCallback(
-    (query: string) => searchOrganizationsAsLookup(webApi, query),
-    [webApi]
-  );
+  // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(webApi, query),
+    [webApi]
+  );
+  const handleSearchOrganizations = React.useCallback(
+    (query: string) => searchOrganizationsAsLookup(webApi, query),
     [webApi]
   );
   const handleSearchUsers = React.useCallback(
@@ -260,449 +87,180 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
     [webApi]
   );
 
-  // ── Assign Resources change handlers ────────────────────────────────────
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedAttorneyId: item?.id ?? '',
-        assignedAttorneyName: item?.name ?? '',
-      }));
-    },
-    []
-  );
-  const handleParalegalChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedParalegalId: item?.id ?? '',
-        assignedParalegalName: item?.name ?? '',
-      }));
-    },
-    []
-  );
-  const handleOutsideCounselChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedOutsideCounselId: item?.id ?? '',
-        assignedOutsideCounselName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  // ── Wizard config ───────────────────────────────────────────────────────
+  const config: ICreateRecordWizardConfig = React.useMemo(
+    () => ({
+      title: 'Create New Project',
+      entityLabel: 'project',
+      filesStepSubtitle:
+        'Upload documents to associate with this project. The AI will extract key information to assist with project setup.',
+      finishingLabel: 'Creating project\u2026',
 
-  // ── Sync dynamic steps with selected action cards (via shellRef) ────────
-  const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
-
-  React.useEffect(() => {
-    const prev = prevSelectedActionsRef.current;
-    const next = selectedActions;
-
-    // Add newly selected follow-on steps
-    next.forEach((actionId) => {
-      if (!prev.includes(actionId)) {
-        const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
-        const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
-
-        const dynamicConfig: IWizardStepConfig = {
-          id: stepId,
-          label: stepLabel,
-          canAdvance: () => {
-            if (stepId === 'followon-send-email') {
-              return emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '';
-            }
-            return true; // assign-resources and draft-summary have no hard requirement
-          },
-          renderContent: () => {
-            if (stepId === 'followon-assign-counsel') {
-              // Build lookup values from form state
-              const fv = formValuesRef.current;
-              const attVal: ILookupItem | null = fv.assignedAttorneyId
-                ? { id: fv.assignedAttorneyId, name: fv.assignedAttorneyName }
-                : null;
-              const paraVal: ILookupItem | null = fv.assignedParalegalId
-                ? { id: fv.assignedParalegalId, name: fv.assignedParalegalName }
-                : null;
-              const ocVal: ILookupItem | null = fv.assignedOutsideCounselId
-                ? { id: fv.assignedOutsideCounselId, name: fv.assignedOutsideCounselName }
-                : null;
-
-              return (
-                <AssignResourcesStep
-                  attorneyValue={attVal}
-                  onAttorneyChange={handleAttorneyChange}
-                  onSearchAttorneys={handleSearchAttorneys}
-                  paralegalValue={paraVal}
-                  onParalegalChange={handleParalegalChange}
-                  onSearchParalegals={handleSearchParalegals}
-                  outsideCounselValue={ocVal}
-                  onOutsideCounselChange={handleOutsideCounselChange}
-                  onSearchOutsideCounsel={handleSearchOutsideCounsel}
-                  notifyResources={notifyResourcesRef.current}
-                  onNotifyChange={setNotifyResources}
-                />
-              );
-            }
-            if (stepId === 'followon-draft-summary') {
-              // Build form values in the shape DraftSummaryStep expects
-              const fv = formValuesRef.current;
-              const matterShapedValues = {
-                matterTypeId: fv.projectTypeId,
-                matterTypeName: fv.projectTypeName,
-                practiceAreaId: fv.practiceAreaId,
-                practiceAreaName: fv.practiceAreaName,
-                matterName: fv.projectName,
-                assignedAttorneyId: fv.assignedAttorneyId,
-                assignedAttorneyName: fv.assignedAttorneyName,
-                assignedParalegalId: fv.assignedParalegalId,
-                assignedParalegalName: fv.assignedParalegalName,
-                assignedOutsideCounselId: fv.assignedOutsideCounselId,
-                assignedOutsideCounselName: fv.assignedOutsideCounselName,
-                summary: fv.description,
-              };
-              return (
-                <DraftSummaryStep
-                  formValues={matterShapedValues}
-                  summaryText={summaryTextRef.current}
-                  onSummaryChange={setSummaryText}
-                  recipients={recipientsRef.current}
-                  onRecipientsChange={setRecipients}
-                  ccRecipients={ccRecipientsRef.current}
-                  onCcRecipientsChange={setCcRecipients}
-                  onSearchContacts={handleSearchContacts}
-                />
-              );
-            }
-            if (stepId === 'followon-send-email') {
-              // Build form values in the shape SendEmailStep expects
-              const fv = formValuesRef.current;
-              const matterShapedValues = {
-                matterTypeId: fv.projectTypeId,
-                matterTypeName: fv.projectTypeName,
-                practiceAreaId: fv.practiceAreaId,
-                practiceAreaName: fv.practiceAreaName,
-                matterName: fv.projectName,
-                assignedAttorneyId: fv.assignedAttorneyId,
-                assignedAttorneyName: fv.assignedAttorneyName,
-                assignedParalegalId: fv.assignedParalegalId,
-                assignedParalegalName: fv.assignedParalegalName,
-                assignedOutsideCounselId: fv.assignedOutsideCounselId,
-                assignedOutsideCounselName: fv.assignedOutsideCounselName,
-                summary: fv.description,
-              };
-              return (
-                <SendEmailStep
-                  formValues={matterShapedValues}
-                  emailTo={emailToRef.current}
-                  onEmailToChange={setEmailTo}
-                  emailSubject={emailSubjectRef.current}
-                  onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBodyRef.current}
-                  onEmailBodyChange={setEmailBody}
-                  onSearchUsers={handleSearchUsers}
-                />
-              );
-            }
-            return <Text size={300}>{stepLabel}</Text>;
-          },
-        };
-
-        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
-      }
-    });
-
-    // Remove deselected follow-on steps
-    prev.forEach((actionId) => {
-      if (!next.includes(actionId)) {
-        shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
-      }
-    });
-
-    prevSelectedActionsRef.current = next;
-  }, [
-    selectedActions,
-    webApi,
-    handleSearchAttorneys,
-    handleSearchParalegals,
-    handleSearchOutsideCounsel,
-    handleSearchContacts,
-    handleSearchUsers,
-    handleAttorneyChange,
-    handleParalegalChange,
-    handleOutsideCounselChange,
-  ]);
-
-  // ── Pre-fill email fields when send-email is selected ────────────────────
-  React.useEffect(() => {
-    if (
-      selectedActions.includes('send-email') &&
-      formValues.projectName &&
-      !emailSubject
-    ) {
-      setEmailSubject(buildDefaultEmailSubject(formValues.projectName));
-      // Map project form values to the shape buildDefaultEmailBody expects
-      setEmailBody(buildDefaultEmailBody({
-        matterTypeId: formValues.projectTypeId,
-        matterTypeName: formValues.projectTypeName,
-        practiceAreaId: formValues.practiceAreaId,
-        practiceAreaName: formValues.practiceAreaName,
-        matterName: formValues.projectName,
-        assignedAttorneyId: formValues.assignedAttorneyId,
-        assignedAttorneyName: formValues.assignedAttorneyName,
-        assignedParalegalId: formValues.assignedParalegalId,
-        assignedParalegalName: formValues.assignedParalegalName,
-        summary: formValues.description,
-      }));
-    }
-  }, [selectedActions, formValues, emailSubject]);
-
-  // ── File handler callbacks ──────────────────────────────────────────────
-  const handleFilesAccepted = React.useCallback(
-    (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
-    []
-  );
-
-  const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) =>
-      fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
-    []
-  );
-
-  const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
-    []
-  );
-
-  const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
-    []
-  );
-
-  // ── Finish handler (returns IWizardSuccessConfig) ───────────────────────
-  // Refs for finish handler — read latest values at invocation time to avoid
-  // stale closures (same pattern as dynamic step renderContent).
-  const selectedActionsRef = React.useRef(selectedActions);
-  selectedActionsRef.current = selectedActions;
-  const fileStateRef = React.useRef(fileState);
-  fileStateRef.current = fileState;
-  const speContainerIdRef = React.useRef(speContainerId);
-  speContainerIdRef.current = speContainerId;
-
-  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
-    const warnings: string[] = [];
-
-    // Read latest values from refs — not closure-captured state
-    const currentFormValues = formValuesRef.current;
-    const currentFiles = fileStateRef.current.uploadedFiles;
-    const currentContainerId = speContainerIdRef.current;
-
-    // 1. Create sprk_project record
-    const projectService = new ProjectService(webApi);
-    const result = await projectService.createProject(currentFormValues);
-    if (!result.success) {
-      throw new Error(result.errorMessage ?? 'Failed to create project');
-    }
-
-    const projectId = result.projectId!;
-    const projectName = result.projectName!;
-
-    // 2. Upload files to SPE + create document records (if files uploaded and container available)
-    if (currentFiles.length > 0 && currentContainerId) {
-      try {
-        const entityService = new EntityCreationService(webApi);
-
-        // Upload files to SPE
-        const uploadResult = await entityService.uploadFilesToSpe(
-          currentContainerId,
-          currentFiles
-        );
-
-        if (uploadResult.errors.length > 0) {
-          for (const err of uploadResult.errors) {
-            warnings.push(`File upload failed for "${err.fileName}": ${err.error}`);
-          }
-        }
-
-        // Create sprk_document records linked to the project
-        if (uploadResult.uploadedFiles.length > 0) {
-          const docResult = await entityService.createDocumentRecords(
-            'sprk_projects',       // Parent entity set name
-            projectId,             // Parent entity ID
-            'sprk_Project',        // Navigation property on sprk_document
-            uploadResult.uploadedFiles,
-            {
-              containerId: currentContainerId,
-              parentRecordName: projectName,
-            }
-          );
-
-          if (docResult.warnings.length > 0) {
-            warnings.push(...docResult.warnings);
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'File processing failed';
-        warnings.push(`File pipeline error: ${message}`);
-      }
-    } else if (currentFiles.length > 0 && !currentContainerId) {
-      warnings.push('SPE container not configured — files were not uploaded to SharePoint Embedded.');
-    }
-
-    // 3. Execute follow-on actions
-    // (For now, follow-on data is collected but not persisted to Dataverse —
-    //  same pattern as Create Matter, where the MatterService handles this.)
-
-    const hasWarnings = warnings.length > 0;
-
-    const viewProject = () => {
-      navigateToEntity({
-        action: 'openRecord',
-        entityName: 'sprk_project',
-        entityId: projectId,
-      });
-      onClose();
-    };
-
-    return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
-      title: hasWarnings ? 'Project created with warnings' : 'Project created!',
-      body: (
-        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
-            &ldquo;{projectName}&rdquo;
-          </span>{' '}
-          has been created
-          {hasWarnings
-            ? ', though some operations could not complete. See details below.'
-            : ' and is ready to use.'}
-        </Text>
-      ),
-      actions: (
-        <>
-          <Button
-            appearance="primary"
-            onClick={viewProject}
-            aria-label={`View project: ${projectName}`}
-          >
-            View Project
-          </Button>
-          <Button appearance="secondary" onClick={onClose}>
-            Close
-          </Button>
-        </>
-      ),
-      warnings,
-    };
-  }, [webApi, onClose]);
-
-  // ── Step configurations ─────────────────────────────────────────────────
-
-  const stepConfigs: IWizardStepConfig[] = React.useMemo(
-    () => [
-      {
-        id: 'add-files',
-        label: 'Add file(s)',
-        canAdvance: () => fileState.uploadedFiles.length > 0,
-        renderContent: () => (
-          <>
-            <div>
-              <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-                Add file(s)
-              </Text>
-              <Text size={200} className={styles.stepSubtitle}>
-                Upload documents to associate with this project. The AI will extract
-                key information to assist with project setup.
-              </Text>
-            </div>
-
-            {fileState.validationErrors.length > 0 && (
-              <MessageBar
-                intent="error"
-                className={styles.errorBar}
-                onMouseEnter={handleClearErrors}
-              >
-                <MessageBarBody>
-                  {fileState.validationErrors.map((err, i) => (
-                    <div key={i}>
-                      <strong>{err.fileName}</strong>: {err.reason}
-                    </div>
-                  ))}
-                </MessageBarBody>
-              </MessageBar>
-            )}
-
-            <FileUploadZone
-              onFilesAccepted={handleFilesAccepted}
-              onValidationErrors={handleValidationErrors}
-            />
-
-            {fileState.uploadedFiles.length > 0 && (
-              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
-            )}
-          </>
-        ),
-      },
-      {
+      infoStep: {
         id: 'create-record',
         label: 'Enter Info',
         canAdvance: () => formValid,
-        renderContent: () => (
+        renderContent: (wizardFiles) => (
           <CreateProjectStep
             webApi={webApi}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
-            uploadedFiles={fileState.uploadedFiles}
+            uploadedFiles={wizardFiles}
             initialFormValues={formValues}
           />
         ),
       },
-      {
-        id: 'next-steps',
-        label: 'Next Steps',
-        canAdvance: () => true,
-        isEarlyFinish: () => selectedActions.length === 0,
-        renderContent: () => (
-          <NextStepsStep
-            selectedActions={selectedActions}
-            onSelectionChange={setSelectedActions}
-            entityLabel="project"
-          />
-        ),
+
+      searchContacts: handleSearchContacts,
+      searchOrganizations: handleSearchOrganizations,
+      searchUsers: handleSearchUsers,
+
+      resolveSpeContainerId: () => getSpeContainerIdFromBusinessUnit(webApi),
+
+      buildEmailSubject: (entityName: string) => `New Project: ${entityName}`,
+      buildEmailBody: (fields: Record<string, string>) => {
+        const typeStr = fields.projectTypeName ? ` ${fields.projectTypeName.toLowerCase()}` : '';
+        const areaStr = fields.practiceAreaName ? ` (${fields.practiceAreaName})` : '';
+        return (
+          `Dear Client,\n\n` +
+          `We are pleased to confirm that your${typeStr} project, "${fields.projectName || ''}"${areaStr}, ` +
+          `has been created in our legal management system.\n\n` +
+          `Our team will be in touch shortly to discuss next steps and any actions required from you.\n\n` +
+          `Please do not hesitate to reach out if you have any questions.\n\n` +
+          `Kind regards,\n[Your Name]\n[Firm Name]`
+        );
       },
-    ],
-    [
-      fileState.uploadedFiles,
-      fileState.validationErrors,
-      formValid,
-      selectedActions,
-      webApi,
-      styles,
-      handleFilesAccepted,
-      handleValidationErrors,
-      handleRemoveFile,
-      handleClearErrors,
-    ]
+      getEntityName: () => formValuesRef.current.projectName,
+      getFormFields: () => ({
+        projectName: formValuesRef.current.projectName,
+        projectTypeName: formValuesRef.current.projectTypeName,
+        practiceAreaName: formValuesRef.current.practiceAreaName,
+      }),
+
+      onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
+        const warnings: string[] = [];
+        const currentFormValues = formValuesRef.current;
+
+        // Merge follow-on resource assignments back into form values
+        const mergedFormValues: ICreateProjectFormState = {
+          ...currentFormValues,
+          assignedAttorneyId: context.followOn.assignedAttorneyId || currentFormValues.assignedAttorneyId,
+          assignedAttorneyName: context.followOn.assignedAttorneyName || currentFormValues.assignedAttorneyName,
+          assignedParalegalId: context.followOn.assignedParalegalId || currentFormValues.assignedParalegalId,
+          assignedParalegalName: context.followOn.assignedParalegalName || currentFormValues.assignedParalegalName,
+          assignedOutsideCounselId: context.followOn.assignedOutsideCounselId || currentFormValues.assignedOutsideCounselId,
+          assignedOutsideCounselName: context.followOn.assignedOutsideCounselName || currentFormValues.assignedOutsideCounselName,
+        };
+
+        // 1. Create sprk_project record
+        const projectService = new ProjectService(webApi);
+        const result = await projectService.createProject(mergedFormValues);
+        if (!result.success) {
+          throw new Error(result.errorMessage ?? 'Failed to create project');
+        }
+
+        const projectId = result.projectId!;
+        const projectName = result.projectName!;
+
+        // 2. Upload files to SPE + create document records
+        if (context.uploadedFiles.length > 0 && context.speContainerId) {
+          try {
+            const entityService = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
+
+            const uploadResult = await entityService.uploadFilesToSpe(
+              context.speContainerId,
+              context.uploadedFiles
+            );
+
+            if (uploadResult.errors.length > 0) {
+              for (const err of uploadResult.errors) {
+                warnings.push(`File upload failed for "${err.fileName}": ${err.error}`);
+              }
+            }
+
+            if (uploadResult.uploadedFiles.length > 0) {
+              const docResult = await entityService.createDocumentRecords(
+                'sprk_projects',
+                projectId,
+                'sprk_Project',
+                uploadResult.uploadedFiles,
+                {
+                  containerId: context.speContainerId,
+                  parentRecordName: projectName,
+                }
+              );
+
+              if (docResult.warnings.length > 0) {
+                warnings.push(...docResult.warnings);
+              }
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'File processing failed';
+            warnings.push(`File pipeline error: ${message}`);
+          }
+        } else if (context.uploadedFiles.length > 0 && !context.speContainerId) {
+          warnings.push('SPE container not configured — files were not uploaded to SharePoint Embedded.');
+        }
+
+        const hasWarnings = warnings.length > 0;
+
+        const viewProject = () => {
+          navigateToEntity({
+            action: 'openRecord',
+            entityName: 'sprk_project',
+            entityId: projectId,
+          });
+          onClose();
+        };
+
+        return {
+          icon: (
+            <CheckmarkCircleFilled
+              fontSize={64}
+              style={{ color: tokens.colorPaletteGreenForeground1 }}
+            />
+          ),
+          title: hasWarnings ? 'Project created with warnings' : 'Project created!',
+          body: (
+            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+                &ldquo;{projectName}&rdquo;
+              </span>{' '}
+              has been created
+              {hasWarnings
+                ? ', though some operations could not complete. See details below.'
+                : ' and is ready to use.'}
+            </Text>
+          ),
+          actions: (
+            <>
+              <Button
+                appearance="primary"
+                onClick={viewProject}
+                aria-label={`View project: ${projectName}`}
+              >
+                View Project
+              </Button>
+              <Button appearance="secondary" onClick={onClose}>
+                Close
+              </Button>
+            </>
+          ),
+          warnings,
+        };
+      },
+    }),
+    [formValid, formValues, webApi, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, onClose]
   );
 
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <WizardShell
-      ref={shellRef}
+    <CreateRecordWizard
       open={open}
-      title="Create New Project"
-      ariaLabel="Create New Project"
-      steps={stepConfigs}
       onClose={onClose}
-      onFinish={handleFinish}
-      finishingLabel="Creating project…"
-      finishLabel="Finish"
+      webApi={webApi}
+      config={config}
     />
   );
 };

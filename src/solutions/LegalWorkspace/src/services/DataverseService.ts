@@ -237,7 +237,7 @@ export class DataverseService {
   /**
    * Resolve the linked contact ID for a systemuser.
    *
-   * Many lookup fields (sprk_assignedattorney, sprk_assignedparalegal) point
+   * Many lookup fields (sprk_assignedattorney1, sprk_assignedparalegal1) point
    * to contacts rather than systemusers. This method retrieves the
    * systemuser._contactid_value lookup to enable broad owner filtering.
    *

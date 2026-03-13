@@ -3,9 +3,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -326,7 +328,7 @@ public static class CommunicationEndpoints
     private static async Task<IResult> HandleIncomingWebhookAsync(
         HttpRequest request,
         JobSubmissionService jobSubmissionService,
-        IConfiguration configuration,
+        IOptions<CommunicationOptions> communicationOptions,
         ILogger<CommunicationService> logger,
         CancellationToken ct)
     {
@@ -390,7 +392,7 @@ public static class CommunicationEndpoints
             }
 
             // ─── Step 4: Validate clientState on each notification ───
-            var expectedClientState = configuration["Communication:WebhookClientState"];
+            var expectedClientState = communicationOptions.Value.WebhookClientState;
 
             if (string.IsNullOrEmpty(expectedClientState))
             {
@@ -422,8 +424,11 @@ public static class CommunicationEndpoints
                 }
 
                 // ─── Step 5: Deduplication ───
-                // Build a dedup key from subscriptionId + resource + changeType to catch retries
-                var dedupKey = $"{notification.SubscriptionId}:{notification.Resource}:{notification.ResourceData?.Id}";
+                // Build a dedup key from the message ID to catch both retries AND duplicate
+                // notifications from multiple subscriptions monitoring the same mailbox.
+                // ResourceData.Id or the last segment of Resource is the Graph message ID.
+                var notificationMessageId = notification.ResourceData?.Id ?? ExtractLastSegment(notification.Resource ?? "");
+                var dedupKey = $"msg:{notificationMessageId}:{notification.ChangeType}";
 
                 // Prune expired entries periodically (every time we process a batch)
                 PruneExpiredNotifications();
@@ -471,11 +476,11 @@ public static class CommunicationEndpoints
                     MaxAttempts = 3
                 };
 
-                await jobSubmissionService.SubmitJobAsync(job, ct);
+                await jobSubmissionService.SubmitCommunicationJobAsync(job, ct);
                 enqueued++;
 
                 logger.LogInformation(
-                    "Enqueued IncomingCommunicationJob {JobId} | SubscriptionId={SubscriptionId}, " +
+                    "Enqueued IncomingCommunicationJob {JobId} to communication queue | SubscriptionId={SubscriptionId}, " +
                     "MessageId={MessageId}, IdempotencyKey={IdempotencyKey}",
                     job.JobId, notification.SubscriptionId, messageId, job.IdempotencyKey);
             }

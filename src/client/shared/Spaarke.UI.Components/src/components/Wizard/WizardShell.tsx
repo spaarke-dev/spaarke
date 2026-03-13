@@ -191,6 +191,9 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     // ── Step config lookup map ─────────────────────────────────────────────
     const configMapRef = React.useRef<Map<string, IWizardStepConfig>>(new Map());
 
+    // ── Force-update counter (for requestUpdate) ─────────────────────────
+    const [, forceRender] = React.useReducer((x: number) => x + 1, 0);
+
     // ── Finishing flow state ───────────────────────────────────────────────
     const [isFinishing, setIsFinishing] = React.useState(false);
     const [finishError, setFinishError] = React.useState<string | null>(null);
@@ -221,11 +224,15 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
           });
         },
 
+        requestUpdate() {
+          forceRender();
+        },
+
         get state() {
           return shellState;
         },
       }),
-      [shellState],
+      [shellState, forceRender],
     );
 
     // ── Reset on open (false -> true) ──────────────────────────────────────

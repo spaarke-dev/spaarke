@@ -1,6 +1,6 @@
 # Communication Service Architecture
 
-> **Last Updated**: March 9, 2026
+> **Last Updated**: March 12, 2026
 > **Purpose**: Architecture documentation for the Communication Service module — outbound/inbound email via Microsoft Graph, Dataverse-managed mailbox accounts, SPE archival, and AI playbook integration.
 > **Status**: Implemented (R2 Complete)
 > **Branch**: `work/email-communication-solution-r2`
@@ -59,7 +59,7 @@ The Communication Service provides unified email send and receive via Microsoft 
 | Send modes | Shared mailbox only | Shared mailbox + individual user (OBO) |
 | EML for inbound | N/A | `GraphMessageToEmlConverter` (pure transformation, no I/O) |
 | Attachment adapter | N/A | `GraphAttachmentAdapter` maps Graph → existing `EmailAttachmentInfo` |
-| Association resolution | Manual (outbound only) | Automatic 4-level cascade for inbound via `IncomingAssociationResolver` |
+| Association resolution | Manual (outbound only) | Automatic 3-level cascade for inbound via `IncomingAssociationResolver` |
 | Mailbox verification | N/A | `MailboxVerificationService` tests send/read capabilities |
 | Daily send limits | N/A | `DailySendCountResetService` + quota check before send |
 | Telemetry | `EmailTelemetry` | `CommunicationTelemetry` (renamed, expanded metrics) |
@@ -72,7 +72,7 @@ The Communication Service provides unified email send and receive via Microsoft 
 1. **Graph Send is Critical Path**: If Graph `sendMail` fails, the entire operation fails with `SdapProblemException`. No partial success.
 2. **Best-Effort Tracking**: Dataverse record creation, SPE archival, attachment records, and AI analysis are wrapped in try/catch. Failures are logged as warnings.
 3. **No Retry Logic**: Failures are immediate. Callers (UI or AI playbook) handle retry decisions.
-4. **Multi-Layer Deduplication**: Inbound emails are deduplicated at four levels: in-memory webhook cache → ServiceBus idempotency key → Dataverse `sprk_graphmessageid` query → Dataverse duplicate detection rule.
+4. **Multi-Layer Deduplication**: Inbound emails are deduplicated at four levels: in-memory webhook cache (keyed by message ID, not subscription ID) → Service Bus `MessageId` set to `IdempotencyKey` (with SHA-256 hashing for keys >128 chars) → Dataverse `sprk_graphmessageid` query → Dataverse duplicate detection rule.
 5. **Sender Validation Before Send**: The approved sender list is validated synchronously before any Graph call.
 6. **Correlation ID Tracing**: Every operation is tagged with a `correlationId` for end-to-end tracing.
 
@@ -115,8 +115,8 @@ The Communication Service provides unified email send and receive via Microsoft 
 │  │Graph │ │Dv Svc│ │SpeFile   │                 ▼                         │
 │  │Client│ │      │ │Store     │  ┌──────────────────────────────────┐     │
 │  │Factry│ │      │ │(ADR-007) │  │ IncomingAssociationResolver     │     │
-│  └──────┘ └──────┘ └──────────┘  │ Thread > Sender > Subject >    │     │
-│                                   │ Mailbox context (4-level)      │     │
+│  └──────┘ └──────┘ └──────────┘  │ Thread > Sender > Subject      │     │
+│                                   │ (3-level cascade)              │     │
 │  ┌─── Background Services ────┐  └──────────────────────────────────┘     │
 │  │ GraphSubscriptionManager   │                                           │
 │  │   (30-min cycle)           │  ┌──────────────────────────────────┐     │
@@ -157,7 +157,7 @@ The Communication Service provides unified email send and receive via Microsoft 
 | `Services/Communication/CommunicationAccountService.cs` | Service | `sprk_communicationaccount` CRUD with Redis caching |
 | `Services/Communication/ApprovedSenderValidator.cs` | Service | Two-tier sender resolution (config + Dataverse accounts) |
 | `Services/Communication/IncomingCommunicationProcessor.cs` | Service | Inbound email processing pipeline |
-| `Services/Communication/IncomingAssociationResolver.cs` | Service | 4-level association cascade for inbound |
+| `Services/Communication/IncomingAssociationResolver.cs` | Service | 3-level association cascade for inbound |
 | `Services/Communication/GraphMessageToEmlConverter.cs` | Service | Pure transformation: Graph Message → RFC 2822 .eml (inbound) |
 | `Services/Communication/GraphAttachmentAdapter.cs` | Static | Maps Graph `FileAttachment` → `EmailAttachmentInfo` |
 | `Services/Communication/EmlGenerationService.cs` | Service | RFC 2822 .eml generation from request data (outbound) |
@@ -306,32 +306,39 @@ CommunicationEndpoints.HandleIncomingWebhookAsync()
   ├── 2. Parse GraphChangeNotificationCollection
   ├── 3. Validate clientState on each notification
   ├── 4. Deduplicate (in-memory ConcurrentDictionary, 10-min window)
-  │       Key: {subscriptionId}:{resource}:{resourceDataId}
+  │       Key: msg:{messageId}:{changeType}
+  │       (Keyed by message ID to catch duplicates from multiple subscriptions)
   ├── 5. Extract mailbox + messageId from resource path
   ├── 6. Enqueue IncomingCommunication job via ServiceBus
   │       IdempotencyKey: Communication:{messageId}:Process
+  │       Service Bus MessageId = IdempotencyKey (SHA-256 hashed if >128 chars)
+  │       Payload includes subscriptionId for GUID→email resolution
   └── 7. Return 202 Accepted
 ```
 
 ### Processing Pipeline
 
-`IncomingCommunicationProcessor.ProcessAsync(mailboxEmail, graphMessageId)`:
+`IncomingCommunicationProcessor.ProcessAsync(mailboxEmail, graphMessageId, subscriptionId?, ct)`:
 
 ```
 Step 1: Deduplication check
   └── Query sprk_communication by sprk_graphmessageid
   ↓ (skip if already exists)
 
-Step 2: Get account details
-  ├── QueryReceiveEnabledAccountsAsync()
+Step 2: Resolve account from mailbox identifier
+  ├── Direct email match against receive-enabled accounts
+  ├── If GUID (shared mailbox): 3-tier resolution:
+  │   ├── 1. Query Graph subscription → extract email from resource path
+  │   ├── 2. Match by stored subscriptionId on Dataverse accounts
+  │   └── 3. Single-account fallback (if only one receive-enabled)
   └── Check AutoCreateRecords flag
   ↓
 
 Step 3: Fetch full message from Graph
   ├── GraphClientFactory.ForApp()
   ├── Users[email].Messages[messageId].GetAsync()
-  ├── Select: id, from, toRecipients, ccRecipients, subject, body, uniqueBody,
-  │           receivedDateTime, hasAttachments
+  ├── Select: id, internetMessageId, from, toRecipients, ccRecipients, subject,
+  │           body, uniqueBody, receivedDateTime, hasAttachments
   └── Expand: attachments
   ↓
 
@@ -339,24 +346,36 @@ Step 4: Create sprk_communication record
   ├── Direction = Incoming (100000000)
   ├── CommunicationType = Email (100000000)
   ├── StatusCode = Delivered (659490003)
+  ├── sprk_internetmessageid = message.InternetMessageId
   └── Prefer uniqueBody over full body (strips reply chains)
   ↓
 
 Step 4.5: Resolve associations  ◄── BEST-EFFORT
-  └── Delegate to IncomingAssociationResolver (4-level cascade)
+  └── Delegate to IncomingAssociationResolver (3-level cascade)
   ↓
 
-Step 5: Process attachments  ◄── BEST-EFFORT (if AutoCreateRecords=true)
+Step 5: Process attachments  ◄── BEST-EFFORT (if AutoCreateRecords=true or account unresolved)
   ├── GraphAttachmentAdapter.ToAttachmentInfoList()
   ├── Filter signature images via AttachmentFilterService
   ├── Upload to SPE: /communications/{id}/attachments/{fileName}
-  └── Create sprk_communicationattachment records
+  ├── Create sprk_document record per attachment
+  │   ├── sprk_documenttype = Email (100000006)
+  │   ├── sprk_sourcetype = Email Attachment (659490004)
+  │   └── sprk_filename = original filename (for AI file type detection)
+  ├── Enqueue AI analysis job per attachment (best-effort)
+  ├── Enqueue RAG indexing job per attachment (best-effort)
+  └── Create sprk_communicationattachment records (linked to sprk_document)
   ↓
 
 Step 6: Archive .eml to SPE  ◄── BEST-EFFORT (if ArchiveIncomingOptIn != false)
   ├── GraphMessageToEmlConverter.ConvertToEml(graphMessage)
   ├── Upload to SPE: /communications/{id}/{filename}.eml
-  └── Create sprk_document record
+  ├── Create sprk_document record
+  │   ├── sprk_documenttype = Email (100000006)
+  │   ├── sprk_sourcetype = Email Archive (659490003)
+  │   └── sprk_filename = .eml filename (for AI file type detection)
+  ├── Enqueue AI analysis job (best-effort)
+  └── Enqueue RAG indexing job (best-effort)
   ↓
 
 Step 7: Mark message as read in Graph  ◄── BEST-EFFORT
@@ -519,12 +538,12 @@ The `ApprovedSenderValidator` uses a two-tier model:
 
 ## Inbound Association Resolution
 
-`IncomingAssociationResolver` uses a 4-level priority cascade. First match wins.
+`IncomingAssociationResolver` uses a 3-level priority cascade. First match wins.
 
 ### Level 1: Thread Matching
 
 - Fetches `In-Reply-To` header from Graph internet message headers
-- Looks up parent `sprk_communication` by message ID
+- Searches `sprk_internetmessageid` first (exact RFC 2822 match), falls back to `sprk_graphmessageid`
 - Copies regarding fields from parent record
 
 ### Level 2: Sender Matching
@@ -543,9 +562,10 @@ Applies 4 regex patterns against subject line:
 | `SPRK-(\d+)` | `sprk_matter` by `sprk_referencenumber` |
 | `[MATTER:(\d+)]` | `sprk_matter` by `sprk_referencenumber` |
 
-### Level 4: Mailbox Context
+### No Default-Matter Fallback
 
-Falls back to `account.DefaultRegardingMatterId` if configured on the communication account.
+Shared mailboxes are not matter-specific, so there is no automatic default-matter assignment.
+Unassociated emails remain unassociated and surface for manual review via Pending Review status.
 
 ### Association Status
 
@@ -615,26 +635,50 @@ Create sprk_communicationattachment records in Dataverse
 ### Dataverse Linkage
 
 After upload, creates a `sprk_document` record:
-- `sprk_documenttype` = Communication (100000002)
-- `sprk_sourcetype` = CommunicationArchive (100000001)
+- `sprk_documentname` = "Archived: {subject}" (outbound) or "{filename}" (attachment)
+- `sprk_filename` = .eml filename or original attachment filename (used by AI analyzer for file type detection)
+- `sprk_documenttype` = Email (100000006)
+- `sprk_sourcetype` = Email Archive (659490003) for .eml, Email Attachment (659490004) for attachments
 - `sprk_communication` = EntityReference to the communication record
-- `sprk_speitemid` / `sprk_spedriveid` = SPE file identifiers
+- `sprk_graphitemid` / `sprk_graphdriveid` = SPE file identifiers
+- `sprk_isemailarchive` = true (for .eml files)
+- `sprk_emailsubject`, `sprk_emailfrom`, `sprk_emailto`, `sprk_emaildate`, `sprk_emaildirection` = email metadata
 
 ---
 
 ## Background Services
 
-Three `BackgroundService` implementations following ADR-001:
+Three `BackgroundService` implementations following ADR-001.
+
+### Startup Resilience Pattern (All Services)
+
+All communication BackgroundServices follow the same startup pattern:
+
+```
+ExecuteAsync(CancellationToken stoppingToken)
+  1. Log startup message
+  2. await Task.Delay(startup_delay, stoppingToken)  ◄── Dependency warm-up
+  3. try { await InitialCycleAsync(stoppingToken); }  ◄── Wrapped in try-catch
+     catch (OperationCanceledException) → return
+     catch (Exception) → log error, continue to loop
+  4. while (timer.WaitForNextTickAsync()) { ... }     ◄── Standard loop with try-catch
+```
+
+**Why**: If the initial cycle throws (e.g., Dataverse/Graph not ready during app startup), an unhandled exception propagates from `ExecuteAsync` and .NET 8's default `BackgroundServiceExceptionBehavior.StopHost` stops the host. Wrapping the initial call in try-catch ensures the service retries on the next timer tick instead of dying silently.
 
 ### GraphSubscriptionManager
 
 | Setting | Value |
 |---------|-------|
 | Tick interval | 30 minutes |
+| Startup delay | 10 seconds |
 | Renewal threshold | 24 hours before expiry |
 | Subscription lifetime | 3 days (Graph maximum for mail) |
 
-**Decision logic per account**:
+**Each cycle executes**:
+
+1. **Orphan cleanup** — Lists all Graph subscriptions, compares with Dataverse-managed IDs, deletes untracked orphans whose `NotificationUrl` matches the configured webhook URL (safety filter to avoid touching subscriptions managed by other applications)
+2. **Per-account lifecycle** — For each receive-enabled account:
 
 | Condition | Action |
 |-----------|--------|
@@ -645,11 +689,14 @@ Three `BackgroundService` implementations following ADR-001:
 
 Subscription resource: `users/{email}/mailFolders/{monitorFolder}/messages` with `changeType=created`.
 
+**Orphan cleanup** prevents duplicate webhook notifications caused by accumulated subscriptions from deployments or multi-instance race conditions. This was the root cause of duplicate email processing discovered in March 2026.
+
 ### InboundPollingBackupService
 
 | Setting | Value |
 |---------|-------|
 | Polling interval | 5 minutes |
+| Startup delay | 15 seconds |
 | Initial lookback window | 15 minutes (on startup/restart) |
 | Max messages per poll | 50 |
 
@@ -683,9 +730,10 @@ Queries `isRead eq false` messages filtered by `receivedDateTime`. Enqueues `Inc
 | `sprk_subject` | String | Email subject |
 | `sprk_body` | Multiline | Email body content |
 | `sprk_graphmessageid` | String | Graph message ID (used for deduplication) |
+| `sprk_internetmessageid` | String | RFC 2822 Internet Message-ID (for thread matching via In-Reply-To) |
 | `sprk_sentat` | DateTime | Send/receive timestamp |
 | `sprk_correlationid` | String | Tracing correlation ID |
-| `sprk_sentby` | String | OID of sending user (User mode only) |
+| `sprk_sentby` | Lookup (systemuser) | Resolved from Azure AD OID via `QuerySystemUserByAzureAdOidAsync` |
 | `sprk_hasattachments` | Boolean | Whether attachments were included |
 | `sprk_attachmentcount` | Integer | Number of attachments |
 | `sprk_associationcount` | Integer | Number of entity associations |
@@ -901,10 +949,22 @@ Registered explicitly in `CommunicationModule` as singleton (not auto-discovered
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `to` | `string` | Yes | Comma-separated recipient emails |
+| `cc` | `string` | No | Comma-separated CC recipient emails |
 | `subject` | `string` | Yes | Email subject |
 | `body` | `string` | Yes | Email body (HTML) |
-| `fromMailbox` | `string` | No | Sender mailbox |
-| `associations` | `object[]` | No | Entity associations |
+| `fromMailbox` | `string` | No | Sender mailbox (null = default shared mailbox) |
+| `regardingEntity` | `string` | No | Dataverse entity logical name for primary association (e.g., `sprk_matter`) |
+| `regardingId` | `string` | No | Dataverse record GUID for primary association |
+| `associations` | `object[]` | No | Additional entity associations |
+
+### How AI Playbooks Send Email
+
+The AI tool framework invokes `SendCommunicationToolHandler.HandleAsync()` which:
+1. Parses tool parameters into a `SendCommunicationRequest`
+2. Delegates to `CommunicationService.SendAsync()` (same pipeline as UI sends)
+3. Returns a structured result with `communicationId`, `status`, and any warnings
+
+This ensures AI-sent emails go through the same validation, sender resolution, archival, and tracking as UI-initiated sends.
 
 ---
 

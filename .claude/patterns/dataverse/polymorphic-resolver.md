@@ -1,8 +1,8 @@
 # Polymorphic Resolver Pattern
 
-> **Domain**: Dataverse Data Model / PCF
+> **Domain**: Dataverse Data Model
 > **ADR**: [ADR-024](../../adr/ADR-024-polymorphic-resolver-pattern.md)
-> **Last Validated**: 2026-02-09
+> **Last Updated**: 2026-03-12
 
 ---
 
@@ -12,350 +12,237 @@ Use the Polymorphic Resolver Pattern when:
 - A child entity needs to associate with multiple different parent entity types
 - You need both unified views (all children) and entity-specific subgrids
 - Native "Regarding" lookup limitations are blocking your requirements
-- You want automatic field mapping from parent to child
 
-**Examples**:
-- Events can be related to Matters, Projects, Invoices, etc.
-- Memos can be attached to Events, Matters, Projects, Documents
-- Tasks can be created for any entity type
+**Entities using this pattern**: `sprk_event`, `sprk_document`, `sprk_workassignment`, `sprk_communication`, `sprk_memo`
 
 ---
 
-## Schema Setup
+## Schema
 
-### Step 1: Create Record Type Entity (sprk_recordtype_ref)
+### Dual-Field Strategy
 
-This entity serves as the lookup target for the resolver pattern:
+Each polymorphic child entity has two field groups:
 
-```xml
-<entity name="sprk_recordtype_ref">
-  <attributes>
-    <attribute name="sprk_name" type="string" length="200" />
-    <attribute name="sprk_recordlogicalname" type="string" length="100" />
-    <attribute name="sprk_recorddisplayname" type="string" length="200" />
-    <attribute name="sprk_regardingfield" type="string" length="100" />
-  </attributes>
-</entity>
+**1. Entity-Specific Lookup Fields** (one per supported parent type)
+```
+sprk_regardingmatter        → Lookup to sprk_matter
+sprk_regardingproject       → Lookup to sprk_project
+sprk_regardinginvoice       → Lookup to sprk_invoice
+sprk_regardingorganization  → Lookup to sprk_organization (or account)
+sprk_regardingperson        → Lookup to contact
+sprk_regardingworkassignment → Lookup to sprk_workassignment
+sprk_regardingbudget        → Lookup to sprk_budget
+sprk_regardinganalysis      → Lookup to sprk_analysis
 ```
 
-**Seed Data**:
-```javascript
-[
-  { name: "Matter", logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter" },
-  { name: "Project", logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject" },
-  { name: "Invoice", logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice" },
-  // ... add all supported parent types
-]
-```
+**2. Resolver Fields** (denormalized for cross-entity views)
 
-### Step 2: Add Fields to Child Entity
+| Field | Type | Purpose |
+|-------|------|---------|
+| `sprk_regardingrecordtype` | Lookup → `sprk_recordtype_ref` | Which entity type (Matter, Project, etc.) |
+| `sprk_regardingrecordid` | Text (50 chars) | GUID of the parent record |
+| `sprk_regardingrecordname` | Text (200 chars) | Display name of parent |
+| `sprk_regardingrecordurl` | URL (2000 chars) | Clickable link to parent record |
 
-Add both entity-specific lookups and resolver fields:
+### Record Type Reference Entity (`sprk_recordtype_ref`)
 
-```xml
-<entity name="sprk_event">
-  <!-- Entity-Specific Lookups (one per parent type) -->
-  <attribute name="sprk_regardingmatter" type="lookup" target="sprk_matter" />
-  <attribute name="sprk_regardingproject" type="lookup" target="sprk_project" />
-  <attribute name="sprk_regardinginvoice" type="lookup" target="sprk_invoice" />
-  <attribute name="sprk_regardinganalysis" type="lookup" target="sprk_analysis" />
-  <attribute name="sprk_regardingaccount" type="lookup" target="account" />
-  <attribute name="sprk_regardingcontact" type="lookup" target="contact" />
-  <attribute name="sprk_regardingworkassignment" type="lookup" target="sprk_workassignment" />
-  <attribute name="sprk_regardingbudget" type="lookup" target="sprk_budget" />
+Seed data table mapping entity logical names to display names:
 
-  <!-- Resolver Fields (denormalized for cross-entity views) -->
-  <attribute name="sprk_regardingrecordtype" type="lookup" target="sprk_recordtype_ref" />
-  <attribute name="sprk_regardingrecordid" type="string" length="50" />
-  <attribute name="sprk_regardingrecordname" type="string" length="200" />
-  <attribute name="sprk_regardingrecordurl" type="string" subtype="url" length="2000" />
-</entity>
-```
+| Field | Example Value |
+|-------|--------------|
+| `sprk_recordlogicalname` | `sprk_matter` |
+| `sprk_recorddisplayname` | `Matter` |
+| `sprk_regardingfield` | `sprk_regardingmatter` |
 
-**Field Descriptions**:
-- `sprk_regardingrecordtype`: Which entity type (Matter, Project, etc.)
-- `sprk_regardingrecordid`: GUID of the parent record
-- `sprk_regardingrecordname`: Display name for grid display
-- `sprk_regardingrecordurl`: Clickable URL to parent record
+**Why a lookup instead of a choice?** Admin-configurable — add new entity types without schema changes.
 
 ---
 
-## PCF Control Setup
+## Implementation: Shared Client Service
 
-### AssociationResolver on Form
+### PolymorphicResolverService
 
-Add the AssociationResolver PCF to the child entity form:
+**Location**: `src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`
+**Exports**: Via `src/client/shared/Spaarke.UI.Components/src/services/index.ts`
 
-```xml
-<control id="AssociationResolver"
-         classid="{guid-of-association-resolver}"
-         library="$webresource:sprk_Spaarke.Controls.AssociationResolver"
-         version="1.0.6">
-  <parameters>
-    <regardingRecordType>sprk_regardingrecordtype</regardingRecordType>
-    <regardingRecordId>sprk_regardingrecordid</regardingRecordId>
-    <regardingRecordName>sprk_regardingrecordname</regardingRecordName>
-  </parameters>
-</control>
-```
-
-**What it does**:
-1. Shows dropdown of entity types (loaded dynamically from sprk_recordtype_ref)
-2. "Select Record" button opens lookup dialog
-3. On selection:
-   - Populates corresponding entity-specific lookup (e.g., `sprk_regardingmatter`)
-   - Clears all other entity-specific lookups
-   - Populates all resolver fields
-   - Applies field mappings if profile exists
-4. Auto-detects if created from subgrid (pre-populated lookup)
-5. Shows "Refresh from Parent" button to re-apply field mappings
-
-### RegardingLink in Grid
-
-Add RegardingLink as a grid customizer for unified views:
-
-```xml
-<grid name="All Events View">
-  <columns>
-    <column name="sprk_regardingrecordname" width="200">
-      <customcontrol formfactor="3" name="Spaarke.Controls.RegardingLink">
-        <!-- Control automatically uses resolver fields to render clickable link -->
-      </customcontrol>
-    </column>
-  </columns>
-</grid>
-```
-
-**Grid Display**:
-```
-Event Name           | Regarding
----------------------|------------------------
-Call client         | Smith v. Jones (Matter)
-Send invoice        | Q1 Budget Report (Project)
-Follow up reminder  | ABC Corp (Account)
-```
-
-Each "Regarding" value is clickable and opens the parent record.
-
----
-
-## Code Implementation
-
-### RecordSelectionHandler (TypeScript)
-
-Handles populating/clearing regarding fields:
+This is the **single source of truth** for client-side resolver logic. All wizard dialogs and entity creation services use this.
 
 ```typescript
-import { ComponentFramework } from "powerapps-component-framework";
-
-export interface IRecordSelection {
-    entityType: string;      // e.g., "sprk_matter"
-    recordId: string;        // GUID
-    recordName: string;      // Display name
-}
-
-export interface IRecordSelectionResult {
-    success: boolean;
-    regardingFieldSet: boolean;
-    otherLookupsCleared: number;
-    errors: string[];
-}
-
-/**
- * Handle record selection from lookup dialog
- * Populates entity-specific lookup + resolver fields
- * Clears all other entity-specific lookups
- */
-export async function handleRecordSelection(
-    selection: IRecordSelection,
-    webAPI: ComponentFramework.WebApi
-): Promise<IRecordSelectionResult> {
-    const result: IRecordSelectionResult = {
-        success: true,
-        regardingFieldSet: false,
-        otherLookupsCleared: 0,
-        errors: []
-    };
-
-    try {
-        // Step 1: Query sprk_recordtype_ref to get configuration
-        const query = `?$filter=sprk_recordlogicalname eq '${selection.entityType}' and statecode eq 0`;
-        const recordTypes = await webAPI.retrieveMultipleRecords("sprk_recordtype_ref", query);
-
-        if (!recordTypes.entities || recordTypes.entities.length === 0) {
-            result.errors.push(`No Record Type found for ${selection.entityType}`);
-            result.success = false;
-            return result;
-        }
-
-        const recordType = recordTypes.entities[0];
-        const regardingField = recordType.sprk_regardingfield as string;
-        const recordTypeId = recordType.sprk_recordtype_refid as string;
-        const displayName = recordType.sprk_recorddisplayname as string;
-
-        // Step 2: Build record URL
-        const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-        const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() || "";
-        const recordUrl = `${clientUrl}/main.aspx?etn=${selection.entityType}&id=${selection.recordId}&pagetype=entityrecord`;
-
-        // Step 3: Set resolver fields
-        xrm.Page.getAttribute("sprk_regardingrecordtype")?.setValue([{
-            id: recordTypeId,
-            name: displayName,
-            entityType: "sprk_recordtype_ref"
-        }]);
-        xrm.Page.getAttribute("sprk_regardingrecordid")?.setValue(selection.recordId);
-        xrm.Page.getAttribute("sprk_regardingrecordname")?.setValue(selection.recordName);
-        xrm.Page.getAttribute("sprk_regardingrecordurl")?.setValue(recordUrl);
-
-        // Step 4: Set entity-specific lookup
-        xrm.Page.getAttribute(regardingField)?.setValue([{
-            id: selection.recordId,
-            name: selection.recordName,
-            entityType: selection.entityType
-        }]);
-        result.regardingFieldSet = true;
-
-        // Step 5: Clear all other entity-specific lookups
-        const allRegardingFields = [
-            "sprk_regardingmatter",
-            "sprk_regardingproject",
-            "sprk_regardinginvoice",
-            "sprk_regardinganalysis",
-            "sprk_regardingaccount",
-            "sprk_regardingcontact",
-            "sprk_regardingworkassignment",
-            "sprk_regardingbudget"
-        ];
-
-        for (const field of allRegardingFields) {
-            if (field !== regardingField) {
-                const attr = xrm.Page.getAttribute(field);
-                if (attr && attr.getValue() !== null) {
-                    attr.setValue(null);
-                    result.otherLookupsCleared++;
-                }
-            }
-        }
-
-        return result;
-
-    } catch (error) {
-        console.error("[RecordSelectionHandler] Error:", error);
-        result.success = false;
-        result.errors.push(error instanceof Error ? error.message : "Unknown error");
-        return result;
-    }
-}
-
-/**
- * Clear all regarding fields
- */
-export function clearAllRegardingFields(): void {
-    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-
-    // Clear resolver fields
-    xrm.Page.getAttribute("sprk_regardingrecordtype")?.setValue(null);
-    xrm.Page.getAttribute("sprk_regardingrecordid")?.setValue(null);
-    xrm.Page.getAttribute("sprk_regardingrecordname")?.setValue(null);
-    xrm.Page.getAttribute("sprk_regardingrecordurl")?.setValue(null);
-
-    // Clear all entity-specific lookups
-    const allRegardingFields = [
-        "sprk_regardingmatter",
-        "sprk_regardingproject",
-        "sprk_regardinginvoice",
-        "sprk_regardinganalysis",
-        "sprk_regardingaccount",
-        "sprk_regardingcontact",
-        "sprk_regardingworkassignment",
-        "sprk_regardingbudget"
-    ];
-
-    for (const field of allRegardingFields) {
-        xrm.Page.getAttribute(field)?.setValue(null);
-    }
-}
+import {
+  applyResolverFields,
+  resolveRecordType,
+  buildRecordUrl,
+  findNavProp,
+  type IPolymorphicWebApi,
+  type INavPropEntry,
+  type IRecordTypeRef,
+  type IResolverFieldValues,
+} from '@spaarke/ui-components';
 ```
 
-### Auto-Detection Feature
+### Key Functions
 
-Detects if record is created from a subgrid (lookup pre-populated):
+| Function | Purpose | Caches? |
+|----------|---------|---------|
+| `resolveRecordType(webApi, entityLogicalName)` | Query `sprk_recordtype_ref` for record type GUID + name | Yes (page lifetime) |
+| `buildRecordUrl(entityLogicalName, recordId)` | Build Dataverse URL for `sprk_regardingrecordurl`. Resolves `clientUrl` and `appId` from Xrm context; falls back to relative URL | No |
+| `findNavProp(entries, referencedEntity, columnHint?)` | Find navigation property name from metadata discovery results | No |
+| `applyResolverFields(webApi, entity, navProps, ...)` | **High-level**: sets entity-specific lookup + all 4 resolver fields on an entity payload | Uses resolveRecordType cache |
 
-```typescript
-export interface IDetectedParentContext {
-    entityType: string;        // e.g., "sprk_matter"
-    recordId: string;          // GUID
-    recordName: string;        // Display name
-    entityDisplayName: string; // "Matter", "Project", etc.
-    regardingField: string;    // "sprk_regardingmatter"
-}
+### Usage Pattern: Full Wizard Service
 
-/**
- * Detect if a regarding lookup is pre-populated (from subgrid creation)
- * Returns context if detected, null otherwise
- */
-export function detectPrePopulatedParent(): IDetectedParentContext | null {
-    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-
-    // Check all entity-specific lookups
-    const regardingFields = [
-        { field: "sprk_regardingmatter", entity: "sprk_matter", display: "Matter" },
-        { field: "sprk_regardingproject", entity: "sprk_project", display: "Project" },
-        { field: "sprk_regardinginvoice", entity: "sprk_invoice", display: "Invoice" },
-        { field: "sprk_regardinganalysis", entity: "sprk_analysis", display: "Analysis" },
-        { field: "sprk_regardingaccount", entity: "account", display: "Account" },
-        { field: "sprk_regardingcontact", entity: "contact", display: "Contact" },
-        { field: "sprk_regardingworkassignment", entity: "sprk_workassignment", display: "Work Assignment" },
-        { field: "sprk_regardingbudget", entity: "sprk_budget", display: "Budget" }
-    ];
-
-    for (const config of regardingFields) {
-        const attr = xrm.Page.getAttribute(config.field);
-        const value = attr?.getValue();
-
-        if (value && value.length > 0) {
-            return {
-                entityType: config.entity,
-                recordId: value[0].id.replace(/[{}]/g, ''),
-                recordName: value[0].name,
-                entityDisplayName: config.display,
-                regardingField: config.field
-            };
-        }
-    }
-
-    return null; // No pre-populated parent found
-}
-```
-
----
-
-## Field Mapping Integration
-
-AssociationResolver integrates with the Field Mapping Framework:
+When a service (e.g., WorkAssignmentService, EventService) creates a child record with a parent association:
 
 ```typescript
-import { FieldMappingHandler, createFieldMappingHandler } from "./handlers/FieldMappingHandler";
+// Step 1: Discover nav-props for the child entity (one-time, cached per service)
+const metaQuery =
+  `EntityDefinitions(LogicalName='sprk_workassignment')/ManyToOneRelationships` +
+  `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
+const metaResult = await webApi.retrieveMultipleRecords('', metaQuery);
+const navProps: INavPropEntry[] = metaResult.entities.map((r) => ({
+  columnName: r['ReferencingAttribute'] as string,
+  navPropName: r['ReferencingEntityNavigationPropertyName'] as string,
+  referencedEntity: r['ReferencedEntity'] as string,
+}));
 
-// After record selection, apply field mappings
-const fieldMappingHandler = createFieldMappingHandler(context.webAPI);
+// Step 2: Build entity payload with business fields
+const entity: Record<string, unknown> = {
+  sprk_name: 'Review contract for Smith case',
+  sprk_priority: 100000001, // Normal
+};
 
-const mappingResult = await fieldMappingHandler.applyMappingsForSelection(
-    "sprk_matter",  // source entity
-    matterId,       // source record GUID
-    {}              // target record (mutated in place)
+// Step 3: Apply all resolver fields in one call
+await applyResolverFields(
+  webApi,
+  entity,           // mutated in place
+  navProps,         // from Step 1
+  'sprk_matter',    // parentEntityLogicalName
+  'sprk_matters',   // parentEntitySet
+  matterId,         // parentRecordId (GUID)
+  'Smith v. Jones', // parentRecordName
+  'matter'          // entityLookupHint (for findNavProp column matching)
 );
 
-if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
-    // Apply to form
-    fieldMappingHandler.applyToForm(mappingResult.mappingResult.mappedValues, true);
+// Step 4: Create the record
+const result = await webApi.createRecord('sprk_workassignment', entity);
+```
 
-    console.log(`Auto-populated ${mappingResult.fieldsMapped} fields from Matter`);
+**What `applyResolverFields` sets on the entity object:**
+```javascript
+{
+  // Entity-specific lookup bind (discovered via navProps + hint)
+  "sprk_RegardingMatter@odata.bind": "/sprk_matters(abc-123-def)",
+
+  // 4 resolver fields (denormalized)
+  "sprk_regardingrecordid": "abc-123-def",
+  "sprk_regardingrecordname": "Smith v. Jones",
+  "sprk_regardingrecordurl": "https://org.crm.dynamics.com/main.aspx?etn=sprk_matter&id=abc-123-def",
+  "sprk_RegardingRecordType@odata.bind": "/sprk_recordtype_refs(type-guid)"
 }
 ```
 
-**Result**: Event automatically gets client, location, billing contact, etc. from Matter
+### Usage Pattern: EntityCreationService (Documents)
+
+`EntityCreationService.createDocumentRecords()` automatically populates all 4 resolver fields. Callers pass `parentRecordName` in options:
+
+```typescript
+await entityService.createDocumentRecords(
+  'sprk_matters',           // parentEntityName (entity set)
+  matterId,                 // parentEntityId
+  'sprk_Matter',            // navigationProperty (entity-specific)
+  uploadResult.uploadedFiles,
+  {
+    containerId: speContainerId,
+    parentRecordName: 'Smith v. Jones',
+    parentEntityLogicalName: 'sprk_matter', // optional — derived from entity set if omitted
+  }
+);
+```
+
+**Internally**: resolves `sprk_recordtype_ref`, discovers nav-prop for `sprk_document → sprk_recordtype_ref`, and sets all 4 resolver fields on each document record in the batch.
+
+---
+
+## Implementation: Server-Side (BFF API)
+
+### IncomingAssociationResolver
+
+**Location**: `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs`
+
+Populates resolver fields server-side when the BFF creates/updates `sprk_communication` records from incoming emails.
+
+**Key methods:**
+
+| Method | Purpose |
+|--------|---------|
+| `PopulateResolverFieldsAsync()` | Determines primary regarding entity from matched lookups, sets all 4 resolver fields |
+| `ResolveRecordTypeRefAsync()` | Queries + caches `sprk_recordtype_ref` by entity logical name |
+| `BuildRecordUrl()` | Server-side URL builder (relative URL, no Xrm context available) |
+
+**Primary entity priority** (when multiple lookups are set, highest-priority entity becomes the "regarding"):
+
+```
+sprk_matter > sprk_project > sprk_invoice > sprk_workassignment >
+sprk_budget > sprk_analysis > sprk_organization > sprk_person
+```
+
+**IDataverseService dependency**: Uses `QueryRecordTypeRefAsync(entityLogicalName)` added to the shared `IDataverseService` interface in `Spaarke.Dataverse`.
+
+---
+
+## All Consumers
+
+| Service | Entity Created | Layer | File |
+|---------|---------------|-------|------|
+| **WorkAssignmentService** | `sprk_workassignment` | Client | `src/solutions/LegalWorkspace/.../CreateWorkAssignment/workAssignmentService.ts` |
+| **EntityCreationService** | `sprk_document` | Client (shared) | `src/client/shared/.../services/EntityCreationService.ts` |
+| **MatterService** | documents via EntityCreationService | Client | `src/solutions/LegalWorkspace/.../CreateMatter/matterService.ts` |
+| **ProjectWizardDialog** | documents via EntityCreationService | Client | `src/solutions/LegalWorkspace/.../CreateProject/ProjectWizardDialog.tsx` |
+| **EventService** | `sprk_event` | Client | `src/solutions/LegalWorkspace/.../CreateEvent/eventService.ts` |
+| **IncomingAssociationResolver** | `sprk_communication` | Server (BFF) | `src/server/api/.../Services/Communication/IncomingAssociationResolver.cs` |
+
+---
+
+## Adding a New Entity to the Pattern
+
+### Step 1: Schema (Dataverse)
+
+```
+1. Add entity-specific lookup fields to the child entity:
+   sprk_regarding{newentity} → Lookup to sprk_{newentity}
+
+2. Add the 4 resolver fields (if child entity is new):
+   sprk_regardingrecordtype  → Lookup to sprk_recordtype_ref
+   sprk_regardingrecordid    → Text (50)
+   sprk_regardingrecordname  → Text (200)
+   sprk_regardingrecordurl   → URL (2000)
+
+3. Add seed data to sprk_recordtype_ref:
+   { sprk_recordlogicalname: "sprk_{newentity}",
+     sprk_recorddisplayname: "{Display Name}",
+     sprk_regardingfield: "sprk_regarding{newentity}" }
+```
+
+### Step 2: Client-Side (Wizard/Service)
+
+```typescript
+// In your service's createRecord method:
+import { applyResolverFields, findNavProp, type INavPropEntry } from '@spaarke/ui-components';
+
+// Discover nav-props for the child entity (do once, cache result)
+const navProps = await this._discoverNavProps('sprk_{childentity}');
+
+// Apply resolver fields to the entity payload
+await applyResolverFields(
+  this._webApi, entity, navProps,
+  'sprk_{newentity}', 'sprk_{newentity}s',
+  parentId, parentName, '{newentity}'
+);
+```
+
+### Step 3: Server-Side (if applicable)
+
+Add the entity to the `RegardingFieldPriority` array in `IncomingAssociationResolver.cs` and add the `GetPrimaryNameField()` mapping.
 
 ---
 
@@ -367,10 +254,9 @@ if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
 <fetch>
   <entity name="sprk_event">
     <attribute name="sprk_eventname" />
-    <attribute name="sprk_duedate" />
-    <attribute name="sprk_priority" />
     <attribute name="sprk_regardingrecordname" />
-    <!-- RegardingLink PCF renders sprk_regardingrecordname as clickable -->
+    <!-- sprk_regardingrecordname shows "Smith v. Jones" -->
+    <!-- sprk_regardingrecordurl provides clickable navigation -->
   </entity>
 </fetch>
 ```
@@ -378,7 +264,7 @@ if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
 ### Entity-Specific Subgrid
 
 ```xml
-<!-- Matter Form: Events Subgrid -->
+<!-- Matter Form: Events Subgrid — uses entity-specific lookup for filtering -->
 <fetch>
   <entity name="sprk_event">
     <filter>
@@ -386,106 +272,30 @@ if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
                  operator="eq"
                  value="{current-matter-id}" />
     </filter>
-    <attribute name="sprk_eventname" />
-    <attribute name="sprk_duedate" />
-    <attribute name="sprk_priority" />
   </entity>
 </fetch>
 ```
 
-**Key Difference**: Entity-specific subgrid uses the lookup field for filtering, not resolver fields.
+**Key**: Subgrids filter on entity-specific lookup fields. Unified views use resolver fields.
 
 ---
 
 ## Best Practices
 
-### ✅ DO
+### MUST
 
-- **DO** use AssociationResolver PCF for all user-facing association selection
-- **DO** populate all resolver fields when setting entity-specific lookup
-- **DO** clear all other entity-specific lookups when changing parent type
-- **DO** use RegardingLink PCF for grid display of regarding records
-- **DO** add new parent types to sprk_recordtype_ref (no schema changes needed)
-- **DO** create Field Mapping Profiles to auto-populate child fields
-- **DO** use auto-detection feature for subgrid creation scenarios
+- **MUST** populate ALL 4 resolver fields when setting an entity-specific lookup
+- **MUST** populate only ONE entity-specific lookup at a time (mutually exclusive)
+- **MUST** use the shared `PolymorphicResolverService` for all programmatic record creation
+- **MUST** pass `parentRecordName` when calling `EntityCreationService.createDocumentRecords()`
+- **MUST** add new parent types to `sprk_recordtype_ref` seed data (no schema changes needed)
 
-### ❌ DON'T
+### MUST NOT
 
-- **DON'T** use native "Regarding" lookup in model-driven apps
-- **DON'T** allow multiple entity-specific lookups to be populated simultaneously
-- **DON'T** hard-code entity types in choice fields
-- **DON'T** skip populating resolver fields (they enable unified views)
-- **DON'T** create new resolver fields without adding to RecordSelectionHandler
-
----
-
-## Related Components
-
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| AssociationResolver | Selection UI | [src/client/pcf/AssociationResolver/](../../../src/client/pcf/AssociationResolver/) |
-| RegardingLink | Grid display | [src/client/pcf/RegardingLink/](../../../src/client/pcf/RegardingLink/) |
-| UpdateRelatedButton | Push mappings | [src/client/pcf/UpdateRelatedButton/](../../../src/client/pcf/UpdateRelatedButton/) |
-| FieldMappingService | Auto-population | [src/client/shared/Spaarke.UI.Components/services/FieldMappingService.ts](../../../src/client/shared/Spaarke.UI.Components/services/FieldMappingService.ts) |
-
----
-
-## Common Scenarios
-
-### Scenario 1: Add New Parent Entity Type
-
-```javascript
-// 1. Add new record to sprk_recordtype_ref
-{
-  sprk_name: "Document",
-  sprk_recordlogicalname: "sprk_document",
-  sprk_recorddisplayname: "Document",
-  sprk_regardingfield: "sprk_regardingdocument"
-}
-
-// 2. Add new lookup field to child entity
-ALTER TABLE sprk_event ADD sprk_regardingdocument LOOKUP(sprk_document)
-
-// 3. Update RecordSelectionHandler.ts (add to regardingFields array)
-{ field: "sprk_regardingdocument", entity: "sprk_document", display: "Document" }
-
-// Done! AssociationResolver automatically shows "Document" option
-```
-
-### Scenario 2: Child Created from Subgrid
-
-```javascript
-// User clicks "New Event" from Matter subgrid
-// Dataverse pre-populates: sprk_regardingmatter = {current-matter-id}
-
-// AssociationResolver.componentDidMount():
-const detected = detectPrePopulatedParent();
-if (detected) {
-    // Auto-complete resolver fields
-    await completeAutoDetectedAssociation(detected, webAPI);
-
-    // Apply field mappings automatically
-    await fieldMappingHandler.applyMappingsForSelection(
-        detected.entityType,
-        detected.recordId,
-        {}
-    );
-
-    // Show read-only UI: "Matter: Smith v. Jones"
-}
-```
-
-### Scenario 3: User Changes Parent Type
-
-```javascript
-// User selects "Matter" → "Project"
-// RecordSelectionHandler clears sprk_regardingmatter
-// Then populates sprk_regardingproject
-// All resolver fields updated to new parent
-
-result.otherLookupsCleared = 1 // sprk_regardingmatter cleared
-result.regardingFieldSet = true // sprk_regardingproject set
-```
+- **MUST NOT** skip resolver fields — they enable cross-entity views and grids
+- **MUST NOT** allow multiple entity-specific lookups to be populated simultaneously
+- **MUST NOT** hard-code entity types in choice fields (use `sprk_recordtype_ref` lookup)
+- **MUST NOT** duplicate resolver logic in individual services — use the shared service
 
 ---
 
@@ -493,19 +303,36 @@ result.regardingFieldSet = true // sprk_regardingproject set
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| "No Record Type found" | sprk_recordtype_ref missing entry | Add seed data for entity type |
-| Multiple lookups populated | Manual field editing | Use AssociationResolver PCF only |
-| Resolver fields empty | Direct lookup edit bypassed control | Always use AssociationResolver |
-| Grid link not clickable | RegardingLink PCF not configured | Add as grid customizer |
-| Subgrid filtering broken | Using resolver field instead of lookup | Use entity-specific lookup for filter |
+| "No Record Type found" | `sprk_recordtype_ref` missing seed data for entity | Add record to `sprk_recordtype_ref` |
+| Resolver fields empty on document | `parentRecordName` not passed in options | Pass `parentRecordName` to `createDocumentRecords()` |
+| Nav-prop not found | Metadata query returned no match for entity | Check `_discoverNavProps()` — verify relationship exists in Dataverse |
+| Multiple lookups populated | Manual field editing on form | Only one entity-specific lookup should be set at a time |
+| Subgrid filtering broken | Using resolver field instead of entity-specific lookup | Use `sprk_regarding{entity}` for subgrid filter conditions |
+
+---
+
+## Related Components
+
+### Active Components
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| **PolymorphicResolverService** | Shared client-side resolver helpers | `src/client/shared/.../services/PolymorphicResolverService.ts` |
+| **EntityCreationService** | Document creation with automatic resolver fields | `src/client/shared/.../services/EntityCreationService.ts` |
+| **IncomingAssociationResolver** | Server-side resolver for Communication (BFF) | `src/server/api/.../Services/Communication/IncomingAssociationResolver.cs` |
+| **IDataverseService** | `QueryRecordTypeRefAsync()` for server-side lookups | `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` |
+| **FieldMappingService** | Auto-population of child fields from parent | `src/client/shared/.../services/FieldMappingService.ts` |
+
+### Archival (PCF controls — deployed in solution but not used by wizard/service code paths)
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| AssociationResolver PCF | Deployed, not actively used | `src/client/pcf/AssociationResolver/` |
+| RegardingLink PCF | Deployed, not actively used | `src/client/pcf/RegardingLink/` |
+| UpdateRelatedButton PCF | Deployed, not actively used | `src/client/pcf/UpdateRelatedButton/` |
 
 ---
 
 **See Also**:
-- [ADR-024](../../adr/ADR-024-polymorphic-resolver-pattern.md) - Architecture decision
+- [ADR-024](../../adr/ADR-024-polymorphic-resolver-pattern.md) - Architecture decision and constraints
 - [Field Mapping Pattern](../pcf/field-mapping.md) - Auto-population pattern
-- [events-and-workflow-automation-r1](../../../projects/events-and-workflow-automation-r1/) - Original implementation project
-
----
-
-**Lines**: ~400

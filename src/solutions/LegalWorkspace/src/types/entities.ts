@@ -20,8 +20,8 @@ export interface IMatter {
   _sprk_organization_value?: string;  // Lookup GUID
   _sprk_leadattorney_value?: string;  // Lookup GUID
   _modifiedby_value?: string;  // Lookup GUID
-  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
-  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedattorney1_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal1_value?: string;  // Lookup GUID (contact)
   sprk_status?: number;  // Option set
   statuscode?: number;  // Standard Dataverse statuscode
   /** Display name from statuscode (populated via formatted value mapping). */
@@ -71,8 +71,8 @@ export interface IProject {
   sprk_practicearea?: string;
   _sprk_owner_value?: string;
   _modifiedby_value?: string;  // Lookup GUID
-  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
-  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedattorney1_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal1_value?: string;  // Lookup GUID (contact)
   sprk_status?: number;
   statuscode?: number;  // Standard Dataverse statuscode
   /** Display name from statuscode (populated via formatted value mapping). */
@@ -121,8 +121,8 @@ export interface IInvoice {
   statuscodeName?: string;
   _ownerid_value?: string;  // Lookup GUID
   _modifiedby_value?: string;  // Lookup GUID
-  _sprk_assignedattorney_value?: string;  // Lookup GUID (contact)
-  _sprk_assignedparalegal_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedattorney1_value?: string;  // Lookup GUID (contact)
+  _sprk_assignedparalegal1_value?: string;  // Lookup GUID (contact)
   createdon: string;
   modifiedon: string;
 }

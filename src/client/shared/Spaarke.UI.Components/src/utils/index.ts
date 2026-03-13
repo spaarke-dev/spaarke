@@ -1,3 +1,4 @@
+export * from "./lookupMatching";
 export * from "./themeDetection";
 export * from "./themeStorage";
 export * from "./xrmContext";

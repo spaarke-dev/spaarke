@@ -7,7 +7,7 @@ import {
   Button,
   Spinner,
 } from "@fluentui/react-components";
-import { OpenRegular, ArrowClockwiseRegular, DocumentAddRegular } from "@fluentui/react-icons";
+import { OpenRegular, ArrowClockwiseRegular, AddRegular } from "@fluentui/react-icons";
 import { GetStartedRow } from "../GetStarted";
 import { QuickSummaryRow } from "../QuickSummary";
 import { ActivityFeed } from "../ActivityFeed/ActivityFeed";
@@ -62,6 +62,18 @@ const LazySummarizeFilesDialog = React.lazy(
 
 const LazyFindSimilarDialog = React.lazy(
   () => import("../FindSimilar/FindSimilarDialog")
+);
+
+const LazyEventWizardDialog = React.lazy(
+  () => import("../CreateEvent/EventWizardDialog")
+);
+
+const LazyTodoWizardDialog = React.lazy(
+  () => import("../CreateTodo/TodoWizardDialog")
+);
+
+const LazyWorkAssignmentWizardDialog = React.lazy(
+  () => import("../CreateWorkAssignment/WorkAssignmentWizardDialog")
 );
 
 // ---------------------------------------------------------------------------
@@ -184,7 +196,6 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -195,6 +206,20 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
     minHeight: "36px",
+  },
+  toolbarDivider: {
+    width: "1px",
+    height: "20px",
+    backgroundColor: tokens.colorNeutralStroke2,
+    marginLeft: tokens.spacingHorizontalXS,
+    marginRight: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  toolbarRightGroup: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: "15px",
   },
 });
 
@@ -217,15 +242,29 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const service = useDataverseService(webApi);
 
   // -------------------------------------------------------------------------
-  // Feed count for Latest Updates badge
+  // Record counts for section badges
   // -------------------------------------------------------------------------
 
   const [feedCount, setFeedCount] = React.useState<number>(0);
+  const [todoCount, setTodoCount] = React.useState<number>(0);
+  const [docCount, setDocCount] = React.useState<number>(0);
 
   // SmartToDo refetch ref — used to sync workspace Kanban after dialog close
   const todoRefetchRef = React.useRef<(() => void) | null>(null);
   const handleTodoRefetchReady = React.useCallback((refetch: () => void) => {
     todoRefetchRef.current = refetch;
+  }, []);
+
+  // Activity Feed refetch ref — used to sync after Event wizard close
+  const feedRefetchRef = React.useRef<(() => void) | null>(null);
+  const handleFeedRefetchReady = React.useCallback((refetch: () => void) => {
+    feedRefetchRef.current = refetch;
+  }, []);
+
+  // Documents refetch ref — used to refresh docs grid
+  const docRefetchRef = React.useRef<(() => void) | null>(null);
+  const handleDocRefetchReady = React.useCallback((refetch: () => void) => {
+    docRefetchRef.current = refetch;
   }, []);
 
   // Open all updates → navigates to sprk_event entity list dialog
@@ -280,6 +319,38 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const [isFindSimilarOpen, setIsFindSimilarOpen] = React.useState(false);
   const handleOpenFindSimilar = React.useCallback(() => setIsFindSimilarOpen(true), []);
   const handleCloseFindSimilar = React.useCallback(() => setIsFindSimilarOpen(false), []);
+
+  // -------------------------------------------------------------------------
+  // Create New Event wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isEventWizardOpen, setIsEventWizardOpen] = React.useState(false);
+  const handleOpenEventWizard = React.useCallback(() => setIsEventWizardOpen(true), []);
+  const handleCloseEventWizard = React.useCallback(() => {
+    setIsEventWizardOpen(false);
+    feedRefetchRef.current?.();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Create New To Do wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isTodoWizardOpen, setIsTodoWizardOpen] = React.useState(false);
+  const handleOpenTodoWizard = React.useCallback(() => setIsTodoWizardOpen(true), []);
+  const handleCloseTodoWizard = React.useCallback(() => {
+    setIsTodoWizardOpen(false);
+    todoRefetchRef.current?.();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Work Assignment wizard dialog state
+  // -------------------------------------------------------------------------
+
+  const [isWorkAssignmentWizardOpen, setIsWorkAssignmentWizardOpen] = React.useState(false);
+  const handleOpenWorkAssignmentWizard = React.useCallback(() => setIsWorkAssignmentWizardOpen(true), []);
+  const handleCloseWorkAssignmentWizard = React.useCallback(() => {
+    setIsWorkAssignmentWizardOpen(false);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Quick Start wizard dialog state
@@ -427,8 +498,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "create-new-project": handleOpenProjectWizard,
       "summarize-new-files": handleOpenSummarize,
       "find-similar": handleOpenFindSimilar,
+      "assign-to-counsel": handleOpenWorkAssignmentWizard,
     }),
-    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar]
+    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard]
   );
 
   // -------------------------------------------------------------------------
@@ -469,11 +541,20 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
               <Button
                 appearance="subtle"
                 size="small"
-                icon={<OpenRegular />}
-                onClick={handleDashboardOpen}
-                aria-label="Open Quick Summary Dashboard"
-                style={{ marginLeft: "auto" }}
+                icon={<ArrowClockwiseRegular />}
+                aria-label="Refresh Quick Summary"
               />
+              <span className={styles.toolbarDivider} aria-hidden="true" />
+              <div style={{ flex: 1 }} />
+              <div className={styles.toolbarRightGroup}>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<OpenRegular />}
+                  onClick={handleDashboardOpen}
+                  aria-label="Open Quick Summary Dashboard"
+                />
+              </div>
             </div>
             <div style={{ padding: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalS, paddingBottom: tokens.spacingVerticalM }}>
               <QuickSummaryRow webApi={webApi} userId={userId} />
@@ -501,17 +582,27 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             userId={userId}
             textOnlyFilter
             gridLayout
+            hideOverflowMenu
             onCountChange={setFeedCount}
             onOpenAll={handleOpenAllUpdates}
+            onRefetchReady={handleFeedRefetchReady}
+            onCreateNew={handleOpenEventWizard}
           />
         </div>
 
         {/* Row 3: My To Do List (left) + My Documents (right) — 50/50 split */}
         <div className={styles.row3}>
           <div className={styles.sectionCard} style={{ height: "560px" }}>
-            <Text className={styles.sectionTitle} size={400} weight="semibold">
-              My To Do List
-            </Text>
+            <div className={styles.row2TitleArea} style={{ paddingTop: tokens.spacingVerticalM, paddingBottom: tokens.spacingVerticalS, paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM }}>
+              <Text size={400} weight="semibold">
+                My To Do List
+              </Text>
+              {todoCount > 0 && (
+                <Badge appearance="filled" color="brand" size="small">
+                  {todoCount}
+                </Badge>
+              )}
+            </div>
             <div className={styles.toolbar} role="toolbar" aria-label="To Do toolbar">
               <Button
                 appearance="subtle"
@@ -519,15 +610,25 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
                 icon={<ArrowClockwiseRegular />}
                 onClick={() => todoRefetchRef.current?.()}
                 aria-label="Refresh To Do list"
-                style={{ marginLeft: "auto" }}
               />
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<OpenRegular />}
-                onClick={handleOpenTodoDialog}
-                aria-label="Open full To Do list"
-              />
+              <span className={styles.toolbarDivider} aria-hidden="true" />
+              <div style={{ flex: 1 }} />
+              <div className={styles.toolbarRightGroup}>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<AddRegular />}
+                  onClick={handleOpenTodoWizard}
+                  aria-label="Create new to do"
+                />
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<OpenRegular />}
+                  onClick={handleOpenTodoDialog}
+                  aria-label="Open full To Do list"
+                />
+              </div>
             </div>
             <div className={styles.sectionContent}>
               <SmartToDo
@@ -535,39 +636,56 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
                 webApi={webApi}
                 userId={userId}
                 disableSidePane
-                onShowMore={handleOpenTodoDialog}
+                onCountChange={setTodoCount}
                 onRefetchReady={handleTodoRefetchReady}
               />
             </div>
           </div>
           <div className={styles.sectionCard} style={{ minHeight: "auto", overflow: "visible" }}>
-            <Text className={styles.sectionTitle} size={400} weight="semibold">
-              My Documents
-            </Text>
+            <div className={styles.row2TitleArea} style={{ paddingTop: tokens.spacingVerticalM, paddingBottom: tokens.spacingVerticalS, paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM }}>
+              <Text size={400} weight="semibold">
+                My Documents
+              </Text>
+              {docCount > 0 && (
+                <Badge appearance="filled" color="brand" size="small">
+                  {docCount}
+                </Badge>
+              )}
+            </div>
             <div className={styles.toolbar} role="toolbar" aria-label="Documents toolbar">
               <Button
                 appearance="subtle"
                 size="small"
-                icon={<DocumentAddRegular />}
-                onClick={handleAddDocument}
-                aria-label="Add document"
-                style={{ marginLeft: "auto" }}
+                icon={<ArrowClockwiseRegular />}
+                onClick={() => docRefetchRef.current?.()}
+                aria-label="Refresh documents"
               />
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<OpenRegular />}
-                onClick={handleOpenDocumentsDialog}
-                aria-label="Open all documents"
-                style={{ marginLeft: tokens.spacingHorizontalS }}
-              />
+              <span className={styles.toolbarDivider} aria-hidden="true" />
+              <div style={{ flex: 1 }} />
+              <div className={styles.toolbarRightGroup}>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<AddRegular />}
+                  onClick={handleAddDocument}
+                  aria-label="Add document"
+                />
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<OpenRegular />}
+                  onClick={handleOpenDocumentsDialog}
+                  aria-label="Open all documents"
+                />
+              </div>
             </div>
             <div className={styles.sectionContent} style={{ overflow: "visible" }}>
               <DocumentsTab
                 service={service}
                 userId={userId}
                 maxVisible={6}
-                onShowMore={handleOpenDocumentsDialog}
+                onCountChange={setDocCount}
+                onRefetchReady={handleDocRefetchReady}
               />
             </div>
           </div>
@@ -637,6 +755,27 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             open={isDashboardOpen}
             onClose={handleDashboardClose}
           />
+        </React.Suspense>
+      )}
+
+      {/* Create New Event wizard dialog */}
+      {isEventWizardOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyEventWizardDialog open={isEventWizardOpen} onClose={handleCloseEventWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Create New To Do wizard dialog */}
+      {isTodoWizardOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyTodoWizardDialog open={isTodoWizardOpen} onClose={handleCloseTodoWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Work Assignment wizard dialog */}
+      {isWorkAssignmentWizardOpen && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyWorkAssignmentWizardDialog open={isWorkAssignmentWizardOpen} onClose={handleCloseWorkAssignmentWizard} webApi={webApi} />
         </React.Suspense>
       )}
     </>

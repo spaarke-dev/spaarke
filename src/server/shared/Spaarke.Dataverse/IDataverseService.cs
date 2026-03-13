@@ -499,6 +499,16 @@ public interface IDataverseService
     Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
 
     /// <summary>
+    /// Query sprk_communication record by internet message ID (RFC 2822 Message-ID header).
+    /// Used for thread-based association resolution: incoming In-Reply-To headers contain
+    /// internet message IDs, not Graph message IDs.
+    /// </summary>
+    /// <param name="internetMessageId">The internet message ID to look up (e.g., &lt;ABC@contoso.com&gt;)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Entity with association fields, or null if not found</returns>
+    Task<Entity?> GetCommunicationByInternetMessageIdAsync(string internetMessageId, CancellationToken ct = default);
+
+    /// <summary>
     /// Query contact records by email address (emailaddress1).
     /// Used for sender-based association resolution.
     /// </summary>
@@ -525,4 +535,23 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>First matching matter entity, or null</returns>
     Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query sprk_recordtype_ref by entity logical name.
+    /// Used by the Polymorphic Resolver pattern (ADR-024) to resolve the record type
+    /// lookup for denormalized resolver fields.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name (e.g., "sprk_matter")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>First matching sprk_recordtype_ref entity, or null</returns>
+    Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Looks up a Dataverse systemuser by Azure AD Object ID.
+    /// Used to resolve Azure AD oid → systemuserid for EntityReference lookups.
+    /// </summary>
+    /// <param name="azureAdObjectId">Azure AD Object ID (from token 'oid' claim)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>systemuserid as Guid, or null if not found</returns>
+    Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default);
 }

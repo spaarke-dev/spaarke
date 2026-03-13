@@ -69,7 +69,7 @@ public class IncomingCommunicationJobHandler : IJobHandler
             }
 
             var messageId = payload.MessageId;
-            var mailboxEmail = ExtractMailboxFromResource(payload.Resource);
+            var mailboxIdentifier = ExtractMailboxFromResource(payload.Resource);
 
             if (string.IsNullOrEmpty(messageId))
             {
@@ -82,7 +82,7 @@ public class IncomingCommunicationJobHandler : IJobHandler
                     job.Attempt, stopwatch.Elapsed);
             }
 
-            if (string.IsNullOrEmpty(mailboxEmail))
+            if (string.IsNullOrEmpty(mailboxIdentifier))
             {
                 _logger.LogError(
                     "Could not extract mailbox email from Resource '{Resource}' in job {JobId}",
@@ -95,17 +95,18 @@ public class IncomingCommunicationJobHandler : IJobHandler
 
             _logger.LogInformation(
                 "Dispatching to IncomingCommunicationProcessor | Mailbox: {Mailbox}, " +
-                "MessageId: {MessageId}, JobId: {JobId}",
-                mailboxEmail, messageId, job.JobId);
+                "MessageId: {MessageId}, SubscriptionId: {SubscriptionId}, JobId: {JobId}",
+                mailboxIdentifier, messageId, payload.SubscriptionId, job.JobId);
 
-            // Delegate to processor
-            await _processor.ProcessAsync(mailboxEmail, messageId, ct);
+            // Delegate to processor — GUID-to-email resolution is handled inside the processor
+            // via subscription-based matching (shared mailboxes can't be resolved via Graph Users API)
+            await _processor.ProcessAsync(mailboxIdentifier, messageId, payload.SubscriptionId, ct);
 
             stopwatch.Stop();
             _logger.LogInformation(
                 "Incoming communication job {JobId} completed in {Duration}ms | " +
                 "Mailbox: {Mailbox}, MessageId: {MessageId}",
-                job.JobId, stopwatch.ElapsedMilliseconds, mailboxEmail, messageId);
+                job.JobId, stopwatch.ElapsedMilliseconds, mailboxIdentifier, messageId);
 
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }

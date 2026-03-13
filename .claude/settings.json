@@ -14,7 +14,9 @@
       "Task(*)",
       "Bash",
       "Read(//c/code_files/spaarke-wt-ai-document-relationship-visuals/src/client/shared/Spaarke.UI.Components/**)",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Read(//c/code_files/spaarke-wt-sdap-file-upload-document-r2/**)",
+      "Bash(npm ls d3-force)"
     ]
   }
 }

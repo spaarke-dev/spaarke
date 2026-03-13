@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: Dataverse Data Model
-> **Last Updated**: 2026-02-09
+> **Last Updated**: 2026-03-12
 
 ---
 
@@ -75,11 +75,12 @@ The Record Type entity serves as the lookup target for resolver fields:
 
 - **MUST** include both entity-specific lookups AND resolver fields for polymorphic entities
 - **MUST** populate only ONE entity-specific lookup at a time (mutually exclusive)
-- **MUST** populate ALL resolver fields when an association is made
+- **MUST** populate ALL 4 resolver fields when an association is made
 - **MUST** clear the previous lookup when changing parent entity type
-- **MUST** use AssociationResolver PCF for user-facing association selection
-- **MUST** use RegardingLink PCF for grid views that display regarding records
+- **MUST** use the shared `PolymorphicResolverService` for all client-side programmatic record creation
+- **MUST** use `IncomingAssociationResolver` (or equivalent) for server-side resolver field population
 - **MUST** reference `sprk_recordtype_ref` (not hard-coded choice fields)
+- **MUST** pass `parentRecordName` when calling `EntityCreationService.createDocumentRecords()`
 
 ### ❌ MUST NOT
 
@@ -87,114 +88,80 @@ The Record Type entity serves as the lookup target for resolver fields:
 - **MUST NOT** allow multiple entity-specific lookups to be populated simultaneously
 - **MUST NOT** hard-code entity types in choice fields (use sprk_recordtype_ref lookup)
 - **MUST NOT** skip resolver fields (they enable cross-entity views)
+- **MUST NOT** duplicate resolver logic in individual services — use the shared `PolymorphicResolverService`
 
 ---
 
 ## Implementation Components
 
+### Active (Shared Services)
+
 | Component | Purpose | Location |
 |-----------|---------|----------|
-| **AssociationResolver PCF** | User interface for selecting parent record | `src/client/pcf/AssociationResolver/` |
-| **RegardingLink PCF** | Grid customizer that renders regarding name as clickable link | `src/client/pcf/RegardingLink/` |
-| **UpdateRelatedButton PCF** | Parent form button to push field mappings to children | `src/client/pcf/UpdateRelatedButton/` |
-| **FieldMappingService** | Applies parent field values to child records | `src/client/shared/Spaarke.UI.Components/services/FieldMappingService.ts` |
-| **RecordSelectionHandler** | Logic to populate/clear regarding fields | `src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts` |
+| **PolymorphicResolverService** | Client-side shared helpers: `resolveRecordType`, `buildRecordUrl`, `findNavProp`, `applyResolverFields` | `src/client/shared/.../services/PolymorphicResolverService.ts` |
+| **EntityCreationService** | Document creation with automatic resolver field population | `src/client/shared/.../services/EntityCreationService.ts` |
+| **IncomingAssociationResolver** | Server-side resolver for Communication entity (BFF API) | `src/server/api/.../Services/Communication/IncomingAssociationResolver.cs` |
+| **IDataverseService** | `QueryRecordTypeRefAsync()` for server-side `sprk_recordtype_ref` lookups | `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` |
+| **FieldMappingService** | Applies parent field values to child records | `src/client/shared/.../services/FieldMappingService.ts` |
+
+### Archival (PCF Controls — deployed but not actively used in wizard/service code paths)
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| AssociationResolver PCF | Form-based selection UI via Xrm.Page | `src/client/pcf/AssociationResolver/` |
+| RegardingLink PCF | Grid customizer for clickable regarding links | `src/client/pcf/RegardingLink/` |
+| UpdateRelatedButton PCF | Parent form button to push field mappings | `src/client/pcf/UpdateRelatedButton/` |
 
 ---
 
 ## Usage Patterns
 
-### On Child Entity Form
+### Client-Side: Wizard/Service Creating Child Records
 
-```xml
-<!-- Event Form: Add AssociationResolver control -->
-<control id="AssociationResolver"
-         classid="{...AssociationResolver}"
-         bound to="sprk_regardingrecordtype"
-/>
+```typescript
+import { applyResolverFields, findNavProp, type INavPropEntry } from '@spaarke/ui-components';
+
+// 1. Discover nav-props (one-time, cache in service constructor)
+const navProps = await this._discoverNavProps('sprk_workassignment');
+
+// 2. Build entity payload, then apply resolver fields
+await applyResolverFields(webApi, entity, navProps,
+  'sprk_matter', 'sprk_matters', matterId, 'Smith v. Jones', 'matter');
+
+// 3. Create record — entity now has entity-specific bind + all 4 resolver fields
+await webApi.createRecord('sprk_workassignment', entity);
 ```
 
-**User Experience**:
-1. User selects entity type from dropdown (Matter, Project, Invoice, etc.)
-2. User clicks "Select Record" - opens Xrm.Utility.lookupObjects dialog
-3. User selects parent record
-4. **Control automatically**:
-   - Populates the corresponding entity-specific lookup (e.g., `sprk_regardingmatter`)
-   - Clears all other entity-specific lookups
-   - Populates all resolver fields (type, id, name, url)
-   - **Applies field mappings** if a profile exists (e.g., copy client from Matter to Event)
+### Client-Side: Document Creation (EntityCreationService)
 
-### In Unified View
-
-```xml
-<!-- All Events View: Show Regarding column -->
-<fetch>
-  <entity name="sprk_event">
-    <attribute name="sprk_regardingrecordname" />
-    <!-- Use RegardingLink PCF as grid customizer -->
-  </entity>
-</fetch>
+```typescript
+// EntityCreationService handles resolver fields internally
+await entityService.createDocumentRecords(
+  'sprk_matters', matterId, 'sprk_Matter', uploadedFiles,
+  { containerId, parentRecordName: 'Smith v. Jones' }
+);
 ```
 
-**Grid Display**: "Smith v. Jones" as clickable link (opens parent record)
+### Server-Side: BFF API (Communication)
 
-### In Entity-Specific Subgrid
-
-```xml
-<!-- Matter Form: Events Subgrid -->
-<fetch>
-  <entity name="sprk_event">
-    <filter>
-      <condition attribute="sprk_regardingmatter"
-                 operator="eq"
-                 value="{current-matter-id}" />
-    </filter>
-  </entity>
-</fetch>
+```csharp
+// IncomingAssociationResolver.PopulateResolverFieldsAsync()
+// Determines primary entity from matched lookups, sets all 4 fields
+await PopulateResolverFieldsAsync(communication, resolvedFields, ct);
 ```
 
-**Filtering Works**: Native Dataverse lookup filtering using entity-specific field
+### In Views
+
+- **Unified views**: Use `sprk_regardingrecordname` for cross-entity display
+- **Entity-specific subgrids**: Filter on entity-specific lookup (e.g., `sprk_regardingmatter`)
 
 ---
 
 ## Field Mapping Integration
 
-The resolver pattern integrates with the Field Mapping Framework:
-
-```typescript
-// When user selects a Matter as parent of an Event
-// 1. AssociationResolver populates regarding fields
-// 2. FieldMappingHandler checks for active profile (Matter -> Event)
-// 3. If profile exists, applies field mappings automatically
-//    Example: Copy sprk_client from Matter to Event
-
-const result = await fieldMappingHandler.applyMappingsForSelection(
-    "sprk_matter",  // source entity
-    matterId,       // source record GUID
-    targetRecord    // Event fields to populate
-);
-
-// Result: Event automatically gets client, location, etc. from Matter
-```
+The resolver pattern integrates with the Field Mapping Framework. When a parent association is established, field mappings can auto-populate child fields (e.g., copy `sprk_client` from Matter to Event).
 
 **See**: `.claude/patterns/dataverse/polymorphic-resolver.md` for implementation details
-
----
-
-## Auto-Detection Feature
-
-AssociationResolver supports **automatic parent detection** when child record is created from a subgrid:
-
-```javascript
-// When Event is created from Matter subgrid
-// Dataverse pre-populates: sprk_regardingmatter = {matter-id}
-// AssociationResolver detects this and:
-// 1. Auto-completes resolver fields
-// 2. Shows read-only association display
-// 3. Applies field mappings automatically
-```
-
-**User sees**: "Matter: Smith v. Jones" (read-only, with "Refresh from Parent" button)
 
 ---
 
@@ -213,11 +180,13 @@ AssociationResolver supports **automatic parent detection** when child record is
 
 ## Examples in Spaarke
 
-| Entity | Polymorphic Association | Resolver Fields |
+| Entity | Polymorphic Association | Resolver Service |
 |--------|------------------------|-----------------|
-| `sprk_event` | Can relate to Matter, Project, Invoice, Analysis, Account, Contact, Work Assignment, Budget | sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl |
-| `sprk_memo` | Can relate to Matter, Project, Event, Document | sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl |
-| `sprk_document` | Can relate to Matter, Project, Invoice | sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl |
+| `sprk_event` | Matter, Project, Invoice, Analysis, Account, Contact, Work Assignment, Budget | Client: `PolymorphicResolverService` via wizard services |
+| `sprk_document` | Matter, Project, Invoice, Work Assignment | Client: `EntityCreationService.createDocumentRecords()` |
+| `sprk_workassignment` | Matter, Project, Invoice, Event | Client: `PolymorphicResolverService` via `WorkAssignmentService` |
+| `sprk_communication` | Matter, Project, Invoice, Work Assignment, Budget, Analysis, Organization, Person | Server: `IncomingAssociationResolver` (BFF API) |
+| `sprk_memo` | Matter, Project, Event, Document | Client: `PolymorphicResolverService` |
 
 ---
 
@@ -233,11 +202,10 @@ AssociationResolver supports **automatic parent detection** when child record is
 
 ## Source Documentation
 
-**Full ADR**: This is the complete ADR. See pattern file for implementation details.
+**Implementation Pattern**: [.claude/patterns/dataverse/polymorphic-resolver.md](../patterns/dataverse/polymorphic-resolver.md) — Full implementation guide with code examples
 
-**Implementation Pattern**: [.claude/patterns/dataverse/polymorphic-resolver.md](../patterns/dataverse/polymorphic-resolver.md)
-
-**Project Source**: events-and-workflow-automation-r1
+**Original Project**: events-and-workflow-automation-r1 (schema + PCF controls)
+**Shared Service Refactor**: sdap-file-upload-document-r2 (PolymorphicResolverService, EntityCreationService, IncomingAssociationResolver)
 
 ---
 

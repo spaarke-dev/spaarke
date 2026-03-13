@@ -65,7 +65,8 @@ import type { IDocumentEmailStepProps } from "./DocumentEmailStep";
 import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
-import { getClientUrl, getTenantId } from "../services/nextStepLauncher";
+import { getClientUrl } from "../services/nextStepLauncher";
+import { getAuthProvider } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -169,20 +170,6 @@ function resolveWebApi(): any {
         if (t?.WebApi?.retrieveMultipleRecords) return t.WebApi;
     } catch { /* */ }
     return undefined;
-}
-
-function getClientUrl(): string | null {
-    const tryGetUrl = (xrmObj: any): string | null => {
-        try {
-            const url = xrmObj?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-            if (url) return url.endsWith("/") ? url.slice(0, -1) : url;
-        } catch { /* */ }
-        return null;
-    };
-    try { if (typeof (window as any).Xrm !== "undefined") { const u = tryGetUrl((window as any).Xrm); if (u) return u; } } catch { /* */ }
-    try { const u = tryGetUrl((window.parent as any)?.Xrm); if (u) return u; } catch { /* */ }
-    try { const u = tryGetUrl((window.top as any)?.Xrm); if (u) return u; } catch { /* */ }
-    return null;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -426,11 +413,14 @@ interface IWorkOnAnalysisStepContentProps {
     successfulFiles: OrchestratorFileResult[];
     /** SPE container ID for file operations. */
     containerId: string;
+    /** Called when analysis is created (signals canAdvance=true). */
+    onAnalysisCreated: () => void;
 }
 
 const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
     successfulFiles,
     containerId,
+    onAnalysisCreated,
 }) => {
     const styles = useStyles();
     const webApi = React.useMemo(() => resolveWebApi(), []);
@@ -504,13 +494,13 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                 toolIds: playbookScopes.toolIds,
             });
 
-            // Open analysis workspace in new tab
+            // Build analysis URL (don't auto-navigate — let user choose)
             const clientUrl = getClientUrl();
             if (clientUrl) {
                 const url = `${clientUrl}/main.aspx?etn=sprk_analysis&id=${analysisId}&pagetype=entityrecord`;
-                window.open(url, "_blank", "noopener,noreferrer");
                 setAnalysisUrl(url);
             }
+            onAnalysisCreated();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to create analysis");
         } finally {
@@ -541,7 +531,54 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                 </MessageBar>
             )}
 
-            {analysisUrl ? (
+            {/* ── Choose a file ────────────────────────────────── */}
+            <div className={styles.sectionBlock}>
+                <Text size={300} className={styles.sectionHeader}>Choose a file:</Text>
+                <Text size={200} className={styles.sectionExplanation}>
+                    Select the document you want to analyze.
+                </Text>
+                {successfulFiles.length > 1 && (
+                    <DocumentPicker
+                        documents={successfulFiles}
+                        selectedDocumentId={selectedDocumentId}
+                        onSelectionChange={setSelectedDocumentId}
+                    />
+                )}
+                {successfulFiles.length === 1 && (
+                    <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground2 }}>
+                        {successfulFiles[0].fileName}
+                    </Text>
+                )}
+            </div>
+
+            {/* ── Choose a playbook ──────────────────────────── */}
+            <div className={styles.sectionBlock}>
+                <Text size={300} className={styles.sectionHeader}>Choose a playbook:</Text>
+                <Text size={200} className={styles.sectionExplanation}>
+                    Select an AI playbook to define the analysis scope.
+                </Text>
+                <PlaybookCardGrid
+                    playbooks={playbooks}
+                    selectedId={selectedPlaybook?.id}
+                    onSelect={handlePlaybookSelect}
+                    isLoading={false}
+                    compact={true}
+                />
+                {/* Create button — right-aligned under playbook grid */}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: tokens.spacingVerticalS }}>
+                    <Button
+                        appearance="primary"
+                        icon={<BrainCircuitRegular />}
+                        onClick={handleCreateAnalysis}
+                        disabled={!canCreate || isCreating}
+                    >
+                        {isCreating ? "Creating Analysis..." : "Create Analysis"}
+                    </Button>
+                </div>
+            </div>
+
+            {/* ── Success confirmation ────────────────────────── */}
+            {analysisUrl && (
                 <div className={styles.successBlock}>
                     <div className={styles.successRow}>
                         <CheckmarkCircleRegular
@@ -550,7 +587,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                         <Text size={400} weight="semibold">Analysis created successfully!</Text>
                     </div>
                     <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-                        Your analysis has been opened in a new browser tab. If the tab was closed, click below to reopen it.
+                        Your analysis is ready. Click below to open it in a new tab.
                     </Text>
                     <Link
                         href={analysisUrl}
@@ -561,55 +598,6 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
                         Open Analysis
                     </Link>
                 </div>
-            ) : (
-                <>
-                    {/* ── Choose a file ────────────────────────────────── */}
-                    <div className={styles.sectionBlock}>
-                        <Text size={300} className={styles.sectionHeader}>Choose a file:</Text>
-                        <Text size={200} className={styles.sectionExplanation}>
-                            Select the document you want to analyze.
-                        </Text>
-                        {successfulFiles.length > 1 && (
-                            <DocumentPicker
-                                documents={successfulFiles}
-                                selectedDocumentId={selectedDocumentId}
-                                onSelectionChange={setSelectedDocumentId}
-                            />
-                        )}
-                        {successfulFiles.length === 1 && (
-                            <Text size={200} style={{ fontStyle: "italic", color: tokens.colorNeutralForeground2 }}>
-                                {successfulFiles[0].fileName}
-                            </Text>
-                        )}
-                    </div>
-
-                    {/* ── Choose a playbook ──────────────────────────── */}
-                    <div className={styles.sectionBlock}>
-                        <Text size={300} className={styles.sectionHeader}>Choose a playbook:</Text>
-                        <Text size={200} className={styles.sectionExplanation}>
-                            Select an AI playbook to define the analysis scope.
-                        </Text>
-                        <PlaybookCardGrid
-                            playbooks={playbooks}
-                            selectedId={selectedPlaybook?.id}
-                            onSelect={handlePlaybookSelect}
-                            isLoading={false}
-                            compact={true}
-                        />
-                    </div>
-
-                    {/* ── Create button ──────────────────────────────── */}
-                    <div>
-                        <Button
-                            appearance="primary"
-                            icon={<BrainCircuitRegular />}
-                            onClick={handleCreateAnalysis}
-                            disabled={!canCreate || isCreating}
-                        >
-                            {isCreating ? "Creating Analysis..." : "Create Analysis"}
-                        </Button>
-                    </div>
-                </>
             )}
         </div>
     );
@@ -644,19 +632,33 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     );
     const [showViewer, setShowViewer] = React.useState(false);
     const [isIndexing, setIsIndexing] = React.useState(false);
+    const [tenantId, setTenantId] = React.useState<string>("");
+
+    // Resolve tenantId asynchronously from MSAL account on mount
+    React.useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const tid = await getAuthProvider().getTenantId();
+                if (!cancelled && tid) setTenantId(tid);
+            } catch {
+                // Non-critical — viewer will show error about missing tenantId
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // Build the DocumentRelationshipViewer URL
     const viewerUrl = React.useMemo(() => {
-        if (!selectedDocumentId) return null;
+        if (!selectedDocumentId || !tenantId) return null;
         const clientUrl = getClientUrl();
         if (!clientUrl) return null;
-        const tenantId = getTenantId();
         const params = new URLSearchParams();
         params.set("documentId", selectedDocumentId);
-        if (tenantId) params.set("tenantId", tenantId);
+        params.set("tenantId", tenantId);
         if (containerId) params.set("containerId", containerId);
         return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(params.toString())}`;
-    }, [selectedDocumentId, containerId]);
+    }, [selectedDocumentId, containerId, tenantId]);
 
     // Ensure file is indexed, then open dialog
     const handleOpenFindSimilar = React.useCallback(async () => {
@@ -674,7 +676,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
             setIsIndexing(true);
             try {
                 const token = await bffTokenProvider();
-                await fetch(`${bffBaseUrl}/api/ai/rag/index-file`, {
+                await fetch(`${bffBaseUrl}/ai/rag/index-file`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -762,6 +764,10 @@ interface IDynamicStepBuildOptions {
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     bffBaseUrl: string;
     bffTokenProvider: () => Promise<string>;
+    /** Ref that tracks whether analysis has been created (for canAdvance). */
+    analysisCreatedRef: React.MutableRefObject<boolean>;
+    /** Ref to WizardShell handle — used to call requestUpdate() after analysis creation. */
+    wizardShellRef: React.RefObject<IWizardShellHandle | null>;
 }
 
 function buildDynamicStepConfig(
@@ -787,12 +793,16 @@ function buildDynamicStepConfig(
         return {
             id: stepId,
             label: stepLabel,
-            canAdvance: () => true,
+            canAdvance: () => options.analysisCreatedRef.current,
             isSkippable: true,
             renderContent: () => (
                 <WorkOnAnalysisStepContent
                     successfulFiles={options.successfulFiles ?? []}
                     containerId={options.containerId}
+                    onAnalysisCreated={() => {
+                        options.analysisCreatedRef.current = true;
+                        options.wizardShellRef.current?.requestUpdate();
+                    }}
                 />
             ),
         };
@@ -835,6 +845,9 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
 
     // Track previous selection to diff adds/removes for dynamic steps
     const prevSelectedRef = React.useRef<NextStepActionId[]>([]);
+
+    // Ref that tracks whether analysis has been created (for canAdvance)
+    const analysisCreatedRef = React.useRef(false);
 
     const handleToggle = React.useCallback(
         (id: NextStepActionId) => {
@@ -889,6 +902,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                         uploadedDocumentMap,
                         bffBaseUrl,
                         bffTokenProvider,
+                        analysisCreatedRef,
+                        wizardShellRef,
                     }),
                     DYNAMIC_CANONICAL_ORDER
                 );

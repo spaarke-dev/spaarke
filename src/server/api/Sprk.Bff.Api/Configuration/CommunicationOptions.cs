@@ -30,6 +30,21 @@ public class CommunicationOptions
     /// Required when ArchiveToSpe=true is used in send requests.
     /// </summary>
     public string? ArchiveContainerId { get; set; }
+
+    /// <summary>
+    /// Public URL that Microsoft Graph calls back to for webhook notifications.
+    /// Must be HTTPS and publicly accessible. Environment-specific.
+    /// Example: https://{app-service}.azurewebsites.net/api/communications/incoming-webhook
+    /// </summary>
+    [Required(ErrorMessage = "Communication:WebhookNotificationUrl is required for Graph subscriptions.")]
+    public string WebhookNotificationUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Shared secret used to validate Graph webhook notifications.
+    /// Should be stored in Key Vault and referenced via @Microsoft.KeyVault(...).
+    /// </summary>
+    [Required(ErrorMessage = "Communication:WebhookClientState is required for Graph webhook validation.")]
+    public string WebhookClientState { get; set; } = string.Empty;
 }
 
 /// <summary>

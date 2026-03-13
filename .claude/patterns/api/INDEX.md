@@ -1,7 +1,7 @@
 # API/BFF Patterns Index
 
 > **Domain**: BFF API / .NET Minimal API
-> **Last Updated**: 2025-12-19
+> **Last Updated**: 2026-03-12
 
 ---
 
@@ -14,6 +14,7 @@
 | [service-registration.md](service-registration.md) | DI configuration (ADR-010) | ~115 |
 | [error-handling.md](error-handling.md) | ProblemDetails (ADR-019) | ~145 |
 | [background-workers.md](background-workers.md) | Job processing (ADR-004) | ~175 |
+| [send-email-integration.md](send-email-integration.md) | Email send integration patterns (UI, AI, server-side) | ~200 |
 
 ---
 
@@ -26,6 +27,7 @@
 | Register new service | `service-registration.md` |
 | Add background job | `background-workers.md` |
 | Handle errors | `error-handling.md` |
+| Send email from module | `send-email-integration.md` |
 
 ---
 
