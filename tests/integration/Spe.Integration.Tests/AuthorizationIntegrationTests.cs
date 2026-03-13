@@ -6,7 +6,10 @@ using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Spaarke.Dataverse;
 using Xunit;
@@ -230,6 +233,46 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
         return CreateClient();
     }
 
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.ConfigureHostConfiguration(config =>
+        {
+            var dict = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
+                ["UAMI_CLIENT_ID"] = "test-client-id",
+                ["TENANT_ID"] = "test-tenant-id",
+                ["API_APP_ID"] = "test-app-id",
+                ["API_CLIENT_SECRET"] = "test-secret",
+                ["AzureAd:Instance"] = "https://login.microsoftonline.com/",
+                ["AzureAd:TenantId"] = "test-tenant-id",
+                ["AzureAd:ClientId"] = "test-app-id",
+                ["AzureAd:Audience"] = "api://test-app-id",
+                ["Graph:TenantId"] = "test-tenant-id",
+                ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
+                ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
+                ["Dataverse:TenantId"] = "test-tenant-id",
+                ["ServiceBus:ConnectionString"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["ServiceBus:QueueName"] = "sdap-jobs",
+                ["DocumentIntelligence:Enabled"] = "false",
+                ["Analysis:Enabled"] = "false",
+                ["DocumentIntelligence:AiSearchEndpoint"] = "",
+                ["DocumentIntelligence:AiSearchKey"] = "",
+                ["Redis:Enabled"] = "false",
+            };
+            config.AddInMemoryCollection(dict!);
+        });
+
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
@@ -251,6 +294,9 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthenticationSchemeOptions, TestAuthenticationHandler>("Test", options => { });
+
+            // Remove hosted services to prevent background work during tests
+            services.RemoveAll<IHostedService>();
         });
 
         builder.UseEnvironment("Testing");
