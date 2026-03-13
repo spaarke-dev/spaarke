@@ -47,12 +47,18 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
+        // Create Analysis*Service instances as named variables so we can bypass auth on each
+        var actionService = new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>());
+        var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>());
+        var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>());
+        var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>());
+
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
-            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
-            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
-            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
-            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
+            actionService,
+            skillService,
+            knowledgeService,
+            toolService,
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
@@ -60,9 +66,23 @@ public class ScopeResolverServiceResolveScopesTests : IDisposable
         // Bypass Azure AD authentication by setting _currentToken via reflection
         // to a non-expired fake token. This prevents the ClientSecretCredential
         // from making real calls to Azure AD during unit tests.
-        var tokenField = typeof(ScopeResolverService)
-            .GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        tokenField.SetValue(_service, new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
+        // Must be set on ScopeResolverService AND each Analysis*Service (which inherit
+        // from DataverseHttpServiceBase and have their own _currentToken field).
+        var fakeToken = new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1));
+        SetFakeToken(_service, typeof(ScopeResolverService), fakeToken);
+        SetFakeToken(actionService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(skillService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(knowledgeService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(toolService, typeof(DataverseHttpServiceBase), fakeToken);
+    }
+
+    /// <summary>
+    /// Sets the _currentToken field via reflection on the specified type to bypass Azure AD auth.
+    /// </summary>
+    private static void SetFakeToken(object instance, Type declaringType, AccessToken token)
+    {
+        var field = declaringType.GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        field.SetValue(instance, token);
     }
 
     public void Dispose()
@@ -566,15 +586,39 @@ public class ScopeResolverServiceTests : IDisposable
         _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
+        // Create Analysis*Service instances as named variables so we can bypass auth on each
+        var actionService = new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>());
+        var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>());
+        var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>());
+        var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>());
+
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
-            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
-            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
-            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
-            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
+            actionService,
+            skillService,
+            knowledgeService,
+            toolService,
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
+
+        // Bypass Azure AD authentication by setting _currentToken via reflection
+        // on ScopeResolverService and each Analysis*Service (DataverseHttpServiceBase).
+        var fakeToken = new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1));
+        SetFakeToken(_service, typeof(ScopeResolverService), fakeToken);
+        SetFakeToken(actionService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(skillService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(knowledgeService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(toolService, typeof(DataverseHttpServiceBase), fakeToken);
+    }
+
+    /// <summary>
+    /// Sets the _currentToken field via reflection on the specified type to bypass Azure AD auth.
+    /// </summary>
+    private static void SetFakeToken(object instance, Type declaringType, AccessToken token)
+    {
+        var field = declaringType.GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        field.SetValue(instance, token);
     }
 
     public void Dispose()
@@ -1021,20 +1065,39 @@ public class ScopeResolverServiceDataverseWebApiTests : IDisposable
         _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
         _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
 
+        // Create Analysis*Service instances as named variables so we can bypass auth on each
+        var actionService = new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>());
+        var skillService = new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>());
+        var knowledgeService = new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>());
+        var toolService = new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>());
+
         _service = new ScopeResolverService(
             _playbookServiceMock.Object,
-            new AnalysisActionService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisActionService>>()),
-            new AnalysisSkillService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisSkillService>>()),
-            new AnalysisKnowledgeService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisKnowledgeService>>()),
-            new AnalysisToolService(_httpClient, _configurationMock.Object, Mock.Of<ILogger<AnalysisToolService>>()),
+            actionService,
+            skillService,
+            knowledgeService,
+            toolService,
             _httpClient,
             _configurationMock.Object,
             _loggerMock.Object);
 
         // Bypass Azure AD authentication by setting _currentToken via reflection
-        var tokenField = typeof(ScopeResolverService)
-            .GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        tokenField.SetValue(_service, new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
+        // on ScopeResolverService and each Analysis*Service (DataverseHttpServiceBase).
+        var fakeToken = new AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1));
+        SetFakeToken(_service, typeof(ScopeResolverService), fakeToken);
+        SetFakeToken(actionService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(skillService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(knowledgeService, typeof(DataverseHttpServiceBase), fakeToken);
+        SetFakeToken(toolService, typeof(DataverseHttpServiceBase), fakeToken);
+    }
+
+    /// <summary>
+    /// Sets the _currentToken field via reflection on the specified type to bypass Azure AD auth.
+    /// </summary>
+    private static void SetFakeToken(object instance, Type declaringType, AccessToken token)
+    {
+        var field = declaringType.GetField("_currentToken", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        field.SetValue(instance, token);
     }
 
     public void Dispose()

@@ -134,12 +134,13 @@ public class DocumentProfileFieldMapperTests
         var result = DocumentProfileFieldMapper.CreateFieldMapping(outputs);
 
         // Assert
-        result.Should().HaveCount(5);
+        result.Should().HaveCount(6);
         result.Should().ContainKey("sprk_filetldr");
         result.Should().ContainKey("sprk_filesummary");
         result.Should().ContainKey("sprk_filekeywords");
         result.Should().ContainKey("sprk_documenttype");
         result.Should().ContainKey("sprk_entities");
+        result.Should().ContainKey("sprk_searchprofile");
 
         result["sprk_filetldr"].Should().Be("Brief summary");
         result["sprk_filesummary"].Should().Be("Detailed summary");

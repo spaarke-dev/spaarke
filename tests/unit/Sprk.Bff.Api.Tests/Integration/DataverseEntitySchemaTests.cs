@@ -31,6 +31,8 @@ public class DataverseEntitySchemaTests
         { "MimeType", new("sprk_filetype", typeof(string)) },
         { "GraphItemId", new("sprk_graphitemid", typeof(string)) },
         { "GraphDriveId", new("sprk_graphdriveid", typeof(string)) },
+        { "FilePath", new("sprk_filepath", typeof(string)) },
+        { "FileType", new("sprk_fileextension", typeof(string)) },
         { "Status", new("statuscode", typeof(OptionSetValue)) },
 
         // AI Analysis Fields
@@ -54,13 +56,35 @@ public class DataverseEntitySchemaTests
         { "EmailTo", new("sprk_emailto", typeof(string)) },
         { "EmailDate", new("sprk_emaildate", typeof(DateTime)) },
         { "EmailBody", new("sprk_emailbody", typeof(string)) },
+        { "EmailCc", new("sprk_emailcc", typeof(string)) },
+        { "EmailMessageId", new("sprk_emailmessageid", typeof(string)) },
+        { "EmailDirection", new("sprk_emaildirection", typeof(OptionSetValue)) },
+        { "EmailTrackingToken", new("sprk_emailtrackingtoken", typeof(string)) },
+        { "EmailConversationIndex", new("sprk_emailconversationindex", typeof(string)) },
+        { "EmailLookup", new("sprk_email", typeof(EntityReference)) },
+        { "IsEmailArchive", new("sprk_isemailarchive", typeof(bool)) },
+        { "RelationshipType", new("sprk_relationshiptype", typeof(OptionSetValue)) },
         { "Attachments", new("sprk_attachments", typeof(string)) },
 
         // Parent Document Fields
         { "ParentDocumentId", new("sprk_parentdocumentid", typeof(string)) },
         { "ParentFileName", new("sprk_parentfilename", typeof(string)) },
         { "ParentGraphItemId", new("sprk_parentgraphitemid", typeof(string)) },
-        { "ParentDocumentLookup", new("sprk_parentdocument", typeof(EntityReference)) }
+        { "ParentDocumentLookup", new("sprk_parentdocument", typeof(EntityReference)) },
+        { "EmailParentId", new("sprk_emailparentid", typeof(string)) },
+
+        // Record Association Lookups
+        { "MatterLookup", new("sprk_matter", typeof(EntityReference)) },
+        { "ProjectLookup", new("sprk_project", typeof(EntityReference)) },
+        { "InvoiceLookup", new("sprk_invoice", typeof(EntityReference)) },
+
+        // Document Source Tracking
+        { "SourceType", new("sprk_sourcetype", typeof(OptionSetValue)) },
+
+        // Search Index Tracking Fields
+        { "SearchIndexed", new("sprk_searchindexed", typeof(bool)) },
+        { "SearchIndexName", new("sprk_searchindexname", typeof(string)) },
+        { "SearchIndexedOn", new("sprk_searchindexedon", typeof(DateTime)) }
     };
 
     private record DataverseFieldMapping(string DataverseFieldName, Type ExpectedType);

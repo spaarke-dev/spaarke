@@ -34,7 +34,7 @@ public class HealthAndHeadersTests : IClassFixture<CustomWebAppFactory>
         res.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
         var json = await res.Content.ReadAsStringAsync();
         json.Should().Contain("Sprk.Bff.Api");
-        json.Should().Contain("1.0.0");
+        json.Should().Contain("1.0.1");
         res.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -9,6 +10,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Tests.Integration.Workspace;
 using Sprk.Bff.Api.Tests.Mocks;
 
 namespace Sprk.Bff.Api.Tests;
@@ -128,6 +130,25 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
         // Use ConfigureTestServices to replace services AFTER the app's services are registered
         builder.ConfigureTestServices(services =>
         {
+            // ---------------------------------------------------------------
+            // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
+            // injects a known test identity when an Authorization header is
+            // present. This satisfies RequireAuthorization() on endpoints.
+            // ---------------------------------------------------------------
+            services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = FakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = FakeAuthHandler.SchemeName;
+            })
+            .AddScheme<AuthenticationSchemeOptions, FakeAuthHandler>(
+                FakeAuthHandler.SchemeName, _ => { });
+
+            // ---------------------------------------------------------------
+            // HOSTED SERVICES: Remove background workers that depend on
+            // services not fully configured in the test environment.
+            // ---------------------------------------------------------------
+            services.RemoveAll<IHostedService>();
+
             // Mock IDataverseService to avoid real Dataverse connection in tests
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);

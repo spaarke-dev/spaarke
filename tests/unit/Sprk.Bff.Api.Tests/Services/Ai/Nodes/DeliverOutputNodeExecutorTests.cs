@@ -99,50 +99,48 @@ public class DeliverOutputNodeExecutorTests
     }
 
     [Fact]
-    public void Validate_WithNoConfig_ReturnsFailure()
+    public void Validate_WithNoConfig_ReturnsSuccess_AutoAssemblyMode()
     {
-        // Arrange
+        // Arrange - null config triggers auto-assembly mode
         var context = CreateValidContext(null);
 
         // Act
         var result = _executor.Validate(context);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("ConfigJson"));
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]
-    public void Validate_WithEmptyConfig_ReturnsFailure()
+    public void Validate_WithEmptyConfig_ReturnsSuccess_AutoAssemblyMode()
     {
-        // Arrange
+        // Arrange - empty config triggers auto-assembly mode
         var context = CreateValidContext("");
 
         // Act
         var result = _executor.Validate(context);
 
         // Assert
-        result.IsValid.Should().BeFalse();
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]
-    public void Validate_WithInvalidJson_ReturnsFailure()
+    public void Validate_WithInvalidJson_ReturnsSuccess_AutoAssemblyMode()
     {
-        // Arrange
+        // Arrange - invalid JSON is treated as unconfigured (auto-assembly mode)
         var context = CreateValidContext("{invalid json}");
 
         // Act
         var result = _executor.Validate(context);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("Invalid"));
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]
-    public void Validate_WithMissingDeliveryType_ReturnsFailure()
+    public void Validate_WithMissingDeliveryType_ReturnsSuccess()
     {
-        // Arrange
+        // Arrange - template-only config without deliveryType is valid
         var config = @"{""template"":""Hello {{name}}""}";
         var context = CreateValidContext(config);
 
@@ -150,8 +148,7 @@ public class DeliverOutputNodeExecutorTests
         var result = _executor.Validate(context);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("Delivery type") || e.Contains("deliveryType"));
+        result.IsValid.Should().BeTrue();
     }
 
     [Fact]
@@ -170,9 +167,10 @@ public class DeliverOutputNodeExecutorTests
     }
 
     [Fact]
-    public void Validate_WithTextTypeAndMissingTemplate_ReturnsFailure()
+    public void Validate_WithTextTypeAndMissingTemplate_ReturnsSuccess()
     {
-        // Arrange
+        // Arrange - template is no longer required at validation time;
+        // auto-assembly handles missing templates at execution time
         var config = @"{""deliveryType"":""text""}";
         var context = CreateValidContext(config);
 
@@ -180,8 +178,7 @@ public class DeliverOutputNodeExecutorTests
         var result = _executor.Validate(context);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("Template"));
+        result.IsValid.Should().BeTrue();
     }
 
     #endregion
@@ -317,17 +314,16 @@ public class DeliverOutputNodeExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_WithValidationFailure_ReturnsErrorOutput()
+    public async Task ExecuteAsync_WithEmptyConfig_ReturnsSuccessViaAutoAssembly()
     {
-        // Arrange
+        // Arrange - empty JSON config triggers auto-assembly mode which succeeds
         var context = CreateValidContext("{}");
 
         // Act
         var result = await _executor.ExecuteAsync(context, CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
+        result.Success.Should().BeTrue();
     }
 
     [Fact]

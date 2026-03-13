@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Spaarke.Dataverse;
@@ -54,7 +55,10 @@ public class AiAuthorizationServiceTests
 
     private static Microsoft.AspNetCore.Http.HttpContext CreateMockHttpContext()
     {
-        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().BuildServiceProvider()
+        };
         context.Request.Headers["Authorization"] = "Bearer mock-token";
         return context;
     }

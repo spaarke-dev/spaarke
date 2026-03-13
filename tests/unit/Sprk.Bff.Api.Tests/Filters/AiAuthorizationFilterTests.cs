@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Api.Filters;
@@ -54,7 +55,8 @@ public class AiAuthorizationFilterTests
         var httpContext = new DefaultHttpContext
         {
             User = user,
-            TraceIdentifier = "test-trace-id"
+            TraceIdentifier = "test-trace-id",
+            RequestServices = new ServiceCollection().BuildServiceProvider()
         };
 
         var contextMock = new Mock<EndpointFilterInvocationContext>();

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Api.Office.Errors;
 using Xunit;
@@ -18,7 +19,10 @@ public class OfficeProblemDetailsTests
 
     private static async Task<(int status, string body)> ExecuteResultAsync(IResult result)
     {
-        var ctx = new DefaultHttpContext();
+        var ctx = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().BuildServiceProvider()
+        };
         var ms = new MemoryStream();
         ctx.Response.Body = ms;
         await result.ExecuteAsync(ctx);

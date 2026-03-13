@@ -299,6 +299,22 @@ public class SummaryHandlerTests
         var context = CreateValidContext(extractedText: longText);
         var tool = CreateTool();
 
+        // Override default mock to return multiple chunks for large text
+        _textChunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(It.IsAny<string?>(), It.IsAny<ChunkingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? text, ChunkingOptions? _, CancellationToken _) =>
+            {
+                if (string.IsNullOrEmpty(text) || text.Length <= 8000)
+                    return new List<TextChunk> { new() { Content = text!, Index = 0, StartPosition = 0, EndPosition = text!.Length } };
+                var chunks = new List<TextChunk>();
+                for (int i = 0; i < text.Length; i += 8000)
+                {
+                    var end = Math.Min(i + 8000, text.Length);
+                    chunks.Add(new TextChunk { Content = text[i..end], Index = chunks.Count, StartPosition = i, EndPosition = end });
+                }
+                return chunks;
+            });
+
         var callCount = 0;
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -562,6 +578,22 @@ This is the executive summary.
         var context = CreateValidContext(extractedText: longText);
         var tool = CreateTool();
 
+        // Override default mock to return multiple chunks for large text
+        _textChunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(It.IsAny<string?>(), It.IsAny<ChunkingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? text, ChunkingOptions? _, CancellationToken _) =>
+            {
+                if (string.IsNullOrEmpty(text) || text.Length <= 8000)
+                    return new List<TextChunk> { new() { Content = text!, Index = 0, StartPosition = 0, EndPosition = text!.Length } };
+                var chunks = new List<TextChunk>();
+                for (int i = 0; i < text.Length; i += 8000)
+                {
+                    var end = Math.Min(i + 8000, text.Length);
+                    chunks.Add(new TextChunk { Content = text[i..end], Index = chunks.Count, StartPosition = i, EndPosition = end });
+                }
+                return chunks;
+            });
+
         var responses = new Queue<string>(new[]
         {
             """{"summary": "Summary of section 1", "confidence": 0.85}""",
@@ -591,6 +623,22 @@ This is the executive summary.
         var context = CreateValidContext(extractedText: longText);
         var tool = CreateTool();
 
+        // Override default mock to return multiple chunks for large text
+        _textChunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(It.IsAny<string?>(), It.IsAny<ChunkingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? text, ChunkingOptions? _, CancellationToken _) =>
+            {
+                if (string.IsNullOrEmpty(text) || text.Length <= 8000)
+                    return new List<TextChunk> { new() { Content = text!, Index = 0, StartPosition = 0, EndPosition = text!.Length } };
+                var chunks = new List<TextChunk>();
+                for (int i = 0; i < text.Length; i += 8000)
+                {
+                    var end = Math.Min(i + 8000, text.Length);
+                    chunks.Add(new TextChunk { Content = text[i..end], Index = chunks.Count, StartPosition = i, EndPosition = end });
+                }
+                return chunks;
+            });
+
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"summary": "Chunk summary text", "confidence": 0.85}""");
@@ -613,11 +661,27 @@ This is the executive summary.
         var context = CreateValidContext(extractedText: longText);
         var tool = CreateTool();
 
+        // Override default mock to return multiple chunks for large text
+        _textChunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(It.IsAny<string?>(), It.IsAny<ChunkingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? text, ChunkingOptions? _, CancellationToken _) =>
+            {
+                if (string.IsNullOrEmpty(text) || text.Length <= 8000)
+                    return new List<TextChunk> { new() { Content = text!, Index = 0, StartPosition = 0, EndPosition = text!.Length } };
+                var chunks = new List<TextChunk>();
+                for (int i = 0; i < text.Length; i += 8000)
+                {
+                    var end = Math.Min(i + 8000, text.Length);
+                    chunks.Add(new TextChunk { Content = text[i..end], Index = chunks.Count, StartPosition = i, EndPosition = end });
+                }
+                return chunks;
+            });
+
         var callCount = 0;
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-            .Returns<string, string?, CancellationToken>((_, _, _) =>
+            .Returns<string, string?, int?, CancellationToken>((_, _, _, _) =>
             {
                 callCount++;
                 if (callCount == 2)
