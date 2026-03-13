@@ -207,7 +207,7 @@ export class WorkAssignmentService {
         entity: 'sprk_project',
         nameField: 'sprk_projectname',
         descField: 'sprk_projectdescription',
-        matterTypeField: '_sprk_projecttyperef_value',
+        matterTypeField: '_sprk_mattertype_value',
         practiceAreaField: '_sprk_practicearea_value',
       },
       invoice: {
@@ -267,33 +267,36 @@ export class WorkAssignmentService {
       return result;
     }
 
-    // Fetch lookup fields separately (may fail if column doesn't exist on entity)
-    if (lookupFields.length > 0) {
+    // Fetch each lookup field individually (if one column doesn't exist, the other still works)
+    if (mapping.matterTypeField) {
       try {
-        const lookupQuery = `?$select=${lookupFields.join(',')}`;
-        console.info(`[WorkAssignmentService] readRecordForPrefill lookups: ${mapping.entity}(${recordId})${lookupQuery}`);
-        const lookupRecord = await this._webApi.retrieveRecord(mapping.entity, recordId, lookupQuery);
-
-        if (mapping.matterTypeField) {
-          const mtId = lookupRecord[mapping.matterTypeField] as string | undefined;
-          if (mtId) {
-            result.matterTypeId = mtId;
-            const formattedKey = `${mapping.matterTypeField}@OData.Community.Display.V1.FormattedValue`;
-            result.matterTypeName = (lookupRecord[formattedKey] as string) ?? '';
-          }
-        }
-
-        if (mapping.practiceAreaField) {
-          const paId = lookupRecord[mapping.practiceAreaField] as string | undefined;
-          if (paId) {
-            result.practiceAreaId = paId;
-            const formattedKey = `${mapping.practiceAreaField}@OData.Community.Display.V1.FormattedValue`;
-            result.practiceAreaName = (lookupRecord[formattedKey] as string) ?? '';
-          }
+        const mtQuery = `?$select=${mapping.matterTypeField}`;
+        console.info(`[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`);
+        const mtRecord = await this._webApi.retrieveRecord(mapping.entity, recordId, mtQuery);
+        const mtId = mtRecord[mapping.matterTypeField] as string | undefined;
+        if (mtId) {
+          result.matterTypeId = mtId;
+          const formattedKey = `${mapping.matterTypeField}@OData.Community.Display.V1.FormattedValue`;
+          result.matterTypeName = (mtRecord[formattedKey] as string) ?? '';
         }
       } catch (err) {
-        console.warn(`[WorkAssignmentService] readRecordForPrefill lookup fields failed for ${recordType}(${recordId}):`, err);
-        // Non-fatal — name/description already captured above
+        console.warn(`[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`, err);
+      }
+    }
+
+    if (mapping.practiceAreaField) {
+      try {
+        const paQuery = `?$select=${mapping.practiceAreaField}`;
+        console.info(`[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`);
+        const paRecord = await this._webApi.retrieveRecord(mapping.entity, recordId, paQuery);
+        const paId = paRecord[mapping.practiceAreaField] as string | undefined;
+        if (paId) {
+          result.practiceAreaId = paId;
+          const formattedKey = `${mapping.practiceAreaField}@OData.Community.Display.V1.FormattedValue`;
+          result.practiceAreaName = (paRecord[formattedKey] as string) ?? '';
+        }
+      } catch (err) {
+        console.warn(`[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`, err);
       }
     }
 
