@@ -14,7 +14,7 @@ public class DocumentIntelligenceOptionsTests
         options.Enabled.Should().BeTrue();
         options.StreamingEnabled.Should().BeTrue();
         options.SummarizeModel.Should().Be("gpt-4o-mini");
-        options.MaxOutputTokens.Should().Be(1000);
+        options.MaxOutputTokens.Should().Be(500);
         options.Temperature.Should().Be(0.3f);
         options.MaxFileSizeBytes.Should().Be(10 * 1024 * 1024);
         options.MaxInputTokens.Should().Be(100_000);

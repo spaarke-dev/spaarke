@@ -136,7 +136,7 @@ public class AiAuthorizationServiceTests
 
         _accessDataSourceMock
             .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string uid, string rid, CancellationToken _) =>
+            .ReturnsAsync((string uid, string rid, string? _, CancellationToken __) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.Read));
 
         // Act
@@ -258,7 +258,7 @@ public class AiAuthorizationServiceTests
 
         _accessDataSourceMock
             .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string uid, string rid, CancellationToken _) =>
+            .ReturnsAsync((string uid, string rid, string? _, CancellationToken __) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.None));
 
         // Act
