@@ -1,7 +1,7 @@
 <task id="PRODENV-023" project="Production Environment Setup R1">
   <metadata>
     <title>Deploy BFF API to production (Deploy-BffApi.ps1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>3</phase>
     <parallel-group>P3-B</parallel-group>
@@ -89,4 +89,13 @@
     <criterion testable="true">App Insights receiving telemetry from production</criterion>
     <criterion testable="true">Key Vault references resolving (no configuration errors)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Deployed via staging slot swap (zero-downtime).
+    Required fixing task 021 gaps: created Entra ID app registrations (spaarke-bff-api-prod,
+    spaarke-dataverse-s2s-prod), populated Key Vault secrets, granted staging slot Key Vault
+    RBAC access, registered app as Dataverse application user.
+    Redis disabled (no production Redis yet). Dataverse points to dev environment.
+    Production URL: https://api.spaarke.com/healthz (Healthy, 200).
+  </notes>
 </task>

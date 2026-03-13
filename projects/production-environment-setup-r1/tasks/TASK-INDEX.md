@@ -9,9 +9,9 @@
 
 | Status | Count |
 |--------|-------|
-| 🔲 Not Started | 31 |
+| 🔲 Not Started | 15 |
 | 🔄 In Progress | 0 |
-| ✅ Complete | 0 |
+| ✅ Complete | 16 |
 | ⛔ Blocked | 0 |
 
 ---
@@ -20,33 +20,33 @@
 
 | Task | Title | Status | Parallel Group | Dependencies | Est. |
 |------|-------|--------|----------------|--------------|------|
-| 001 | Create platform.bicep from existing modules | 🔲 | P1-A | None | 4h |
-| 002 | Create customer.bicep from existing modules | 🔲 | P1-A | None | 3h |
-| 003 | Create production parameter files | 🔲 | P1-A | None | 2h |
-| 004 | Finalize naming convention to Adopted status | 🔲 | P1-B | None | 2h |
-| 005 | Create appsettings.Production.json with Key Vault refs | 🔲 | P1-B | None | 3h |
-| 006 | Validate Bicep templates with what-if | 🔲 | P1-C | 001, 002, 003 | 2h |
+| 001 | Create platform.bicep from existing modules | ✅ | P1-A | None | 4h |
+| 002 | Create customer.bicep from existing modules | ✅ | P1-A | None | 3h |
+| 003 | Create production parameter files | ✅ | P1-A | None | 2h |
+| 004 | Finalize naming convention to Adopted status | ✅ | P1-B | None | 2h |
+| 005 | Create appsettings.Production.json with Key Vault refs | ✅ | P1-B | None | 3h |
+| 006 | Validate Bicep templates with what-if | ✅ | P1-C | 001, 002, 003 | 2h |
 
 ## Phase 2: Deployment Scripts
 
 | Task | Title | Status | Parallel Group | Dependencies | Est. |
 |------|-------|--------|----------------|--------------|------|
-| 010 | Create Deploy-Platform.ps1 | 🔲 | P2-A | 001 | 4h |
-| 011 | Parameterize Deploy-BffApi.ps1 | 🔲 | P2-A | 005 | 3h |
-| 012 | Create Deploy-DataverseSolutions.ps1 | 🔲 | P2-A | None | 4h |
-| 013 | Create Test-Deployment.ps1 (smoke tests) | 🔲 | P2-A | None | 3h |
-| 014 | Create Provision-Customer.ps1 | 🔲 | P2-B | 010, 012, 013 | 6h |
-| 015 | Create Decommission-Customer.ps1 | 🔲 | P2-B | 002 | 3h |
-| 016 | Create Rotate-Secrets.ps1 | 🔲 | P2-C | None | 3h |
+| 010 | Create Deploy-Platform.ps1 | ✅ | P2-A | 001 | 4h |
+| 011 | Parameterize Deploy-BffApi.ps1 | ✅ | P2-A | 005 | 3h |
+| 012 | Create Deploy-DataverseSolutions.ps1 | ✅ | P2-A | None | 4h |
+| 013 | Create Test-Deployment.ps1 (smoke tests) | ✅ | P2-A | None | 3h |
+| 014 | Create Provision-Customer.ps1 | ✅ | P2-B | 010, 012, 013 | 6h |
+| 015 | Create Decommission-Customer.ps1 | ✅ | P2-B | 002 | 3h |
+| 016 | Create Rotate-Secrets.ps1 | ✅ | P2-C | None | 3h |
 
 ## Phase 3: Platform & Demo Deployment
 
 | Task | Title | Status | Parallel Group | Dependencies | Est. |
 |------|-------|--------|----------------|--------------|------|
-| 020 | Deploy shared platform | 🔲 | P3-A | 010 | 4h |
-| 021 | Create Entra ID app registrations | 🔲 | P3-A | None | 3h |
-| 022 | Configure custom domain api.spaarke.com + SSL | 🔲 | P3-B | 020 | 2h |
-| 023 | Deploy BFF API to production | 🔲 | P3-B | 020, 021 | 3h |
+| 020 | Deploy shared platform | ✅ | P3-A | 010 | 4h |
+| 021 | Create Entra ID app registrations | ✅ | P3-A | None | 3h |
+| 022 | Configure custom domain api.spaarke.com + SSL | ✅ | P3-B | 020 | 2h |
+| 023 | Deploy BFF API to production | ✅ | P3-B | 020, 021 | 3h |
 | 024 | Provision demo customer | 🔲 | P3-C | 023, 014 | 4h |
 | 025 | Load sample data into demo | 🔲 | P3-D | 024 | 3h |
 | 026 | Configure demo user access (B2B) | 🔲 | P3-D | 024 | 2h |
