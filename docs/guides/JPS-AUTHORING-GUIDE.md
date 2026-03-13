@@ -4,7 +4,7 @@
 > **Date**: March 4, 2026
 > **Status**: Production
 > **Author**: Spaarke Engineering
-> **Related**: [AI Architecture Guide - Section 19](SPAARKE-AI-ARCHITECTURE.md#19-json-prompt-schema-jps-pipeline-2026-03-04)
+> **Related**: [AI Architecture Guide - Section 19](../architecture/ai-implementation-reference.md#19-json-prompt-schema-jps-pipeline-2026-03-04)
 
 ---
 
@@ -12,7 +12,7 @@
 
 JSON Prompt Schema (JPS) is the structured prompt format for Spaarke playbook actions. JPS definitions replace flat-text prompts with composable, typed JSON that supports scoped knowledge, template parameters, dynamic choices, and structured output. JPS definitions are stored in the `sprk_systemprompt` column of `sprk_aiaction` records.
 
-This guide covers how to author new JPS definitions. For the pipeline architecture, see [AI Architecture Guide - Section 19](SPAARKE-AI-ARCHITECTURE.md#19-json-prompt-schema-jps-pipeline-2026-03-04).
+This guide covers how to author new JPS definitions. For the pipeline architecture, see [AI Architecture Guide - Section 19](../architecture/ai-implementation-reference.md#19-json-prompt-schema-jps-pipeline-2026-03-04).
 
 > **ADR-015 Compliance**: This guide uses placeholder content in examples. Do not include actual production prompt text in documentation or logs.
 

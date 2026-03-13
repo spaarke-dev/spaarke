@@ -1,10 +1,11 @@
-# JPS Comprehensive Guide
+# Playbook JPS Prompt Schema Guide
 
-> **Version**: 1.0
-> **Date**: March 4, 2026
+> **Version**: 1.1
+> **Date**: March 13, 2026
 > **Status**: Production
 > **Author**: Spaarke Engineering
 > **Audience**: Developers, AI engineers, prompt authors
+> **Related**: [playbook-architecture.md](../architecture/playbook-architecture.md) (playbook internals)
 
 ---
 
@@ -584,8 +585,8 @@ Restore from backup files (`-BackupPath`), re-seed from git history, or remove J
 | Document | Purpose |
 |----------|---------|
 | [JPS Authoring Guide](JPS-AUTHORING-GUIDE.md) | Detailed authoring reference with examples and best practices |
-| [AI Architecture Guide - Section 19](SPAARKE-AI-ARCHITECTURE.md#19-json-prompt-schema-jps-pipeline-2026-03-04) | Pipeline internals, component diagram, migration strategy |
-| [How to Create AI Playbook Scopes](HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md) | Creating knowledge and skill records for `$ref` resolution |
+| [AI Architecture Guide - Section 19](../architecture/ai-implementation-reference.md#19-json-prompt-schema-jps-pipeline-2026-03-04) | Pipeline internals, component diagram, migration strategy |
+| [Playbook Scope Configuration Guide](PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md) | Creating knowledge and skill records for `$ref` resolution |
 
 ### Example JPS Files
 

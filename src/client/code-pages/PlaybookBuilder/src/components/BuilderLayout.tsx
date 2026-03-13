@@ -27,14 +27,14 @@ import {
     Add20Regular,
     Bot20Regular,
     Play20Regular,
-    PanelRight20Regular,
     PanelLeft20Regular,
-    Settings20Regular,
+    FullScreenMaximize20Regular,
+    FullScreenMinimize20Regular,
 } from "@fluentui/react-icons";
 import { ReactFlowProvider } from "@xyflow/react";
 
 import { PlaybookCanvas } from "./canvas/PlaybookCanvas";
-import { PropertiesPanel } from "./properties/PropertiesPanel";
+import { NodePropertiesDialog } from "./properties/NodePropertiesDialog";
 import { ExecutionOverlay } from "./execution/ExecutionOverlay";
 import { AiAssistantModal } from "./ai-assistant/AiAssistantModal";
 import { usePlaybookLoader } from "../hooks/usePlaybookLoader";
@@ -190,14 +190,6 @@ const useStyles = makeStyles({
         position: "relative",
         overflow: "hidden",
     },
-    rightSidebar: {
-        flexShrink: 0,
-        transition: "width 0.2s ease",
-        overflow: "hidden",
-    },
-    rightSidebarCollapsed: {
-        width: "0px",
-    },
     loading: {
         display: "flex",
         flexDirection: "column",
@@ -245,18 +237,25 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
 
     // Panel visibility
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
-    const [rightPanelOpen, setRightPanelOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Fullscreen
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    useEffect(() => {
+        const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+        document.addEventListener("fullscreenchange", onChange);
+        return () => document.removeEventListener("fullscreenchange", onChange);
+    }, []);
+    const toggleFullscreen = useCallback(() => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            document.documentElement.requestFullscreen();
+        }
+    }, []);
     const [saveStatus, setSaveStatus] = useState<"saved" | "error" | null>(null);
     const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    // Auto-open properties panel when a node is selected
-    useEffect(() => {
-        if (selectedNodeId) {
-            setRightPanelOpen(true);
-        }
-    }, [selectedNodeId]);
 
     // Load scope data on mount
     useEffect(() => {
@@ -415,12 +414,12 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
                         />
                     </Tooltip>
                     <Divider vertical style={{ height: "20px" }} />
-                    <Tooltip content={rightPanelOpen ? "Hide properties" : "Show properties"} relationship="label">
+                    <Tooltip content={isFullscreen ? "Exit fullscreen" : "Fullscreen"} relationship="label">
                         <Button
                             appearance="subtle"
                             size="small"
-                            icon={<PanelRight20Regular />}
-                            onClick={() => setRightPanelOpen(!rightPanelOpen)}
+                            icon={isFullscreen ? <FullScreenMinimize20Regular /> : <FullScreenMaximize20Regular />}
+                            onClick={toggleFullscreen}
                         />
                     </Tooltip>
                 </div>
@@ -470,16 +469,10 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
                     </div>
                 </ReactFlowProvider>
 
-                {/* Right Sidebar — Properties Panel */}
-                <div
-                    className={mergeClasses(
-                        styles.rightSidebar,
-                        !rightPanelOpen && styles.rightSidebarCollapsed,
-                    )}
-                >
-                    {rightPanelOpen && <PropertiesPanel />}
-                </div>
             </div>
+
+            {/* Node Properties Dialog */}
+            <NodePropertiesDialog />
 
             {/* AI Assistant Modal (floating) */}
             {isAiModalOpen && <AiAssistantModal />}

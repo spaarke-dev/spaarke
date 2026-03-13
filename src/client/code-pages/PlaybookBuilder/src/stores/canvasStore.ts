@@ -223,6 +223,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         // Set type-specific defaults for structural nodes
         if (nodeType === "deliverOutput") {
             baseData.deliveryType = "markdown";
+        } else if (nodeType === "deliverToIndex") {
+            baseData.indexName = "knowledge";
+            baseData.indexSource = "document";
         }
 
         const newNode: PlaybookNode = {

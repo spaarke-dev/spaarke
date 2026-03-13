@@ -1,7 +1,8 @@
-# Playbook Creation Guide
+# Playbook Design Guide
 
 > **Audience**: AI Business Analysts, Solution Architects
 > **Last Updated**: March 2026
+> **Related**: [playbook-architecture.md](../architecture/playbook-architecture.md) (technical internals), [PLAYBOOK-BUILDER-GUIDE.md](PLAYBOOK-BUILDER-GUIDE.md) (builder UI)
 
 ---
 
@@ -433,11 +434,42 @@ This ensures Claude Code always has the latest scope catalog when designing play
 
 ---
 
+## Output Nodes
+
+Playbooks support two output node types for delivering results:
+
+### DeliverOutput (ActionType 40)
+
+The standard output node. Assembles results from upstream nodes into a structured JSON output, optionally writing fields to the triggering Dataverse record via UpdateRecord-style field mappings.
+
+**When to use**: Displaying results in UI, writing analysis output back to the source record.
+
+### DeliverToIndex (ActionType 41)
+
+Indexes upstream node results into Azure AI Search for semantic retrieval. Enqueues a `RagIndexing` background job via Service Bus — processing is asynchronous.
+
+**When to use**: Making playbook output searchable via Semantic Search. Common pattern: Document Profile playbooks that index document metadata for later retrieval.
+
+**Configuration**:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `indexName` | `"knowledge"` | Target Azure AI Search index |
+| `indexSource` | `"document"` | Source type: `"document"` (full doc) or `"field"` (specific field) |
+
+**Design tip**: Use DeliverToIndex alongside DeliverOutput when you want both UI display AND search indexing. They can run in parallel as separate output branches.
+
+For full technical details, see [playbook-architecture.md](../architecture/playbook-architecture.md).
+
+---
+
 ## Related Resources
 
 - [JPS Authoring Guide](JPS-AUTHORING-GUIDE.md) — Creating JPS definitions for actions
-- [JPS Comprehensive Guide](JPS-COMPREHENSIVE-GUIDE.md) — Full JPS schema reference
-- [AI Architecture Guide](SPAARKE-AI-ARCHITECTURE.md) — Platform architecture overview
+- [Playbook JPS Prompt Schema Guide](PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md) — Full JPS schema reference
+- [AI Architecture](../architecture/AI-ARCHITECTURE.md) — Platform architecture overview
+- [Playbook Architecture](../architecture/playbook-architecture.md) — Playbook internals, node executors, execution engine
+- [AI Implementation Reference](../architecture/ai-implementation-reference.md) — Working code examples
 - **Scope Catalog**: `docs/ai-knowledge/catalogs/scope-model-index.json`
 - **Provisioning Script**: `scripts/Deploy-Playbook.ps1`
 - **Claude Code Skill**: `/jps-playbook-design`

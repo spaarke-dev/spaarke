@@ -1,5 +1,7 @@
 # Playbook Builder Full-Screen Setup Guide
 
+> **ARCHIVED**: March 2026 — This guide documents the old PCF-based Playbook Builder deployment (custom page + PCF control wrapper). The builder is now a React Code Page (`sprk_playbookbuilder.html`). See `docs/guides/PLAYBOOK-BUILDER-GUIDE.md` for current documentation.
+
 > **Purpose**: Deploy the Playbook Builder PCF control as a full-screen Custom Page dialog
 > **Entity**: sprk_analysisplaybook (Analysis Playbook)
 > **Components**: Custom Page + Ribbon Button + JavaScript Web Resource

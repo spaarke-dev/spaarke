@@ -909,7 +909,7 @@ ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints
 
 ## AI Architecture
 
-AI features are built using the **AI Tool Framework** - see `docs/guides/SPAARKE-AI-ARCHITECTURE.md`.
+AI features are built using the **AI Tool Framework** - see `docs/architecture/AI-ARCHITECTURE.md` and `docs/architecture/ai-implementation-reference.md`.
 
 | Component | Purpose |
 |-----------|---------|

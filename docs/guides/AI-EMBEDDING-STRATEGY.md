@@ -403,7 +403,7 @@ After completing migration:
 | [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) | Full RAG system architecture including hybrid search pipeline |
 | [RAG-CONFIGURATION.md](RAG-CONFIGURATION.md) | Configuration reference for all RAG settings |
 | [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) | Troubleshooting guide for RAG issues |
-| [SPAARKE-AI-ARCHITECTURE.md](SPAARKE-AI-ARCHITECTURE.md) | Overall AI architecture and tool framework |
+| [ai-implementation-reference.md](../architecture/ai-implementation-reference.md) | Overall AI architecture and tool framework |
 | [auth-AI-azure-resources.md](../architecture/auth-AI-azure-resources.md) | Azure OpenAI resource details and endpoints |
 
 ### Key Source Files

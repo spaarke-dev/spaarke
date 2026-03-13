@@ -1,22 +1,18 @@
-# Spaarke AI Architecture
+# AI Implementation Reference
 
-> **Version**: 1.9
-> **Date**: March 4, 2026
-> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization + Semantic Search R1 + JPS Pipeline)
+> **Version**: 2.0
+> **Date**: March 13, 2026
+> **Purpose**: Implementation companion to [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — working code examples, configuration patterns, and service implementations
+> **Companion to**: [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) (design reference), [playbook-architecture.md](playbook-architecture.md) (playbook internals)
 > **Author**: Spaarke Engineering
-> **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
-> **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
-> **2026-01-12**: Document Relationship Visualization module added (3072-dim vectors, orphan file support)
-> **2026-01-20**: Semantic Search Foundation R1 - Hybrid search API with entity scoping
-> **2026-03-04**: JSON Prompt Schema (JPS) Pipeline - Structured prompt format replacing flat text
 
 ---
 
 ## Overview
 
-This document provides **implementation-focused architecture guidance** for extending the Spaarke platform with AI capabilities. AI features are implemented as **extensions to the existing `Sprk.Bff.Api`**, leveraging the BFF as an orchestration layer for Dataverse, Azure, SPE, and AI services.
+This document provides **implementation-focused guidance** with working code examples for extending the Spaarke platform with AI capabilities. For the design-level architecture, see [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md). For playbook-specific internals (node executors, execution engine, canvas model), see [playbook-architecture.md](playbook-architecture.md).
 
-For strategic context, use cases, and Microsoft Foundry platform details, see the [AI Strategy Document](../../reference/architecture/SPAARKE-AI-STRATEGY.md).
+AI features are implemented as **extensions to the existing `Sprk.Bff.Api`**, leveraging the BFF as an orchestration layer for Dataverse, Azure, SPE, and AI services.
 
 ---
 
@@ -3628,7 +3624,7 @@ For the complete JPS authoring reference, see [JPS Authoring Guide](JPS-AUTHORIN
 - [BFF API Patterns](../architecture/sdap-bff-api-patterns.md)
 - [RAG Architecture](RAG-ARCHITECTURE.md) - RAG pipeline, indexing, and Semantic Search API details
 - [AI Search & Visualization Module](../../projects/ai-azure-search-module/README.md) - Project documentation
-- [Playbook Builder Full-Screen Setup](PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md) - PCF control deployment and AI Assistant usage
+- [Playbook Builder Guide](../guides/PLAYBOOK-BUILDER-GUIDE.md) - PCF control deployment and AI Assistant usage
 - [JPS Authoring Guide](JPS-AUTHORING-GUIDE.md) - Practical guide for creating JPS prompt definitions
 
 ---

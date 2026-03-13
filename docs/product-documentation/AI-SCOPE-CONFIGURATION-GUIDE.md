@@ -578,4 +578,4 @@ Maintain a log of changes:
 
 ---
 
-*For technical implementation details, see the [AI Architecture Guide](../guides/SPAARKE-AI-ARCHITECTURE.md) and [Playbook Scope Design](../architecture/AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md).*
+*For technical implementation details, see the [AI Architecture Guide](../architecture/ai-implementation-reference.md) and [Playbook Scope Design](../architecture/AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md).*

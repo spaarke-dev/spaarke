@@ -5,7 +5,8 @@
 > **Audience**: Claude Code sessions working on playbook creation, BFF endpoint wiring, and frontend integration.
 >
 > **Created**: March 5, 2026
-> **Updated**: March 12, 2026 — Shared library promotion: useAiPrefill hook, findBestLookupMatch utility, AiFieldTag, EntityCreationService DI
+> **Updated**: March 13, 2026 — Renamed per doc convention; shared library promotion: useAiPrefill hook, findBestLookupMatch utility, AiFieldTag, EntityCreationService DI
+> **Related**: [playbook-architecture.md](../architecture/playbook-architecture.md) (playbook internals), [PLAYBOOK-DESIGN-GUIDE.md](PLAYBOOK-DESIGN-GUIDE.md) (playbook design)
 
 ---
 

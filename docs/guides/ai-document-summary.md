@@ -707,7 +707,7 @@ const url = `${normalizedBaseUrl}/api/documents/${documentId}/preview-url`;
 
 - [AI Troubleshooting Guide](ai-troubleshooting.md) - Common issues and solutions
 - [RAG Architecture Guide](RAG-ARCHITECTURE.md) - Hybrid search and knowledge retrieval
-- [AI Architecture Guide](SPAARKE-AI-ARCHITECTURE.md) - Overall AI architecture
+- [AI Architecture Guide](../architecture/ai-implementation-reference.md) - Overall AI architecture
 - [ADR-023: Choice Dialog Pattern](../adr/ADR-023-choice-dialog-pattern.md) - Resume dialog design
 
 ---

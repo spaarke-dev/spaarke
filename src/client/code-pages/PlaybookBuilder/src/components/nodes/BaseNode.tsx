@@ -23,18 +23,17 @@ const useStyles = makeStyles({
     container: {
         minWidth: "140px",
         maxWidth: "180px",
-        ...shorthands.borderRadius(tokens.borderRadiusMedium),
+        ...shorthands.borderRadius("0"),
         backgroundColor: tokens.colorNeutralBackground1,
         ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
-        boxShadow: tokens.shadow4,
         ...shorthands.overflow("hidden"),
-        transitionProperty: "box-shadow, border-color",
+        transitionProperty: "border-color",
         transitionDuration: "0.2s",
         transitionTimingFunction: "ease",
     },
     selected: {
         ...shorthands.borderColor(tokens.colorBrandStroke1),
-        boxShadow: tokens.shadow16,
+        ...shorthands.borderWidth("2px"),
     },
     header: {
         display: "flex",

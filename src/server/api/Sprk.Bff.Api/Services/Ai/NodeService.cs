@@ -983,7 +983,7 @@ public class NodeService : INodeService
     private static NodeType MapCanvasTypeToNodeType(string canvasType) => canvasType switch
     {
         "aiAnalysis" or "aiCompletion" or "aiEmbedding" => NodeType.AIAnalysis,
-        "deliverOutput" => NodeType.Output,
+        "deliverOutput" or "deliverToIndex" => NodeType.Output,
         "condition" or "parallel" or "wait" or "start" => NodeType.Control,
         "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage" => NodeType.Workflow,
         _ => NodeType.AIAnalysis // Default to AI for unknown types
@@ -1000,6 +1000,7 @@ public class NodeService : INodeService
         "aiCompletion" => ActionType.AiCompletion,
         "aiEmbedding" => ActionType.AiEmbedding,
         "deliverOutput" => ActionType.DeliverOutput,
+        "deliverToIndex" => ActionType.DeliverToIndex,
         "condition" => ActionType.Condition,
         "parallel" => ActionType.Parallel,
         "wait" => ActionType.Wait,

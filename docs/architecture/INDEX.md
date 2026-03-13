@@ -37,6 +37,8 @@ This directory contains comprehensive architecture documentation covering system
 ### AI
 
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) - Four-tier AI framework: Scope Library, Composition, Runtime, Infrastructure
+- **[playbook-architecture.md](playbook-architecture.md)** - **NEW**: Dedicated playbook system — node types, execution engine, canvas model, all node executors
+- **[ai-implementation-reference.md](ai-implementation-reference.md)** - Implementation companion — working code examples, configuration patterns, service implementations
 - [SPAARKE-AI-STRATEGY.md](SPAARKE-AI-STRATEGY.md) - AI strategy and adoption analysis
 
 ### Platform Components
@@ -59,7 +61,8 @@ This directory contains comprehensive architecture documentation covering system
 - Working with SDAP → Load sdap-*.md files
 - Workspace integration → Load sdap-workspace-integration-patterns.md
 - Creating new resources → Load AZURE-RESOURCE-NAMING-CONVENTION.md
-- Understanding AI features → Load SPAARKE-AI-STRATEGY.md, AI-ARCHITECTURE.md
+- Understanding AI features → Load AI-ARCHITECTURE.md, playbook-architecture.md
+- AI implementation patterns → Load ai-implementation-reference.md
 - Side panes, context awareness, cross-pane communication → Load SIDE-PANE-PLATFORM-ARCHITECTURE.md
 
 ## Phase 3 TODO

@@ -1,9 +1,10 @@
-# How to Create AI Playbooks and Scopes
+# Playbook Scope Configuration Guide
 
-> **Version**: 3.1
-> **Date**: March 3, 2026
+> **Version**: 3.2
+> **Date**: March 13, 2026
 > **Audience**: Dataverse Administrators, Power Users, Engineers
 > **Prerequisites**: Access to Dataverse environment with Spaarke AI solution installed
+> **Related**: For output node types (DeliverOutput, DeliverToIndex, SendEmail, CreateTask), see [playbook-architecture.md](../architecture/playbook-architecture.md)
 
 ---
 

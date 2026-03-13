@@ -264,7 +264,7 @@ With Model 2 (Customer-hosted), customers have **full control** over their AI re
 
 ## 2. Architecture Overview
 
-> **Implementation Details**: For detailed code structure, DI patterns, and endpoint implementations, see [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md)
+> **Implementation Details**: For detailed code structure, DI patterns, and endpoint implementations, see [ai-implementation-reference.md](ai-implementation-reference.md)
 
 ### 2.1 Azure Components (Shared with Microsoft Foundry)
 
@@ -1052,7 +1052,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ## 9. Implementation Details
 
-> **Full Implementation Guide**: See [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md) for detailed code structure and patterns.
+> **Full Implementation Guide**: See [ai-implementation-reference.md](ai-implementation-reference.md) for detailed code structure and patterns.
 
 ### 9.1 BFF API Configuration
 

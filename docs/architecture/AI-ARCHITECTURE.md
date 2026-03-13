@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
-> **Version**: 3.3
-> **Last Updated**: March 6, 2026
+> **Version**: 3.4
+> **Last Updated**: March 13, 2026
 > **Audience**: Claude Code, AI agents, engineers
 > **Purpose**: Technical reference for the Spaarke AI platform component framework
 > **Supersedes**: `AI-PLAYBOOK-ARCHITECTURE.md` (v2.0), `AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md` (v2.0)
@@ -428,207 +428,18 @@ Write operations with ownership validation (SYS- scopes are immutable):
 
 ### Playbooks (Visual Canvas)
 
-Playbooks are the primary composition pattern -- visual node-based workflows stored as Dataverse records.
+Playbooks are the primary composition pattern — visual node-based workflows stored as Dataverse records (`sprk_analysisplaybook`). They define what AI operations to perform and in what order, with a pluggable execution backend.
 
-**Entity**: `sprk_analysisplaybook`
-**Canvas field**: `sprk_canvaslayoutjson` (serialized JSON of nodes and edges)
-**Builder PCF**: `src/client/pcf/PlaybookBuilderHost/`
+> **Full documentation**: See [playbook-architecture.md](playbook-architecture.md) for the complete playbook system including node type system, execution engine, canvas data model, and node executor framework.
 
-#### Three-Level Node Type System
+**Quick reference — Node type enums**:
 
-Nodes use three type concepts at different layers:
-
-| Level | Name | Where Stored | Purpose | Example |
-|-------|------|-------------|---------|---------|
-| **Canvas Type** | `PlaybookNodeType` | React Flow `node.data.type` | React component selection | `"aiAnalysis"` |
-| **Dataverse NodeType** | `sprk_nodetype` | `sprk_playbooknode` OptionSet | Coarse scope resolution | `AIAnalysis (100000000)` |
-| **ActionType** | `__actionType` in ConfigJson | `sprk_playbooknode.sprk_configjson` | Fine-grained executor dispatch | `AiAnalysis (0)` |
-
-**Canvas Types** (8 React components — drag-and-drop palette items):
-
-```typescript
-type PlaybookNodeType =
-  | 'start'           // Entry point — always Spaarke code
-  | 'aiAnalysis'      // AI analysis (LLM call) — backend-flexible
-  | 'aiCompletion'    // AI completion (LLM call) — backend-flexible
-  | 'condition'       // Conditional branching — always Spaarke code
-  | 'deliverOutput'   // Output delivery — always Spaarke code
-  | 'deliverToIndex'  // RAG semantic indexing — always Spaarke code
-  | 'createTask'      // Task creation — always Spaarke code
-  | 'sendEmail'       // Email action — always Spaarke code
-  | 'wait';           // Wait/delay — always Spaarke code
-```
-
-**Dataverse NodeType** (4 coarse categories for scope resolution):
-
-```csharp
-public enum NodeType
-{
-    AIAnalysis = 100_000_000,  // Full scope resolution (skills, knowledge, tools)
-    Output     = 100_000_001,  // No scopes — assembles previous outputs
-    Control    = 100_000_002,  // No scopes — flow control
-    Workflow   = 100_000_003   // No scopes — Dataverse/email actions
-}
-```
-
-**ActionType** (15 fine-grained executor dispatch values):
-
-```csharp
-public enum ActionType
-{
-    // AI nodes (backend-flexible)
-    AiAnalysis = 0, AiCompletion = 1, AiEmbedding = 2,
-    // Processing nodes
-    RuleEngine = 10, Calculation = 11, DataTransform = 12,
-    // Workflow nodes (always Spaarke code)
-    CreateTask = 20, SendEmail = 21, UpdateRecord = 22,
-    CallWebhook = 23, SendTeamsMessage = 24,
-    // Control nodes (always Spaarke code)
-    Condition = 30, Parallel = 31, Wait = 32,
-    // Output nodes
-    DeliverOutput = 40,
-    DeliverToIndex = 41     // Queue document for RAG semantic indexing
-}
-```
-
-**Mapping flow** (computed during canvas-to-Dataverse sync):
-
-```
-Canvas Type "sendEmail"
-  → NodeType.Workflow (100000003)     ← written to sprk_nodetype
-  → ActionType.SendEmail (21)         ← written to __actionType in sprk_configjson
-```
-
-At execution time: NodeType determines scope resolution strategy, ActionType determines which `INodeExecutor` runs.
-
-#### Node Data Structure
-
-```typescript
-// src/client/code-pages/PlaybookBuilder/src/types/playbook.ts
-interface PlaybookNodeData {
-  label: string;
-  type: PlaybookNodeType;
-  actionId?: string;             // Linked action (system prompt)
-  outputVariable?: string;       // Variable name for output reference
-  isActive?: boolean;            // Active/disabled toggle
-  skillIds?: string[];           // Linked skills (N:N)
-  knowledgeIds?: string[];       // Linked knowledge (N:N)
-  toolIds?: string[];            // Linked tools (N:N)
-  modelDeploymentId?: string;    // AI model selection
-  timeoutSeconds?: number;       // 30-3600s
-  retryCount?: number;           // 0-5
-  conditionJson?: string;        // Condition expression (condition nodes)
-  // Type-specific config (stored in sprk_configjson):
-  deliveryType?: string;         // Deliver Output: "markdown" | "html" | "text" | "json"
-  template?: string;             // Deliver Output: Handlebars template
-  emailTo?: string[];            // Send Email: recipients
-  emailSubject?: string;         // Send Email: subject
-  taskSubject?: string;          // Create Task: task subject
-  systemPrompt?: string;         // AI Completion: custom system prompt
-  userPromptTemplate?: string;   // AI Completion: user prompt with {{variables}}
-  waitType?: string;             // Wait: "duration" | "until" | "condition"
-}
-```
-
-#### Canvas JSON Format
-
-Stored in `sprk_analysisplaybook.sprk_canvaslayoutjson`:
-
-```json
-{
-  "nodes": [
-    {
-      "id": "node_1736956789_abc",
-      "type": "aiAnalysis",
-      "position": { "x": 250, "y": 100 },
-      "data": {
-        "label": "Extract Entities",
-        "type": "aiAnalysis",
-        "actionId": "ACT-001",
-        "skillIds": ["SKL-001", "SKL-008"],
-        "knowledgeIds": ["KNW-001"],
-        "toolId": "TL-001",
-        "outputVariable": "entities",
-        "modelDeploymentId": "gpt-4o-mini"
-      }
-    }
-  ],
-  "edges": [
-    {
-      "id": "reactflow__edge-node_1-node_2",
-      "source": "node_1",
-      "target": "node_2",
-      "type": "smoothstep",
-      "animated": true
-    }
-  ],
-  "version": 1
-}
-```
-
-#### Playbooks as "Frontend"
-
-Playbooks define **what** to do. The execution backend is pluggable:
-
-```
-Playbook (Spaarke Canvas)
-├── AI Nodes → Backend-flexible:
-│   ├── Option A: In-Process (current) — PlaybookOrchestrationService
-│   ├── Option B: Agent Framework Workflow (future) — IChatClient/AIAgent
-│   └── Option C: AI Foundry Agent Service (future) — Published agents
-└── Workflow Nodes → Always Spaarke code:
-    ├── CreateTask → Dataverse task creation
-    ├── SendEmail → Email delivery
-    ├── UpdateRecord → Dataverse PATCH
-    ├── Condition → Branch evaluation
-    └── DeliverOutput → Output assembly
-```
-
-A single playbook can mix backends per node. This is not an either/or decision.
-
-#### Playbook Catalog (PB-001 through PB-010)
-
-| ID | Name | Document Types | Complexity | Nodes |
-|----|------|----------------|-----------|-------|
-| PB-001 | Quick Document Review | ANY | Low | Classify → Extract → Summarize → Deliver |
-| PB-002 | Full Contract Analysis | CONTRACT, AMENDMENT | High | Extract → (Clauses ‖ Risks) → Compare → Deliver |
-| PB-003 | NDA Review | NDA | Medium | Extract → Scope → Risks → Deliver |
-| PB-004 | Lease Review | LEASE | High | Extract → (Clauses ‖ Dates) → Risks → Deliver |
-| PB-005 | Employment Contract | EMPLOYMENT | Medium | Summarize → Extract → Clauses → Risks |
-| PB-006 | Invoice Validation | INVOICE | Low | Extract → Classify |
-| PB-007 | SLA Analysis | SLA, CONTRACT | Medium | Summarize → Extract → Clauses |
-| PB-008 | Due Diligence Review | ANY | Medium | Summarize → Classify → Extract → Risks |
-| PB-009 | Compliance Review | POLICY, CONTRACT | Medium | Summarize → Extract → Clauses → Risks |
-| PB-010 | Risk-Focused Scan | CONTRACT, NDA, LEASE | Low | Extract → Risks |
-
-#### Playbook-Scope Matrix
-
-| Playbook | Skills | Actions | Knowledge | Tools |
-|----------|--------|---------|-----------|-------|
-| PB-001 | SKL-008 | ACT-001,003,004 | KNW-005 | TL-001,003,004 |
-| PB-002 | SKL-001,009,010 | ACT-001-006 | KNW-001,003,004 | TL-001-006 |
-| PB-003 | SKL-003,009 | ACT-001,002,004,005 | KNW-001,003,006 | TL-001,002,004,005 |
-| PB-004 | SKL-004,009 | ACT-001,002,004,005,007 | KNW-003,004,007 | TL-001,002,004,005,007 |
-| PB-005 | SKL-005,007 | ACT-001,002,004,005 | KNW-002,008 | TL-001,002,004,005 |
-| PB-006 | SKL-002 | ACT-001,003,008 | KNW-005 | TL-001,003,008 |
-| PB-007 | SKL-006,007 | ACT-001,002,004 | KNW-002,009 | TL-001,002,004 |
-| PB-008 | SKL-008,009 | ACT-001,003,004,005 | KNW-004,010 | TL-001,003,004,005 |
-| PB-009 | SKL-007,009 | ACT-002,004,005 | KNW-002,003 | TL-002,004,005 |
-| PB-010 | SKL-009 | ACT-001,005 | KNW-004 | TL-001,005 |
-
-#### Document Type to Playbook Mapping
-
-| Document Type | Primary Playbook | Alternatives |
-|---------------|------------------|-------------|
-| CONTRACT | PB-002 Full Contract | PB-001, PB-010 |
-| NDA | PB-003 NDA Review | PB-001, PB-010 |
-| LEASE | PB-004 Lease Review | PB-001, PB-002 |
-| EMPLOYMENT | PB-005 Employment | PB-001 |
-| SLA | PB-007 SLA Analysis | PB-002 |
-| INVOICE | PB-006 Invoice | PB-001 |
-| AMENDMENT | PB-002 Full Contract | PB-001 |
-| POLICY | PB-009 Compliance | PB-001 |
-| Unknown | PB-001 Quick Review | PB-010 |
+| NodeType (coarse) | ActionType (fine) | Examples |
+|-------------------|-------------------|---------|
+| AIAnalysis (100000000) | AiAnalysis (0), AiCompletion (1) | LLM calls with full scope resolution |
+| Output (100000001) | DeliverOutput (40), DeliverToIndex (41) | Output assembly, RAG indexing |
+| Control (100000002) | Condition (30), Wait (32) | Flow control |
+| Workflow (100000003) | CreateTask (20), SendEmail (21), UpdateRecord (22) | Dataverse/email actions |
 
 ### SprkChat (Conversational)
 
@@ -662,6 +473,8 @@ Scopes can be invoked directly via API without a playbook:
 ---
 
 ## Tier 3: Execution Runtime
+
+> **Dedicated playbook document**: [playbook-architecture.md](playbook-architecture.md) covers the playbook system in depth — node type system, execution engine, canvas data model, all node executors, builder UI, and canvas-to-Dataverse sync. The sections below retain the full runtime reference for this document's completeness.
 
 ### Playbook Builder (Code Page — Current)
 
@@ -1337,10 +1150,13 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 
 | Document | Location | Audience |
 |----------|----------|----------|
+| **Playbook Architecture** | [`docs/architecture/playbook-architecture.md`](playbook-architecture.md) | Engineers (playbook internals, node executors, execution engine) |
+| **AI Implementation Reference** | [`docs/architecture/ai-implementation-reference.md`](ai-implementation-reference.md) | Engineers (working code examples, configuration patterns) |
 | AI Strategy & Roadmap | `docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md` | Executive/business |
-| AI Implementation Guide | `docs/guides/SPAARKE-AI-ARCHITECTURE.md` | Engineers (detailed how-to) |
-| How to Create Playbooks | `docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md` | Admins, Power Users |
-| SK Chat Design | `projects/ai-document-analysis-enhancements/sk-analysis-chat-design.md` | Engineers (SprkChat design) |
+| Playbook Design Guide | `docs/guides/PLAYBOOK-DESIGN-GUIDE.md` | Architects (playbook design workflow) |
+| Playbook Builder Guide | `docs/guides/PLAYBOOK-BUILDER-GUIDE.md` | End users (builder UI) |
+| Playbook Scope Configuration | `docs/guides/PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md` | Admins, Power Users |
+| Playbook JPS Prompt Schema | `docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md` | Engineers (JPS pipeline) |
 | AI Deployment Guide | `docs/guides/AI-DEPLOYMENT-GUIDE.md` | DevOps |
 | Azure AI Resources | `docs/architecture/auth-AI-azure-resources.md` | Infrastructure |
 | ADR-013 | `.claude/adr/ADR-013.md` | Architecture constraints |

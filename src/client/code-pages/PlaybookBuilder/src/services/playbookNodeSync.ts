@@ -377,7 +377,7 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
 
         case "deliverToIndex":
             // Deliver to Index: index name, source, parent entity, metadata
-            if (data.indexName) config.indexName = data.indexName;
+            config.indexName = data.indexName ?? "";
             config.source = data.indexSource ?? "document";
             if (data.indexContentVariable) config.contentVariable = data.indexContentVariable;
             if (data.indexParentEntityType || data.indexParentEntityId) {

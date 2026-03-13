@@ -543,7 +543,7 @@ src/client/shared/Spaarke.UI.Components/  Shared UI library
 - [sdap-workspace-integration-patterns.md](sdap-workspace-integration-patterns.md) — Workspace integration
 - [sdap-troubleshooting.md](sdap-troubleshooting.md) — Common issues and resolutions
 - [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](../guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md) — Email automation architecture
-- [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md) — AI architecture deep dive
+- [ai-implementation-reference.md](ai-implementation-reference.md) — AI architecture deep dive
 - [BFF API Architecture Assessment](../../projects/ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md) — Full assessment with recommendations
 
 ---

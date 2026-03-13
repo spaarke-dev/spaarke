@@ -47,9 +47,9 @@ Ask the user:
 ```
 LOAD knowledge files:
   - docs/ai-knowledge/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
-  - docs/guides/SPAARKE-AI-ARCHITECTURE.md (pipeline architecture, Section 19)
+  - docs/architecture/playbook-architecture.md (playbook internals, node executors, execution engine)
   - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference)
-  - docs/guides/JPS-COMPREHENSIVE-GUIDE.md (patterns, deployment)
+  - docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md (patterns, deployment)
 
 LOAD example JPS files for pattern matching:
   - projects/ai-json-prompt-schema-system/notes/jps-conversions/ (all available)

@@ -545,7 +545,7 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 ## References
 
 - [SPAARKE-AI-STRATEGY.md](../architecture/SPAARKE-AI-STRATEGY.md) - Strategic AI direction and Microsoft Foundry alignment
-- [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md) - Detailed implementation guide
+- [ai-implementation-reference.md](../architecture/ai-implementation-reference.md) - Detailed implementation guide
 - [ADR-001: Minimal API and Workers](ADR-001-minimal-api-and-workers.md)
 - [ADR-004: Async Job Contract](ADR-004-async-job-contract.md)
 - [ADR-008: Authorization Endpoint Filters](ADR-008-authorization-endpoint-filters.md)

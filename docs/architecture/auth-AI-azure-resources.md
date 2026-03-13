@@ -357,7 +357,7 @@ Document Upload → AI Analysis → ExtractedEntities model → Dataverse fields
                                       └─ DocumentType → sprk_extractdocumenttype + sprk_DocumentType (choice)
 ```
 
-See [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md#5-entity-extraction--dataverse-integration) for extensibility details.
+See [ai-implementation-reference.md](ai-implementation-reference.md#5-entity-extraction--dataverse-integration) for extensibility details.
 
 ---
 

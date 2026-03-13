@@ -1,8 +1,8 @@
-# AI Playbook Builder - User Guide
+# Playbook Builder Guide
 
-> **Version**: 1.0.0
->
-> **Last Updated**: January 2026
+> **Version**: 1.1.0
+> **Last Updated**: March 2026
+> **Related**: [playbook-architecture.md](../architecture/playbook-architecture.md) (technical internals), [PLAYBOOK-DESIGN-GUIDE.md](PLAYBOOK-DESIGN-GUIDE.md) (design workflow)
 
 ## Overview
 
@@ -50,6 +50,22 @@ The AI will:
 | "Add a clause extraction step" | Adds a clause extraction node |
 | "Add risk detection" | Adds a risk analysis node |
 | "Include a summary node" | Adds a summarization node |
+| "Add a deliver to index node" | Adds a DeliverToIndex node for search indexing |
+
+### Available Node Types
+
+| Node Type | Purpose |
+|-----------|---------|
+| **AI Analysis** | LLM-powered analysis with full scope resolution |
+| **AI Completion** | Simple LLM completion without tool use |
+| **Condition** | Branching logic (true/false paths) |
+| **Create Task** | Creates a Dataverse task record |
+| **Send Email** | Sends email via Dataverse |
+| **Wait** | Pauses execution for a duration |
+| **Deliver Output** | Assembles results into structured output, writes to record fields |
+| **Deliver To Index** | Indexes results into Azure AI Search for semantic retrieval |
+
+**Deliver To Index** is useful when playbook output should be searchable. Configure `indexName` (default: "knowledge") and `indexSource` ("document" or "field") in the node properties panel.
 
 ### Connecting Nodes
 

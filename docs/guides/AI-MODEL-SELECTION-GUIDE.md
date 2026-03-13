@@ -7,7 +7,7 @@
 > **Related Files**:
 > - `src/server/api/Sprk.Bff.Api/Services/Ai/ModelSelector.cs` — ModelSelector service and OperationType enum
 > - `projects/ai-spaarke-platform-enhancments-r3/notes/azure-openai-model-inventory.md` — Deployed model inventory
-> - `docs/guides/SPAARKE-AI-ARCHITECTURE.md` — Overall AI architecture
+> - `docs/architecture/ai-implementation-reference.md` — Overall AI architecture
 
 ---
 
@@ -236,7 +236,7 @@ If o1-mini is unavailable in westus2, use this configuration workaround instead:
 
 ## Related Documentation
 
-- [SPAARKE AI Architecture](./SPAARKE-AI-ARCHITECTURE.md) — Overall AI system design and tool framework
+- [AI Implementation Reference](../architecture/ai-implementation-reference.md) — Overall AI system design and tool framework
 - [AI Deployment Guide](./AI-DEPLOYMENT-GUIDE.md) — Deploying Azure OpenAI models and configuring the BFF API
-- [HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md](./HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md) — Creating Action, Skill, and Knowledge scopes for playbooks
+- [Playbook Scope Configuration Guide](./PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md) — Creating Action, Skill, and Knowledge scopes for playbooks
 - [RAG Architecture](./RAG-ARCHITECTURE.md) — Embedding model usage and retrieval-augmented generation

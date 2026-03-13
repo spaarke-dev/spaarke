@@ -245,7 +245,7 @@ az deployment sub create \
 
 ## Related Documentation
 
-- [SPAARKE-AI-ARCHITECTURE.md](SPAARKE-AI-ARCHITECTURE.md) - AI feature architecture
+- [ai-implementation-reference.md](../architecture/ai-implementation-reference.md) - AI feature architecture
 - [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) - RAG-specific troubleshooting
 - [AI-DEPLOYMENT-GUIDE.md](AI-DEPLOYMENT-GUIDE.md) - Deployment procedures
 

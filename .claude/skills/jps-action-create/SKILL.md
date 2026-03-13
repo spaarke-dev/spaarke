@@ -44,7 +44,7 @@ Ask the user (use AskUserQuestion or conversation):
 ```
 LOAD knowledge files:
   - docs/guides/JPS-AUTHORING-GUIDE.md (schema reference)
-  - docs/guides/JPS-COMPREHENSIVE-GUIDE.md (architecture + patterns)
+  - docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md (architecture + patterns)
 
 LOAD 2-3 example JPS files as patterns:
   - projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json (simple extraction)
