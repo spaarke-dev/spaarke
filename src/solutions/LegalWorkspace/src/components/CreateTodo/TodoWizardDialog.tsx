@@ -28,6 +28,9 @@ import {
   searchUsersAsLookup,
 } from '../CreateMatter/matterService';
 
+import { EntityCreationService } from '../../services/EntityCreationService';
+import { getBffBaseUrl } from '../../config/bffConfig';
+import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import type { IWebApi } from '../../types/xrm';
 
@@ -118,7 +121,23 @@ const TodoWizardDialog: React.FC<ITodoWizardDialogProps> = ({ open, onClose, web
           throw new Error(result.errorMessage ?? 'Failed to create to do');
         }
 
+        const todoId = result.todoId!;
         const todoName = result.todoName!;
+        const warnings: string[] = [];
+
+        // Send email (if selected)
+        if (_context.selectedActions.includes('send-email') && _context.followOn.emailTo.trim()) {
+          const entityService = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
+          const emailResult = await entityService.sendEmail({
+            to: _context.followOn.emailTo,
+            subject: _context.followOn.emailSubject,
+            body: _context.followOn.emailBody,
+            associations: [{ entityType: 'sprk_event', entityId: todoId, entityName: todoName }],
+          });
+          if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        }
+
+        const hasWarnings = warnings.length > 0;
 
         return {
           icon: (
@@ -127,13 +146,16 @@ const TodoWizardDialog: React.FC<ITodoWizardDialogProps> = ({ open, onClose, web
               style={{ color: tokens.colorPaletteGreenForeground1 }}
             />
           ),
-          title: 'To Do created!',
+          title: hasWarnings ? 'To Do created with warnings' : 'To Do created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
               <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
                 &ldquo;{todoName}&rdquo;
               </span>{' '}
-              has been added to your to do list.
+              has been added to your to do list
+              {hasWarnings
+                ? ', though some operations could not complete. See details below.'
+                : '.'}
             </Text>
           ),
           actions: (
@@ -141,7 +163,7 @@ const TodoWizardDialog: React.FC<ITodoWizardDialogProps> = ({ open, onClose, web
               Done
             </Button>
           ),
-          warnings: [],
+          warnings,
         };
       },
     }),

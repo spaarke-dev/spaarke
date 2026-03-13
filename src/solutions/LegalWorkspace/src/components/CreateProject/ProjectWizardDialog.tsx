@@ -202,6 +202,18 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
           warnings.push('SPE container not configured — files were not uploaded to SharePoint Embedded.');
         }
 
+        // 3. Send email (if selected)
+        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
+          const emailService = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
+          const emailResult = await emailService.sendEmail({
+            to: context.followOn.emailTo,
+            subject: context.followOn.emailSubject,
+            body: context.followOn.emailBody,
+            associations: [{ entityType: 'sprk_project', entityId: projectId, entityName: projectName }],
+          });
+          if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        }
+
         const hasWarnings = warnings.length > 0;
 
         const viewProject = () => {

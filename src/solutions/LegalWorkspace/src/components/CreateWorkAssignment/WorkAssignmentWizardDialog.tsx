@@ -20,7 +20,7 @@
  */
 import * as React from 'react';
 import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
-import { CheckmarkCircleRegular } from '@fluentui/react-icons';
+import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell';
 import type {
@@ -55,6 +55,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type { IWebApi } from '../../types/xrm';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
+import { navigateToEntity } from '../../utils/navigation';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -387,6 +388,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
               onValidChange={handleEnterInfoValid}
               onFormValues={handleEnterInfoValues}
               initialValues={prefillRef.current}
+              uploadedFiles={uploadedFilesRef.current}
+              hasInitialValues={!!prefillRef.current}
             />
           );
         },
@@ -424,9 +427,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     if (result.status === 'error') {
       return {
-        icon: null,
+        icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteRedForeground1 }} />,
         title: 'Error',
-        body: result.errorMessage ?? 'An unknown error occurred.',
+        body: (
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            {result.errorMessage ?? 'An unknown error occurred.'}
+          </Text>
+        ),
         actions: (
           <Button appearance="primary" onClick={onClose}>
             Close
@@ -465,20 +472,29 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       }
     }
 
+    const hasWarnings = warnings.length > 0;
+
+    const viewRecord = () => {
+      navigateToEntity({ action: 'openRecord', entityName: 'sprk_workassignment', entityId: waId });
+      onClose();
+    };
+
     return {
-      icon: <CheckmarkCircleRegular style={{ fontSize: 48, color: tokens.colorPaletteGreenForeground1 }} />,
-      title: 'Work Assignment Created',
+      icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
+      title: hasWarnings ? 'Work assignment created with warnings' : 'Work assignment created!',
       body: (
-        <Text>
-          <strong>{form.name}</strong> has been created successfully.
+        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+          <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{form.name}&rdquo;</span>{' '}
+          has been created{hasWarnings ? ', though some follow-on actions could not complete. See details below.' : ' and is ready to use.'}
         </Text>
       ),
       actions: (
-        <Button appearance="primary" onClick={onClose}>
-          Done
-        </Button>
+        <>
+          <Button appearance="primary" onClick={viewRecord} aria-label={`View record: ${form.name}`}>View Record</Button>
+          <Button appearance="secondary" onClick={onClose}>Close</Button>
+        </>
       ),
-      warnings: warnings.length > 0 ? warnings : undefined,
+      warnings: hasWarnings ? warnings : undefined,
     };
   }, [onClose]);
 
