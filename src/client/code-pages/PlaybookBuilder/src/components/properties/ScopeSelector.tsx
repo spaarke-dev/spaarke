@@ -47,12 +47,13 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         ...shorthands.gap("4px"),
+        flex: 1,
     },
     checkboxList: {
         display: "flex",
         flexDirection: "column",
         ...shorthands.gap("2px"),
-        maxHeight: "200px",
+        flex: 1,
         overflowY: "auto",
     },
     empty: {

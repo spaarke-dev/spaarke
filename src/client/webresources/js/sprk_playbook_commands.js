@@ -150,6 +150,12 @@ function openPlaybookBuilderDialog(params, formContext) {
             dataParams += "&isNew=true";
         }
 
+        // Pass theme from Xrm context so the Code Page matches the app theme
+        var detectedTheme = detectXrmTheme();
+        if (detectedTheme) {
+            dataParams += "&theme=" + detectedTheme;
+        }
+
         // Navigate to Code Page web resource (not Custom Page)
         var pageInput = {
             pageType: "webresource",
@@ -210,6 +216,47 @@ function openPlaybookBuilderDialog(params, formContext) {
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/**
+ * Detect the current Xrm app theme (light or dark).
+ * Returns "light" or "dark", or null if detection fails.
+ *
+ * @returns {string|null} Theme name
+ */
+function detectXrmTheme() {
+    try {
+        var ctx = Xrm.Utility.getGlobalContext();
+        if (ctx && typeof ctx.getCurrentTheme === "function") {
+            var themeInfo = ctx.getCurrentTheme();
+            if (themeInfo && themeInfo.backgroundcolor) {
+                // Parse RGB values and compute luminance
+                var match = themeInfo.backgroundcolor.match(/\d+/g);
+                if (match && match.length >= 3) {
+                    var r = parseInt(match[0], 10);
+                    var g = parseInt(match[1], 10);
+                    var b = parseInt(match[2], 10);
+                    var luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                    return luminance < 0.5 ? "dark" : "light";
+                }
+                // Handle hex colors
+                if (themeInfo.backgroundcolor.charAt(0) === "#") {
+                    var hex = themeInfo.backgroundcolor.substring(1);
+                    if (hex.length >= 6) {
+                        var rh = parseInt(hex.substring(0, 2), 16);
+                        var gh = parseInt(hex.substring(2, 4), 16);
+                        var bh = parseInt(hex.substring(4, 6), 16);
+                        var lum = (0.299 * rh + 0.587 * gh + 0.114 * bh) / 255;
+                        return lum < 0.5 ? "dark" : "light";
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.log(LOG_PREFIX, "Could not detect Xrm theme:", e.message);
+    }
+    // Default to light when detection fails
+    return "light";
+}
 
 /**
  * Get playbook display name from form

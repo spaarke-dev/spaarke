@@ -87,13 +87,13 @@ const useStyles = makeStyles({
         textTransform: "capitalize" as const,
     },
     accordionPanel: {
-        ...shorthands.padding("8px", "12px", "12px"),
+        ...shorthands.padding("12px", "16px", "16px"),
     },
     fieldGroup: {
         display: "flex",
         flexDirection: "column",
-        ...shorthands.gap("4px"),
-        marginBottom: "8px",
+        ...shorthands.gap("6px"),
+        marginBottom: "12px",
     },
     deleteSection: {
         ...shorthands.padding("12px"),
@@ -166,14 +166,8 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
         [node.id, updateNodeData],
     );
 
-    // Default open accordion items
-    const defaultOpenItems = useMemo(() => {
-        const items = ["basic"];
-        if (isAiNode) items.push("action", "aiModel", "promptConfig");
-        if (hasTypeForm) items.push("typeConfig");
-        if (isConditionNode) items.push("condition");
-        return items;
-    }, [hasTypeForm, isAiNode, isConditionNode]);
+    // Default open accordion items — only "basic" tab open initially
+    const defaultOpenItems = useMemo(() => ["basic"], []);
 
     return (
         <div className={styles.root}>
@@ -205,7 +199,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                             <Label size="small" htmlFor={`${node.id}-name`}>Name</Label>
                             <Input
                                 id={`${node.id}-name`}
-                                size="small"
+                                size="medium"
                                 value={node.data.label}
                                 onChange={(_, data) => handleUpdate("label", data.value)}
                             />
@@ -215,7 +209,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                                 <Label size="small" htmlFor={`${node.id}-outputVar`}>Output Variable</Label>
                                 <Input
                                     id={`${node.id}-outputVar`}
-                                    size="small"
+                                    size="medium"
                                     value={node.data.outputVariable ?? ""}
                                     onChange={(_, data) => handleUpdate("outputVariable", data.value)}
                                     placeholder={`output_${nodeType}`}
@@ -410,7 +404,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                             <div className={styles.fieldGroup}>
                                 <Label size="small">Timeout (seconds)</Label>
                                 <SpinButton
-                                    size="small"
+                                    size="medium"
                                     min={0}
                                     max={3600}
                                     step={30}
@@ -423,7 +417,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                             <div className={styles.fieldGroup}>
                                 <Label size="small">Retry Count</Label>
                                 <SpinButton
-                                    size="small"
+                                    size="medium"
                                     min={0}
                                     max={5}
                                     step={1}

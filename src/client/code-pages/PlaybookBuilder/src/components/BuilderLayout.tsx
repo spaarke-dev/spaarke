@@ -5,7 +5,7 @@
  *   - Top toolbar: save, undo, redo, add node, AI assistant toggle, execution controls
  *   - Left sidebar: Node palette (drag-and-drop node types)
  *   - Center: ReactFlow canvas
- *   - Right sidebar: PropertiesPanel (when node selected)
+ *   - Overlay: NodePropertiesDialog (landscape modal, when node selected)
  *   - Floating: AiAssistantModal (toggleable)
  *   - Overlay: ExecutionOverlay (during execution)
  */
@@ -28,8 +28,6 @@ import {
     Bot20Regular,
     Play20Regular,
     PanelLeft20Regular,
-    FullScreenMaximize20Regular,
-    FullScreenMinimize20Regular,
 } from "@fluentui/react-icons";
 import { ReactFlowProvider } from "@xyflow/react";
 
@@ -239,20 +237,6 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Fullscreen
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    useEffect(() => {
-        const onChange = () => setIsFullscreen(!!document.fullscreenElement);
-        document.addEventListener("fullscreenchange", onChange);
-        return () => document.removeEventListener("fullscreenchange", onChange);
-    }, []);
-    const toggleFullscreen = useCallback(() => {
-        if (document.fullscreenElement) {
-            document.exitFullscreen();
-        } else {
-            document.documentElement.requestFullscreen();
-        }
-    }, []);
     const [saveStatus, setSaveStatus] = useState<"saved" | "error" | null>(null);
     const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -411,15 +395,6 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
                             size="small"
                             icon={<Bot20Regular />}
                             onClick={() => (isAiModalOpen ? closeAiModal() : openAiModal())}
-                        />
-                    </Tooltip>
-                    <Divider vertical style={{ height: "20px" }} />
-                    <Tooltip content={isFullscreen ? "Exit fullscreen" : "Fullscreen"} relationship="label">
-                        <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={isFullscreen ? <FullScreenMinimize20Regular /> : <FullScreenMaximize20Regular />}
-                            onClick={toggleFullscreen}
                         />
                     </Tooltip>
                 </div>
