@@ -712,6 +712,8 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Deploying changes to `src/server/api/Sprk.Bff.Api/` | Load `bff-deploy` skill — use `scripts/Deploy-BffApi.ps1` |
 | Deploying changes to `src/client/pcf/` | Load `pcf-deploy` skill — build, copy, pack, import |
 | Deploying changes to `src/client/code-pages/` | Load `code-page-deploy` skill — two-step build (webpack + inline HTML) |
+| Deploying changes to `src/solutions/LegalWorkspace/` | Vite build (`npm run build`) then `scripts/Deploy-CorporateWorkspace.ps1` — uploads `sprk_corporateworkspace` web resource |
+| Deploying changes to `src/solutions/EventsPage/` | Use `scripts/Deploy-EventsPage.ps1` — uploads `sprk_eventspage` web resource |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 | Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
 | Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |

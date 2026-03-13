@@ -329,6 +329,9 @@ COMMON SCRIPT MATCHES:
   - API testing → Test-SdapBffApi.ps1
   - Health checks → test-sdap-api-health.js
   - Custom page deploy → Deploy-CustomPage.ps1
+  - Corporate workspace deploy → Deploy-CorporateWorkspace.ps1
+  - Events page deploy → Deploy-EventsPage.ps1
+  - BFF API deploy → Deploy-BffApi.ps1
   - Ribbon export → Export-EntityRibbon.ps1
 
 UPDATE current-task.md:
