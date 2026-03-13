@@ -15,11 +15,11 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 

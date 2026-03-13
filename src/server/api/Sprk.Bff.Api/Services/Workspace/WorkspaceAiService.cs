@@ -182,12 +182,22 @@ public class WorkspaceAiService
 
         var priorityLabel = priority switch
         {
-            0 => "Low", 1 => "Normal", 2 => "High", 3 => "Urgent", _ => "Unknown"
+            0 => "Low",
+            1 => "Normal",
+            2 => "High",
+            3 => "Urgent",
+            _ => "Unknown"
         };
         var statusLabel = statusCode switch
         {
-            1 => "Draft", 2 => "Planned", 3 => "Open", 4 => "On Hold",
-            5 => "Completed", 6 => "Cancelled", 7 => "Deleted", _ => "Unknown"
+            1 => "Draft",
+            2 => "Planned",
+            3 => "Open",
+            4 => "On Hold",
+            5 => "Completed",
+            6 => "Cancelled",
+            7 => "Deleted",
+            _ => "Unknown"
         };
 
         var parts = new List<string>

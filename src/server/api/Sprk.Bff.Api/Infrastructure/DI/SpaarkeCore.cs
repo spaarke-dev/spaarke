@@ -8,9 +8,9 @@ using Spaarke.Core.Auth.Rules;
 using Spaarke.Core.Cache;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Caching;
-using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 

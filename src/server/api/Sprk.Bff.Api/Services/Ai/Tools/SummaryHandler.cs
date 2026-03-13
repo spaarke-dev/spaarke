@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.Tools;

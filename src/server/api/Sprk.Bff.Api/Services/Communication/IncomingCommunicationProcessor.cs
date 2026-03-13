@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
@@ -10,7 +11,6 @@ using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
-using System.Text.Json;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
 namespace Sprk.Bff.Api.Services.Communication;

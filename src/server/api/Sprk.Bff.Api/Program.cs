@@ -1342,106 +1342,106 @@ app.MapHealthChecks("/healthz").AllowAnonymous();
 if (app.Environment.IsDevelopment())
 {
 
-// Dataverse connection test endpoint (debug-only: exposes connection details and error messages)
-app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
+    // Dataverse connection test endpoint (debug-only: exposes connection details and error messages)
+    app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 
-// Dataverse CRUD operations test endpoint (debug-only: performs write operations against Dataverse)
-app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
+    // Dataverse CRUD operations test endpoint (debug-only: performs write operations against Dataverse)
+    app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
-// DEBUG: Test document retrieval by ID (string param, not GUID constraint)
-app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
-{
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
-    try
+    // DEBUG: Test document retrieval by ID (string param, not GUID constraint)
+    app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
     {
-        var doc = await dataverseService.GetDocumentAsync(id);
-        if (doc == null)
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+        try
         {
-            return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
-        }
-        return Results.Ok(new
-        {
-            status = "FOUND",
-            documentId = doc.Id,
-            name = doc.Name,
-            fileName = doc.FileName,
-            isEmailArchive = doc.IsEmailArchive,
-            parentDocumentId = doc.ParentDocumentId,
-            matterId = doc.MatterId,
-            projectId = doc.ProjectId,
-            invoiceId = doc.InvoiceId,
-            emailConversationIndex = doc.EmailConversationIndex
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-        return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Test document retrieval (temporary - remove after debugging)
-app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
-{
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
-    try
-    {
-        var doc = await dataverseService.GetDocumentAsync(id.ToString());
-        if (doc == null)
-        {
-            return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
-        }
-        return Results.Ok(new
-        {
-            status = "FOUND",
-            documentId = doc.Id,
-            name = doc.Name,
-            fileName = doc.FileName,
-            isEmailArchive = doc.IsEmailArchive,
-            parentDocumentId = doc.ParentDocumentId,
-            matterId = doc.MatterId,
-            projectId = doc.ProjectId,
-            invoiceId = doc.InvoiceId,
-            emailConversationIndex = doc.EmailConversationIndex
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-        return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
-app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
-{
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
-    try
-    {
-        var children = await dataverseService.GetDocumentsByParentAsync(parentId);
-        var childList = children.ToList();
-        return Results.Ok(new
-        {
-            status = "OK",
-            parentDocumentId = parentId.ToString(),
-            childCount = childList.Count,
-            children = childList.Select(c => new
+            var doc = await dataverseService.GetDocumentAsync(id);
+            if (doc == null)
             {
-                documentId = c.Id,
-                name = c.Name,
-                fileName = c.FileName,
-                isEmailArchive = c.IsEmailArchive,
-                parentDocumentId = c.ParentDocumentId,
-                createdOn = c.CreatedOn
-            })
-        });
-    }
-    catch (Exception ex)
+                return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
+            }
+            return Results.Ok(new
+            {
+                status = "FOUND",
+                documentId = doc.Id,
+                name = doc.Name,
+                fileName = doc.FileName,
+                isEmailArchive = doc.IsEmailArchive,
+                parentDocumentId = doc.ParentDocumentId,
+                matterId = doc.MatterId,
+                projectId = doc.ProjectId,
+                invoiceId = doc.InvoiceId,
+                emailConversationIndex = doc.EmailConversationIndex
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+            return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Test document retrieval (temporary - remove after debugging)
+    app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
     {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
-        return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+        try
+        {
+            var doc = await dataverseService.GetDocumentAsync(id.ToString());
+            if (doc == null)
+            {
+                return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
+            }
+            return Results.Ok(new
+            {
+                status = "FOUND",
+                documentId = doc.Id,
+                name = doc.Name,
+                fileName = doc.FileName,
+                isEmailArchive = doc.IsEmailArchive,
+                parentDocumentId = doc.ParentDocumentId,
+                matterId = doc.MatterId,
+                projectId = doc.ProjectId,
+                invoiceId = doc.InvoiceId,
+                emailConversationIndex = doc.EmailConversationIndex
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+            return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
+    app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
+    {
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
+        try
+        {
+            var children = await dataverseService.GetDocumentsByParentAsync(parentId);
+            var childList = children.ToList();
+            return Results.Ok(new
+            {
+                status = "OK",
+                parentDocumentId = parentId.ToString(),
+                childCount = childList.Count,
+                children = childList.Select(c => new
+                {
+                    documentId = c.Id,
+                    name = c.Name,
+                    fileName = c.FileName,
+                    isEmailArchive = c.IsEmailArchive,
+                    parentDocumentId = c.ParentDocumentId,
+                    createdOn = c.CreatedOn
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
+            return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
 
 } // end Development-only debug endpoints (healthz/dataverse, healthz/dataverse/crud, healthz/dataverse/doc, debug/document, debug/children)
 
@@ -1472,265 +1472,265 @@ app.MapGet("/status", () =>
 if (app.Environment.IsDevelopment())
 {
 
-// DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
-app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
+    // DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
+    app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
     {
-        await using var receiver = serviceBusClient.CreateReceiver(
-            "office-upload-finalization",
-            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver(
+                "office-upload-finalization",
+                new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+                {
+                    SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                    ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                });
+
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
             {
-                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
-                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                sequenceNumber = m.SequenceNumber,
+                deadLetterReason = m.DeadLetterReason,
+                deadLetterErrorDescription = m.DeadLetterErrorDescription,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office DLQ");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
+    app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office-indexing queue");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at office-profile queue
+    app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver("office-profile");
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office-profile queue");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at sdap-jobs dead letter queue (to diagnose "No Handler" errors)
+    app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            var queueName = app.Configuration["ServiceBus:QueueName"] ?? "sdap-jobs";
+            await using var receiver = serviceBusClient.CreateReceiver(
+                queueName,
+                new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+                {
+                    SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                    ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                });
+
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                deadLetterReason = m.DeadLetterReason,
+                deadLetterErrorDescription = m.DeadLetterErrorDescription,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                subject = m.Subject,
+                applicationProperties = m.ApplicationProperties.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? "null"),
+                bodyPreview = m.Body.ToString().Length > 800 ? m.Body.ToString()[..800] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = $"{queueName}/$DeadLetterQueue", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking sdap-jobs DLQ");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: List all registered job handlers (to diagnose "No Handler" errors)
+    app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger) =>
+    {
+        try
+        {
+            using var scope = sp.CreateScope();
+            var handlers = scope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
+
+            var handlerInfo = handlers.Select(h => new
+            {
+                jobType = h.JobType,
+                handlerType = h.GetType().FullName
+            }).ToList();
+
+            // Also try to resolve AppOnlyDocumentAnalysisJobHandler directly to see if it fails
+            string? directResolutionError = null;
+            try
+            {
+                var directHandler = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+                if (directHandler == null)
+                {
+                    directResolutionError = "Direct resolution returned null (not registered as concrete type)";
+                }
+            }
+            catch (Exception ex)
+            {
+                directResolutionError = $"Direct resolution failed: {ex.Message}";
+                if (ex.InnerException != null)
+                {
+                    directResolutionError += $" → Inner: {ex.InnerException.Message}";
+                }
+            }
+
+            // Try to resolve IAppOnlyAnalysisService
+            string? analysisServiceError = null;
+            try
+            {
+                var analysisService = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
+                if (analysisService == null)
+                {
+                    analysisServiceError = "IAppOnlyAnalysisService returned null";
+                }
+            }
+            catch (Exception ex)
+            {
+                analysisServiceError = $"IAppOnlyAnalysisService failed: {ex.Message}";
+                if (ex.InnerException != null)
+                {
+                    analysisServiceError += $" → Inner: {ex.InnerException.Message}";
+                }
+            }
+
+            return Results.Ok(new
+            {
+                totalHandlers = handlers.Count,
+                handlers = handlerInfo,
+                hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
+                directHandlerResolution = directResolutionError ?? "OK",
+                analysisServiceResolution = analysisServiceError ?? "OK"
             });
-
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
+        }
+        catch (Exception ex)
         {
-            sequenceNumber = m.SequenceNumber,
-            deadLetterReason = m.DeadLetterReason,
-            deadLetterErrorDescription = m.DeadLetterErrorDescription,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error peeking office DLQ");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
-app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error peeking office-indexing queue");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at office-profile queue
-app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        await using var receiver = serviceBusClient.CreateReceiver("office-profile");
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error peeking office-profile queue");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at sdap-jobs dead letter queue (to diagnose "No Handler" errors)
-app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        var queueName = app.Configuration["ServiceBus:QueueName"] ?? "sdap-jobs";
-        await using var receiver = serviceBusClient.CreateReceiver(
-            queueName,
-            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+            logger.LogError(ex, "Error listing job handlers");
+            return Results.Ok(new
             {
-                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
-                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                error = ex.Message,
+                innerError = ex.InnerException?.Message,
+                innerInnerError = ex.InnerException?.InnerException?.Message
             });
+        }
+    }).AllowAnonymous();
 
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            deadLetterReason = m.DeadLetterReason,
-            deadLetterErrorDescription = m.DeadLetterErrorDescription,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            subject = m.Subject,
-            applicationProperties = m.ApplicationProperties.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? "null"),
-            bodyPreview = m.Body.ToString().Length > 800 ? m.Body.ToString()[..800] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = $"{queueName}/$DeadLetterQueue", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
+    // DEBUG: Diagnose communication BackgroundService resolution and manually trigger subscription management
+    app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<Program> logger) =>
     {
-        logger.LogError(ex, "Error peeking sdap-jobs DLQ");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
+        var results = new Dictionary<string, string>();
 
-// DEBUG: List all registered job handlers (to diagnose "No Handler" errors)
-app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger) =>
-{
-    try
-    {
-        using var scope = sp.CreateScope();
-        var handlers = scope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
-
-        var handlerInfo = handlers.Select(h => new
-        {
-            jobType = h.JobType,
-            handlerType = h.GetType().FullName
-        }).ToList();
-
-        // Also try to resolve AppOnlyDocumentAnalysisJobHandler directly to see if it fails
-        string? directResolutionError = null;
+        // Check if key services resolve
         try
         {
-            var directHandler = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
-            if (directHandler == null)
+            var accountService = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
+            results["CommunicationAccountService"] = "OK";
+
+            // Try to query receive-enabled accounts (the first thing GraphSubscriptionManager does)
+            try
             {
-                directResolutionError = "Direct resolution returned null (not registered as concrete type)";
+                var accounts = await accountService.QueryReceiveEnabledAccountsAsync();
+                results["ReceiveEnabledAccounts"] = $"{accounts.Length} found";
+                foreach (var account in accounts)
+                {
+                    results[$"Account:{account.EmailAddress}"] =
+                        $"SubId={account.SubscriptionId ?? "none"}, Expiry={account.SubscriptionExpiry}, AutoCreate={account.AutoCreateRecords}";
+                }
+            }
+            catch (Exception ex)
+            {
+                results["ReceiveEnabledAccounts"] = $"QUERY FAILED: {ex.Message}";
             }
         }
         catch (Exception ex)
         {
-            directResolutionError = $"Direct resolution failed: {ex.Message}";
-            if (ex.InnerException != null)
-            {
-                directResolutionError += $" → Inner: {ex.InnerException.Message}";
-            }
+            results["CommunicationAccountService"] = $"FAILED: {ex.Message}";
         }
 
-        // Try to resolve IAppOnlyAnalysisService
-        string? analysisServiceError = null;
+        // List Graph subscriptions
         try
         {
-            var analysisService = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
-            if (analysisService == null)
+            var graphFactory = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>();
+            var graphClient = graphFactory.ForApp();
+            var subs = await graphClient.Subscriptions.GetAsync();
+            results["ActiveGraphSubscriptions"] = $"{subs?.Value?.Count ?? 0}";
+            if (subs?.Value != null)
             {
-                analysisServiceError = "IAppOnlyAnalysisService returned null";
+                foreach (var sub in subs.Value)
+                {
+                    results[$"Subscription:{sub.Id}"] =
+                        $"Resource={sub.Resource}, Expires={sub.ExpirationDateTime}, ChangeType={sub.ChangeType}, NotificationUrl={sub.NotificationUrl}";
+                }
             }
         }
         catch (Exception ex)
         {
-            analysisServiceError = $"IAppOnlyAnalysisService failed: {ex.Message}";
-            if (ex.InnerException != null)
-            {
-                analysisServiceError += $" → Inner: {ex.InnerException.Message}";
-            }
+            results["ActiveGraphSubscriptions"] = $"FAILED: {ex.Message}";
         }
 
-        return Results.Ok(new
+        // Check hosted services
+        var hostedServices = sp.GetServices<Microsoft.Extensions.Hosting.IHostedService>().ToList();
+        results["TotalHostedServices"] = hostedServices.Count.ToString();
+        var commServices = hostedServices.Where(s =>
+            s.GetType().Namespace?.Contains("Communication") == true).ToList();
+        foreach (var svc in commServices)
         {
-            totalHandlers = handlers.Count,
-            handlers = handlerInfo,
-            hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
-            directHandlerResolution = directResolutionError ?? "OK",
-            analysisServiceResolution = analysisServiceError ?? "OK"
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error listing job handlers");
-        return Results.Ok(new
-        {
-            error = ex.Message,
-            innerError = ex.InnerException?.Message,
-            innerInnerError = ex.InnerException?.InnerException?.Message
-        });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Diagnose communication BackgroundService resolution and manually trigger subscription management
-app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<Program> logger) =>
-{
-    var results = new Dictionary<string, string>();
-
-    // Check if key services resolve
-    try
-    {
-        var accountService = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
-        results["CommunicationAccountService"] = "OK";
-
-        // Try to query receive-enabled accounts (the first thing GraphSubscriptionManager does)
-        try
-        {
-            var accounts = await accountService.QueryReceiveEnabledAccountsAsync();
-            results["ReceiveEnabledAccounts"] = $"{accounts.Length} found";
-            foreach (var account in accounts)
-            {
-                results[$"Account:{account.EmailAddress}"] =
-                    $"SubId={account.SubscriptionId ?? "none"}, Expiry={account.SubscriptionExpiry}, AutoCreate={account.AutoCreateRecords}";
-            }
+            results[$"HostedService:{svc.GetType().Name}"] = "Running";
         }
-        catch (Exception ex)
-        {
-            results["ReceiveEnabledAccounts"] = $"QUERY FAILED: {ex.Message}";
-        }
-    }
-    catch (Exception ex)
-    {
-        results["CommunicationAccountService"] = $"FAILED: {ex.Message}";
-    }
 
-    // List Graph subscriptions
-    try
-    {
-        var graphFactory = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>();
-        var graphClient = graphFactory.ForApp();
-        var subs = await graphClient.Subscriptions.GetAsync();
-        results["ActiveGraphSubscriptions"] = $"{subs?.Value?.Count ?? 0}";
-        if (subs?.Value != null)
-        {
-            foreach (var sub in subs.Value)
-            {
-                results[$"Subscription:{sub.Id}"] =
-                    $"Resource={sub.Resource}, Expires={sub.ExpirationDateTime}, ChangeType={sub.ChangeType}, NotificationUrl={sub.NotificationUrl}";
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        results["ActiveGraphSubscriptions"] = $"FAILED: {ex.Message}";
-    }
-
-    // Check hosted services
-    var hostedServices = sp.GetServices<Microsoft.Extensions.Hosting.IHostedService>().ToList();
-    results["TotalHostedServices"] = hostedServices.Count.ToString();
-    var commServices = hostedServices.Where(s =>
-        s.GetType().Namespace?.Contains("Communication") == true).ToList();
-    foreach (var svc in commServices)
-    {
-        results[$"HostedService:{svc.GetType().Name}"] = "Running";
-    }
-
-    return Results.Ok(results);
-}).AllowAnonymous();
+        return Results.Ok(results);
+    }).AllowAnonymous();
 
 } // end Development-only debug endpoints (Service Bus queues, job handlers, communication services)
 

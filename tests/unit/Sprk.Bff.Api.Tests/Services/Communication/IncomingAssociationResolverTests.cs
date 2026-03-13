@@ -5,7 +5,6 @@ using Microsoft.Graph.Models;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Xrm.Sdk;
-using KiotaIParsable = Microsoft.Kiota.Abstractions.Serialization.IParsable;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -13,6 +12,7 @@ using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
+using KiotaIParsable = Microsoft.Kiota.Abstractions.Serialization.IParsable;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
