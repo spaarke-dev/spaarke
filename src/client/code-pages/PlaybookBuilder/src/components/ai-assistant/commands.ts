@@ -60,6 +60,10 @@ export const NODE_TYPE_INFO: Record<
         label: "Deliver Output",
         description: "Send results to destination",
     },
+    deliverToIndex: {
+        label: "Deliver to Index",
+        description: "Queue document for RAG semantic indexing",
+    },
     updateRecord: {
         label: "Update Record",
         description: "Write fields to a Dataverse record",

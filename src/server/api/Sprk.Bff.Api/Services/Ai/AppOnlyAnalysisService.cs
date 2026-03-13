@@ -203,7 +203,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 extractionResult.Text,
                 effectivePlaybookName,
                 dataverseAnalysisId,
-                cancellationToken);
+                cancellationToken,
+                graphDriveId: document.GraphDriveId,
+                graphItemId: document.GraphItemId);
 
             if (!analysisResult.IsSuccess)
             {
@@ -348,7 +350,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         string documentText,
         string playbookName,
         Guid? dataverseAnalysisId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? graphDriveId = null,
+        string? graphItemId = null)
     {
         // 1. Load playbook by name
         Models.Ai.PlaybookResponse playbook;
@@ -375,7 +379,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
             return await ExecuteNodeBasedAnalysisAsync(
                 documentId, documentName, fileName, documentText,
-                playbook.Id, dataverseAnalysisId, cancellationToken);
+                playbook.Id, dataverseAnalysisId, cancellationToken,
+                graphDriveId, graphItemId);
         }
 
         // Legacy path: no nodes — execute tools sequentially using playbook-level scopes
@@ -409,7 +414,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 Metadata = new Dictionary<string, object?>
                 {
                     ["PlaybookId"] = playbook.Id,
-                    ["PlaybookName"] = playbook.Name
+                    ["PlaybookName"] = playbook.Name,
+                    ["GraphDriveId"] = graphDriveId,
+                    ["GraphItemId"] = graphItemId
                 }
             }
         };
@@ -565,7 +572,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         string documentText,
         Guid playbookId,
         Guid? dataverseAnalysisId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? graphDriveId = null,
+        string? graphItemId = null)
     {
         var documentContext = new DocumentContext
         {
@@ -576,7 +585,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Metadata = new Dictionary<string, object?>
             {
                 ["PlaybookId"] = playbookId,
-                ["DataverseAnalysisId"] = dataverseAnalysisId
+                ["DataverseAnalysisId"] = dataverseAnalysisId,
+                ["GraphDriveId"] = graphDriveId,
+                ["GraphItemId"] = graphItemId
             }
         };
 

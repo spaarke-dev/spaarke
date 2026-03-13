@@ -123,5 +123,8 @@ public enum ActionType
     Start = 33,
 
     /// <summary>Render and deliver final output.</summary>
-    DeliverOutput = 40
+    DeliverOutput = 40,
+
+    /// <summary>Queue document for RAG semantic indexing.</summary>
+    DeliverToIndex = 41
 }

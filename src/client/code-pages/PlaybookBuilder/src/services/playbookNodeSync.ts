@@ -375,6 +375,25 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
             };
             break;
 
+        case "deliverToIndex":
+            // Deliver to Index: index name, source, parent entity, metadata
+            if (data.indexName) config.indexName = data.indexName;
+            config.source = data.indexSource ?? "document";
+            if (data.indexContentVariable) config.contentVariable = data.indexContentVariable;
+            if (data.indexParentEntityType || data.indexParentEntityId) {
+                config.parentEntity = {
+                    entityType: data.indexParentEntityType ?? "",
+                    entityId: data.indexParentEntityId ?? "",
+                    entityName: data.indexParentEntityName ?? "",
+                };
+            }
+            if (data.indexMetadata) {
+                try {
+                    config.metadata = JSON.parse(data.indexMetadata as string);
+                } catch { /* invalid JSON, skip */ }
+            }
+            break;
+
         case "sendEmail":
             // Send Email: to, cc, subject, body, isHtml
             if (data.emailTo && data.emailTo.length > 0) config.to = data.emailTo;

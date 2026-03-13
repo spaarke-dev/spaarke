@@ -16,6 +16,7 @@ export { AiAnalysisNode } from "./AiAnalysisNode";
 export { AiCompletionNode } from "./AiCompletionNode";
 export { ConditionNode } from "./ConditionNode";
 export { DeliverOutputNode } from "./DeliverOutputNode";
+export { DeliverToIndexNode } from "./DeliverToIndexNode";
 export { UpdateRecordNode } from "./UpdateRecordNode";
 export { CreateTaskNode } from "./CreateTaskNode";
 export { SendEmailNode } from "./SendEmailNode";
@@ -27,6 +28,7 @@ import { AiAnalysisNode } from "./AiAnalysisNode";
 import { AiCompletionNode } from "./AiCompletionNode";
 import { ConditionNode } from "./ConditionNode";
 import { DeliverOutputNode } from "./DeliverOutputNode";
+import { DeliverToIndexNode } from "./DeliverToIndexNode";
 import { UpdateRecordNode } from "./UpdateRecordNode";
 import { CreateTaskNode } from "./CreateTaskNode";
 import { SendEmailNode } from "./SendEmailNode";
@@ -45,6 +47,7 @@ export const nodeTypes: NodeTypes = {
     aiCompletion: AiCompletionNode,
     condition: ConditionNode,
     deliverOutput: DeliverOutputNode,
+    deliverToIndex: DeliverToIndexNode,
     updateRecord: UpdateRecordNode,
     createTask: CreateTaskNode,
     sendEmail: SendEmailNode,

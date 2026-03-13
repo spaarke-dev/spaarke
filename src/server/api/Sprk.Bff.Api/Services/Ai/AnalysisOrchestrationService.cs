@@ -1390,7 +1390,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 Metadata = new Dictionary<string, object?>
                 {
                     ["PlaybookId"] = request.PlaybookId,
-                    ["PlaybookName"] = playbook.Name
+                    ["PlaybookName"] = playbook.Name,
+                    ["GraphDriveId"] = document.GraphDriveId,
+                    ["GraphItemId"] = document.GraphItemId
                 }
             };
 

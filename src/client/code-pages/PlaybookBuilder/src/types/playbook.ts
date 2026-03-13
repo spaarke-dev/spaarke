@@ -19,6 +19,7 @@ export enum PlaybookNodeType {
     AiCompletion = "aiCompletion",
     Condition = "condition",
     DeliverOutput = "deliverOutput",
+    DeliverToIndex = "deliverToIndex",
     UpdateRecord = "updateRecord",
     CreateTask = "createTask",
     SendEmail = "sendEmail",
@@ -54,6 +55,7 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
     [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
     [PlaybookNodeType.Condition]: DataverseNodeType.Control,
     [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
+    [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
     [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
     [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
     [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
@@ -85,6 +87,7 @@ export enum ActionType {
     Parallel = 31,
     Wait = 32,
     DeliverOutput = 40,
+    DeliverToIndex = 41,
 }
 
 /**
@@ -96,6 +99,7 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
     [PlaybookNodeType.AiCompletion]: ActionType.AiCompletion,
     [PlaybookNodeType.Condition]: ActionType.Condition,
     [PlaybookNodeType.DeliverOutput]: ActionType.DeliverOutput,
+    [PlaybookNodeType.DeliverToIndex]: ActionType.DeliverToIndex,
     [PlaybookNodeType.UpdateRecord]: ActionType.UpdateRecord,
     [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
     [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
@@ -156,6 +160,15 @@ export interface PlaybookNodeData {
     includeMetadata?: boolean;
     includeSourceCitations?: boolean;
     maxOutputLength?: number;
+
+    // Deliver to Index config
+    indexName?: string;
+    indexSource?: "document" | "content";
+    indexContentVariable?: string;
+    indexParentEntityType?: string;
+    indexParentEntityId?: string;
+    indexParentEntityName?: string;
+    indexMetadata?: string;
 
     // Send Email config
     emailTo?: string[];
@@ -233,6 +246,13 @@ export const NODE_TYPE_INFO: NodeTypeInfo[] = [
         label: "Deliver Output",
         description: "Format and deliver results as markdown, HTML, or text",
         icon: "DocumentText",
+        category: "output",
+    },
+    {
+        type: PlaybookNodeType.DeliverToIndex,
+        label: "Deliver to Index",
+        description: "Queue document for RAG semantic indexing",
+        icon: "DatabaseSearch",
         category: "output",
     },
     {

@@ -41,6 +41,7 @@ import { ModelSelector } from "./ModelSelector";
 import { ScopeSelector } from "./ScopeSelector";
 import { ConditionEditor } from "./ConditionEditor";
 import { DeliverOutputForm } from "./DeliverOutputForm";
+import { DeliverToIndexForm } from "./DeliverToIndexForm";
 import { SendEmailForm } from "./SendEmailForm";
 import { CreateTaskForm } from "./CreateTaskForm";
 import { AiCompletionForm } from "./AiCompletionForm";
@@ -133,7 +134,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
     const isStartNode = nodeType === "start";
 
     // Determine which type-specific form to show
-    const hasTypeForm = ["deliverOutput", "updateRecord", "sendEmail", "createTask", "aiCompletion", "wait"].includes(nodeType);
+    const hasTypeForm = ["deliverOutput", "deliverToIndex", "updateRecord", "sendEmail", "createTask", "aiCompletion", "wait"].includes(nodeType);
 
     // Generic field updater
     const handleUpdate = useCallback(
@@ -280,6 +281,13 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                         <AccordionPanel className={styles.accordionPanel}>
                             {nodeType === "deliverOutput" && (
                                 <DeliverOutputForm
+                                    nodeId={node.id}
+                                    data={node.data}
+                                    onUpdate={handleUpdate}
+                                />
+                            )}
+                            {nodeType === "deliverToIndex" && (
+                                <DeliverToIndexForm
                                     nodeId={node.id}
                                     data={node.data}
                                     onUpdate={handleUpdate}

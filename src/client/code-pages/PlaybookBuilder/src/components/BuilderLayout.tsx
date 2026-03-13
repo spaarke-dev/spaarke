@@ -72,6 +72,7 @@ const NODE_PALETTE: NodePaletteItem[] = [
     { type: "aiCompletion", label: "AI Completion", description: "Generate AI text completion", color: tokens.colorBrandBackground },
     { type: "condition", label: "Condition", description: "Branch based on expression", color: tokens.colorPaletteYellowBackground3 },
     { type: "deliverOutput", label: "Deliver Output", description: "Format and save results", color: tokens.colorPaletteGreenBackground3 },
+    { type: "deliverToIndex", label: "Deliver to Index", description: "Queue for RAG semantic indexing", color: tokens.colorPaletteGreenBackground3 },
     { type: "updateRecord", label: "Update Record", description: "Write fields to Dataverse record", color: tokens.colorPaletteGreenBackground3 },
     { type: "createTask", label: "Create Task", description: "Create a Dataverse task", color: tokens.colorPaletteBerryBackground2 },
     { type: "sendEmail", label: "Send Email", description: "Send notification email", color: tokens.colorPaletteBerryBackground2 },

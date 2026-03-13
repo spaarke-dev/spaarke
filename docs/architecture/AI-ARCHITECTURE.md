@@ -42,7 +42,7 @@ Spaarke AI is organized into four tiers. Each tier has distinct responsibilities
 1. **Playbooks are the "frontend"** -- the Spaarke-specific composition and management UI for AI workflows. The execution backend is flexible.
 2. **Scopes are independent primitives** -- consumable by playbooks, SprkChat, standalone API calls, and background jobs without requiring a playbook.
 3. **AI nodes are backend-flexible** -- a node can execute in-process (current), via Microsoft Agent Framework (future), or as a published AI Foundry agent (future).
-4. **Workflow nodes stay Spaarke** -- CreateTask, SendEmail, UpdateRecord, Condition, DeliverOutput nodes always run as Spaarke code.
+4. **Workflow nodes stay Spaarke** -- CreateTask, SendEmail, UpdateRecord, Condition, DeliverOutput, DeliverToIndex nodes always run as Spaarke code.
 5. **AI Foundry is infrastructure** -- it provides model hosting, Foundry IQ knowledge bases, and Agent Service runtime. It does not compete with the scope library.
 
 ---
@@ -453,6 +453,7 @@ type PlaybookNodeType =
   | 'aiCompletion'    // AI completion (LLM call) — backend-flexible
   | 'condition'       // Conditional branching — always Spaarke code
   | 'deliverOutput'   // Output delivery — always Spaarke code
+  | 'deliverToIndex'  // RAG semantic indexing — always Spaarke code
   | 'createTask'      // Task creation — always Spaarke code
   | 'sendEmail'       // Email action — always Spaarke code
   | 'wait';           // Wait/delay — always Spaarke code
@@ -485,7 +486,8 @@ public enum ActionType
     // Control nodes (always Spaarke code)
     Condition = 30, Parallel = 31, Wait = 32,
     // Output nodes
-    DeliverOutput = 40
+    DeliverOutput = 40,
+    DeliverToIndex = 41     // Queue document for RAG semantic indexing
 }
 ```
 
@@ -680,6 +682,7 @@ PlaybookBuilder (Code Page)
             │   ├── AiCompletionNode
             │   ├── ConditionNode
             │   ├── DeliverOutputNode
+            │   ├── DeliverToIndexNode
             │   ├── CreateTaskNode
             │   ├── SendEmailNode
             │   ├── WaitNode
@@ -690,7 +693,7 @@ PlaybookBuilder (Code Page)
             │       ├── ModelSelector (AI model dropdown)
             │       ├── ActionSelector (linked action)
             │       ├── ConditionEditor (condition nodes)
-            │       ├── DeliverOutputForm / SendEmailForm / CreateTaskForm / etc.
+            │       ├── DeliverOutputForm / DeliverToIndexForm / SendEmailForm / CreateTaskForm / etc.
             │       └── VariableReferencePanel (upstream output variables)
             ├── ExecutionOverlay (during playbook execution)
             └── AiAssistantModal (conversational builder, floating)
@@ -847,6 +850,7 @@ public class PlaybookRunContext {
 | `UpdateRecordNodeExecutor.cs` | UpdateRecord (22) | Always Spaarke code |
 | `SendEmailNodeExecutor.cs` | SendEmail (21) | Always Spaarke code |
 | `DeliverOutputNodeExecutor.cs` | DeliverOutput (40) | Always Spaarke code |
+| `DeliverToIndexNodeExecutor.cs` | DeliverToIndex (41) | Always Spaarke code — enqueues RagIndexing background job via Service Bus |
 
 ### Tool Handler Framework
 
@@ -968,6 +972,9 @@ PlaybookOrchestrationService.ExecutePlaybookAsync()
   │   │   │   ├── DeliverOutputNodeExecutor (ActionType 40):
   │   │   │   │   └── Render Handlebars template with all NodeOutputs
   │   │   │   │
+  │   │   │   ├── DeliverToIndexNodeExecutor (ActionType 41):
+  │   │   │   │   └── Enqueue RagIndexing job via Service Bus (fire-and-forget)
+  │   │   │   │
   │   │   │   ├── CreateTask/SendEmail (ActionType 20-21):
   │   │   │   │   └── Execute Spaarke workflow action on Dataverse/Graph
   │   │   │   │
@@ -1024,7 +1031,7 @@ Document field writes happen **during** playbook execution (UpdateRecord node in
 
 **File**: `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs`
 
-The TemplateEngine renders Handlebars.NET templates against a context built from previous node outputs. It is used by `UpdateRecordNodeExecutor` and `DeliverOutputNodeExecutor` to resolve `{{output_nodeLabel.output.fieldName}}` references.
+The TemplateEngine renders Handlebars.NET templates against a context built from previous node outputs. It is used by `UpdateRecordNodeExecutor`, `DeliverOutputNodeExecutor`, and `DeliverToIndexNodeExecutor` to resolve `{{output_nodeLabel.output.fieldName}}` references.
 
 **Key methods**:
 
@@ -1344,6 +1351,7 @@ The PlaybookOrchestrationService evolves from a full execution engine to a thin 
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-03-13 | 3.4 | Added DeliverToIndex node (ActionType 41): new Output node that enqueues RagIndexing background jobs via Service Bus for semantic search indexing. Enables Document Profile playbook to automatically index uploaded documents. New files: DeliverToIndexNodeExecutor.cs, DeliverToIndexNode.tsx, DeliverToIndexForm.tsx. DocumentContext.Metadata enriched with GraphDriveId/GraphItemId at all construction sites. |
 | 2026-03-06 | 3.3 | Added JSON Prompt Schema (JPS) documentation: prompt composition with JPS format detection, $choices dynamic enum resolution with 5 Dataverse prefix types (lookup, optionset, multiselect, boolean, downstream), LookupChoicesResolver pre-resolution pipeline, IScopeResolverService query methods, updated execution flow with $choices pre-resolution step, updated file structure. |
 | 2026-03-03 | 3.2 | Updated for typed field mappings: TemplateEngine (ConvertJsonElement, FlattenArrays), UpdateRecord OData PATCH with typed coercion (Choice/Boolean/Number), consumer integration pattern (PCF triggers playbook, no client-side field writes), removed obsolete DocumentProfileFieldMapper references from execution flow. |
 | 2026-03-01 | 3.1 | Updated for Playbook Builder R5: three-level node type system (Canvas Type → NodeType → ActionType), Code Page builder as primary (PCF legacy), canvas-to-Dataverse sync with sprk_nodetype + __actionType, parallel execution batches and performance optimization, updated file structure, all 6 node executors, all 12 tool handlers. |

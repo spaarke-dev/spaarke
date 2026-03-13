@@ -20,6 +20,7 @@ export type PlaybookNodeType =
     | "aiCompletion"
     | "condition"
     | "deliverOutput"
+    | "deliverToIndex"
     | "updateRecord"
     | "createTask"
     | "sendEmail"
