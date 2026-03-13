@@ -423,6 +423,11 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IEntityResolutionService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IClarificationService>(Moq.MockBehavior.Loose).Object);
 
+            // Semantic Search & Record Search - endpoints are always mapped but services
+            // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
+            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(Moq.MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(Moq.MockBehavior.Loose).Object);
+
             // IOpenAiClient is conditionally registered (DocumentIntelligence:Enabled=true only),
             // but FinanceModule services (InvoiceAnalysisService, InvoiceSearchService, etc.) always
             // depend on it. Register a stub to prevent InvalidOperationException during scope activation.
@@ -493,6 +498,14 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             // Register test JWT authentication scheme (overrides production JWT bearer)
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthSchemeOptions, TestKbAuthHandler>("Test", _ => { });
+
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = "Test";
+                options.DefaultChallengeScheme = "Test";
+            });
         });
 
         builder.UseEnvironment("Testing");
@@ -660,7 +673,7 @@ internal class TestKbAuthHandler
         var authHeader = Request.Headers.Authorization.ToString();
         if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.NoResult());
+            return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Fail("No Authorization header"));
         }
 
         var token = authHeader["Bearer ".Length..].Trim();

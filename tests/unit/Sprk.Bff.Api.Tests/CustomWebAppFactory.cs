@@ -112,22 +112,8 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
         // DI lifetime issues in the production codebase (not introduced by this PR)
         builder.UseEnvironment("Testing");
 
-        // Configuration is set in CreateHost/ConfigureHostConfiguration
-        // This method handles DI overrides for tests
-        builder.ConfigureServices(services =>
-        {
-            if (Environment.GetEnvironmentVariable("USE_FAKE_GRAPH") == "1")
-            {
-                // Replace Graph client factory
-                var graphFactory = services.SingleOrDefault(s => s.ServiceType == typeof(IGraphClientFactory));
-                if (graphFactory != null) services.Remove(graphFactory);
-                services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
-
-                // OBO functionality now handled by SpeFileStore - no mock needed
-            }
-        });
-
-        // Use ConfigureTestServices to replace services AFTER the app's services are registered
+        // Use ConfigureTestServices to replace services AFTER the app's services are registered.
+        // This ensures our fakes override the real implementations registered in Program.cs.
         builder.ConfigureTestServices(services =>
         {
             // ---------------------------------------------------------------
@@ -151,6 +137,17 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 options.DefaultAuthenticateScheme = FakeAuthHandler.SchemeName;
                 options.DefaultChallengeScheme = FakeAuthHandler.SchemeName;
             });
+
+            // ---------------------------------------------------------------
+            // GRAPH CLIENT FACTORY: Replace with a fake that does NOT perform
+            // real MSAL OBO token exchange against Azure AD. Without this,
+            // any endpoint that calls SpeFileStore (OBO, upload, file ops)
+            // would attempt a real token exchange with the test "Bearer test-token",
+            // which Azure AD rejects. The global exception handler maps
+            // MsalServiceException → 401, causing spurious auth failures.
+            // ---------------------------------------------------------------
+            services.RemoveAll<IGraphClientFactory>();
+            services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
             // ---------------------------------------------------------------
             // HOSTED SERVICES: Remove background workers that depend on

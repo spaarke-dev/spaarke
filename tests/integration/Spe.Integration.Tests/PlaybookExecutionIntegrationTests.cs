@@ -21,6 +21,9 @@ namespace Spe.Integration.Tests;
 /// - Analysis records are created successfully
 ///
 /// Note: These tests require a configured Dataverse dev environment.
+///
+/// Tests that resolve services from DI and call Dataverse are skipped when
+/// running without a live Dataverse connection.
 /// </remarks>
 [Collection("Integration")]
 [Trait("Category", "Integration")]
@@ -98,7 +101,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
 
     #region Scope Resolution Tests
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ResolvesEmptyScopes_WhenNoIdsProvided()
     {
         // Arrange
@@ -121,7 +124,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine("Empty scope resolution successful - no scopes returned for empty input");
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ResolvesScopesAsync_HandlesInvalidIds()
     {
         // Arrange
@@ -148,7 +151,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine($"  Tools found: {scopes.Tools.Length}");
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_GetActionAsync_ReturnsNullForInvalidId()
     {
         // Arrange
@@ -167,7 +170,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
 
     #region Handler Discovery Tests
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void ToolHandlerRegistry_DiscoversCoreHandlers()
     {
         // Arrange
@@ -187,7 +190,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         }
     }
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void GenericAnalysisHandler_IsAvailable()
     {
         // Arrange
@@ -209,7 +212,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine($"  HasConfigSchema: {handler.Metadata.ConfigurationSchema != null}");
     }
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void AllHandlers_HaveConfigurationSchemas()
     {
         // Arrange
@@ -238,7 +241,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
 
     #region Tool Validation Tests
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void GenericAnalysisHandler_ValidatesContext()
     {
         // Arrange
@@ -259,7 +262,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine($"GenericAnalysisHandler validation result: {(result.IsValid ? "VALID" : "INVALID")}");
     }
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void GenericAnalysisHandler_RejectsEmptyDocument()
     {
         // Arrange
@@ -285,7 +288,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
 
     #region Playbook Service Tests
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IPlaybookService")]
     public async Task PlaybookService_GetByNameAsync_ThrowsForInvalidName()
     {
         // Arrange
@@ -301,7 +304,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine("GetByNameAsync correctly throws for non-existent playbook");
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IPlaybookService")]
     public async Task PlaybookService_ValidateAsync_RequiresName()
     {
         // Arrange
@@ -325,7 +328,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine($"  Errors: {string.Join(", ", result.Errors)}");
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IPlaybookService")]
     public async Task PlaybookService_ValidateAsync_RequiresActionOrTool()
     {
         // Arrange
@@ -353,7 +356,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
 
     #region Integration Flow Tests
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IPlaybookService and IScopeResolverService")]
     public async Task PlaybookExecution_ResolvesPlaybookScopes_WhenPlaybookExists()
     {
         // This test verifies the scope resolution path for playbook execution
@@ -397,7 +400,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         }
     }
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void HandlerFallback_UsesGenericHandler_WhenCustomHandlerNotFound()
     {
         // Arrange
@@ -421,7 +424,7 @@ public class PlaybookExecutionIntegrationTests : IClassFixture<IntegrationTestFi
         _output.WriteLine("  Result: System correctly falls back to GenericAnalysisHandler");
     }
 
-    [Fact]
+    [Fact(Skip = "IToolHandlerRegistry depends on Dataverse for handler discovery")]
     public void ToolComposition_MultipleHandlers_CanProcessSameDocument()
     {
         // Arrange
@@ -476,7 +479,7 @@ Consultant agrees to maintain confidentiality of all Company information.
 
     #region CRUD Operations Tests (Dataverse)
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ListActions_ReturnsResults()
     {
         // Arrange
@@ -502,7 +505,7 @@ Consultant agrees to maintain confidentiality of all Company information.
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ListSkills_ReturnsResults()
     {
         // Arrange
@@ -524,7 +527,7 @@ Consultant agrees to maintain confidentiality of all Company information.
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ListKnowledge_ReturnsResults()
     {
         // Arrange
@@ -546,7 +549,7 @@ Consultant agrees to maintain confidentiality of all Company information.
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_ListTools_ReturnsResults()
     {
         // Arrange
@@ -568,7 +571,7 @@ Consultant agrees to maintain confidentiality of all Company information.
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Requires live Dataverse connection for IScopeResolverService")]
     public async Task ScopeResolver_SearchScopes_ReturnsFilteredResults()
     {
         // Arrange

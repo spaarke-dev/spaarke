@@ -514,6 +514,15 @@ Date: January 1, 2024       Date: January 1, 2024
 
     private static AnalysisTool CreateTestTool(ToolType toolType)
     {
+        // GenericAnalysisHandler requires 'operation' and 'prompt_template' in configuration
+        var config = toolType == ToolType.Custom
+            ? System.Text.Json.JsonSerializer.Serialize(new
+            {
+                operation = "analyze",
+                prompt_template = "Analyze the following document: {{document}}"
+            })
+            : "{}";
+
         return new AnalysisTool
         {
             Id = Guid.NewGuid(),
@@ -521,7 +530,7 @@ Date: January 1, 2024       Date: January 1, 2024
             Description = $"Test tool for {toolType}",
             Type = toolType,
             HandlerClass = $"{toolType}Handler",
-            Configuration = "{}"
+            Configuration = config
         };
     }
 

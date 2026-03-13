@@ -57,7 +57,7 @@ public class AiAuthorizationServiceTests
     {
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
         };
         context.Request.Headers["Authorization"] = "Bearer mock-token";
         return context;
