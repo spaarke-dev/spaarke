@@ -1,0 +1,85 @@
+<task id="PRODENV-004" project="Production Environment Setup R1">
+  <metadata>
+    <title>Finalize naming convention to Adopted status</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-B</parallel-group>
+    <tags>documentation, naming, standards</tags>
+  </metadata>
+
+  <prompt>
+    Update AZURE-RESOURCE-NAMING-CONVENTION.md from "Proposed" to "Adopted" status.
+    Add the complete production naming matrix covering all resource types, Dataverse
+    components, code namespaces, Service Bus queues, Redis keys, and Entra ID registrations.
+  </prompt>
+
+  <role>
+    Technical writer and cloud architect familiar with Azure naming conventions.
+  </role>
+
+  <goal>
+    A comprehensive, adopted naming convention document that serves as the authoritative
+    reference for all production resource naming decisions.
+  </goal>
+
+  <inputs>
+    <file purpose="current-doc">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="design-doc">projects/production-environment-setup-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-11">Two standard prefixes: sprk_ (Dataverse/code) and spaarke- (Azure)</constraint>
+    <constraint source="FR-11">No legacy prefixes (spe-*, sdap-*) for new resources</constraint>
+    <constraint source="project">Dev environment stays as-is; production starts clean</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure resource naming conventions</topic>
+    <files>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The naming convention was previously in "Proposed" status. This task finalizes it
+      for production use. The design.md Section 6.6 contains the comprehensive naming
+      matrix that must be incorporated.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Read current document">
+      Read AZURE-RESOURCE-NAMING-CONVENTION.md and design.md Section 6.6.
+    </step>
+    <step order="2" name="Update status">
+      Change document status from "Proposed" to "Adopted".
+    </step>
+    <step order="3" name="Add complete naming matrix">
+      Add production naming examples for all resource types from design.md Section 6.6:
+      Azure resources, Dataverse components, code namespaces, Service Bus queues,
+      Redis key prefixes, Entra ID registrations.
+    </step>
+    <step order="4" name="Add migration notes">
+      Document that dev environment retains legacy names; production starts with new standard.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document status is "Adopted"</criterion>
+    <criterion testable="true">Complete naming matrix covers Azure, Dataverse, code, Service Bus, Redis, Entra ID</criterion>
+    <criterion testable="true">All examples use sprk_/spaarke- prefixes (no legacy prefixes)</criterion>
+    <criterion testable="true">Migration notes explain dev vs production naming approach</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<task id="PRODENV-013" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Test-Deployment.ps1 (smoke tests)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-A</parallel-group>
+    <tags>powershell, testing, smoke-tests</tags>
+  </metadata>
+
+  <prompt>
+    Create Test-Deployment.ps1 that runs smoke tests against a deployed environment
+    to verify BFF API, Dataverse, SPE, and AI services are operational. Must complete
+    in under 5 minutes.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with deployment verification and smoke testing.
+  </role>
+
+  <goal>
+    A comprehensive smoke test script that validates all critical services are
+    operational after deployment, completing in under 5 minutes.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="existing-test">scripts/Test-SdapBffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-07">Must verify BFF API, Dataverse, SPE, and AI services</constraint>
+    <constraint source="NFR-01">Must complete in under 5 minutes</constraint>
+    <constraint source="ADR-001">Health check at /healthz</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deployment smoke testing</topic>
+    <files>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This script is called after every deployment to verify the environment is healthy.
+      It tests connectivity and basic operations for each service layer. The existing
+      Test-SdapBffApi.ps1 can serve as a reference for API testing patterns.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing test script">
+      Read Test-SdapBffApi.ps1 for testing patterns.
+    </step>
+    <step order="2" name="Create Test-Deployment.ps1">
+      Create scripts/Test-Deployment.ps1 with test groups:
+      - BFF API: /healthz, /ping, authenticated endpoint
+      - Dataverse: connection test, solution verification
+      - SPE: container listing, upload/download test
+      - AI: OpenAI completion test, search index check, Doc Intelligence probe
+      - Redis: connection and basic get/set
+      - Service Bus: queue existence check
+    </step>
+    <step order="3" name="Add reporting">
+      Output results as structured table with pass/fail/skip status.
+      Return non-zero exit code if any critical test fails.
+    </step>
+    <step order="4" name="Add timeout handling">
+      Each test group has individual timeout. Total execution capped at 5 minutes.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell</tool>
+    <tool name="az">Azure CLI for service checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Test-Deployment.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists and parses without syntax errors</criterion>
+    <criterion testable="true">Tests BFF API health endpoint</criterion>
+    <criterion testable="true">Tests Dataverse connectivity</criterion>
+    <criterion testable="true">Tests AI services (OpenAI, Search, Doc Intelligence)</criterion>
+    <criterion testable="true">Structured output with pass/fail status per test</criterion>
+    <criterion testable="true">Non-zero exit code on critical test failure</criterion>
+  </acceptance-criteria>
+</task>

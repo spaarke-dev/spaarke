@@ -1,0 +1,98 @@
+<task id="PRODENV-024" project="Production Environment Setup R1">
+  <metadata>
+    <title>Provision demo customer (Provision-Customer.ps1 -CustomerId demo)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-C</parallel-group>
+    <tags>deployment, provisioning, demo, customer</tags>
+  </metadata>
+
+  <prompt>
+    Provision the demo customer environment using Provision-Customer.ps1 with
+    CustomerId=demo. This is the first real customer provisioning and validates
+    the entire provisioning pipeline end-to-end.
+  </prompt>
+
+  <role>
+    DevOps engineer executing the first customer provisioning with careful validation at each step.
+  </role>
+
+  <goal>
+    Demo customer fully provisioned: Azure resources in rg-spaarke-demo-prod,
+    Dataverse environment with all solutions, SPE containers, tenant registered in BFF API.
+  </goal>
+
+  <inputs>
+    <file purpose="provision-script">scripts/Provision-Customer.ps1</file>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-06">Demo uses identical script as real customers</constraint>
+    <constraint source="FR-02">Only customerId and displayName as inputs</constraint>
+    <constraint source="NFR-01">Complete in under 30 minutes</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Customer provisioning</topic>
+    <files>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Test-Deployment.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The demo environment is the first "customer" provisioned using the standard
+      provisioning pipeline. It validates that Provision-Customer.ps1 works end-to-end.
+      Any issues found here are fixed before onboarding real customers.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-023" status="complete">BFF API deployed to production</dependency>
+      <dependency task="PRODENV-014" status="complete">Provision-Customer.ps1 exists</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Run provisioning script">
+      Execute: Provision-Customer.ps1 -CustomerId demo -DisplayName "Spaarke Demo"
+      Monitor each step for errors.
+    </step>
+    <step order="2" name="Verify Azure resources">
+      Check rg-spaarke-demo-prod: Storage, Key Vault, Service Bus, Redis all created.
+    </step>
+    <step order="3" name="Verify Dataverse environment">
+      Confirm Dataverse environment created, all solutions imported.
+    </step>
+    <step order="4" name="Verify SPE containers">
+      Check SPE containers provisioned and accessible.
+    </step>
+    <step order="5" name="Run smoke tests">
+      Execute Test-Deployment.ps1 against demo environment.
+    </step>
+    <step order="6" name="Document issues">
+      Record any issues, workarounds, or script improvements needed.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Demo provisioning results and smoke test output</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Provision-Customer.ps1 completes without errors</criterion>
+    <criterion testable="true">rg-spaarke-demo-prod exists with all 4 resource types</criterion>
+    <criterion testable="true">Dataverse environment created with all managed solutions</criterion>
+    <criterion testable="true">SPE containers provisioned and accessible</criterion>
+    <criterion testable="true">Smoke tests pass for demo environment</criterion>
+    <criterion testable="true">Provisioning completed in under 30 minutes</criterion>
+  </acceptance-criteria>
+</task>

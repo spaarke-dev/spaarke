@@ -1,0 +1,88 @@
+<task id="PRODENV-025" project="Production Environment Setup R1">
+  <metadata>
+    <title>Load sample data into demo environment</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-D</parallel-group>
+    <tags>demo, data, testing</tags>
+  </metadata>
+
+  <prompt>
+    Load non-confidential test data into the demo environment: sample documents
+    in SPE containers, demo records in Dataverse, and test AI search index data.
+    This data enables demo users to experience all Spaarke features.
+  </prompt>
+
+  <role>
+    QA engineer preparing demo environments with representative test data.
+  </role>
+
+  <goal>
+    Demo environment populated with realistic, non-confidential test data that
+    exercises all Spaarke features: document storage, AI search, document analysis.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">All data must be non-confidential (test/sample only)</constraint>
+    <constraint source="project">Data must exercise all major features</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Demo data preparation</topic>
+    <files>
+      <file>scripts/create-test-chartdefinitions.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Demo environment needs realistic data to show prospects. Documents should
+      represent typical use cases (contracts, invoices, correspondence). Dataverse
+      records should include document profiles, matters, and contacts.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-024" status="complete">Demo customer provisioned</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Prepare sample documents">
+      Create or collect non-confidential test documents (PDF, DOCX, XLSX).
+      Organize by document type (contracts, invoices, correspondence).
+    </step>
+    <step order="2" name="Upload to SPE containers">
+      Upload sample documents to demo SPE containers via Graph API.
+    </step>
+    <step order="3" name="Create Dataverse records">
+      Create demo records: document profiles, matters, contacts, chart definitions.
+    </step>
+    <step order="4" name="Index documents in AI Search">
+      Trigger AI indexing of uploaded documents for RAG capabilities.
+    </step>
+    <step order="5" name="Verify data accessible">
+      Verify documents accessible, search returns results, AI analysis works.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell</tool>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Sample data inventory and verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sample documents uploaded to SPE containers</criterion>
+    <criterion testable="true">Dataverse demo records created (profiles, matters, contacts)</criterion>
+    <criterion testable="true">AI Search returns results for demo documents</criterion>
+    <criterion testable="true">All data is non-confidential test content</criterion>
+  </acceptance-criteria>
+</task>

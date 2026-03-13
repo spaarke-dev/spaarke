@@ -1,0 +1,97 @@
+<task id="PRODENV-005" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create appsettings.Production.json with Key Vault references</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-B</parallel-group>
+    <tags>configuration, bff-api, key-vault</tags>
+  </metadata>
+
+  <prompt>
+    Create appsettings.Production.json for the BFF API with Key Vault references
+    (@Microsoft.KeyVault(...)) for all secrets. Configure production endpoints for
+    Azure OpenAI, AI Search, Document Intelligence, Redis, Service Bus, and Dataverse.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with ASP.NET configuration, Key Vault references,
+    and the Options pattern with ValidateOnStart.
+  </role>
+
+  <goal>
+    A production configuration file that uses Key Vault references for all secrets
+    and configures the BFF API to work with the shared platform resources while
+    supporting multi-customer routing.
+  </goal>
+
+  <inputs>
+    <file purpose="existing-config">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-08">ALL secrets via Key Vault references — zero plaintext</constraint>
+    <constraint source="ADR-009">Redis configuration must be present</constraint>
+    <constraint source="ADR-010">Options pattern with ValidateOnStart</constraint>
+    <constraint source="ADR-001">Health check at /healthz must remain functional</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ASP.NET configuration and Key Vault references</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF API currently has appsettings.json for development. Production config
+      must reference Key Vault for secrets while keeping non-secret configuration
+      (like feature flags, logging levels) inline. The configuration must support
+      the multi-customer model where customer-specific settings are resolved at runtime.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Analyze existing appsettings.json">
+      Read current config to identify all settings that need production values.
+      Classify each as: secret (Key Vault), environment-specific (parameterize),
+      or static (keep inline).
+    </step>
+    <step order="2" name="Create appsettings.Production.json">
+      Create production config with:
+      - Key Vault references for: connection strings, API keys, client secrets
+      - Production endpoints for: OpenAI, AI Search, Doc Intelligence
+      - Logging configuration (Information level, App Insights)
+      - Redis connection via Key Vault reference
+      - Service Bus connection via Key Vault reference
+    </step>
+    <step order="3" name="Validate structure">
+      Ensure JSON is valid and Key Vault reference syntax is correct.
+      Verify all ADR-009 Redis settings are present.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Validate JSON structure</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.Production.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">appsettings.Production.json exists and is valid JSON</criterion>
+    <criterion testable="true">All connection strings use @Microsoft.KeyVault(...) references</criterion>
+    <criterion testable="true">No plaintext secrets anywhere in the file</criterion>
+    <criterion testable="true">Redis configuration present per ADR-009</criterion>
+    <criterion testable="true">Logging configured for production (Information level, App Insights sink)</criterion>
+  </acceptance-criteria>
+</task>

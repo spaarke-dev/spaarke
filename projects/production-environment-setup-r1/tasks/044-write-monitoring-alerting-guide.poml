@@ -1,0 +1,73 @@
+<task id="PRODENV-044" project="Production Environment Setup R1">
+  <metadata>
+    <title>Write monitoring and alerting setup guide</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5</phase>
+    <parallel-group>P5-A</parallel-group>
+    <tags>documentation, monitoring, alerting</tags>
+  </metadata>
+
+  <prompt>
+    Write a monitoring and alerting setup guide covering App Insights configuration,
+    alert rules, dashboards, and customer-scoped log queries.
+  </prompt>
+
+  <role>Technical writer documenting monitoring and alerting setup.</role>
+
+  <goal>
+    A guide for setting up and maintaining production monitoring including
+    dashboards, alerts, and customer-scoped queries.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-12">Logs must include customerId dimension</constraint>
+    <constraint source="FR-12">Customer-filtered queries must work</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure monitoring and alerting</topic>
+    <files>
+      <file>infrastructure/bicep/modules/monitoring.bicep</file>
+      <file>infrastructure/bicep/modules/alerts.bicep</file>
+      <file>infrastructure/bicep/modules/dashboard.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Production monitoring is critical for proactive issue detection.</background>
+    <dependencies>
+      <dependency task="PRODENV-020" status="complete">Platform deployed with monitoring</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Write monitoring guide">
+      Create docs/guides/MONITORING-AND-ALERTING-GUIDE.md covering:
+      - App Insights configuration and connection
+      - Key metrics to monitor per service
+      - Alert rules (CPU, memory, response time, errors, availability)
+      - Dashboard setup and customization
+      - Customer-scoped log queries (filter by customerId)
+      - Cost monitoring setup
+      - On-call procedures
+    </step>
+  </steps>
+
+  <tools><tool name="git">Version control</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/guides/MONITORING-AND-ALERTING-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Key metrics identified per service type</criterion>
+    <criterion testable="true">Alert rules defined with thresholds</criterion>
+    <criterion testable="true">Customer-scoped KQL queries included</criterion>
+    <criterion testable="true">Dashboard setup instructions provided</criterion>
+  </acceptance-criteria>
+</task>

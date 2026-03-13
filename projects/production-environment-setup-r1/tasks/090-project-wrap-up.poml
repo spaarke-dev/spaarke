@@ -1,0 +1,89 @@
+<task id="PRODENV-090" project="Production Environment Setup R1">
+  <metadata>
+    <title>Project wrap-up (README status, lessons learned, archive)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <parallel-group>P5-C</parallel-group>
+    <tags>documentation, wrap-up, project-management</tags>
+  </metadata>
+
+  <prompt>
+    Finalize the project: update README status to Complete, create lessons-learned.md,
+    verify all graduation criteria are met, archive project artifacts,
+    and prepare for merge to master.
+  </prompt>
+
+  <role>Project manager performing final project closeout.</role>
+
+  <goal>
+    Project formally closed with all documentation updated, lessons captured,
+    and branch ready for merge to master.
+  </goal>
+
+  <inputs>
+    <file purpose="readme">projects/production-environment-setup-r1/README.md</file>
+    <file purpose="task-index">projects/production-environment-setup-r1/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">All 13 graduation criteria must be verified</constraint>
+    <constraint source="project">All tasks must be complete before wrap-up</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project wrap-up procedures</topic>
+    <files>
+      <file>projects/production-environment-setup-r1/README.md</file>
+      <file>projects/production-environment-setup-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Final project task. Captures institutional knowledge and prepares for merge.</background>
+    <dependencies>
+      <dependency task="ALL" status="complete">All other tasks must be complete</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Verify graduation criteria">
+      Check each of 13 graduation criteria in README.md. Mark as met or document gaps.
+    </step>
+    <step order="2" name="Update README status">
+      Change status from "Not Started" to "Complete". Update all graduation criteria checkmarks.
+    </step>
+    <step order="3" name="Create lessons learned">
+      Create projects/production-environment-setup-r1/notes/lessons-learned.md capturing:
+      - What worked well
+      - What could be improved
+      - Unexpected challenges
+      - Recommendations for future deployments
+    </step>
+    <step order="4" name="Final TASK-INDEX update">
+      Verify all tasks marked complete in TASK-INDEX.md.
+    </step>
+    <step order="5" name="Prepare for merge">
+      Run /push-to-github to ensure all changes committed and pushed.
+      Create or update PR for final review.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/production-environment-setup-r1/README.md (updated status)</output>
+    <output type="docs">projects/production-environment-setup-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md status is "Complete"</criterion>
+    <criterion testable="true">All 13 graduation criteria verified and checked</criterion>
+    <criterion testable="true">Lessons learned document created</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked complete</criterion>
+    <criterion testable="true">All changes committed and pushed to remote</criterion>
+  </acceptance-criteria>
+</task>

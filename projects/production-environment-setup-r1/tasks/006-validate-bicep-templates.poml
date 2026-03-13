@@ -1,0 +1,89 @@
+<task id="PRODENV-006" project="Production Environment Setup R1">
+  <metadata>
+    <title>Validate Bicep templates with az deployment group what-if</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-C</parallel-group>
+    <tags>bicep, validation, infrastructure</tags>
+  </metadata>
+
+  <prompt>
+    Validate all Bicep templates (platform.bicep, customer.bicep) and parameter files
+    using az bicep build for syntax and az deployment group what-if for deployment
+    simulation. Fix any issues found.
+  </prompt>
+
+  <role>
+    Azure infrastructure engineer experienced with Bicep validation and deployment simulation.
+  </role>
+
+  <goal>
+    All Bicep templates pass syntax validation and what-if simulation without errors,
+    confirming they will deploy correctly to production.
+  </goal>
+
+  <inputs>
+    <file purpose="platform-template">infrastructure/bicep/platform.bicep</file>
+    <file purpose="customer-template">infrastructure/bicep/customer.bicep</file>
+    <file purpose="params">infrastructure/bicep/parameters/platform-prod.bicepparam</file>
+    <file purpose="params">infrastructure/bicep/parameters/demo-customer.bicepparam</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Do NOT actually deploy — use what-if only</constraint>
+    <constraint source="FR-10">Templates must be idempotent</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bicep validation and what-if deployment</topic>
+    <files>
+      <file>infrastructure/bicep/platform.bicep</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is a validation gate before actual deployment. What-if shows what resources
+      would be created/modified without making changes.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-001" status="complete">platform.bicep must exist</dependency>
+      <dependency task="PRODENV-002" status="complete">customer.bicep must exist</dependency>
+      <dependency task="PRODENV-003" status="complete">Parameter files must exist</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Syntax validation">
+      Run az bicep build on platform.bicep and customer.bicep. Fix any syntax errors.
+    </step>
+    <step order="2" name="What-if platform">
+      Run az deployment group what-if for platform.bicep with platform-prod params.
+      Review output for expected resources.
+    </step>
+    <step order="3" name="What-if customer">
+      Run az deployment group what-if for customer.bicep with demo-customer params.
+      Review output for expected resources.
+    </step>
+    <step order="4" name="Document results">
+      Create validation report noting any warnings, expected resource counts, and confirmation.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for Bicep build and what-if</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Validation results documented in task completion</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build succeeds for both templates with zero errors</criterion>
+    <criterion testable="true">az deployment group what-if shows expected resources for platform</criterion>
+    <criterion testable="true">az deployment group what-if shows expected resources for customer</criterion>
+    <criterion testable="true">No warnings or errors in what-if output (or documented and accepted)</criterion>
+  </acceptance-criteria>
+</task>

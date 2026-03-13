@@ -1,0 +1,88 @@
+<task id="PRODENV-027" project="Production Environment Setup R1">
+  <metadata>
+    <title>Run full smoke test suite and document gaps</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-E</parallel-group>
+    <tags>testing, validation, smoke-tests</tags>
+  </metadata>
+
+  <prompt>
+    Run the complete smoke test suite (Test-Deployment.ps1) against the production
+    platform and demo customer. Document all results, identify gaps, and create
+    remediation tasks for any failures.
+  </prompt>
+
+  <role>
+    QA engineer performing comprehensive production validation.
+  </role>
+
+  <goal>
+    Complete smoke test report covering all services (BFF API, Dataverse, SPE, AI)
+    with pass/fail results and remediation plan for any failures.
+  </goal>
+
+  <inputs>
+    <file purpose="test-script">scripts/Test-Deployment.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-07">Must verify BFF API, Dataverse, SPE, and AI services</constraint>
+    <constraint source="project">All tests must pass or have documented remediation plan</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Production smoke testing</topic>
+    <files>
+      <file>scripts/Test-Deployment.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Final validation after demo deployment. This confirms the complete stack
+      is operational. Any failures create remediation tasks before moving to CI/CD.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-025" status="complete">Sample data loaded</dependency>
+      <dependency task="PRODENV-026" status="complete">User access configured</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Run platform smoke tests">
+      Test-Deployment.ps1 -Scope Platform. Verify shared resources.
+    </step>
+    <step order="2" name="Run demo customer smoke tests">
+      Test-Deployment.ps1 -Scope Customer -CustomerId demo. Verify customer resources.
+    </step>
+    <step order="3" name="Run end-to-end tests">
+      Test complete user workflow: sign in → view documents → AI query → create record.
+    </step>
+    <step order="4" name="Document results">
+      Create comprehensive test report with pass/fail for each test.
+      Document any gaps or failures with remediation plan.
+    </step>
+    <step order="5" name="Create remediation tasks">
+      For any failures, create follow-up tasks with priority and owner.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell</tool>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Comprehensive smoke test report with remediation plan</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All platform smoke tests pass</criterion>
+    <criterion testable="true">All demo customer smoke tests pass</criterion>
+    <criterion testable="true">Test-Deployment.ps1 completes in under 5 minutes</criterion>
+    <criterion testable="true">Test report documents all results with evidence</criterion>
+    <criterion testable="true">Any failures have documented remediation plan</criterion>
+  </acceptance-criteria>
+</task>

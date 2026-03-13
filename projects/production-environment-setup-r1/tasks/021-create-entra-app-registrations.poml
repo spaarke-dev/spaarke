@@ -1,0 +1,96 @@
+<task id="PRODENV-021" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Entra ID app registrations (BFF API prod, Dataverse S2S prod)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-A</parallel-group>
+    <tags>entra-id, authentication, configuration</tags>
+  </metadata>
+
+  <prompt>
+    Create production Entra ID app registrations in tenant a221a95e-... for:
+    (1) BFF API production with appropriate API permissions and redirect URIs,
+    (2) Dataverse S2S service principal for server-to-server authentication.
+    Configure client secrets/certificates and store in platform Key Vault.
+  </prompt>
+
+  <role>
+    Identity and access management specialist experienced with Entra ID and Azure AD app registrations.
+  </role>
+
+  <goal>
+    Production-ready Entra ID app registrations with credentials securely stored
+    in Key Vault, ready for BFF API and Dataverse S2S authentication.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-08">Client secrets stored in Key Vault only</constraint>
+    <constraint source="FR-11">App registration names follow spaarke- naming</constraint>
+    <constraint source="project">Same Entra ID tenant as dev (a221a95e-...)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Entra ID app registrations</topic>
+    <files>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>scripts/Register-BffApi-WithCertificate.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF API needs an Entra ID app registration for authentication. The Dataverse
+      S2S registration enables server-to-server communication without user context.
+      These are created in the same tenant as dev but with production-specific names.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Review existing registrations">
+      Check existing dev app registrations for reference configuration.
+      Read Register-BffApi-WithCertificate.ps1 for patterns.
+    </step>
+    <step order="2" name="Create BFF API prod registration">
+      Create app registration: spaarke-bff-api-prod
+      - Configure redirect URIs for production
+      - Set API permissions (Microsoft Graph, Dataverse)
+      - Generate client secret or certificate
+      - Store credentials in sprk-platform-prod-kv
+    </step>
+    <step order="3" name="Create Dataverse S2S registration">
+      Create app registration: spaarke-dataverse-s2s-prod
+      - Configure Dataverse API permissions
+      - Generate client secret
+      - Store in platform Key Vault
+    </step>
+    <step order="4" name="Verify authentication">
+      Test token acquisition for both registrations.
+    </step>
+    <step order="5" name="Document registrations">
+      Record app IDs, tenant ID, configured permissions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI (az ad app)</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">App registration details (IDs, permissions, Key Vault secret names)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API prod app registration created with correct permissions</criterion>
+    <criterion testable="true">Dataverse S2S prod app registration created</criterion>
+    <criterion testable="true">All credentials stored in sprk-platform-prod-kv</criterion>
+    <criterion testable="true">Token acquisition succeeds for both registrations</criterion>
+    <criterion testable="true">Registration names follow spaarke- naming convention</criterion>
+  </acceptance-criteria>
+</task>

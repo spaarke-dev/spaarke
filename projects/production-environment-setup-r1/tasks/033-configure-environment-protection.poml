@@ -1,0 +1,90 @@
+<task id="PRODENV-033" project="Production Environment Setup R1">
+  <metadata>
+    <title>Configure GitHub environment protection rules</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <parallel-group>P4-B</parallel-group>
+    <tags>github, security, ci-cd, configuration</tags>
+  </metadata>
+
+  <prompt>
+    Configure GitHub environment protection rules for staging and production environments.
+    Set up required reviewers, deployment branches, and wait timers. Document required
+    GitHub Actions secrets.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with GitHub repository administration and CI/CD security.
+  </role>
+
+  <goal>
+    GitHub environments configured with appropriate protection rules ensuring
+    production deployments require approval and staging has basic gates.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-09">All workflows must have environment protection</constraint>
+    <constraint source="NFR-05">Audit trail for deployments</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GitHub environment protection</topic>
+    <files>
+      <file>.github/workflows/deploy-platform.yml</file>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.github/workflows/provision-customer.yml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      GitHub environments provide deployment protection rules. Production requires
+      manual approval. Staging can auto-deploy but with branch restrictions.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-030" status="complete">deploy-platform.yml exists</dependency>
+      <dependency task="PRODENV-031" status="complete">deploy-bff-api.yml exists</dependency>
+      <dependency task="PRODENV-032" status="complete">provision-customer.yml exists</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create staging environment">
+      Configure staging: deployment branch (master only), no wait timer.
+    </step>
+    <step order="2" name="Create production environment">
+      Configure production: required reviewers, deployment branch (master),
+      optional wait timer.
+    </step>
+    <step order="3" name="Document required secrets">
+      Document all GitHub Actions secrets needed:
+      AZURE_CREDENTIALS, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID,
+      PAC_CREDENTIALS, etc.
+    </step>
+    <step order="4" name="Verify configuration">
+      Confirm environments appear in repository settings.
+      Verify protection rules are active.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">GitHub environment configuration documented</output>
+    <output type="report">Required secrets inventory</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Staging environment created with branch restriction</criterion>
+    <criterion testable="true">Production environment created with required reviewers</criterion>
+    <criterion testable="true">Required GitHub secrets documented</criterion>
+    <criterion testable="true">Protection rules verified active in repository settings</criterion>
+  </acceptance-criteria>
+</task>

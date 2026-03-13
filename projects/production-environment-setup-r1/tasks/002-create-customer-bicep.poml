@@ -1,0 +1,101 @@
+<task id="PRODENV-002" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create customer.bicep from existing modules</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-A</parallel-group>
+    <tags>bicep, infrastructure, customer</tags>
+  </metadata>
+
+  <prompt>
+    Create the per-customer Bicep template (customer.bicep) that deploys all customer-specific
+    Azure resources to rg-spaarke-{customerId}-prod. This template is run once per customer
+    onboarding and provisions isolated data resources.
+  </prompt>
+
+  <role>
+    Azure infrastructure engineer experienced with Bicep templates and multi-tenant resource isolation.
+  </role>
+
+  <goal>
+    A working customer.bicep that deploys per-customer resources: Storage Account, Key Vault,
+    Service Bus namespace, and Redis Cache — all in a dedicated resource group following
+    the naming standard with customer ID parameterized.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="naming-convention">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    <file purpose="reference-template">infrastructure/bicep/model2-full.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-08">All secrets stored in customer Key Vault</constraint>
+    <constraint source="FR-10">Template must be idempotent</constraint>
+    <constraint source="FR-11">All resources follow sprk_/spaarke- naming with customer ID</constraint>
+    <constraint source="NFR-03">Customer resources isolated — failure must not impact others</constraint>
+    <constraint source="NFR-04">Resources tagged for cost tracking</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Bicep per-customer resource provisioning</topic>
+    <files>
+      <file>infrastructure/bicep/modules/storage-account.bicep</file>
+      <file>infrastructure/bicep/modules/key-vault.bicep</file>
+      <file>infrastructure/bicep/modules/service-bus.bicep</file>
+      <file>infrastructure/bicep/modules/redis.bicep</file>
+      <file>infrastructure/bicep/model2-full.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Each customer gets their own resource group with isolated data resources.
+      The shared platform (platform.bicep, task 001) hosts compute and AI services.
+      This template is called by Provision-Customer.ps1 during onboarding.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Study customer resource modules">
+      Read storage-account.bicep, key-vault.bicep, service-bus.bicep, redis.bicep modules.
+    </step>
+    <step order="2" name="Design parameter structure">
+      Define parameters: customerId, environmentName, location, platformKeyVaultName.
+      Customer ID drives all resource naming.
+    </step>
+    <step order="3" name="Create customer.bicep">
+      Create infrastructure/bicep/customer.bicep composing:
+      - Storage Account (sprk{customer}{env}sa)
+      - Key Vault (sprk-{customer}-{env}-kv)
+      - Service Bus (spaarke-{customer}-{env}-sb)
+      - Redis Cache (spaarke-{customer}-{env}-cache)
+      Add Azure tags: customer, environment, managedBy, createdDate.
+    </step>
+    <step order="4" name="Add outputs">
+      Export connection strings, endpoints, Key Vault URI for use by provisioning scripts.
+    </step>
+    <step order="5" name="Validate syntax">
+      Run az bicep build to validate.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for Bicep validation</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/customer.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">customer.bicep exists and passes az bicep build validation</criterion>
+    <criterion testable="true">Template deploys 4 resource types (Storage, Key Vault, Service Bus, Redis)</criterion>
+    <criterion testable="true">All resource names include customerId parameter</criterion>
+    <criterion testable="true">Azure tags applied to all resources for cost tracking</criterion>
+    <criterion testable="true">Connection strings and endpoints exported as outputs</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,88 @@
+<task id="PRODENV-003" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create production parameter files</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-A</parallel-group>
+    <tags>bicep, configuration, parameters</tags>
+  </metadata>
+
+  <prompt>
+    Create Bicep parameter files for production deployment: platform-prod.bicepparam
+    (shared platform), demo-customer.bicepparam (demo customer), and
+    customer-template.bicepparam (template for new customers).
+  </prompt>
+
+  <role>
+    Azure infrastructure engineer familiar with Bicep parameterization and environment configuration.
+  </role>
+
+  <goal>
+    Three production-ready parameter files that configure platform.bicep and customer.bicep
+    for the production environment with correct naming, SKUs, and capacity settings.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="naming-convention">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-08">No secrets in parameter files — use Key Vault references</constraint>
+    <constraint source="FR-11">All resource names follow naming standard</constraint>
+    <constraint source="FR-06">Demo uses identical template as real customers</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bicep parameter files</topic>
+    <files>
+      <file>infrastructure/bicep/model2-full.bicep</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Parameter files separate environment-specific values from templates. The demo customer
+      uses the same customer.bicep as real customers (FR-06 parity). The customer-template
+      serves as a starting point when onboarding new customers.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Create platform-prod.bicepparam">
+      Configure: environmentName=prod, location=westus2, App Service P1v3,
+      AI Search Standard2 with 2 replicas, 180-day log retention.
+    </step>
+    <step order="2" name="Create demo-customer.bicepparam">
+      Configure: customerId=demo, environmentName=prod, location=westus2.
+      Follows same pattern as any customer.
+    </step>
+    <step order="3" name="Create customer-template.bicepparam">
+      Template with placeholder customerId and comments explaining each parameter.
+    </step>
+    <step order="4" name="Validate parameter files">
+      Verify parameter files reference correct Bicep templates and all required params provided.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/parameters/platform-prod.bicepparam</output>
+    <output type="code">infrastructure/bicep/parameters/demo-customer.bicepparam</output>
+    <output type="code">infrastructure/bicep/parameters/customer-template.bicepparam</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Three parameter files exist in infrastructure/bicep/parameters/</criterion>
+    <criterion testable="true">platform-prod.bicepparam specifies P1v3, westus2, Standard2 search</criterion>
+    <criterion testable="true">demo-customer.bicepparam uses customerId=demo with same template as real customers</criterion>
+    <criterion testable="true">customer-template.bicepparam has placeholder values with documentation comments</criterion>
+    <criterion testable="true">No secrets or connection strings in any parameter file</criterion>
+  </acceptance-criteria>
+</task>

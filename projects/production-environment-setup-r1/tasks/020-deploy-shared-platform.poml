@@ -1,0 +1,92 @@
+<task id="PRODENV-020" project="Production Environment Setup R1">
+  <metadata>
+    <title>Deploy shared platform (Deploy-Platform.ps1)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-A</parallel-group>
+    <tags>deployment, azure, platform, infrastructure</tags>
+  </metadata>
+
+  <prompt>
+    Execute Deploy-Platform.ps1 to deploy the shared platform infrastructure to
+    rg-spaarke-platform-prod in westus2. Verify all resources are created and operational.
+    This is the first actual production deployment.
+  </prompt>
+
+  <role>
+    Cloud infrastructure engineer executing production deployments with careful verification.
+  </role>
+
+  <goal>
+    All shared platform resources deployed and verified operational in rg-spaarke-platform-prod:
+    App Service, OpenAI, AI Search, Doc Intelligence, Monitoring, Key Vault.
+  </goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-Platform.ps1</file>
+    <file purpose="bicep-template">infrastructure/bicep/platform.bicep</file>
+    <file purpose="params">infrastructure/bicep/parameters/platform-prod.bicepparam</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Run what-if first before actual deployment</constraint>
+    <constraint source="FR-01">All resources in westus2</constraint>
+    <constraint source="FR-11">Verify naming convention compliance</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure platform deployment</topic>
+    <files>
+      <file>scripts/Deploy-Platform.ps1</file>
+      <file>infrastructure/bicep/platform.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the first real production deployment. Run what-if first, review output,
+      then deploy. Post-deployment, verify each resource is healthy.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-010" status="complete">Deploy-Platform.ps1 must exist</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Pre-deployment review">
+      Run Deploy-Platform.ps1 with -WhatIf. Review expected changes.
+    </step>
+    <step order="2" name="Execute deployment">
+      Run Deploy-Platform.ps1 for real. Monitor for errors.
+    </step>
+    <step order="3" name="Verify resources">
+      Check each resource: App Service responds, OpenAI endpoint accessible,
+      AI Search index operational, Key Vault accessible, App Insights collecting.
+    </step>
+    <step order="4" name="Configure autoscaling">
+      Set up autoscaling rules on App Service Plan if not in Bicep.
+    </step>
+    <step order="5" name="Document deployment">
+      Record deployment timestamp, resource IDs, any issues encountered.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Deployment verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Resource group rg-spaarke-platform-prod exists in westus2</criterion>
+    <criterion testable="true">All 7 resource types deployed and in healthy state</criterion>
+    <criterion testable="true">App Service responds (even without code deployed yet)</criterion>
+    <criterion testable="true">Key Vault accessible with correct access policies</criterion>
+    <criterion testable="true">App Insights connected and collecting telemetry</criterion>
+    <criterion testable="true">All resource names follow naming convention</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,87 @@
+<task id="PRODENV-022" project="Production Environment Setup R1">
+  <metadata>
+    <title>Configure custom domain api.spaarke.com + SSL</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-B</parallel-group>
+    <tags>dns, ssl, app-service, configuration</tags>
+  </metadata>
+
+  <prompt>
+    Configure the custom domain api.spaarke.com on the production App Service with
+    Azure-managed SSL certificate. Set up DNS records and verify domain ownership.
+  </prompt>
+
+  <role>
+    Cloud infrastructure engineer experienced with DNS, SSL, and Azure App Service custom domains.
+  </role>
+
+  <goal>
+    BFF API accessible at https://api.spaarke.com with valid SSL certificate
+    and automatic renewal.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-13">Domain: api.spaarke.com with Azure-managed SSL</constraint>
+    <constraint source="project">Use Azure-managed free certificate (auto-renewal)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure App Service custom domains and SSL</topic>
+    <files>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The production API must be accessible at api.spaarke.com. Azure-managed SSL
+      provides automatic certificate renewal. DNS must be configured with CNAME or
+      A record pointing to the App Service.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-020" status="complete">App Service must be deployed</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Configure DNS">
+      Create CNAME record for api.spaarke.com pointing to App Service default hostname.
+      Or create A record with App Service IP + TXT verification record.
+    </step>
+    <step order="2" name="Add custom domain to App Service">
+      az webapp config hostname add for api.spaarke.com.
+    </step>
+    <step order="3" name="Create managed certificate">
+      az webapp config ssl create for Azure-managed certificate.
+      Bind to custom domain with SNI SSL.
+    </step>
+    <step order="4" name="Verify HTTPS access">
+      Test https://api.spaarke.com responds (may show default page until BFF deployed).
+      Verify certificate is valid and auto-renewal configured.
+    </step>
+    <step order="5" name="Configure CORS">
+      Update App Service CORS settings for production origins.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Domain configuration and SSL verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">api.spaarke.com resolves to App Service</criterion>
+    <criterion testable="true">HTTPS works with valid SSL certificate</criterion>
+    <criterion testable="true">Certificate is Azure-managed with auto-renewal</criterion>
+    <criterion testable="true">HTTP redirects to HTTPS</criterion>
+  </acceptance-criteria>
+</task>

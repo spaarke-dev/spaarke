@@ -1,0 +1,100 @@
+<task id="PRODENV-015" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Decommission-Customer.ps1 (customer teardown)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-B</parallel-group>
+    <tags>powershell, decommission, customer</tags>
+  </metadata>
+
+  <prompt>
+    Create Decommission-Customer.ps1 that cleanly removes all per-customer resources
+    (Azure resource group, Dataverse environment, SPE containers, tenant registration)
+    without affecting other customers or the shared platform.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with Azure resource cleanup and safe teardown procedures.
+  </role>
+
+  <goal>
+    A safe teardown script with confirmation prompts, dry-run support, and verification
+    that only customer-specific resources are removed.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-03">Must not affect other customers or shared platform</constraint>
+    <constraint source="NFR-03">Customer isolation — only remove targeted customer</constraint>
+    <constraint source="project">Require explicit confirmation before destructive operations</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure resource teardown automation</topic>
+    <files>
+      <file>infrastructure/bicep/customer.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Customer decommissioning is the reverse of provisioning. It must safely remove
+      all customer resources. This is critical for the repeatability test (task 045)
+      where a test customer is provisioned and then decommissioned.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-002" status="complete">customer.bicep defines what resources exist</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Design teardown pipeline">
+      Define reverse provisioning steps:
+      1. Validate customer exists
+      2. De-register from BFF API tenant registry
+      3. Remove SPE containers
+      4. Delete Dataverse environment
+      5. Delete Azure resource group (removes all Azure resources)
+      6. Verify cleanup complete
+    </step>
+    <step order="2" name="Create Decommission-Customer.ps1">
+      Implement with:
+      - Parameters: CustomerId, EnvironmentName, DryRun, Force
+      - Confirmation prompt (unless -Force)
+      - DryRun mode lists what would be deleted
+      - Step-by-step execution with logging
+      - Verification after each step
+    </step>
+    <step order="3" name="Add safety checks">
+      Prevent decommissioning if: customer has active sessions, resource group name
+      doesn't match expected pattern, or platform resources would be affected.
+    </step>
+    <step order="4" name="Test syntax">
+      Validate PowerShell syntax.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Decommission-Customer.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists and parses without syntax errors</criterion>
+    <criterion testable="true">DryRun mode lists resources without deleting</criterion>
+    <criterion testable="true">Confirmation prompt required unless -Force specified</criterion>
+    <criterion testable="true">Deletes Azure resource group for customer</criterion>
+    <criterion testable="true">Deletes Dataverse environment</criterion>
+    <criterion testable="true">Safety checks prevent accidental platform resource deletion</criterion>
+    <criterion testable="true">Verification step confirms all resources removed</criterion>
+  </acceptance-criteria>
+</task>

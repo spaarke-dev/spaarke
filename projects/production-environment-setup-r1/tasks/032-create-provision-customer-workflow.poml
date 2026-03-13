@@ -1,0 +1,92 @@
+<task id="PRODENV-032" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create provision-customer.yml (manual dispatch)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>4</phase>
+    <parallel-group>P4-A</parallel-group>
+    <tags>github-actions, ci-cd, provisioning</tags>
+  </metadata>
+
+  <prompt>
+    Create GitHub Actions workflow provision-customer.yml with manual dispatch trigger
+    that accepts customer parameters (customerId, displayName) and runs
+    Provision-Customer.ps1 end-to-end.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with GitHub Actions parameterized workflows.
+  </role>
+
+  <goal>
+    A manual-dispatch workflow that provisions a new customer environment via
+    GitHub Actions with proper logging, verification, and status reporting.
+  </goal>
+
+  <inputs>
+    <file purpose="provision-script">scripts/Provision-Customer.ps1</file>
+    <file purpose="existing-workflow">.github/workflows/sdap-ci.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-09">Environment protection rules required</constraint>
+    <constraint source="FR-02">Inputs: customerId and displayName</constraint>
+    <constraint source="NFR-05">Audit trail for provisioning operations</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GitHub Actions manual dispatch workflows</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>scripts/Provision-Customer.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Customer provisioning is manual-triggered (not automated) because each new
+      customer requires deliberate decision. The workflow provides audit trail
+      and consistent execution environment.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-014" status="complete">Provision-Customer.ps1 exists</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create workflow file">
+      Create .github/workflows/provision-customer.yml with:
+      - workflow_dispatch with inputs: customerId (required), displayName (required)
+      - Azure login
+      - Run Provision-Customer.ps1 with inputs
+      - Run Test-Deployment.ps1 for verification
+      - Output provisioning summary
+    </step>
+    <step order="2" name="Add environment protection">
+      Reference 'production' environment with approval.
+    </step>
+    <step order="3" name="Add artifact upload">
+      Upload provisioning logs as workflow artifacts for audit.
+    </step>
+    <step order="4" name="Validate workflow">
+      Check YAML syntax.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/provision-customer.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow has manual dispatch with customerId and displayName inputs</criterion>
+    <criterion testable="true">Runs Provision-Customer.ps1 with provided parameters</criterion>
+    <criterion testable="true">Includes post-provisioning verification step</criterion>
+    <criterion testable="true">Provisioning logs uploaded as artifacts</criterion>
+    <criterion testable="true">Environment protection for production</criterion>
+    <criterion testable="true">Valid YAML syntax</criterion>
+  </acceptance-criteria>
+</task>

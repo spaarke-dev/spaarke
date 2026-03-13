@@ -1,0 +1,116 @@
+<task id="PRODENV-014" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Provision-Customer.ps1 (end-to-end customer provisioning)</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-B</parallel-group>
+    <tags>powershell, provisioning, customer, automation</tags>
+  </metadata>
+
+  <prompt>
+    Create Provision-Customer.ps1 — the master customer onboarding script that orchestrates
+    the full provisioning pipeline: Azure resources → Key Vault secrets → Dataverse environment
+    (via Admin API) → solution import → SPE containers → tenant registration → smoke tests.
+  </prompt>
+
+  <role>
+    Senior DevOps engineer experienced with Azure, Power Platform, and end-to-end automation.
+  </role>
+
+  <goal>
+    A single script that provisions a complete customer environment requiring only
+    customerId and displayName as inputs, completing in under 30 minutes.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="customer-bicep">infrastructure/bicep/customer.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-02">Requires only customerId and displayName as inputs</constraint>
+    <constraint source="FR-06">Demo deployed via same script as real customers</constraint>
+    <constraint source="FR-14">Dataverse via Power Platform Admin API (not manual)</constraint>
+    <constraint source="FR-10">Idempotent — safe to re-run if partially failed</constraint>
+    <constraint source="NFR-01">Must complete in under 30 minutes</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Customer provisioning automation</topic>
+    <files>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Test-Deployment.ps1</file>
+      <file>scripts/Deploy-Platform.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the most complex script in the project. It orchestrates multiple sub-scripts
+      and Azure/Dataverse operations into a single workflow. Each step must be resumable
+      if the script fails partway through (idempotency). The demo environment is the
+      first customer provisioned using this exact script.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-010" status="complete">Deploy-Platform.ps1 patterns</dependency>
+      <dependency task="PRODENV-012" status="complete">Deploy-DataverseSolutions.ps1 for solution import</dependency>
+      <dependency task="PRODENV-013" status="complete">Test-Deployment.ps1 for smoke tests</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Design provisioning pipeline">
+      Define the step-by-step provisioning flow:
+      1. Validate inputs and prerequisites
+      2. Create resource group (rg-spaarke-{customerId}-prod)
+      3. Deploy customer.bicep (Azure resources)
+      4. Populate Key Vault with secrets (connection strings, API keys)
+      5. Create Dataverse environment via Power Platform Admin API
+      6. Wait for Dataverse provisioning
+      7. Import managed solutions (Deploy-DataverseSolutions.ps1)
+      8. Provision SPE containers
+      9. Register customer in BFF API tenant registry
+      10. Run smoke tests (Test-Deployment.ps1)
+    </step>
+    <step order="2" name="Create Provision-Customer.ps1">
+      Implement each step with:
+      - Step tracking (resume from last successful step)
+      - Comprehensive error handling
+      - Timeout handling (especially Dataverse provisioning)
+      - Progress logging with timestamps
+    </step>
+    <step order="3" name="Add Admin API integration">
+      Implement Power Platform Admin API calls for Dataverse environment creation.
+      Include fallback documentation for manual creation if API fails.
+    </step>
+    <step order="4" name="Add resumability">
+      Track completed steps in a state file so script can resume from failure point.
+    </step>
+    <step order="5" name="Test syntax">
+      Validate PowerShell syntax and parameter validation.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Provision-Customer.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists and parses without syntax errors</criterion>
+    <criterion testable="true">Requires only CustomerId and DisplayName as mandatory parameters</criterion>
+    <criterion testable="true">Creates Azure resource group and deploys customer.bicep</criterion>
+    <criterion testable="true">Creates Dataverse environment via Power Platform Admin API</criterion>
+    <criterion testable="true">Imports managed solutions via Deploy-DataverseSolutions.ps1</criterion>
+    <criterion testable="true">Runs smoke tests on completion</criterion>
+    <criterion testable="true">Supports resumability from last successful step</criterion>
+    <criterion testable="true">Manual fallback documented for Dataverse creation if API fails</criterion>
+  </acceptance-criteria>
+</task>
