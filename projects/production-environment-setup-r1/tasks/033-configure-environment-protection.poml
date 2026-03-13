@@ -1,7 +1,7 @@
 <task id="PRODENV-033" project="Production Environment Setup R1">
   <metadata>
     <title>Configure GitHub environment protection rules</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>4</phase>
     <parallel-group>P4-B</parallel-group>

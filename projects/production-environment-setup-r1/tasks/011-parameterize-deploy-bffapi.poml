@@ -1,7 +1,7 @@
 <task id="PRODENV-011" project="Production Environment Setup R1">
   <metadata>
     <title>Parameterize Deploy-BffApi.ps1 for multi-environment support</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2</phase>
     <parallel-group>P2-A</parallel-group>
@@ -92,4 +92,19 @@
     <criterion testable="true">Rollback support via swap-back if post-swap health check fails</criterion>
     <criterion testable="true">Script parses without syntax errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Parameterized Deploy-BffApi.ps1 from 146 lines to 452 lines.
+    Key changes:
+    - Added 10 parameters (ResourceGroupName, AppServiceName, Environment, UseSlotDeploy, SlotName,
+      HealthCheckPath, RollbackOnFailure, MaxHealthCheckRetries, HealthCheckIntervalSeconds, PublishPath)
+    - Default values preserve dev backward compatibility (same resource group and app service)
+    - Staging slot deploy: deploy to slot -> health check -> swap -> post-swap health check
+    - Rollback: automatic swap-back if post-swap health check fails
+    - Production safety: warns if deploying without slot deploy, requires confirmation
+    - Publish path moved to deploy/api-publish (outside project source tree per azure-deployment.md)
+    - Stdout logging enabled in web.config before packaging
+    - Zip size validation (warns if > 100 MB)
+    - Reusable Test-HealthCheck function with configurable retries
+  </notes>
 </task>

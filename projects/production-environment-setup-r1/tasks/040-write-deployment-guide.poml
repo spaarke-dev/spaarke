@@ -1,7 +1,7 @@
 <task id="PRODENV-040" project="Production Environment Setup R1">
   <metadata>
     <title>Write production deployment guide (step-by-step)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>5</phase>
     <parallel-group>P5-A</parallel-group>

@@ -1,7 +1,7 @@
 <task id="PRODENV-026" project="Production Environment Setup R1">
   <metadata>
     <title>Configure demo user access (B2B guest invitations)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>3</phase>
     <parallel-group>P3-D</parallel-group>
@@ -75,6 +75,15 @@
   <outputs>
     <output type="report">Demo user access verification results</output>
   </outputs>
+
+  <notes>
+    Completed 2026-03-13. Created Invite-DemoUsers.ps1 script and demo-users.json config file.
+    Script automates B2B guest invitations via Microsoft Graph API, provides Dataverse role
+    assignment guidance, and verifies end-to-end access (Entra ID + Dataverse + SPE).
+    SPE and AI access require no separate configuration — handled via OBO flow in BFF API.
+    Updated CUSTOMER-ONBOARDING-RUNBOOK.md Section 5b with automated workflow.
+    Updated scripts/README.md with Invite-DemoUsers.ps1 registry entry.
+  </notes>
 
   <acceptance-criteria>
     <criterion testable="true">B2B guest invitations sent and accepted</criterion>

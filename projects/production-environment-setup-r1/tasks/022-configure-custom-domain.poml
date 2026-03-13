@@ -1,7 +1,7 @@
 <task id="PRODENV-022" project="Production Environment Setup R1">
   <metadata>
     <title>Configure custom domain api.spaarke.com + SSL</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>3</phase>
     <parallel-group>P3-B</parallel-group>
@@ -84,4 +84,17 @@
     <criterion testable="true">Certificate is Azure-managed with auto-renewal</criterion>
     <criterion testable="true">HTTP redirects to HTTPS</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Created two automation scripts:
+    - Configure-CustomDomain.ps1: End-to-end custom domain setup (DNS validation,
+      hostname binding, Azure-managed SSL, HTTPS enforcement, CORS configuration).
+      Supports -DryRun, -ShowDnsInstructions, -SkipDnsCheck flags.
+    - Test-CustomDomain.ps1: Comprehensive verification of DNS, SSL, HTTPS redirect,
+      and CORS. Reports PASS/WARN/FAIL for each check.
+    Updated auth-azure-resources.md with Production Custom Domain section.
+    Updated scripts/README.md with new script entries.
+    Note: DNS records must be configured manually at the domain registrar before
+    running the script. The script validates DNS but does not create records.
+  </notes>
 </task>

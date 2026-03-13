@@ -1,7 +1,7 @@
 <task id="PRODENV-006" project="Production Environment Setup R1">
   <metadata>
     <title>Validate Bicep templates with az deployment group what-if</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <parallel-group>P1-C</parallel-group>
@@ -86,4 +86,33 @@
     <criterion testable="true">az deployment group what-if shows expected resources for customer</criterion>
     <criterion testable="true">No warnings or errors in what-if output (or documented and accepted)</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13.
+
+    ISSUES FOUND AND FIXED:
+    1. platform-prod.bicepparam had `using '../stacks/platform.bicep'` — file did not exist.
+       Fixed to `using '../platform.bicep'` (root-level template).
+    2. demo-customer.bicepparam had `using '../stacks/customer.bicep'` — file did not exist.
+       Fixed to `using '../customer.bicep'` (root-level template).
+    3. platform-prod.bicepparam used wrong parameter names:
+       - `appServiceSku` → `appServicePlanSku`
+       - `logRetentionInDays` → `logRetentionDays`
+    4. platform-prod.bicepparam had parameters not in platform.bicep:
+       - Removed: redisSku, redisCapacity, aiSearchPartitionCount, enableAiFoundry,
+         enableMonitoringDashboard, alertNotificationEmail
+    5. demo-customer.bicepparam had parameters for model1-customer.bicep stack, not root customer.bicep:
+       - Removed: customerName, sharedKeyVaultName, sharedAiSearchEndpoint, dataverseUrl, speContainerId
+       - Added: environmentName, location, platformKeyVaultName, storageSku, serviceBusSku, redisSku, redisCapacity
+
+    VALIDATION RESULTS:
+    - az bicep build: Both templates compile with zero errors
+    - az bicep build-params: Both param files validate successfully
+    - All 16 Bicep modules compile individually with zero errors
+    - 1 warning (outputs-should-not-contain-secrets in ai-search.bicep) — pre-existing, suppressed where used
+    - customer.bicep what-if: SUCCESS — 14 resources to create (all expected)
+    - platform.bicep what-if: Template valid but Azure subscription lacks OpenAI S0 quota
+      (SpecialFeatureOrQuotaIdRequired error — subscription issue, not template issue)
+    - platform.bicep ARM JSON output: 10 top-level resources confirmed
+  </notes>
 </task>

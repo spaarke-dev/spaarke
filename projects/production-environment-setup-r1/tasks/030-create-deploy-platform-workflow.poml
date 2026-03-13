@@ -1,7 +1,7 @@
 <task id="PRODENV-030" project="Production Environment Setup R1">
   <metadata>
     <title>Create deploy-platform.yml (manual dispatch, what-if + deploy)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>4</phase>
     <parallel-group>P4-A</parallel-group>

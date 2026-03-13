@@ -1,7 +1,7 @@
 <task id="PRODENV-014" project="Production Environment Setup R1">
   <metadata>
     <title>Create Provision-Customer.ps1 (end-to-end customer provisioning)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <phase>2</phase>
     <parallel-group>P2-B</parallel-group>

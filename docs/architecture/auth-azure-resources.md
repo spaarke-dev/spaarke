@@ -688,6 +688,159 @@ Update the [Client Secrets Inventory](#client-secrets-inventory) section in this
 
 ---
 
+## Production App Registrations
+
+> **Created by**: `scripts/Register-EntraAppRegistrations.ps1`
+> **Verified by**: `scripts/Test-EntraAppRegistrations.ps1`
+> **Tenant**: Same as dev (`a221a95e-6abc-4434-aecc-e48338a1b2f2`)
+
+### Production BFF API App (spaarke-bff-api-prod)
+
+| Property | Value |
+|----------|-------|
+| **Display Name** | `spaarke-bff-api-prod` |
+| **Application (client) ID** | *(set after creation — stored in Key Vault as `BFF-API-ClientId`)* |
+| **Application ID URI** | `api://{client-id}` |
+| **Platform** | Web |
+| **Purpose** | Production BFF API: validates user tokens, performs OBO for Graph + Dataverse |
+
+**Redirect URIs**:
+```
+https://api.spaarke.com/.auth/login/aad/callback
+```
+
+**Exposed API Scopes**:
+```
+api://{client-id}/user_impersonation
+```
+
+**API Permissions** (Delegated):
+- Microsoft Graph: `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `Mail.Send`
+- Dynamics CRM: `user_impersonation`
+
+**Known Client Applications**: *(configured after PCF and Code Page prod client registrations are created)*
+
+**Key Vault Secrets** (`sprk-platform-prod-kv`):
+
+| Secret Name | Content |
+|-------------|---------|
+| `TenantId` | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
+| `BFF-API-ClientId` | Application (client) ID |
+| `BFF-API-ClientSecret` | Client secret (24-month expiry) |
+| `BFF-API-Audience` | `api://{client-id}` |
+
+---
+
+### Production Dataverse S2S App (spaarke-dataverse-s2s-prod)
+
+| Property | Value |
+|----------|-------|
+| **Display Name** | `spaarke-dataverse-s2s-prod` |
+| **Application (client) ID** | *(set after creation — stored in Key Vault as `Dataverse-S2S-ClientId`)* |
+| **Platform** | Web (no redirect URI needed) |
+| **Purpose** | Server-to-server Dataverse authentication (ServiceClient, AuthType=ClientSecret) |
+
+**API Permissions** (Delegated):
+- Dynamics CRM: `user_impersonation`
+
+**Key Vault Secrets** (`sprk-platform-prod-kv`):
+
+| Secret Name | Content |
+|-------------|---------|
+| `Dataverse-S2S-ClientId` | Application (client) ID |
+| `Dataverse-S2S-ClientSecret` | Client secret (24-month expiry) |
+
+---
+
+### Production vs Dev Comparison
+
+| Property | Dev | Production |
+|----------|-----|------------|
+| **BFF API Name** | SPE BFF API | spaarke-bff-api-prod |
+| **BFF API Client ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | *(after creation)* |
+| **S2S Name** | DSM-SPE Dev 2 | spaarke-dataverse-s2s-prod |
+| **S2S Client ID** | `170c98e1-d486-4355-bcbe-170454e0207c` | *(after creation)* |
+| **Redirect URI** | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
+| **Secret Storage** | App Service settings / user-secrets | Key Vault (`sprk-platform-prod-kv`) |
+| **Naming** | Legacy (pre-convention) | FR-11 compliant (`spaarke-` prefix) |
+
+---
+
+### Post-Creation Manual Steps
+
+1. **Admin Consent**: Global Administrator must grant admin consent for both registrations
+2. **Dataverse Application Users**: After Dataverse environment provisioning, register both apps as Application Users with appropriate security roles
+3. **Known Client Applications**: After PCF/Code Page production client registrations are created, add their client IDs to `knownClientApplications` on the BFF API app
+4. **SPE Container Type Registration**: Run `Register-BffApi-WithCertificate.ps1` (modified for prod) to register the BFF API with the production SPE container type
+
+---
+
+## Production Custom Domain & SSL
+
+> **Configured by**: `scripts/Configure-CustomDomain.ps1`
+> **Verified by**: `scripts/Test-CustomDomain.ps1`
+
+### Custom Domain Configuration
+
+| Property | Value |
+|----------|-------|
+| **Custom Domain** | `api.spaarke.com` |
+| **App Service** | `spaarke-bff-prod` |
+| **Default Hostname** | `spaarke-bff-prod.azurewebsites.net` |
+| **Resource Group** | `rg-spaarke-platform-prod` |
+| **SSL Certificate** | Azure-managed (auto-renewal) |
+| **HTTPS-Only** | Enabled (HTTP -> HTTPS redirect) |
+
+### DNS Records Required
+
+| Type | Name | Value | TTL |
+|------|------|-------|-----|
+| CNAME | `api` | `spaarke-bff-prod.azurewebsites.net` | 3600 |
+
+**Alternative** (if CNAME not supported at apex):
+- A record: `api` -> App Service IP
+- TXT record: `asuid.api` -> domain verification ID
+
+### SSL Certificate Details
+
+- **Type**: Azure-managed free certificate
+- **Auto-Renewal**: Yes (Azure handles renewal automatically)
+- **Binding**: SNI SSL
+- **Coverage**: `api.spaarke.com`
+
+### CORS Configuration
+
+CORS origins are added per customer as they onboard:
+
+```bash
+# Add origin for a new customer's Dataverse environment
+az webapp cors add \
+  --name spaarke-bff-prod \
+  --resource-group rg-spaarke-platform-prod \
+  --allowed-origins "https://spaarke-{customer}.crm.dynamics.com"
+```
+
+### Endpoints
+
+| URL | Purpose |
+|-----|---------|
+| `https://api.spaarke.com/healthz` | Health check endpoint |
+| `https://api.spaarke.com/ping` | Lightweight ping |
+| `https://api.spaarke.com/api/*` | BFF API endpoints |
+
+### Verification
+
+```powershell
+# Full verification suite
+.\Test-CustomDomain.ps1
+
+# Quick manual checks
+curl https://api.spaarke.com/healthz
+nslookup api.spaarke.com
+```
+
+---
+
 ## Related Articles
 
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) - Auth flow implementation
@@ -697,4 +850,3 @@ Update the [Client Secrets Inventory](#client-secrets-inventory) section in this
 ---
 
 *Extracted from AUTHENTICATION-ARCHITECTURE.md resource inventory and GUID reference*
-```

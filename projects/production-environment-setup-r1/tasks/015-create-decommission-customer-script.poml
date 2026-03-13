@@ -1,7 +1,7 @@
 <task id="PRODENV-015" project="Production Environment Setup R1">
   <metadata>
     <title>Create Decommission-Customer.ps1 (customer teardown)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2</phase>
     <parallel-group>P2-B</parallel-group>

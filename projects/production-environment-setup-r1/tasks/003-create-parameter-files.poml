@@ -1,7 +1,7 @@
 <task id="PRODENV-003" project="Production Environment Setup R1">
   <metadata>
     <title>Create production parameter files</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <parallel-group>P1-A</parallel-group>
@@ -85,4 +85,18 @@
     <criterion testable="true">customer-template.bicepparam has placeholder values with documentation comments</criterion>
     <criterion testable="true">No secrets or connection strings in any parameter file</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Created three production parameter files:
+    - platform-prod.bicepparam: P1v3, westus2, Standard2 AI Search (2 replicas), Premium Redis, 180-day retention
+    - demo-customer.bicepparam: customerId=demo, same customer.bicep template as real customers (FR-06)
+    - customer-template.bicepparam: Placeholder values with comprehensive documentation comments
+
+    Additional changes:
+    - Renamed existing customer-template.bicepparam (Model 2) to model2-customer-template.bicepparam
+      to avoid conflict with the new Model 1 customer template
+    - All parameter files reference future platform.bicep and customer.bicep (created by tasks 001/002)
+    - Zero secrets in any parameter file (FR-08 verified)
+    - All naming follows sprk_/spaarke- convention (FR-11 verified)
+  </notes>
 </task>

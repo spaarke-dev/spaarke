@@ -1,7 +1,7 @@
 <task id="PRODENV-002" project="Production Environment Setup R1">
   <metadata>
     <title>Create customer.bicep from existing modules</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1</phase>
     <parallel-group>P1-A</parallel-group>
@@ -98,4 +98,13 @@
     <criterion testable="true">Azure tags applied to all resources for cost tracking</criterion>
     <criterion testable="true">Connection strings and endpoints exported as outputs</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Created infrastructure/bicep/customer.bicep as a subscription-scoped
+    template deploying 4 isolated customer resources (Storage, Key Vault, Service Bus, Redis)
+    into rg-spaarke-{customerId}-{env}. All resource names parameterized with customerId.
+    Tags include customer, environment, application, managedBy, createdDate for cost tracking.
+    Outputs export all connection strings and endpoints for use by Provision-Customer.ps1.
+    Validated with az bicep build — zero errors.
+  </notes>
 </task>

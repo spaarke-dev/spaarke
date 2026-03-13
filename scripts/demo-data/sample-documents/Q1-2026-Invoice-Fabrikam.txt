@@ -1,0 +1,68 @@
+INVOICE
+
+From: Fabrikam Inc.
+      1234 Technology Drive
+      Redmond, WA 98052
+
+To:   Spaarke Legal Services
+      5678 Innovation Blvd
+      Seattle, WA 98101
+
+Invoice Number: FAB-INV-2026-Q1-0042
+Invoice Date: April 1, 2026
+Due Date: May 1, 2026
+Payment Terms: Net 30
+PO Reference: PO-2026-0187
+
+==========================================================================
+DESCRIPTION OF SERVICES
+==========================================================================
+
+Line  Description                          Qty    Rate        Amount
+----  -----------                          ---    ----        ------
+1     Consulting Services - AI Integration  120 hrs  $250.00   $30,000.00
+      (January - March 2026)
+
+2     Patent License Royalty - Q1 2026       1       $45,000   $45,000.00
+      (Per cross-licensing agreement
+       PLA-2026-0042, 3.5% of Net Revenue)
+
+3     Technical Support - Premium Tier       3 mos   $5,000    $15,000.00
+      (24/7 support with 4-hour SLA)
+
+4     Training Services                     40 hrs   $175.00    $7,000.00
+      (Staff training on document
+       classification system)
+
+5     Cloud Infrastructure Costs            3 mos    $8,500    $25,500.00
+      (Shared compute and storage for
+       AI model hosting, Q1 usage)
+
+6     Travel & Expenses                     1                   $4,950.00
+      (On-site integration sessions,
+       January 15-17 and March 4-5)
+
+==========================================================================
+                                     Subtotal:      $127,450.00
+                                     Tax (0%):           $0.00
+                                     -------------------------
+                                     TOTAL DUE:     $127,450.00
+==========================================================================
+
+PAYMENT INSTRUCTIONS:
+  Bank: First National Bank
+  Account Name: Fabrikam Inc.
+  Account Number: XXXX-XXXX-4532
+  Routing Number: XXXX-XXX-89
+  Reference: FAB-INV-2026-Q1-0042
+
+LATE PAYMENT:
+  Interest of 1.5% per month on amounts past due.
+
+QUESTIONS:
+  Contact: accounts@fabrikam.com
+  Phone: 425-555-0199
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All company names, amounts, and details are fictitious.

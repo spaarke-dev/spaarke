@@ -1,7 +1,7 @@
 <task id="PRODENV-090" project="Production Environment Setup R1">
   <metadata>
     <title>Project wrap-up (README status, lessons learned, archive)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>5</phase>
     <parallel-group>P5-C</parallel-group>

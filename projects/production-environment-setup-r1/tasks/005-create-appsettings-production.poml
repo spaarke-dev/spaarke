@@ -1,7 +1,7 @@
 <task id="PRODENV-005" project="Production Environment Setup R1">
   <metadata>
     <title>Create appsettings.Production.json with Key Vault references</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1</phase>
     <parallel-group>P1-B</parallel-group>

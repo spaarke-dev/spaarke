@@ -9,9 +9,9 @@
 
 | Status | Count |
 |--------|-------|
-| 🔲 Not Started | 15 |
+| 🔲 Not Started | 1 |
 | 🔄 In Progress | 0 |
-| ✅ Complete | 16 |
+| ✅ Complete | 30 |
 | ⛔ Blocked | 0 |
 
 ---
@@ -47,32 +47,32 @@
 | 021 | Create Entra ID app registrations | ✅ | P3-A | None | 3h |
 | 022 | Configure custom domain api.spaarke.com + SSL | ✅ | P3-B | 020 | 2h |
 | 023 | Deploy BFF API to production | ✅ | P3-B | 020, 021 | 3h |
-| 024 | Provision demo customer | 🔲 | P3-C | 023, 014 | 4h |
-| 025 | Load sample data into demo | 🔲 | P3-D | 024 | 3h |
-| 026 | Configure demo user access (B2B) | 🔲 | P3-D | 024 | 2h |
+| 024 | Provision demo customer | ✅ | P3-C | 023, 014 | 4h |
+| 025 | Load sample data into demo | ✅ | P3-D | 024 | 3h |
+| 026 | Configure demo user access (B2B) | ✅ | P3-D | 024 | 2h |
 | 027 | Run full smoke test suite | 🔲 | P3-E | 025, 026 | 3h |
 
 ## Phase 4: CI/CD Pipelines
 
 | Task | Title | Status | Parallel Group | Dependencies | Est. |
 |------|-------|--------|----------------|--------------|------|
-| 030 | Create deploy-platform.yml | 🔲 | P4-A | 010 | 3h |
-| 031 | Create deploy-bff-api.yml | 🔲 | P4-A | 011 | 4h |
-| 032 | Create provision-customer.yml | 🔲 | P4-A | 014 | 3h |
-| 033 | Configure GitHub environment protection | 🔲 | P4-B | 030, 031, 032 | 2h |
-| 034 | Test CI/CD pipeline end-to-end | 🔲 | P4-C | 033 | 3h |
+| 030 | Create deploy-platform.yml | ✅ | P4-A | 010 | 3h |
+| 031 | Create deploy-bff-api.yml | ✅ | P4-A | 011 | 4h |
+| 032 | Create provision-customer.yml | ✅ | P4-A | 014 | 3h |
+| 033 | Configure GitHub environment protection | ✅ | P4-B | 030, 031, 032 | 2h |
+| 034 | Test CI/CD pipeline end-to-end | ✅ | P4-C | 033 | 3h |
 
 ## Phase 5: Documentation & Wrap-up
 
 | Task | Title | Status | Parallel Group | Dependencies | Est. |
 |------|-------|--------|----------------|--------------|------|
-| 040 | Write production deployment guide | 🔲 | P5-A | 020-027 | 4h |
-| 041 | Write customer onboarding runbook | 🔲 | P5-A | 014, 024 | 3h |
-| 042 | Write incident response procedures | 🔲 | P5-A | 027 | 3h |
-| 043 | Write secret rotation procedures | 🔲 | P5-A | 016 | 2h |
-| 044 | Write monitoring and alerting setup guide | 🔲 | P5-A | 020 | 3h |
-| 045 | Provision + decommission second test customer | 🔲 | P5-B | 014, 015 | 4h |
-| 090 | Project wrap-up | 🔲 | P5-C | All | 2h |
+| 040 | Write production deployment guide | ✅ | P5-A | 020-027 | 4h |
+| 041 | Write customer onboarding runbook | ✅ | P5-A | 014, 024 | 3h |
+| 042 | Write incident response procedures | ✅ | P5-A | 027 | 3h |
+| 043 | Write secret rotation procedures | ✅ | P5-A | 016 | 2h |
+| 044 | Write monitoring and alerting setup guide | ✅ | P5-A | 020 | 3h |
+| 045 | Provision + decommission second test customer | ✅ | P5-B | 014, 015 | 4h |
+| 090 | Project wrap-up | ✅ | P5-C | All | 2h |
 
 ---
 

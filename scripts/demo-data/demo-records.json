@@ -1,0 +1,215 @@
+{
+  "$schema": "demo-records-schema",
+  "description": "Non-confidential sample data for the Spaarke demo environment. Creates realistic records that exercise all major features: matters, projects, events, documents, contacts, and chart definitions.",
+  "lastUpdated": "2026-03-13",
+  "version": "1.0.0",
+
+  "contacts": [
+    {
+      "firstname": "Sarah",
+      "lastname": "Mitchell",
+      "emailaddress1": "sarah.mitchell@contoso.com",
+      "telephone1": "206-555-0101",
+      "jobtitle": "General Counsel",
+      "company": "Contoso Ltd."
+    },
+    {
+      "firstname": "James",
+      "lastname": "Chen",
+      "emailaddress1": "james.chen@fabrikam.com",
+      "telephone1": "206-555-0102",
+      "jobtitle": "Associate Attorney",
+      "company": "Fabrikam Inc."
+    },
+    {
+      "firstname": "Maria",
+      "lastname": "Rodriguez",
+      "emailaddress1": "maria.rodriguez@northwindtraders.com",
+      "telephone1": "206-555-0103",
+      "jobtitle": "Contract Manager",
+      "company": "Northwind Traders"
+    },
+    {
+      "firstname": "David",
+      "lastname": "Kim",
+      "emailaddress1": "david.kim@adventureworks.com",
+      "telephone1": "206-555-0104",
+      "jobtitle": "Compliance Officer",
+      "company": "Adventure Works"
+    },
+    {
+      "firstname": "Emily",
+      "lastname": "Thompson",
+      "emailaddress1": "emily.thompson@woodgrove.com",
+      "telephone1": "206-555-0105",
+      "jobtitle": "Senior Paralegal",
+      "company": "Woodgrove Bank"
+    }
+  ],
+
+  "matters": [
+    {
+      "sprk_mattername": "Contoso Supply Agreement Review",
+      "sprk_matternumber": "MTR-2026-001",
+      "sprk_matterdescription": "Review and negotiate the annual supply agreement between Contoso Ltd. and our organization. Includes pricing terms, delivery schedules, and liability provisions. Target completion by end of Q2 2026."
+    },
+    {
+      "sprk_mattername": "Fabrikam IP Licensing",
+      "sprk_matternumber": "MTR-2026-002",
+      "sprk_matterdescription": "Intellectual property licensing arrangement with Fabrikam Inc. covering software patents and trade secrets. Includes cross-licensing terms and royalty calculations."
+    },
+    {
+      "sprk_mattername": "Northwind Data Processing Agreement",
+      "sprk_matternumber": "MTR-2026-003",
+      "sprk_matterdescription": "Data processing agreement with Northwind Traders to comply with GDPR and CCPA requirements. Covers data handling, retention policies, breach notification procedures, and sub-processor management."
+    },
+    {
+      "sprk_mattername": "Adventure Works Employment Dispute",
+      "sprk_matternumber": "MTR-2026-004",
+      "sprk_matterdescription": "Employment dispute resolution with Adventure Works regarding non-compete clause enforcement. Includes arbitration preparation, witness statements, and settlement negotiations."
+    },
+    {
+      "sprk_mattername": "Woodgrove Banking Compliance Audit",
+      "sprk_matternumber": "MTR-2026-005",
+      "sprk_matterdescription": "Annual compliance audit of Woodgrove Bank partnership agreements. Covers regulatory requirements (OCC, FDIC), anti-money laundering provisions, and consumer protection clauses."
+    }
+  ],
+
+  "projects": [
+    {
+      "sprk_projectname": "Q2 Contract Portfolio Review",
+      "sprk_projectnumber": "PRJ-2026-001",
+      "sprk_projectdescription": "Comprehensive review of all active contracts expiring in Q2 2026. Identify renewal opportunities, renegotiation candidates, and contracts requiring termination. 47 contracts across 12 vendors."
+    },
+    {
+      "sprk_projectname": "GDPR Compliance Documentation",
+      "sprk_projectnumber": "PRJ-2026-002",
+      "sprk_projectdescription": "Prepare and organize all documentation required for GDPR compliance audit. Includes data processing agreements, privacy impact assessments, and records of processing activities."
+    },
+    {
+      "sprk_projectname": "Vendor Due Diligence Program",
+      "sprk_projectnumber": "PRJ-2026-003",
+      "sprk_projectdescription": "Establish vendor due diligence program for all new and existing critical vendors. Includes risk assessment templates, financial stability checks, and ongoing monitoring procedures."
+    }
+  ],
+
+  "events": [
+    {
+      "sprk_eventname": "Contract Renewal Deadline - Contoso",
+      "sprk_eventdescription": "Annual supply agreement with Contoso Ltd. expires on June 30, 2026. Begin renewal negotiations at least 60 days prior. Key contact: Sarah Mitchell (General Counsel).",
+      "sprk_eventstatus": 100000000
+    },
+    {
+      "sprk_eventname": "GDPR Audit Preparation Meeting",
+      "sprk_eventdescription": "Kickoff meeting for GDPR compliance audit preparation. Review current DPA status, identify gaps in documentation, and assign remediation tasks. All stakeholders required.",
+      "sprk_eventstatus": 100000000
+    },
+    {
+      "sprk_eventname": "IP License Fee Payment Due",
+      "sprk_eventdescription": "Quarterly royalty payment to Fabrikam Inc. under cross-licensing agreement. Amount calculated per usage metrics from Q1 2026. Payment deadline: April 15, 2026.",
+      "sprk_eventstatus": 100000000
+    },
+    {
+      "sprk_eventname": "Board Compliance Report",
+      "sprk_eventdescription": "Prepare and submit quarterly compliance report to the board of directors. Cover regulatory changes, outstanding issues, remediation progress, and risk assessments.",
+      "sprk_eventstatus": 100000000
+    },
+    {
+      "sprk_eventname": "Vendor Risk Assessment - Northwind",
+      "sprk_eventdescription": "Conduct annual risk assessment for Northwind Traders. Evaluate financial stability, data handling practices, and regulatory compliance. Schedule on-site audit if risk score exceeds threshold.",
+      "sprk_eventstatus": 100000000
+    }
+  ],
+
+  "documents": [
+    {
+      "sprk_documentname": "Contoso Supply Agreement v3.2",
+      "sprk_documentdescription": "Master supply agreement between our organization and Contoso Ltd. covering raw materials, components, and finished goods. Version 3.2 includes amended pricing schedules and updated force majeure clauses.",
+      "sprk_documenttype": "Contract",
+      "sampleFileName": "Contoso-Supply-Agreement-v3.2.pdf"
+    },
+    {
+      "sprk_documentname": "Fabrikam Patent License Agreement",
+      "sprk_documentdescription": "Cross-licensing agreement for software patents between our organization and Fabrikam Inc. Covers patent families US-9,876,543 and US-10,234,567. Includes royalty calculation methodology.",
+      "sprk_documenttype": "License Agreement",
+      "sampleFileName": "Fabrikam-Patent-License.pdf"
+    },
+    {
+      "sprk_documentname": "Northwind DPA - GDPR Compliant",
+      "sprk_documentdescription": "Data Processing Agreement with Northwind Traders compliant with GDPR Article 28. Defines roles (controller/processor), data categories, security measures, and breach notification timelines.",
+      "sprk_documenttype": "DPA",
+      "sampleFileName": "Northwind-DPA-GDPR.pdf"
+    },
+    {
+      "sprk_documentname": "Employment Non-Compete Analysis",
+      "sprk_documentdescription": "Legal analysis of non-compete clause enforceability across jurisdictions. Covers Washington State, California, and New York statutes. Prepared for Adventure Works employment dispute.",
+      "sprk_documenttype": "Legal Analysis",
+      "sampleFileName": "NonCompete-Analysis.pdf"
+    },
+    {
+      "sprk_documentname": "Woodgrove Compliance Checklist 2026",
+      "sprk_documentdescription": "Annual compliance checklist for Woodgrove Bank partnership. Covers OCC regulatory requirements, BSA/AML obligations, consumer protection standards, and fair lending compliance.",
+      "sprk_documenttype": "Checklist",
+      "sampleFileName": "Woodgrove-Compliance-Checklist-2026.pdf"
+    },
+    {
+      "sprk_documentname": "Vendor Risk Assessment Template",
+      "sprk_documentdescription": "Standardized template for evaluating third-party vendor risk. Includes financial stability metrics, cybersecurity posture assessment, regulatory compliance verification, and business continuity evaluation.",
+      "sprk_documenttype": "Template",
+      "sampleFileName": "Vendor-Risk-Assessment-Template.pdf"
+    },
+    {
+      "sprk_documentname": "Q1 2026 Invoice Summary - Fabrikam",
+      "sprk_documentdescription": "Consolidated invoice summary for Q1 2026 services rendered by Fabrikam Inc. Includes consulting fees, license royalties, and expense reimbursements. Total: $127,450.00.",
+      "sprk_documenttype": "Invoice",
+      "sampleFileName": "Q1-2026-Invoice-Fabrikam.pdf"
+    },
+    {
+      "sprk_documentname": "Board Meeting Minutes - March 2026",
+      "sprk_documentdescription": "Minutes from the March 2026 board of directors meeting. Topics covered: Q1 financial results, compliance audit status, vendor program update, and strategic planning for H2 2026.",
+      "sprk_documenttype": "Minutes",
+      "sampleFileName": "Board-Minutes-March-2026.pdf"
+    }
+  ],
+
+  "chartDefinitions": [
+    {
+      "sprk_name": "Demo - Active Matters by Status",
+      "sprk_visualtype": 100000004,
+      "sprk_entitylogicalname": "sprk_matter",
+      "sprk_groupbyfield": "statecode",
+      "sprk_aggregationtype": 100000000,
+      "sprk_optionsjson": "{\"title\":\"Matters by Status\",\"showPercentages\":true,\"showLegend\":true}"
+    },
+    {
+      "sprk_name": "Demo - Projects Overview",
+      "sprk_visualtype": 100000000,
+      "sprk_entitylogicalname": "sprk_project",
+      "sprk_aggregationtype": 100000000,
+      "sprk_optionsjson": "{\"title\":\"Active Projects\",\"icon\":\"ProjectCollection\"}"
+    },
+    {
+      "sprk_name": "Demo - Events Timeline",
+      "sprk_visualtype": 100000002,
+      "sprk_entitylogicalname": "sprk_event",
+      "sprk_groupbyfield": "createdon",
+      "sprk_aggregationtype": 100000000,
+      "sprk_optionsjson": "{\"title\":\"Events Over Time\",\"dateGrouping\":\"month\",\"showDataPoints\":true}"
+    },
+    {
+      "sprk_name": "Demo - Documents by Type",
+      "sprk_visualtype": 100000001,
+      "sprk_entitylogicalname": "sprk_document",
+      "sprk_groupbyfield": "sprk_documenttype",
+      "sprk_aggregationtype": 100000000,
+      "sprk_optionsjson": "{\"title\":\"Documents by Type\",\"showDataLabels\":true}"
+    },
+    {
+      "sprk_name": "Demo - Document Count",
+      "sprk_visualtype": 100000000,
+      "sprk_entitylogicalname": "sprk_document",
+      "sprk_aggregationtype": 100000000,
+      "sprk_optionsjson": "{\"title\":\"Total Documents\",\"icon\":\"Document\"}"
+    }
+  ]
+}

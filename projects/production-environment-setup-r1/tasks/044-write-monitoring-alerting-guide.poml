@@ -1,7 +1,7 @@
 <task id="PRODENV-044" project="Production Environment Setup R1">
   <metadata>
     <title>Write monitoring and alerting setup guide</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>5</phase>
     <parallel-group>P5-A</parallel-group>

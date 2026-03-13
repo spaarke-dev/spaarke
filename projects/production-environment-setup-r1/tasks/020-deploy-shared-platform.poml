@@ -1,7 +1,7 @@
 <task id="PRODENV-020" project="Production Environment Setup R1">
   <metadata>
     <title>Deploy shared platform (Deploy-Platform.ps1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>3</phase>
     <parallel-group>P3-A</parallel-group>

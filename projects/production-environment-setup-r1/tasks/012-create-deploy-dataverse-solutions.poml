@@ -1,7 +1,7 @@
 <task id="PRODENV-012" project="Production Environment Setup R1">
   <metadata>
     <title>Create Deploy-DataverseSolutions.ps1 (managed solution import in order)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>2</phase>
     <parallel-group>P2-A</parallel-group>

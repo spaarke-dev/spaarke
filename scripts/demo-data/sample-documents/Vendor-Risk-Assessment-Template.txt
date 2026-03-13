@@ -1,0 +1,97 @@
+VENDOR RISK ASSESSMENT TEMPLATE
+Version 2.0
+
+Assessment Date: _______________
+Assessor: _______________
+Vendor Name: _______________
+Vendor Category: [ ] Critical  [ ] High  [ ] Medium  [ ] Low
+
+==========================================================================
+SECTION 1: VENDOR IDENTIFICATION
+==========================================================================
+
+Company Legal Name: _______________
+DBA (if different): _______________
+Country of Incorporation: _______________
+Primary Contact: _______________
+Contract Reference: _______________
+Annual Contract Value: $_______________
+Services Provided: _______________
+
+==========================================================================
+SECTION 2: FINANCIAL STABILITY (Weight: 25%)
+==========================================================================
+
+Score each item 1-5 (1=Poor, 5=Excellent)
+
+[ ] 2.1 Revenue trend (3-year) ............ Score: ___
+[ ] 2.2 Profitability ..................... Score: ___
+[ ] 2.3 Debt-to-equity ratio ............. Score: ___
+[ ] 2.4 Cash flow adequacy ............... Score: ___
+[ ] 2.5 Credit rating (D&B/Moody's) ...... Score: ___
+
+Financial Stability Score: ___ / 25
+
+==========================================================================
+SECTION 3: CYBERSECURITY POSTURE (Weight: 30%)
+==========================================================================
+
+[ ] 3.1 SOC 2 Type II certification ....... Score: ___
+[ ] 3.2 ISO 27001 certification ........... Score: ___
+[ ] 3.3 Encryption standards (at rest) .... Score: ___
+[ ] 3.4 Encryption standards (in transit) . Score: ___
+[ ] 3.5 Incident response plan ............ Score: ___
+[ ] 3.6 Penetration testing frequency ..... Score: ___
+
+Cybersecurity Score: ___ / 30
+
+==========================================================================
+SECTION 4: REGULATORY COMPLIANCE (Weight: 25%)
+==========================================================================
+
+[ ] 4.1 Industry-specific compliance ...... Score: ___
+[ ] 4.2 GDPR / CCPA readiness ............ Score: ___
+[ ] 4.3 Data residency requirements ....... Score: ___
+[ ] 4.4 Regulatory audit history .......... Score: ___
+[ ] 4.5 Litigation history ................ Score: ___
+
+Regulatory Score: ___ / 25
+
+==========================================================================
+SECTION 5: BUSINESS CONTINUITY (Weight: 20%)
+==========================================================================
+
+[ ] 5.1 BCP/DR plan documented ........... Score: ___
+[ ] 5.2 Recovery time objective (RTO) ..... Score: ___
+[ ] 5.3 Recovery point objective (RPO) .... Score: ___
+[ ] 5.4 Geographic redundancy ............. Score: ___
+
+Business Continuity Score: ___ / 20
+
+==========================================================================
+OVERALL RISK ASSESSMENT
+==========================================================================
+
+Total Score: ___ / 100
+
+Risk Rating:
+  90-100: Low Risk (annual review)
+  70-89:  Medium Risk (semi-annual review)
+  50-69:  High Risk (quarterly review + mitigation plan)
+  Below 50: Critical Risk (immediate escalation required)
+
+Recommendation: [ ] Approve  [ ] Approve with conditions  [ ] Reject
+
+Conditions/Notes:
+_______________________________________________
+
+==========================================================================
+APPROVALS
+==========================================================================
+
+Assessor Signature: _________________ Date: _________
+Risk Manager: _________________ Date: _________
+Legal Review (if >$100K): _________________ Date: _________
+
+---
+This is a SAMPLE document for demonstration purposes only.

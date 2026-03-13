@@ -1,7 +1,7 @@
 <task id="PRODENV-031" project="Production Environment Setup R1">
   <metadata>
     <title>Create deploy-bff-api.yml (push trigger, staging → swap → rollback)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>4</phase>
     <parallel-group>P4-A</parallel-group>

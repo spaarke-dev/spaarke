@@ -1,7 +1,7 @@
 <task id="PRODENV-004" project="Production Environment Setup R1">
   <metadata>
     <title>Finalize naming convention to Adopted status</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <parallel-group>P1-B</parallel-group>
