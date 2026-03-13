@@ -1,7 +1,7 @@
 <task id="PRODENV-027" project="Production Environment Setup R1">
   <metadata>
     <title>Run full smoke test suite and document gaps</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>3</phase>
     <parallel-group>P3-E</parallel-group>

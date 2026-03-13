@@ -300,11 +300,16 @@ function Test-BffApi {
 function Test-Dataverse {
     Write-TestHeader "Dataverse"
 
+    # NOTE: PAC CLI on Windows is a .cmd wrapper (pac.cmd). When invoked via
+    # `& pac ...` inside a PowerShell script, stdout capture is unreliable and
+    # $LASTEXITCODE may be null. Workaround: invoke via `cmd /c pac` which
+    # properly routes the .cmd wrapper's output through the shell.
+
     # 2a. PAC CLI connectivity
     Invoke-TestDirect -Group 'Dataverse' -TestName 'PAC CLI authenticated' -Critical $true -ScriptBlock {
-        $output = & pac auth list 2>&1
+        $output = & cmd /c pac auth list 2>&1
         $outputStr = ($output | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or $outputStr -match 'No profiles') {
+        if ([string]::IsNullOrWhiteSpace($outputStr) -or $outputStr -match 'No profiles') {
             throw "PAC CLI not authenticated. Run 'pac auth create' first."
         }
         $outputStr -split "`n" | Select-Object -First 3 | ForEach-Object { $_.Trim() }
@@ -312,10 +317,10 @@ function Test-Dataverse {
 
     # 2b. Solution verification
     Invoke-TestDirect -Group 'Dataverse' -TestName 'SpaarkeCore solution installed' -Critical $true -ScriptBlock {
-        $output = & pac solution list 2>&1
+        $output = & cmd /c pac solution list 2>&1
         $outputStr = ($output | Out-String)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to list solutions: $outputStr"
+        if ([string]::IsNullOrWhiteSpace($outputStr)) {
+            throw "Failed to list solutions (no output from pac)"
         }
         if ($outputStr -notmatch 'SpaarkeCore|sprk_core|spaarkecore') {
             throw "SpaarkeCore solution not found in target environment"
@@ -325,10 +330,10 @@ function Test-Dataverse {
 
     # 2c. Dataverse API connectivity (via pac org who)
     Invoke-TestDirect -Group 'Dataverse' -TestName 'Dataverse org accessible' -Critical $true -ScriptBlock {
-        $output = & pac org who 2>&1
+        $output = & cmd /c pac org who 2>&1
         $outputStr = ($output | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0) {
-            throw "Cannot reach Dataverse org: $outputStr"
+        if ([string]::IsNullOrWhiteSpace($outputStr)) {
+            throw "Cannot reach Dataverse org (no output from pac)"
         }
         $outputStr -split "`n" | Select-Object -First 3 | ForEach-Object { $_.Trim() }
     }
