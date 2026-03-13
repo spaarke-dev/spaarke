@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Add Quality Badges to Repository README</title>
+    <phase>4: Remediation</phase>
+    <status>pending</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>043</blocks>
+    <tags>remediation, documentation</tags>
+  </metadata>
+
+  <prompt>
+    Add quality status badges to the repository README.md. Include badges for: SonarCloud quality gate
+    status, code coverage percentage, build status (from sdap-ci.yml), and ADR compliance (from the
+    adr-audit workflow if it produces a status). Use standard badge markdown format with links to the
+    relevant dashboards. Place badges in the header area of README.md beneath the repository title.
+  </prompt>
+
+  <role>
+    Developer experience engineer specializing in repository documentation and quality dashboards.
+    Expert in GitHub Actions badge URLs, SonarCloud badge configuration, and Shields.io badge format.
+  </role>
+
+  <goal>
+    A README.md with a badges section showing the current quality status of the repository at a glance.
+    Each badge links to its corresponding dashboard or report. Badges are correct for the spaarke-dev
+    organization and update automatically based on the actual CI/SonarCloud state.
+  </goal>
+
+  <context>
+    <background>
+      Repository badges provide an instant quality signal on the repository's main page. The four badges
+      to add are:
+
+      1. Build status badge (GitHub Actions sdap-ci.yml):
+         Format: `![Build Status](https://github.com/spaarke-dev/spaarke/actions/workflows/sdap-ci.yml/badge.svg)`
+         Link: `https://github.com/spaarke-dev/spaarke/actions/workflows/sdap-ci.yml`
+
+      2. Code coverage badge (from Coverlet/SonarCloud or a coverage artifact):
+         If SonarCloud is configured: use SonarCloud coverage badge
+         If coverage badge is uploaded to a service: use that service's badge URL
+         Format: Standard Shields.io or SonarCloud badge format
+
+      3. SonarCloud quality gate badge:
+         Format: `[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=spaarke-dev_spaarke&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=spaarke-dev_spaarke)`
+         Requires the SonarCloud project key — check existing workflow configuration for the key.
+
+      4. ADR compliance badge (optional — only if the adr-audit workflow produces a badge or status):
+         Check .github/workflows/adr-audit.yml for any badge generation. If no badge exists, skip
+         this one and note it as future improvement.
+
+      Placement: Insert the badges as the first content after the repository title `# Spaarke` heading,
+      before any description prose. Use a single line with spaces between badges for readability.
+
+      The SonarCloud project key must be verified from the existing workflow configuration — do not
+      guess it. Read the SonarCloud-related workflow files to extract the correct project key.
+    </background>
+    <relevant-files>
+      <file>README.md (modify — add badges section)</file>
+      <file>.github/workflows/sdap-ci.yml (read — extract GitHub Actions badge URL format)</file>
+      <file>.github/workflows/adr-audit.yml (read — check if ADR compliance badge is generated)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Badge URLs must use the actual repository slug (spaarke-dev/spaarke or the correct organization/repo). Do not use placeholder URLs.</constraint>
+    <constraint source="spec">Each badge must link to its corresponding dashboard or report page. Badges that show a status without linking to details are less useful.</constraint>
+    <constraint source="spec">If the SonarCloud project key cannot be determined from existing workflow files, add a placeholder badge with a TODO comment rather than guessing the key.</constraint>
+    <constraint source="spec">Do not restructure the existing README.md content. Insert the badges section at the top (after title) and leave all other content unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read README.md to understand its current structure, identify the repository title heading location, and find the correct insertion point for the badges section.</step>
+    <step order="2">Read .github/workflows/sdap-ci.yml to confirm the workflow filename (for build status badge URL) and extract the GitHub organization and repository name.</step>
+    <step order="3">Read .github/workflows/adr-audit.yml to check if it generates a badge. Also check for any SonarCloud workflow file that contains the project key.</step>
+    <step order="4">Construct the build status badge: `[![Build Status](https://github.com/{org}/{repo}/actions/workflows/sdap-ci.yml/badge.svg)](https://github.com/{org}/{repo}/actions/workflows/sdap-ci.yml)` using the actual org/repo values.</step>
+    <step order="5">Construct the SonarCloud quality gate badge using the project key from step 3. If the key is not found, add a placeholder: `![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=TODO_PROJECT_KEY&metric=alert_status)` with a comment noting the key needs to be updated.</step>
+    <step order="6">Construct the code coverage badge. If SonarCloud coverage badge is available (same project key), use the SonarCloud coverage metric badge. Otherwise, note that the coverage badge requires a badge service integration as future work.</step>
+    <step order="7">Insert the badges on a single line immediately after the `# Spaarke` title in README.md, followed by a blank line before the next content section. Format: `badge1 badge2 badge3`.</step>
+    <step order="8">Review the modified README.md to ensure badges are correctly placed, markdown syntax is valid, and no existing content was accidentally removed or shifted.</step>
+    <step order="9">Update TASK-INDEX.md: change task 036 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">README.md (updated with quality badges)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md contains a badges section immediately after the repository title heading</criterion>
+    <criterion>Build status badge is present with correct GitHub Actions URL for sdap-ci.yml</criterion>
+    <criterion>SonarCloud quality gate badge is present (or a placeholder with TODO comment if project key not found)</criterion>
+    <criterion>Each badge is a linked badge (wraps the badge markdown in a link)</criterion>
+    <criterion>No existing README.md content was removed or restructured</criterion>
+    <criterion>Badge markdown syntax is valid (no broken image references)</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Install and Configure CodeRabbit for AI PR Review</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>017</blocks>
+    <tags>tooling, ai-review, coderabbit, github</tags>
+  </metadata>
+
+  <prompt>
+    Install the CodeRabbit GitHub App on the spaarke repository. Create a .coderabbit.yaml configuration file with custom review rules derived from Spaarke's ADRs and coding conventions. Configure severity levels and review scope. Set review mode to advisory-only so CodeRabbit comments never block PR merges. Evaluate the free tier before committing to a paid plan.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in CI/CD pipelines and AI-assisted code review tooling.
+  </role>
+
+  <goal>
+    CodeRabbit is installed on the spaarke GitHub repository and posts AI-generated code review comments on every PR. The .coderabbit.yaml configuration file is committed to the repository so review rules are version-controlled. CodeRabbit does not block PR merges (advisory only). Free tier is used unless it does not support private repositories.
+  </goal>
+
+  <context>
+    <background>
+      FR-03 requires an AI code reviewer that provides line-by-line review on every PR. CodeRabbit is a GitHub App that integrates with pull requests and posts review comments automatically. It supports custom instructions via .coderabbit.yaml. The Spaarke codebase has specific ADR constraints (ADR-021: Fluent v9 only, ADR-022: PCF React 16 only, ADR-010: DI minimalism) that should be surfaced by CodeRabbit's review. CodeRabbit must never block merges — its output is advisory, complementing the blocking checks in sdap-ci.yml. Per the unresolved questions in spec.md, the first step is to verify whether the free tier supports private repositories.
+    </background>
+    <relevant-files>
+      <file>.coderabbit.yaml (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-04">CodeRabbit MUST NOT block PR merges. Review mode must be advisory only. This is a hard requirement during Phase 2 — blocking mode is only enabled in Phase 3+ graduation.</constraint>
+    <constraint source="spec.md NFR-06">No API keys or tokens stored in the repository. CodeRabbit connects via GitHub App OAuth — no secrets need to be committed.</constraint>
+    <constraint source="spec.md NFR-07">Monthly cost must stay within overall $100/month budget. Evaluate and document free tier capabilities before enabling paid plan. Escalate to human decision if free tier is insufficient for private repos.</constraint>
+    <constraint source="spec.md NFR-08">All CodeRabbit configuration must be version-controlled in .coderabbit.yaml. Do not rely on web dashboard-only settings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to https://coderabbit.ai and check whether the free tier supports private GitHub repositories. Document finding. If free tier does not support private repos, flag as human escalation before proceeding with installation (cost approval required).</step>
+    <step order="2">Install the CodeRabbit GitHub App on the spaarke-dev GitHub organization, scoped to the spaarke repository only (not all repositories). Use the standard OAuth installation flow.</step>
+    <step order="3">Create .coderabbit.yaml at the repository root. Set review.auto_review.enabled: true and review.auto_review.drafts: false (skip draft PRs). Set tone to "informative".</step>
+    <step order="4">Add custom review instructions in .coderabbit.yaml referencing Spaarke ADRs. Include instructions for: (1) Fluent UI v9 only — flag @fluentui/react (v8) imports; (2) PCF controls must not use React 18 createRoot; (3) DI registrations — flag if a new interface has only one implementation; (4) API endpoints — verify ProblemDetails used for errors.</step>
+    <step order="5">Configure path-level review instructions in .coderabbit.yaml: for src/client/pcf/** paths add PCF-specific React 16 reminders; for src/server/api/** paths add .NET ADR reminders.</step>
+    <step order="6">Set review.finishing_touches.docstrings.enabled: false (we don't use auto-generated docstrings).</step>
+    <step order="7">Create a test PR (or use an existing branch) to verify CodeRabbit posts a review comment. Confirm the review comment appears and does not set a blocking status check.</step>
+    <step order="8">Document the pricing tier selected, estimated monthly cost, and any limitations in projects/code-quality-and-assurance-r1/notes/tooling-verification.md (create stub if not exists).</step>
+    <step order="9">Update TASK-INDEX.md to mark task 013 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>.coderabbit.yaml — CodeRabbit configuration with ADR-aware review rules</output>
+    <output>CodeRabbit GitHub App installed on spaarke repository</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>CodeRabbit GitHub App is installed and active on the spaarke repository</criterion>
+    <criterion>.coderabbit.yaml is committed to the repository root</criterion>
+    <criterion>CodeRabbit posts review comments on a test PR without blocking merge</criterion>
+    <criterion>Custom instructions reference ADR-021, ADR-022, and ADR-010 constraints</criterion>
+    <criterion>Path-specific instructions configured for src/client/pcf/ and src/server/api/</criterion>
+    <criterion>Free tier evaluation documented with pricing decision recorded</criterion>
+    <criterion>CodeRabbit review does NOT appear as a required status check in branch protection rules</criterion>
+  </acceptance-criteria>
+</task>

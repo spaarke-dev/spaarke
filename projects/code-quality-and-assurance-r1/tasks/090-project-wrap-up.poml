@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Project Wrap-Up: Code Quality and Assurance R1</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>043, 044, 045</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, documentation</tags>
+  </metadata>
+
+  <prompt>
+    Complete the code-quality-and-assurance-r1 project wrap-up. Update the project README.md status
+    to Complete. Create a lessons-learned.md file documenting what worked, what did not work, and
+    recommendations for the next quality improvement cycle. Archive ephemeral notes (move to
+    notes/archive/). Produce a final quality scorecard comparing before-project and after-project
+    metrics. Run /repo-cleanup to verify repository hygiene.
+  </prompt>
+
+  <role>
+    Project lead performing a structured project closure. Skilled at extracting lessons learned from
+    AI-assisted development projects and producing actionable retrospective documentation.
+  </role>
+
+  <goal>
+    A formally closed project with: an updated README showing Complete status, a lessons-learned
+    document useful for future quality projects, archived notes, and a final scorecard showing the
+    measurable quality improvement delivered. The repository passes /repo-cleanup checks.
+  </goal>
+
+  <context>
+    <background>
+      This is the final task of the code-quality-and-assurance-r1 project. The project established
+      a comprehensive automated quality system for the Spaarke repository. This wrap-up task:
+
+      1. Updates README.md status: Change status from "In Progress" to "Complete". Update the
+         completion date. Add a brief summary of what was delivered.
+
+      2. Creates lessons-learned.md: A retrospective document covering:
+         - What worked well (e.g., the Phase 1 audit approach, specific tooling choices that proved valuable)
+         - What did not work as planned (e.g., integration challenges, tasks that were harder than estimated)
+         - Recommendations for the next quality cycle (e.g., topics not covered in this project,
+           improvements to the quality system itself)
+         - Time estimates vs. actuals (if actual hours are trackable from TASK-INDEX.md)
+
+      3. Archives ephemeral notes: The notes/ directory contains working files created during the
+         project (audit reports, resolution logs, verification reports). These have permanent value
+         but are working documents, not final deliverables. Move them to notes/archive/ to distinguish
+         them from the final deliverables (docs/guides/, docs/procedures/).
+
+      4. Final quality scorecard: Compare the before-project baseline (from the initial audit notes)
+         to the after-project state. Key metrics to compare:
+         - Test coverage: baseline % vs. current %
+         - TODO/FIXME count: 96 (initial) vs. < 20 (target)
+         - Vulnerability count: initial vs. 0 directly-fixable
+         - Program.cs line count: 1,940 (initial) vs. < 500 (target)
+         - Tooling: list tools added (Prettier, Husky, SonarCloud, etc.)
+         - Automation: list new automated workflows added (nightly, weekly, hooks)
+
+      5. /repo-cleanup: Run the repo-cleanup skill or equivalent cleanup to verify the project
+         structure is clean — no stray files, no empty directories, no untracked build artifacts.
+
+      The lessons-learned.md should be genuinely useful for the next person or AI agent tasked
+      with a quality improvement project — not a formality. Be specific and honest about what
+      the project achieved and what it did not.
+    </background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r1/README.md (modify — update status to Complete)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/lessons-learned.md (create)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/ (read — review all notes for archival)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-scorecard.md (read — before-project baseline metrics)</file>
+      <file>projects/code-quality-and-assurance-r1/tasks/TASK-INDEX.md (read — task completion status for retrospective)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">The final quality scorecard must use actual measured data, not estimates. Pull current metrics from the live codebase: run `grep -rn "TODO\|FIXME" src/ | wc -l` for the current TODO count, `wc -l src/server/api/Sprk.Bff.Api/Program.cs` for the current line count, etc.</constraint>
+    <constraint source="spec">Lessons-learned.md must be honest and specific. "Things that didn't work" is as valuable as "things that worked." Vague retrospective documents provide no value for future projects.</constraint>
+    <constraint source="spec">notes/ files should be archived (moved to notes/archive/) rather than deleted. They represent the audit history and may be referenced by future quarterly audits.</constraint>
+    <constraint source="spec">Do not delete or archive the quality-system-verification.md — this is a permanent record of the acceptance verification and should remain in notes/ (not notes/archive/).</constraint>
+    <constraint source="spec">The README.md update must include a "Delivered" section listing the specific artifacts and systems created, not just a status change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/README.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-scorecard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r1/README.md to understand its current structure and find the status field and any "In Progress" sections to update.</step>
+    <step order="2">Read projects/code-quality-and-assurance-r1/tasks/TASK-INDEX.md to review which tasks completed, which may have been deferred, and the overall completion picture. Use this for the retrospective.</step>
+    <step order="3">Read projects/code-quality-and-assurance-r1/notes/quality-scorecard.md to get the before-project baseline metrics. These are compared against the current state in the final scorecard.</step>
+    <step order="4">Collect current-state metrics: run `grep -rn "TODO\|FIXME" src/ | wc -l`, `wc -l src/server/api/Sprk.Bff.Api/Program.cs`, and check the latest CI run results for coverage. Record actual current-state values.</step>
+    <step order="5">Update projects/code-quality-and-assurance-r1/README.md: change status to "Complete", add completion date, add a "Delivered" section listing: new workflow files, new skill enhancements, new documentation, remediation work completed (with measurable outcomes).</step>
+    <step order="6">Create projects/code-quality-and-assurance-r1/notes/lessons-learned.md. Include sections: What Worked Well (specific successes), What Didn't Work As Planned (honest assessment with root causes), Recommendations for Next Cycle (actionable), Time Estimates vs. Actuals (if trackable), and a brief Executive Summary.</step>
+    <step order="7">Write the final quality scorecard section in lessons-learned.md (or as a separate table in README.md): before vs. after comparison for key metrics. Use actual measured data from step 4.</step>
+    <step order="8">Create notes/archive/ directory. Move all notes files except quality-system-verification.md to notes/archive/. Files to archive: audit-bff-api.md, audit-dependencies.md, audit-typescript-pcf.md, audit-configuration.md, todo-resolution-log.md, vulnerability-resolution.md, branch-protection-config.md, documentation-audit.md, quality-scorecard.md.</step>
+    <step order="9">Invoke the /repo-cleanup skill (or run equivalent cleanup checks): verify no stray build artifacts, no empty directories, no untracked files that should be gitignored. Fix any issues found.</step>
+    <step order="10">Update TASK-INDEX.md: mark task 090 as completed. Verify all tasks in the index have a completed status (or documented deferred status). The project is now complete.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">projects/code-quality-and-assurance-r1/README.md (updated to Complete status with Delivered section)</output>
+    <output type="file">projects/code-quality-and-assurance-r1/notes/lessons-learned.md (new)</output>
+    <output type="directory">projects/code-quality-and-assurance-r1/notes/archive/ (archived working notes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md status is updated to "Complete" with a completion date</criterion>
+    <criterion>README.md includes a "Delivered" section listing specific artifacts created by the project</criterion>
+    <criterion>lessons-learned.md exists with sections: What Worked Well, What Didn't Work, Recommendations, Time Estimates vs. Actuals</criterion>
+    <criterion>Final quality scorecard includes before/after data for: TODO count, Program.cs line count, and at least 2 additional metrics</criterion>
+    <criterion>All scorecard metrics use actual measured values (not estimates)</criterion>
+    <criterion>notes/archive/ directory exists with all working notes except quality-system-verification.md</criterion>
+    <criterion>quality-system-verification.md remains in notes/ (not archived)</criterion>
+    <criterion>Repository passes /repo-cleanup checks (no stray artifacts)</criterion>
+    <criterion>TASK-INDEX.md shows all tasks as completed or explicitly deferred with justification</criterion>
+  </acceptance-criteria>
+</task>

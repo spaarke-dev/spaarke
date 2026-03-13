@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Configure Husky and lint-staged for Pre-Commit Hooks</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 011</dependencies>
+    <blocks>017</blocks>
+    <tags>tooling, git-hooks, husky</tags>
+  </metadata>
+
+  <prompt>
+    Install Husky and lint-staged at the repository root. Configure a pre-commit hook that runs: Prettier on staged .ts, .tsx, and .json files; ESLint on staged .ts and .tsx files; and dotnet format on staged .cs files. The complete pre-commit hook must finish in under 10 seconds for a typical staged change set (1-10 files). Verify the hook fires correctly on a real staged commit.
+  </prompt>
+
+  <role>
+    DevOps engineer with experience configuring git hooks for monorepo environments.
+  </role>
+
+  <goal>
+    A working Husky pre-commit hook that enforces code formatting and linting on staged files before each commit. The hook must complete in under 10 seconds for typical changes, skip on CI environments, and work correctly across the PCF, code-pages, and BFF API source trees.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 010 (Prettier) and 011 (ESLint strictening) established the formatting and linting configurations. This task wires those tools into git's pre-commit lifecycle using Husky + lint-staged so every commit is automatically checked. The 10-second constraint (NFR-03) is critical — lint-staged runs tools only on staged files (not the entire codebase) to keep hook execution fast. dotnet format must also run on staged .cs files to enforce C# formatting that aligns with .editorconfig.
+    </background>
+    <relevant-files>
+      <file>.husky/pre-commit (create)</file>
+      <file>.lintstagedrc.json (create)</file>
+      <file>package.json (modify - add husky and lint-staged devDependencies, prepare script)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-03">Pre-commit hooks MUST complete in under 10 seconds for typical staged changes (1-10 files). Use lint-staged to run tools only on staged files, not the full codebase.</constraint>
+    <constraint source="spec.md">Hook must be skippable in CI environments. Check for CI environment variable and skip hook execution when CI=true to avoid double-running in GitHub Actions.</constraint>
+    <constraint source="spec.md NFR-08">Hook configuration must be version-controlled. .husky/ directory and .lintstagedrc.json must be committed to the repository.</constraint>
+    <constraint source="project">dotnet format must target only the specific .cs files that are staged, not run a full solution format (too slow). Use dotnet format --include flag with the list of staged .cs files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check if a root-level package.json exists. If not, create a minimal one (name, version, private: true) to serve as the monorepo root for Husky installation.</step>
+    <step order="2">Install Husky and lint-staged as devDependencies: npm install --save-dev husky lint-staged</step>
+    <step order="3">Initialize Husky: npx husky init. This creates .husky/ directory and adds a prepare script to package.json.</step>
+    <step order="4">Create .husky/pre-commit hook script. The script should: check for CI=true and exit 0 if set; then run npx lint-staged.</step>
+    <step order="5">Create .lintstagedrc.json with three entries: (1) "*.{ts,tsx}" runs prettier --write then eslint --fix (in that order); (2) "*.{json,yaml,yml}" runs prettier --write; (3) "*.cs" runs a shell command that collects staged .cs files and passes them to dotnet format --include.</step>
+    <step order="6">Test the pre-commit hook by staging a small TypeScript file change and running git commit. Verify the hook fires, Prettier formats the file, ESLint runs, and the commit completes.</step>
+    <step order="7">Test with a staged .cs file change. Verify dotnet format runs only on the staged file, not the full solution.</step>
+    <step order="8">Time the hook execution on a typical staged change. If it exceeds 8 seconds, investigate and optimize (e.g., skip ESLint --fix and only report errors, or limit dotnet format scope).</step>
+    <step order="9">Verify the hook is skipped when CI=true by running: CI=true git commit --dry-run (or equivalent test).</step>
+    <step order="10">Update TASK-INDEX.md to mark task 012 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>.husky/pre-commit — Git pre-commit hook script</output>
+    <output>.lintstagedrc.json — lint-staged configuration mapping file patterns to commands</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Husky pre-commit hook fires on git commit</criterion>
+    <criterion>Prettier runs on staged .ts, .tsx, .json files</criterion>
+    <criterion>ESLint runs on staged .ts, .tsx files</criterion>
+    <criterion>dotnet format runs on staged .cs files (scoped to staged files only)</criterion>
+    <criterion>Hook completes in under 10 seconds for a 1-5 file staged change set</criterion>
+    <criterion>Hook is skipped when CI=true environment variable is set</criterion>
+    <criterion>.husky/ directory and .lintstagedrc.json are committed to the repository</criterion>
+  </acceptance-criteria>
+</task>

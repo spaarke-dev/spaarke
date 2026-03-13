@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Refactor Program.cs into Feature Modules</title>
+    <phase>4: Remediation</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 008</dependencies>
+    <blocks>035, 043</blocks>
+    <tags>remediation, dotnet, refactoring, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Refactor Program.cs (currently 1,940 lines) into feature module extension methods following the
+    ADR-010 pattern. Extract logical groupings into dedicated files under a DependencyInjection/ folder:
+    AddSpaarkeCore(), AddDocumentsModule(), AddWorkersModule(), AddAiModule(), and any other natural
+    groupings identified during audit. Program.cs must be under 500 lines after the refactor. Each
+    module extension method file must be under 200 lines. Functionality must be identical before and
+    after — this is a pure structural refactor with no behavioral changes.
+  </prompt>
+
+  <role>
+    Senior .NET developer specializing in .NET 8 Minimal API architecture and dependency injection
+    patterns. Expert in applying ADR-010 DI minimalism and feature module extraction.
+  </role>
+
+  <goal>
+    A refactored Program.cs of under 500 lines that delegates DI registration to feature module
+    extension methods, each in their own file under DependencyInjection/. All existing functionality
+    is preserved — the build passes, all tests pass, and the API behaves identically. The DI
+    registration count per module stays within the ADR-010 limit of 15 non-framework services.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API Program.cs has grown to 1,940 lines across multiple AI-assisted development cycles.
+      The audit (task 001) identified specific section boundaries and DI registration groupings that
+      map naturally to feature modules. The feature module pattern in ADR-010 prescribes:
+
+      ```csharp
+      // In DependencyInjection/DocumentsModule.cs
+      public static class DocumentsModule
+      {
+          public static IServiceCollection AddDocumentsModule(this IServiceCollection services)
+          {
+              services.AddSingleton<SpeFileStore>();
+              services.AddSingleton<DocumentAuthorizationService>();
+              // ... up to 15 non-framework registrations
+              return services;
+          }
+      }
+      ```
+
+      Program.cs then becomes:
+      ```csharp
+      builder.Services
+          .AddSpaarkeCore()
+          .AddDocumentsModule()
+          .AddWorkersModule()
+          .AddAiModule();
+      ```
+
+      The audit report at projects/code-quality-and-assurance-r1/notes/audit-bff-api.md contains the
+      section breakdown of Program.cs (which sections exist at which line ranges) — read this first
+      to understand the natural extraction boundaries before starting.
+
+      This is a pure structural refactor — no logic changes, no new services, no removed registrations.
+      The goal is readability and maintainability, not functional change.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (modify — primary target)</file>
+      <file>src/server/api/Sprk.Bff.Api/DependencyInjection/ (create — new folder for modules)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md (read — section breakdown from task 001)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Each module extension method must have no more than 15 non-framework DI registrations. If a logical group exceeds this limit, split it into sub-modules (e.g., AddDocumentsCoreModule + AddDocumentsStorageModule).</constraint>
+    <constraint source="ADR-010">Use concrete types by default — do not introduce new interfaces during this refactor. If an interface currently exists with a single implementation, note it but do not remove it in this task (that is task 031 scope).</constraint>
+    <constraint source="spec">Program.cs MUST be under 500 lines after refactor. Each DependencyInjection/*.cs file MUST be under 200 lines.</constraint>
+    <constraint source="spec">This is a structural refactor only — zero behavioral changes. No service is added, removed, or reconfigured. All existing middleware, pipeline configuration, and endpoint registration must remain identical.</constraint>
+    <constraint source="testing.md">Run `dotnet build` before starting (establish baseline) and after each extraction (verify no regression). Run `dotnet test` after all extractions are complete to verify functional equivalence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r1/notes/audit-bff-api.md to get the Program.cs section breakdown (line ranges and logical groupings identified during the audit). Use this as the extraction plan.</step>
+    <step order="2">Run `dotnet build src/server/api/Sprk.Bff.Api/` to establish a clean baseline. Record the output. Zero errors required before proceeding.</step>
+    <step order="3">Read Program.cs in full and map the actual sections to the audit report's breakdown. Identify 4-6 natural feature module groupings based on related service registrations and functionality.</step>
+    <step order="4">Create the DependencyInjection/ folder under src/server/api/Sprk.Bff.Api/. Plan the module files: list the module names, their extension method names, and which DI registrations each will contain.</step>
+    <step order="5">Extract the first module (start with the largest grouping to get the biggest line-count reduction). Create the .cs file, move the relevant registrations, update Program.cs to call the extension method. Build to verify.</step>
+    <step order="6">Extract the second module. Build to verify. Continue this one-module-at-a-time approach with a build check after each extraction.</step>
+    <step order="7">Extract remaining modules until Program.cs is under 500 lines. Maintain build verification after each extraction.</step>
+    <step order="8">Verify each module file is under 200 lines. If any module exceeds 200 lines, split it using a sub-module pattern (AddXxxCoreModule + AddXxxStorageModule or similar).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` on the complete refactored codebase. Must produce zero errors and zero new warnings.</step>
+    <step order="10">Run `dotnet test` to verify all tests pass after the structural refactor. Record test results.</step>
+    <step order="11">Count the final line count of Program.cs (`wc -l src/server/api/Sprk.Bff.Api/Program.cs`) and each DependencyInjection/*.cs file. Verify all limits are met.</step>
+    <step order="12">Update TASK-INDEX.md: change task 030 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Program.cs (refactored, under 500 lines)</output>
+    <output type="directory">src/server/api/Sprk.Bff.Api/DependencyInjection/ (new — 4-6 module files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Program.cs is under 500 lines after refactor</criterion>
+    <criterion>Each file in DependencyInjection/ is under 200 lines</criterion>
+    <criterion>At minimum four module extension methods exist: AddSpaarkeCore, AddDocumentsModule, AddWorkersModule, AddAiModule (or equivalent groupings)</criterion>
+    <criterion>No non-framework DI registration in any module exceeds 15 services</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` produces zero errors and zero new warnings</criterion>
+    <criterion>`dotnet test` passes with the same results as before the refactor</criterion>
+    <criterion>No new interfaces were introduced during the refactor</criterion>
+    <criterion>No existing middleware, pipeline configuration, or endpoint registration was changed</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

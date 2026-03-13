@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Create Nightly Quality GitHub Actions Workflow</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>015, 017</dependencies>
+    <blocks>021, 025, 043</blocks>
+    <tags>automation, github-actions, nightly, ci-cd</tags>
+  </metadata>
+
+  <prompt>
+    Create the nightly-quality.yml GitHub Actions workflow that runs a comprehensive quality sweep on
+    weeknights. The workflow triggers on cron schedule '0 6 * * 1-5' (6AM UTC Mon-Fri) and supports
+    manual dispatch. It must orchestrate four jobs: (1) full test suite with Coverlet coverage collection,
+    (2) SonarCloud analysis, (3) Claude Code headless review using the prompt file from task 021,
+    (4) dependency audit using dotnet list --vulnerable and npm audit. The entire workflow must complete
+    in under 15 minutes. Results are aggregated and written to a rolling GitHub issue with deduplication
+    across runs.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in GitHub Actions workflows and CI/CD quality pipelines. Expert in
+    workflow optimization, job parallelization, and GitHub Issues API integration.
+  </role>
+
+  <goal>
+    A working nightly-quality.yml workflow at .github/workflows/nightly-quality.yml that automatically
+    runs all four quality jobs on weeknights, completes under 15 minutes, and creates/updates a rolling
+    GitHub issue with structured findings. Manual dispatch allows on-demand execution.
+  </goal>
+
+  <context>
+    <background>
+      The existing sdap-ci.yml handles PR-triggered checks (fast, < 5 min). The nightly workflow is
+      complementary — it runs deeper, slower checks that are impractical on every PR: full test coverage
+      collection, SonarCloud analysis with full history, AI-assisted code review, and dependency
+      vulnerability scanning. The workflow uses the review prompt file created in task 021
+      (scripts/quality/nightly-review-prompt.md) for the Claude Code headless review job.
+
+      Key design requirements:
+      - Jobs 1 (tests) and 4 (dependency audit) can run in parallel
+      - Job 2 (SonarCloud) depends on job 1 (needs coverage artifacts)
+      - Job 3 (Claude Code review) is independent and can run in parallel with jobs 1 and 4
+      - Rolling GitHub issue: search for existing open issue with label 'nightly-quality', update it
+        rather than creating a new one each run. Deduplicate findings by hashing finding descriptions.
+      - Claude Code headless mode: `claude -p "$(cat scripts/quality/nightly-review-prompt.md)" --output-format json`
+    </background>
+    <relevant-files>
+      <file>.github/workflows/nightly-quality.yml (create)</file>
+      <file>.github/workflows/sdap-ci.yml (read — model for workflow structure and secrets usage)</file>
+      <file>.github/workflows/adr-audit.yml (read — model for scheduled workflow and issue creation)</file>
+      <file>scripts/quality/nightly-review-prompt.md (reference — created by task 021)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Total workflow runtime MUST be under 15 minutes. Use job parallelization where possible. Cache dotnet restore and npm install artifacts between runs.</constraint>
+    <constraint source="spec">GitHub issue deduplication is mandatory. Do NOT create a new issue on each run. Search for existing open issue with label 'nightly-quality' first and update it.</constraint>
+    <constraint source="spec">Claude Code headless review MUST use the prompt file at scripts/quality/nightly-review-prompt.md — do not inline the prompt in the workflow YAML.</constraint>
+    <constraint source="spec">Manual dispatch (workflow_dispatch) trigger is required in addition to the cron schedule to allow on-demand execution during development.</constraint>
+    <constraint source="spec">Workflow failures in individual jobs should not cancel other jobs — use continue-on-error at job level with explicit failure reporting in the issue update step.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/adr-audit.yml</file>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .github/workflows/sdap-ci.yml and .github/workflows/adr-audit.yml to understand existing workflow patterns, secrets names, runner configuration, and caching strategies used in this repository.</step>
+    <step order="2">Design the job dependency graph: identify which jobs can run in parallel (tests + dependency audit + AI review) and which must be sequential (SonarCloud after tests for coverage).</step>
+    <step order="3">Create .github/workflows/nightly-quality.yml with the cron trigger '0 6 * * 1-5', workflow_dispatch trigger, and the four-job structure. Use ubuntu-latest runner for all jobs.</step>
+    <step order="4">Implement job 1 (test-and-coverage): checkout, setup dotnet, restore cache, run `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings`, upload coverage artifacts for SonarCloud.</step>
+    <step order="5">Implement job 2 (sonarcloud-analysis): depends on job 1, downloads coverage artifacts, runs SonarCloud scanner. Reference existing SonarCloud configuration from sdap-ci.yml if present.</step>
+    <step order="6">Implement job 3 (ai-code-review): checkout, install claude CLI (npm install -g @anthropic-ai/claude-code), run headless review using `claude -p "$(cat scripts/quality/nightly-review-prompt.md)" --output-format json --dangerously-skip-permissions`, capture JSON output to file.</step>
+    <step order="7">Implement job 4 (dependency-audit): checkout, run `dotnet list src/ package --vulnerable --include-transitive`, run `npm audit --json` in each client workspace, capture findings to JSON artifacts.</step>
+    <step order="8">Implement the issue-update job (runs after all others, always): reads artifacts from all completed jobs, searches for existing GitHub issue with label 'nightly-quality' using `gh issue list --label nightly-quality --state open`, updates body if found or creates new issue if not. Format findings as structured markdown table.</step>
+    <step order="9">Add caching steps to all jobs: dotnet NuGet cache (`~/.nuget/packages`), npm cache. Use consistent cache keys based on lockfile hashes.</step>
+    <step order="10">Add job timeout-minutes constraints to enforce the 15-minute total limit (suggest: 10 min for test job, 8 min for SonarCloud, 5 min for AI review, 5 min for dependency audit).</step>
+    <step order="11">Verify the workflow YAML is syntactically valid by checking indentation, quoting, and required fields. Ensure all referenced secrets match the names used in sdap-ci.yml.</step>
+    <step order="12">Update TASK-INDEX.md: change task 020 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">.github/workflows/nightly-quality.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>nightly-quality.yml exists with cron trigger '0 6 * * 1-5' and workflow_dispatch trigger</criterion>
+    <criterion>Four jobs defined: test-and-coverage, sonarcloud-analysis, ai-code-review, dependency-audit</criterion>
+    <criterion>Job parallelization is correct: tests and dependency audit run in parallel; SonarCloud depends on test-and-coverage</criterion>
+    <criterion>job timeout-minutes set on each job to enforce the 15-minute total budget</criterion>
+    <criterion>NuGet and npm caches are configured with lockfile-based cache keys</criterion>
+    <criterion>Claude Code headless job reads prompt from scripts/quality/nightly-review-prompt.md (not inlined)</criterion>
+    <criterion>Issue-update job uses gh CLI to search for existing open issue before creating new one</criterion>
+    <criterion>Individual job failures do not cancel remaining jobs (continue-on-error or needs with always())</criterion>
+    <criterion>All referenced secrets match names used in existing repository workflows</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Update sdap-ci.yml with New Quality Checks</title>
+    <phase>4: Remediation</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030, 033, 034</dependencies>
+    <blocks>040, 043</blocks>
+    <tags>remediation, github-actions, ci-cd</tags>
+  </metadata>
+
+  <prompt>
+    Update the existing sdap-ci.yml GitHub Actions workflow to integrate the new quality checks
+    established in this project. Add Prettier format verification, the strictened ESLint check, and
+    updated architecture tests. Remove continue-on-error from the test job (Phase 3 graduation —
+    tests now reliably pass). Ensure the total PR pipeline completes in under 5 minutes.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in GitHub Actions optimization and CI/CD pipeline design. Expert at
+    adding quality gates to existing workflows without introducing latency or instability.
+  </role>
+
+  <goal>
+    An updated sdap-ci.yml that enforces Prettier formatting, strict ESLint, and architecture test
+    compliance on every PR. The pipeline completes in under 5 minutes. The test job no longer uses
+    continue-on-error — failures are now blocking. Existing workflow structure is preserved and extended,
+    not replaced.
+  </goal>
+
+  <context>
+    <background>
+      The sdap-ci.yml workflow handles PR-triggered CI checks. After the remediation tasks (030-034),
+      the codebase now meets the standards enforced by the new tooling, so those checks can be added
+      as required gates.
+
+      Changes to make:
+      1. Add Prettier format check step: `prettier --check "src/client/**/*.{ts,tsx}"` — fails the
+         build if any TypeScript files are not formatted. This is advisory until task 034 completes
+         the bulk format, then becomes blocking.
+      2. Add ESLint strictened check step: `npx eslint src/client/ --max-warnings 0` — fails the
+         build if any TypeScript lint violations exist. Replaces or augments the existing ESLint
+         step if one exists.
+      3. Update architecture tests: ensure `dotnet test tests/Spaarke.ArchTests/` is in the
+         pipeline. If it is already there, verify it does not use `--no-build` when it should
+         build, or vice versa.
+      4. Remove continue-on-error from the test job: this was added as a temporary measure while
+         tests were being stabilized. Now that tests reliably pass (post task 033/034 cleanup),
+         test failures should block PRs.
+
+      Performance constraint: Total pipeline < 5 minutes. Measure the current pipeline runtime
+      via `gh run list --workflow=sdap-ci.yml --limit=5` to understand the baseline. If adding
+      Prettier and ESLint checks risks exceeding 5 minutes, parallelize them with existing checks
+      rather than adding them sequentially.
+
+      CRITICAL: Do NOT restructure the existing sdap-ci.yml. Extend jobs and add steps within the
+      existing job structure. Do not rename jobs, change trigger conditions, or reorder existing steps.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/sdap-ci.yml (modify — extend with new quality checks)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-01">Total PR pipeline MUST complete in under 5 minutes. Measure current runtime before adding checks. Parallelize if needed to stay under budget.</constraint>
+    <constraint source="spec">MUST NOT restructure the existing sdap-ci.yml. Only extend — add steps to existing jobs, or add new parallel jobs. Do not rename, reorder, or remove existing jobs or steps.</constraint>
+    <constraint source="spec">Removing continue-on-error from the test job is required for Phase 3 graduation. This signals that the test suite is now stable and should be treated as a blocking gate.</constraint>
+    <constraint source="spec">Prettier check and ESLint check must be added as required (not continue-on-error) gates. PRs that fail formatting or linting should not be mergeable.</constraint>
+    <constraint source="spec">Read the existing sdap-ci.yml carefully before making any changes. Document the current structure and runtime before proposing modifications.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .github/workflows/sdap-ci.yml in full. Document: job names, step names, existing quality checks, current trigger conditions, and any continue-on-error usage. Note the overall structure to plan non-breaking extensions.</step>
+    <step order="2">Run `gh run list --workflow=sdap-ci.yml --limit=5` to check recent pipeline runtimes. Note the median runtime as a baseline — the budget is 5 minutes and new checks must fit within it.</step>
+    <step order="3">Identify the correct placement for the Prettier check step. If there is an existing TypeScript build or lint job, add the Prettier check as a step within that job before or after the existing steps. Use `prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern`.</step>
+    <step order="4">Identify the correct placement for the ESLint strictened check step. Add `npx eslint src/client/ --max-warnings 0` in the TypeScript job. If an ESLint step already exists, update it to use --max-warnings 0 flag.</step>
+    <step order="5">Verify the architecture test step: check if `dotnet test tests/Spaarke.ArchTests/` is already in the workflow. If missing, add it to the .NET job. If present, verify it is not configured with continue-on-error.</step>
+    <step order="6">Remove continue-on-error from the test job: find the `continue-on-error: true` setting in the test or build job and remove it. This is a one-line change but a critical one — verify the line number before removing.</step>
+    <step order="7">Assess the estimated runtime impact of the new steps. If the Prettier check and ESLint check add more than 60 seconds to the pipeline, consider extracting them into a parallel job that runs alongside the existing build job.</step>
+    <step order="8">If parallelization is needed (step 7 assessment): create a new job (e.g., `client-quality-checks`) with appropriate `needs` and `runs-on` settings. Move the Prettier and ESLint steps there. Ensure it can run in parallel with the build job.</step>
+    <step order="9">Verify the modified workflow YAML is syntactically valid: check indentation, job dependencies (needs), and that no existing jobs reference removed steps or jobs.</step>
+    <step order="10">Update TASK-INDEX.md: change task 035 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">.github/workflows/sdap-ci.yml (updated with new quality checks)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sdap-ci.yml includes a Prettier format check (`prettier --check`) step or job</criterion>
+    <criterion>sdap-ci.yml includes an ESLint strictened check (`npx eslint --max-warnings 0`) step or job</criterion>
+    <criterion>Architecture tests (`dotnet test tests/Spaarke.ArchTests/`) are present and not marked continue-on-error</criterion>
+    <criterion>continue-on-error is removed from the test job</criterion>
+    <criterion>Existing job names, trigger conditions, and step ordering are preserved — only extensions made</criterion>
+    <criterion>Total estimated pipeline runtime is under 5 minutes (assessed via gh run list baseline + new step estimates)</criterion>
+    <criterion>Workflow YAML is syntactically valid</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

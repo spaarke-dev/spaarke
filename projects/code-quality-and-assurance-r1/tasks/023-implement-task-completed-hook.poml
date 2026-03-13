@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Implement Claude Code TaskCompleted Quality Gate Hook</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>043</blocks>
+    <tags>automation, hooks, claude-code, quality-gate</tags>
+  </metadata>
+
+  <prompt>
+    Create a Claude Code TaskCompleted hook script at scripts/quality/task-quality-gate.sh. On task
+    completion the hook runs three checks: (1) dotnet build -warnaserror to verify the build is clean,
+    (2) lint all files changed in the current git diff, (3) run architecture tests if any .cs files
+    are in the diff. Register the hook in .claude/settings.json. The hook must not block on warnings
+    for non-code tasks and must only run architecture tests if .cs files are present in the diff.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Claude Code hooks and quality gate automation. Expert in git diff
+    analysis, shell scripting, and integrating architecture tests into automated workflows.
+  </role>
+
+  <goal>
+    A TaskCompleted hook that enforces a lightweight quality gate at the end of every Claude Code task
+    execution. The gate catches build breaks, lint violations in changed files, and architecture test
+    failures before a task is considered complete — without adding significant latency for documentation
+    or non-code tasks.
+  </goal>
+
+  <context>
+    <background>
+      The TaskCompleted hook fires when Claude Code finishes a task (after the task-execute skill
+      marks it complete). This is the last checkpoint before the user sees the task completion
+      message. The hook has access to the full repository context and can run commands.
+
+      Gate design:
+      - Build check: `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror` — treats warnings as
+        errors. If this fails, the hook reports the failure clearly so Claude Code can see it.
+      - Changed files lint: Use `git diff --name-only HEAD` to get changed files. For each .cs file
+        run dotnet format --verify-no-changes. For each .ts/.tsx file run eslint.
+      - Architecture tests: If any .cs files appear in `git diff --name-only HEAD`, run
+        `dotnet test tests/Spaarke.ArchTests/ --no-build` (skip build since gate step 1 already built).
+        Skip architecture tests entirely if no .cs files changed.
+
+      Non-code task detection: If `git diff --name-only HEAD` returns only .md, .json config, .yaml,
+      or .poml files (no .cs, .ts, .tsx, .ps1), skip the build and architecture tests — run only
+      the file-type-appropriate linters for changed files.
+
+      The hook must complete in under 2 minutes total. Architecture tests (6 classes) typically run
+      in ~30 seconds so this is feasible.
+    </background>
+    <relevant-files>
+      <file>scripts/quality/task-quality-gate.sh (create)</file>
+      <file>.claude/settings.json (modify — register hook)</file>
+      <file>scripts/quality/post-edit-lint.sh (read — reuse linting logic via sourcing or calling)</file>
+      <file>tests/Spaarke.ArchTests/ (read — understand test structure for correct test command)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Hook MUST NOT block or add significant latency for documentation-only tasks (tasks where git diff contains only .md, .poml, .yaml, .json files). Detect non-code tasks and skip build/arch tests.</constraint>
+    <constraint source="spec">Architecture tests MUST only run if .cs files appear in the git diff. Running arch tests for TypeScript-only changes is unnecessary overhead.</constraint>
+    <constraint source="spec">Hook output must be clearly structured so Claude Code can read the quality gate results and act on failures. Use a consistent format: [GATE: PASS/FAIL] prefix for each check.</constraint>
+    <constraint source="spec">If the build fails (-warnaserror), the hook must exit non-zero to signal Claude Code that the task has unresolved issues.</constraint>
+    <constraint source=".claude/settings.json">Must read existing .claude/settings.json before modifying. Preserve all existing keys, values, and previously registered hooks from task 022.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/settings.json to understand the current structure including the PostToolUse hook registered in task 022. Plan the TaskCompleted hook addition without disturbing existing hooks.</step>
+    <step order="2">Read tests/Spaarke.ArchTests/ structure to understand the project name and correct dotnet test command needed to run architecture tests in isolation.</step>
+    <step order="3">Create scripts/quality/task-quality-gate.sh with bash shebang and executable permissions. Add global error trap consistent with post-edit-lint.sh.</step>
+    <step order="4">Implement changed-files detection: run `git diff --name-only HEAD` and categorize results into arrays: CS_FILES (*.cs), TS_FILES (*.ts *.tsx), PS_FILES (*.ps1), DOC_FILES (*.md *.poml *.yaml *.json). Detect if this is a code change or documentation-only task.</step>
+    <step order="5">Implement the non-code fast path: if no CS_FILES or TS_FILES, run only documentation-appropriate checks (e.g., verify .json files are valid JSON with python3 -m json.tool), print [GATE: SKIP — no code changes], and exit 0.</step>
+    <step order="6">Implement gate step 1 (build check): run `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror --no-incremental 2>&1`. Print [GATE: PASS — build clean] or [GATE: FAIL — build errors]. Exit 1 if build fails.</step>
+    <step order="7">Implement gate step 2 (lint changed files): iterate over CS_FILES and run dotnet format --verify-no-changes --include for each. Iterate over TS_FILES and run npx eslint for each. Accumulate and report results with [GATE: PASS/WARN — lint].</step>
+    <step order="8">Implement gate step 3 (architecture tests): if CS_FILES is non-empty, run `dotnet test tests/Spaarke.ArchTests/ --no-build 2>&1`. Print [GATE: PASS — arch tests] or [GATE: FAIL — arch tests]. Exit 1 if tests fail.</step>
+    <step order="9">Implement the summary section: print a consolidated gate report at the end: total checks run, pass/fail counts, and a final [QUALITY GATE: PASSED] or [QUALITY GATE: FAILED] line.</step>
+    <step order="10">Update .claude/settings.json: add the TaskCompleted hook entry alongside the existing PostToolUse hook. Ensure the JSON structure is valid after modification.</step>
+    <step order="11">Verify both scripts are executable and .claude/settings.json is valid JSON: `python3 -m json.tool .claude/settings.json`.</step>
+    <step order="12">Update TASK-INDEX.md: change task 023 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">scripts/quality/task-quality-gate.sh</output>
+    <output type="file">.claude/settings.json (updated with TaskCompleted hook registration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>scripts/quality/task-quality-gate.sh exists and is executable</criterion>
+    <criterion>Script correctly identifies code changes vs. documentation-only tasks via git diff --name-only</criterion>
+    <criterion>Documentation-only tasks skip build and architecture tests (fast path)</criterion>
+    <criterion>Architecture tests run only when .cs files appear in the git diff</criterion>
+    <criterion>Build check uses -warnaserror flag and exits non-zero on failure</criterion>
+    <criterion>Each gate step outputs a [GATE: PASS/FAIL] prefixed result line</criterion>
+    <criterion>Summary section prints consolidated [QUALITY GATE: PASSED/FAILED] at end</criterion>
+    <criterion>.claude/settings.json contains TaskCompleted hook registration</criterion>
+    <criterion>PostToolUse hook from task 022 is preserved in .claude/settings.json (not overwritten)</criterion>
+    <criterion>.claude/settings.json is valid JSON after modification</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

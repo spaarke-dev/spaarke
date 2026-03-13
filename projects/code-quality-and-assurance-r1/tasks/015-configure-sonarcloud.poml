@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Configure SonarCloud Integration for Static Analysis</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>017, 020</blocks>
+    <tags>tooling, static-analysis, sonarcloud, github-actions</tags>
+  </metadata>
+
+  <prompt>
+    Configure SonarCloud integration for the spaarke GitHub repository. Create sonar-project.properties at the repository root with correct source/test file inclusions and exclusions. Create a GitHub Actions workflow stub for nightly SonarCloud analysis (nightly-quality.yml). Configure a SonarCloud quality gate with appropriate thresholds. Enable AI Code Assurance if available on the selected tier. The quality gate is advisory initially — it must not block PR merges during Phase 2.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in static code analysis, SonarCloud configuration, and GitHub Actions.
+  </role>
+
+  <goal>
+    SonarCloud is connected to the spaarke repository and analyzing code. sonar-project.properties is committed to the repository and correctly scopes the analysis to relevant source files. A nightly GitHub Actions workflow stub exists at .github/workflows/nightly-quality.yml. The SonarCloud quality gate is configured but advisory-only during Phase 2.
+  </goal>
+
+  <context>
+    <background>
+      FR-06 requires SonarCloud integration with quality gate, AI Code Assurance detection, and coverage tracking. SonarCloud provides static analysis, security hotspot detection, code duplication analysis, and (on supported tiers) AI-generated code detection. The sonar-project.properties file controls what SonarCloud analyzes — it must correctly include src/ and tests/ while excluding generated files, Dataverse solution XML, migrations, and third-party code. The nightly workflow stub created here will be fully populated in Task 020 (nightly pipeline). Per spec.md assumptions, we start with the free tier — if quality gate or AI Code Assurance requires a paid tier, flag for human decision.
+    </background>
+    <relevant-files>
+      <file>sonar-project.properties (create)</file>
+      <file>.github/workflows/nightly-quality.yml (create stub - full implementation in Task 020)</file>
+      <file>.github/workflows/sdap-ci.yml (read-only - understand existing workflow for consistency)</file>
+      <file>config/coverlet.runsettings (read-only - understand coverage output format for SonarCloud ingestion)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-04">SonarCloud quality gate MUST be advisory only during Phase 2. Do NOT configure SonarCloud as a required PR status check. Blocking enforcement happens in Task 040 (Phase 3 graduation).</constraint>
+    <constraint source="spec.md NFR-07">Monthly cost must stay within the $100/month overall budget. Evaluate and document free tier coverage. If AI Code Assurance requires paid tier, flag for human approval before enabling.</constraint>
+    <constraint source="spec.md NFR-08">sonar-project.properties must be version-controlled. SonarCloud project key and organization must be documented in the file. SonarCloud token stored in GitHub Secrets only (secret name: SONAR_TOKEN).</constraint>
+    <constraint source="spec.md">sonar.exclusions must exclude: src/solutions/ (Dataverse XML), **/node_modules/**, **/dist/**, **/build/**, **/out/**, **/coverage/**, **/*.min.js, **/*_generated.*, **/Migrations/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Go to sonarcloud.io and create or confirm the spaarke SonarCloud organization. Connect it to the spaarke-dev GitHub organization. Set up the spaarke project. Note the project key and organization key for use in sonar-project.properties.</step>
+    <step order="2">Verify free tier capabilities: what analysis features are available, whether AI Code Assurance is included, and what the private repository limits are. Document findings. If free tier is insufficient, escalate to human for tier decision before proceeding.</step>
+    <step order="3">Create sonar-project.properties at repository root. Set: sonar.projectKey, sonar.organization, sonar.sources=src, sonar.tests=tests, sonar.exclusions (see constraints), sonar.test.exclusions=tests/**/*Tests.cs,tests/**/*Spec.ts. Set sonar.cs.opencover.reportsPaths=coverage/*/coverage.opencover.xml to ingest Coverlet output.</step>
+    <step order="4">Configure sonar.sourceEncoding=UTF-8 and sonar.scm.provider=git in sonar-project.properties.</step>
+    <step order="5">Add SONAR_TOKEN to GitHub repository secrets (Settings > Secrets > Actions). Document the manual step if the token is not yet available.</step>
+    <step order="6">Create .github/workflows/nightly-quality.yml as a stub. Include: schedule trigger (cron: "0 6 * * 1-5" — weeknights 6 AM UTC), workflow_dispatch trigger for manual runs, and a placeholder sonarcloud-scan job that runs SonarCloud scanner using the SONAR_TOKEN secret. Mark the stub clearly with a TODO comment: "Full nightly pipeline implemented in Task 020".</step>
+    <step order="7">Configure the SonarCloud quality gate in the SonarCloud web dashboard. Use the default "Sonar way" gate initially. Document the thresholds: coverage on new code ≥70%, duplications on new code ≤3%, maintainability rating ≤A on new code.</step>
+    <step order="8">Run a manual SonarCloud analysis (via workflow_dispatch or local scanner) to verify the project analyzes without errors and appears in the SonarCloud dashboard.</step>
+    <step order="9">Confirm SonarCloud is NOT configured as a required status check in GitHub branch protection. It should appear as an optional check only.</step>
+    <step order="10">Update TASK-INDEX.md to mark task 015 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>sonar-project.properties — SonarCloud project configuration file</output>
+    <output>.github/workflows/nightly-quality.yml — Nightly quality workflow stub (full implementation in Task 020)</output>
+    <output>SonarCloud organization and project configured at sonarcloud.io</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sonar-project.properties committed to repository root with correct projectKey, organization, sources, tests, and exclusions</criterion>
+    <criterion>SonarCloud project appears in sonarcloud.io dashboard with a successful analysis run</criterion>
+    <criterion>SONAR_TOKEN is configured as a GitHub Actions secret (not committed to repository)</criterion>
+    <criterion>nightly-quality.yml stub committed with schedule trigger and sonarcloud-scan job</criterion>
+    <criterion>Quality gate configured in SonarCloud with coverage ≥70% on new code threshold</criterion>
+    <criterion>SonarCloud is NOT a required status check (advisory only)</criterion>
+    <criterion>Free tier evaluation documented with tier decision rationale</criterion>
+  </acceptance-criteria>
+</task>

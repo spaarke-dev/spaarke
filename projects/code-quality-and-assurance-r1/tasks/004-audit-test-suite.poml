@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit Test Suite Quality and Coverage</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008</blocks>
+    <tags>audit, testing, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive audit of the Spaarke test suite. Measure current code coverage using
+    Coverlet with the existing coverlet.runsettings configuration. Assess test quality by examining
+    whether tests verify behavior vs. implementation details. Identify coverage gaps in critical
+    paths. Review test naming conventions, mocking patterns, and test organization. Produce a
+    structured audit report establishing the baseline coverage percentage and quality grade.
+  </prompt>
+
+  <role>
+    Senior .NET developer and test quality expert. Expert in xUnit, Moq, Coverlet, and
+    behavior-driven testing principles. Apply Spaarke testing constraints and patterns as
+    the quality benchmark.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-test-suite.md
+    establishing the baseline test coverage percentage, identifying coverage gaps in critical
+    paths, assessing test quality patterns, and providing an overall letter grade (A-F) for
+    the test suite. This baseline feeds task 007 (scorecard) and is the starting point for
+    the coverage ≥70% target in the success criteria.
+  </goal>
+
+  <context>
+    <background>
+      The Spaarke test suite is in tests/ and includes unit tests, integration tests, and
+      architecture tests (Spaarke.ArchTests). The test suite has been growing alongside the
+      codebase but has never been formally evaluated for coverage or quality.
+
+      Key context:
+      - Coverlet is already configured in config/coverlet.runsettings for coverage collection
+      - Architecture tests (tests/Spaarke.ArchTests/) have 6 test classes verifying ADR compliance
+        using NetArchTest — these are high-value tests that must be preserved
+      - The success criteria for this project requires code coverage ≥70% on new code
+      - AI-generated tests commonly exhibit "implementation testing" anti-patterns: testing that
+        a method was called rather than testing the outcome of the operation
+      - Excessive mocking (mocking everything, including DTOs and value objects) is another
+        AI-generated test anti-pattern that produces tests with no real coverage value
+      - Test naming conventions in .NET: `MethodName_StateUnderTest_ExpectedBehavior` is preferred
+        over `TestMethod1`, `ShouldDoX`, or `MethodNameTest`
+      - The sdap-ci.yml pipeline currently runs tests with `continue-on-error: true` — this
+        must NOT be changed until Phase 3 graduation (per spec constraints)
+
+      The audit should distinguish:
+      1. Architecture tests (Spaarke.ArchTests) — always high value, preserve
+      2. Unit tests with proper behavior verification — high value
+      3. Unit tests with implementation verification (brittle, low value) — identify
+      4. Tests with excessive mocking (test the mock, not the code) — identify
+      5. Gaps: critical paths with zero test coverage — highest priority
+    </background>
+    <relevant-files>
+      <file>tests/ (read — all test projects)</file>
+      <file>tests/Spaarke.ArchTests/ (read — architecture test classes)</file>
+      <file>config/coverlet.runsettings (read — coverage configuration)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-test-suite.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing.md">Tests MUST verify observable behavior and outcomes, not internal implementation details. Flag tests that assert method call counts on internal dependencies as low-value.</constraint>
+    <constraint source="testing.md">Mocking should be limited to external dependencies (HTTP clients, database connections, external APIs). Flag tests that mock domain services or value objects.</constraint>
+    <constraint source="spec">The coverage target for new code is ≥70%. Establish the current baseline — this number goes into the quality scorecard.</constraint>
+    <constraint source="spec">Architecture tests in Spaarke.ArchTests MUST be preserved. These are high-value automated ADR compliance checks.</constraint>
+    <constraint source="spec">Do NOT modify `continue-on-error: true` in sdap-ci.yml — this is blocked until Phase 3 graduation per project constraints.</constraint>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any test files or configuration during this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/INDEX.md</file>
+      <file>config/coverlet.runsettings</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run the full test suite with coverage: `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings` — capture pass/fail counts and any test failures</step>
+    <step order="2">Locate and parse the coverage report output (typically in TestResults/ directories as coverage.cobertura.xml) — extract overall line coverage, branch coverage, and per-assembly coverage percentages</step>
+    <step order="3">Identify the 10 production code files/classes with the lowest coverage percentage that are in critical paths (API endpoints, services, authorization filters)</step>
+    <step order="4">Count test projects and test files: how many xUnit test projects exist, how many test classes, how many test methods total</step>
+    <step order="5">Examine test naming conventions: sample 20-30 test method names and assess whether they follow the `MethodName_State_ExpectedBehavior` convention or use anti-patterns (TestMethod1, ShouldDoX, etc.)</step>
+    <step order="6">Review Architecture tests (Spaarke.ArchTests): list all 6 test classes and what ADR constraint each validates — note any ADRs from the spec that are NOT currently covered by ArchTests</step>
+    <step order="7">Identify behavior vs. implementation testing: sample 20-30 test methods and classify each as behavioral (tests observable output) or implementation (tests internal method calls/mock invocations)</step>
+    <step order="8">Assess mocking patterns: look for tests where every dependency is mocked (over-mocking), and tests that mock domain objects that should be real instances</step>
+    <step order="9">Identify coverage gaps in critical paths: check coverage for authorization filters, error handling paths, BFF API endpoints, and any code related to security-sensitive operations</step>
+    <step order="10">Count TODO/FIXME comments in test files and list them (test debt)</step>
+    <step order="11">Compile all findings into the audit report — include the baseline coverage number prominently, assign overall letter grade (A-F), list top 5 remediation priorities</step>
+    <step order="12">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-test-suite.md</step>
+    <step order="13">Update TASK-INDEX.md: change task 004 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-test-suite.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-test-suite.md exists and covers all five audit areas: coverage measurement, test quality patterns, coverage gaps, naming conventions, mocking patterns</criterion>
+    <criterion>Baseline overall line coverage percentage explicitly stated (this is the key metric for the scorecard)</criterion>
+    <criterion>Per-assembly coverage percentages reported for all test projects</criterion>
+    <criterion>10 lowest-coverage critical path files identified with their coverage percentages</criterion>
+    <criterion>All 6 ArchTest test classes listed with the ADR constraint each validates</criterion>
+    <criterion>ADRs from the spec NOT currently covered by ArchTests are identified as gaps</criterion>
+    <criterion>Behavioral vs. implementation test ratio estimated (even if approximate)</criterion>
+    <criterion>Over-mocked tests identified by file path with description of the anti-pattern</criterion>
+    <criterion>Overall letter grade (A-F) assigned to test suite area with justification</criterion>
+    <criterion>Top 5 remediation priorities listed with estimated effort</criterion>
+    <criterion>No test files or configuration were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

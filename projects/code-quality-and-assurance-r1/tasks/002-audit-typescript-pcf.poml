@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit TypeScript/PCF/Code Pages Code Quality</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 033, 034</blocks>
+    <tags>audit, typescript, pcf, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive code quality audit of all TypeScript frontend code: PCF controls
+    (src/client/pcf/), Code Pages (src/client/code-pages/), and the shared UI component library
+    (src/client/shared/). Run ESLint across all projects, identify component size outliers, check
+    import patterns and shared library usage, verify Fluent UI v9 compliance (ADR-021), confirm
+    React version compliance (ADR-022 for PCF, ADR-026 for Code Pages), and detect hard-coded
+    colors. Produce a structured audit report with findings and an overall letter grade.
+  </prompt>
+
+  <role>
+    Senior TypeScript and React developer. Expert in PCF control development, Fluent UI v9,
+    and Spaarke frontend conventions. Apply ADR-021, ADR-022, and ADR-026 as primary quality
+    lenses.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md
+    covering ESLint violations, component size outliers, import pattern issues, Fluent UI compliance,
+    React version compliance, and hard-coded color violations. Report includes an overall letter
+    grade (A-F) for the TypeScript/PCF area and a prioritized remediation list feeding task 007
+    (scorecard) and task 008 (remediation plan).
+  </goal>
+
+  <context>
+    <background>
+      The Spaarke frontend spans approximately 955 TypeScript files across three areas:
+
+      - PCF controls (src/client/pcf/): Field-bound React 16/17 controls for Dataverse forms.
+        Must use platform-provided React 16/17 APIs (no createRoot), Fluent UI v9, and import
+        shared components from @spaarke/ui-components per ADR-022 and ADR-012.
+
+      - Code Pages (src/client/code-pages/): Standalone React 18 dialogs and pages.
+        Must use createRoot, bundle React 18, use Vite + singlefile build per ADR-026.
+        Each Code Page is a single self-contained HTML file output.
+
+      - Shared UI library (src/client/shared/Spaarke.UI.Components/): Shared components and
+        utilities consumed by both PCF controls and Code Pages per ADR-012.
+
+      ESLint configurations may be inconsistent across the multiple PCF project subdirectories.
+      There is no root-level ESLint config, no Prettier config, and no pre-commit hooks — these
+      are being added in Phase 2. This audit establishes the baseline violation count before
+      stricter rules are enforced.
+
+      Known concerns from spec:
+      - No root ESLint config (each PCF project may have different rule sets)
+      - No Prettier config (formatting inconsistencies expected)
+      - Hard-coded colors may exist (violates ADR-021 dark mode requirement)
+      - Some PCF controls may import React 18 APIs accidentally
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/ (read — all PCF control projects)</file>
+      <file>src/client/code-pages/ (read — all Code Page projects)</file>
+      <file>src/client/shared/Spaarke.UI.Components/ (read — shared library)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All UI components MUST use Fluent UI v9 (@fluentui/react-components). No v8 imports, no hard-coded hex/rgb colors — all colors must come from Fluent tokens or theme objects.</constraint>
+    <constraint source="ADR-022">PCF controls MUST use React 16/17 platform-provided APIs only. Flag any `import { createRoot } from 'react-dom/client'` or React 18-specific hooks in PCF projects.</constraint>
+    <constraint source="ADR-026">Code Pages MUST use React 18 createRoot, Vite build, and produce a single self-contained HTML output. Flag any Code Page missing these characteristics.</constraint>
+    <constraint source="ADR-012">Shared UI components MUST be imported from @spaarke/ui-components. Flag duplicate component implementations that should be in the shared library.</constraint>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any source files during this task. Document findings only.</constraint>
+    <constraint source="spec">ESLint strictening is task 011 and fixing violations is task 033 — this task only identifies and quantifies.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-026.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enumerate all PCF control projects under src/client/pcf/ — list each project directory and check for the presence (or absence) of an .eslintrc / eslint.config.js file in each</step>
+    <step order="2">Run ESLint across all PCF projects (from each project root: `npm run lint` or `npx eslint src/ --ext .ts,.tsx`) — capture total error and warning counts per project</step>
+    <step order="3">Run ESLint across all Code Page projects under src/client/code-pages/ — capture violation counts per project</step>
+    <step order="4">Analyze component size: identify any React component file over 300 lines, any component function/class over 150 lines, any component with more than 15 props</step>
+    <step order="5">Audit import patterns: search for any Fluent UI v8 imports (`@fluentui/react` without `/components`), any hard-coded color values (hex `#[0-9a-fA-F]{3,6}`, rgb(), or named CSS colors in JSX style props)</step>
+    <step order="6">Check React version compliance in PCF: search all PCF project .ts/.tsx files for `createRoot`, `useId` (React 18 hook), `useDeferredValue`, `useTransition` — these must not appear in PCF controls</step>
+    <step order="7">Check Code Page compliance with ADR-026: verify each Code Page project uses Vite as bundler, imports createRoot from react-dom/client, and produces single HTML output</step>
+    <step order="8">Audit shared library usage: identify any component in PCF controls or Code Pages that duplicates functionality already in @spaarke/ui-components (DataGrid, StatusBadge, WizardDialog, SidePanel, etc.)</step>
+    <step order="9">Review TypeScript strictness: check tsconfig.json files for `strict: true`, `noImplicitAny`, `strictNullChecks` — identify any project with loosened TypeScript settings</step>
+    <step order="10">Count total TODO/FIXME comments across all TypeScript files and list file paths with counts</step>
+    <step order="11">Compile all findings into the audit report — group by severity and area, assign overall letter grade (A-F), list top 5 remediation priorities</step>
+    <step order="12">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md</step>
+    <step order="13">Update TASK-INDEX.md: change task 002 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-typescript-pcf.md exists and covers all six audit areas: ESLint violations, component size outliers, import patterns, Fluent UI v9 compliance, React version compliance, hard-coded colors</criterion>
+    <criterion>ESLint error and warning counts reported per project (both PCF and Code Pages)</criterion>
+    <criterion>Any React 18 API usage in PCF controls explicitly called out with file paths and line numbers</criterion>
+    <criterion>Any Fluent UI v8 imports or hard-coded color values listed with file paths</criterion>
+    <criterion>Any Code Page not using Vite + createRoot documented</criterion>
+    <criterion>ESLint config inventory completed (which projects have configs, which are missing)</criterion>
+    <criterion>TypeScript strictness settings inventoried across all tsconfig.json files</criterion>
+    <criterion>Overall letter grade (A-F) assigned to TypeScript/PCF area with justification</criterion>
+    <criterion>Top 5 remediation priorities listed with estimated effort</criterion>
+    <criterion>No source files were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Implement Weekly Quality Summary Job</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>043</blocks>
+    <tags>automation, metrics, github-actions</tags>
+  </metadata>
+
+  <prompt>
+    Add a weekly summary job to the nightly-quality.yml workflow (or create a separate weekly workflow
+    if structurally cleaner). The job runs on Friday nights and aggregates quality metrics from the
+    week's nightly runs: coverage trend, new violations count, TODO/FIXME count, and dependency health.
+    It creates or updates a weekly summary GitHub issue with a markdown table showing metric trends
+    across all five nightly runs from the week.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in GitHub Actions workflows and quality metrics aggregation. Expert in
+    GitHub Issues API via gh CLI and workflow artifact handling.
+  </role>
+
+  <goal>
+    An automated weekly quality summary that gives the team a concise weekly view of quality trends.
+    The summary issue shows whether quality improved or degraded across five key metrics during the
+    week, enabling proactive identification of quality regressions before they become entrenched.
+  </goal>
+
+  <context>
+    <background>
+      The nightly workflow (task 020) runs Mon-Fri and produces findings artifacts per run. The weekly
+      summary job aggregates those five runs into a trend report. This closes the feedback loop: daily
+      developers see individual nightly findings, weekly the team sees the trend.
+
+      Weekly summary metrics to aggregate:
+      1. Test coverage: percentage from each nightly run (trending up/down/stable)
+      2. New violations: count of new findings per nightly run (should trend toward zero)
+      3. TODO/FIXME count: total count at end of each day (should trend down)
+      4. Dependency health: count of vulnerable dependencies per day
+      5. Build warnings: count of -warnaserror warnings suppressed (if any)
+
+      Implementation approach: The weekly job runs at '0 22 * * 5' (Friday 10PM UTC). It uses
+      gh run list to find the 5 most recent completed nightly workflow runs from the current week.
+      For each run, it downloads the JSON artifacts (coverage report, AI review output, dependency
+      audit output) and extracts the key metrics. It builds a markdown trend table and creates/updates
+      a GitHub issue labeled 'weekly-quality-summary'.
+
+      If nightly run artifacts are not available (e.g., run failed), the row shows "N/A" for that
+      day's metrics rather than failing the weekly job.
+
+      Structural decision: Add as a new job in nightly-quality.yml with a separate cron trigger
+      (Friday), or create .github/workflows/weekly-quality.yml as a standalone file. Choose based
+      on readability — if nightly-quality.yml is already complex after task 020, create a separate file.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/nightly-quality.yml (modify or reference — depends on structural decision)</file>
+      <file>.github/workflows/weekly-quality.yml (create if separate file is chosen)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Weekly summary MUST aggregate metrics from all five nightly runs of the week, not just the most recent. Use gh run list to identify and download artifacts from each run.</constraint>
+    <constraint source="spec">Weekly issue must use label 'weekly-quality-summary' (different from nightly label 'nightly-quality'). Search for existing open issue before creating a new one.</constraint>
+    <constraint source="spec">Missing nightly artifacts (failed runs, skipped days) must not cause the weekly job to fail — display "N/A" in the trend table for missing data points.</constraint>
+    <constraint source="spec FR-14">The weekly summary markdown table must include columns for: Day, Coverage %, New Violations, TODO Count, Vulnerable Deps, and a Trend signal (arrow or emoji).</constraint>
+    <constraint source="spec">Weekly job must complete in under 5 minutes. Downloading and parsing 5 days of artifacts is the main cost — use parallel downloads where possible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>.github/workflows/nightly-quality.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .github/workflows/nightly-quality.yml (created in task 020) to understand the artifact names, job names, and overall structure. Determine whether adding the weekly job here or in a separate file is cleaner.</step>
+    <step order="2">Make the structural decision: if nightly-quality.yml already has 5+ jobs and 200+ lines, create .github/workflows/weekly-quality.yml. Otherwise, add the weekly-summary job to nightly-quality.yml with a separate cron trigger.</step>
+    <step order="3">Define the artifact schema expected from nightly runs: document the exact artifact names (e.g., coverage-report, ai-review-output, dependency-audit-output) and the JSON keys used to extract each metric. This must match what task 020 produces.</step>
+    <step order="4">Implement the artifact collection step: use `gh run list --workflow=nightly-quality.yml --status=success --limit=5` to find the last 5 completed nightly runs. Extract run IDs. Handle the case where fewer than 5 runs exist (new repository scenario).</step>
+    <step order="5">Implement per-run metric extraction: for each run ID, download artifacts using `gh run download {run_id} --name {artifact_name}`. Parse JSON to extract: coverage percentage, violation count, TODO count, vulnerable dep count. Handle missing artifacts with N/A.</step>
+    <step order="6">Implement the trend table builder: create a bash or Python script that takes the 5-day metric arrays and produces a markdown table with day labels (Mon-Fri), metric values, and a trend signal comparing Friday vs Monday (up arrow if improved, down arrow if degraded, dash if stable).</step>
+    <step order="7">Implement the GitHub issue creation/update: search for existing open issue with label 'weekly-quality-summary' using `gh issue list --label weekly-quality-summary --state open`. Update the body if found, create new if not. Include the trend table and a summary paragraph.</step>
+    <step order="8">Add the weekly job to the chosen location (nightly-quality.yml or weekly-quality.yml) with cron trigger '0 22 * * 5', job timeout of 10 minutes, and the artifact collection, metric extraction, and issue update steps.</step>
+    <step order="9">Verify the workflow YAML is syntactically valid. Ensure the issue template handles the empty-week case gracefully (first run of a new week with no prior nightly data).</step>
+    <step order="10">Update TASK-INDEX.md: change task 025 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">.github/workflows/nightly-quality.yml (modified to add weekly-summary job) OR .github/workflows/weekly-quality.yml (new standalone file)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Weekly summary job exists with cron trigger '0 22 * * 5' (Friday nights)</criterion>
+    <criterion>Job collects artifacts from the 5 most recent completed nightly runs via gh run list</criterion>
+    <criterion>Missing nightly run artifacts produce "N/A" in the table rather than failing the job</criterion>
+    <criterion>Output markdown table includes columns: Day, Coverage %, New Violations, TODO Count, Vulnerable Deps, Trend</criterion>
+    <criterion>Job creates or updates a GitHub issue labeled 'weekly-quality-summary' (not 'nightly-quality')</criterion>
+    <criterion>Issue search deduplication prevents creating duplicate weekly summary issues</criterion>
+    <criterion>Weekly job timeout is set (10 minutes maximum)</criterion>
+    <criterion>Workflow YAML is syntactically valid</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

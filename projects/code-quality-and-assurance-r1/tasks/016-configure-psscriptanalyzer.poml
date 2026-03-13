@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Install and Configure PSScriptAnalyzer for PowerShell Quality</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>017, 022</blocks>
+    <tags>tooling, powershell, linting</tags>
+  </metadata>
+
+  <prompt>
+    Install PSScriptAnalyzer PowerShell module and create PSScriptAnalyzerSettings.psd1 with rules appropriate for Spaarke's deployment and automation scripts. Create a wrapper script at scripts/quality/Invoke-PSAnalysis.ps1 for CI integration. Test the analyzer on the existing scripts/ directory and document the baseline finding count.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in PowerShell scripting, automation quality, and CI/CD pipeline integration.
+  </role>
+
+  <goal>
+    PSScriptAnalyzer is installed and configured with a project-specific settings file. A wrapper script enables CI integration. Running Invoke-PSAnalysis.ps1 on the scripts/ directory produces a structured report. Baseline violation counts from the PowerShell audit (Task 003) are verified against PSScriptAnalyzer output.
+  </goal>
+
+  <context>
+    <background>
+      The PowerShell audit (Task 003) inventoried 114 PowerShell scripts covering deployment, maintenance, and automation. PSScriptAnalyzer is the standard static analysis tool for PowerShell scripts, equivalent to ESLint for TypeScript. It checks for common bugs, style violations, security issues, and best practice deviations. The PSScriptAnalyzerSettings.psd1 file allows configuring which rules to include/exclude and their severity levels. The wrapper script Invoke-PSAnalysis.ps1 provides a consistent interface for both local developer use and CI invocation in the nightly workflow (Task 020). Findings from Task 003's manual audit should be compared against PSScriptAnalyzer's automated output to identify gaps.
+    </background>
+    <relevant-files>
+      <file>PSScriptAnalyzerSettings.psd1 (create at repository root)</file>
+      <file>scripts/quality/Invoke-PSAnalysis.ps1 (create)</file>
+      <file>scripts/ (read existing scripts to understand patterns and inform rule selection)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">PSScriptAnalyzer module must be installable without administrative privileges (CurrentUser scope). Use: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force. This ensures it works in GitHub Actions without elevated permissions.</constraint>
+    <constraint source="spec.md NFR-08">PSScriptAnalyzerSettings.psd1 must be version-controlled in the repository. No analyzer settings stored outside the repo.</constraint>
+    <constraint source="project">The Invoke-PSAnalysis.ps1 wrapper must support: -Path parameter (defaults to scripts/), -Severity parameter (defaults to Warning,Error), -OutputFormat parameter (Text for local, XML for CI), and -FailOnError switch (exit code 1 if errors found, used in CI).</constraint>
+    <constraint source="project">Do not enforce rules that would require rewriting functional deployment scripts as part of this task. Rules should catch bugs and security issues as ERROR, style issues as WARNING only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/README.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-powershell.md</file>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read scripts/README.md and projects/code-quality-and-assurance-r1/notes/audit-powershell.md to understand the script inventory and known issues from the PowerShell audit.</step>
+    <step order="2">Install PSScriptAnalyzer: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force. Verify installation with: Get-Module PSScriptAnalyzer -ListAvailable.</step>
+    <step order="3">Run a baseline scan with default settings to see what rules fire: Invoke-ScriptAnalyzer -Path scripts/ -Recurse | Group-Object RuleName | Sort-Object Count -Descending. Document the top 10 rules by violation count.</step>
+    <step order="4">Create PSScriptAnalyzerSettings.psd1 at repository root. Include: IncludeRules for the most impactful rules (PSAvoidUsingPlainTextForPassword, PSAvoidUsingConvertToSecureStringWithPlainText, PSUseShouldProcessForStateChangingFunctions, PSAvoidUsingWriteHost, PSUseDeclaredVarsMoreThanAssignments, PSAvoidGlobalVars). Set ExcludeRules for any rules that generate excessive false positives on the deployment script patterns found in step 3.</step>
+    <step order="5">Set severity levels in PSScriptAnalyzerSettings.psd1: Error for security rules (plain text passwords, insecure string conversion). Warning for style and best practice rules. Information for minor suggestions.</step>
+    <step order="6">Create scripts/quality/ directory if it does not exist. Create scripts/quality/Invoke-PSAnalysis.ps1 with parameters: -Path (default: scripts/), -Severity (default: @('Warning','Error')), -OutputFormat (default: 'Text'), -FailOnError switch. The script runs Invoke-ScriptAnalyzer using PSScriptAnalyzerSettings.psd1 and outputs results. When -FailOnError is set and errors exist, exit with code 1.</step>
+    <step order="7">Test Invoke-PSAnalysis.ps1 against the scripts/ directory: ./scripts/quality/Invoke-PSAnalysis.ps1 -Path scripts/ -Severity Error,Warning. Review output for expected findings vs false positives.</step>
+    <step order="8">Document the baseline finding counts (Error count, Warning count, total) in the script header comment and in projects/code-quality-and-assurance-r1/notes/tooling-verification.md.</step>
+    <step order="9">Verify the script exits with code 1 when errors are found using -FailOnError, and exits 0 when only warnings exist.</step>
+    <step order="10">Update TASK-INDEX.md to mark task 016 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>PSScriptAnalyzerSettings.psd1 — PSScriptAnalyzer rules configuration</output>
+    <output>scripts/quality/Invoke-PSAnalysis.ps1 — CI-compatible wrapper script for PSScriptAnalyzer</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PSScriptAnalyzer module installed and available (Get-Module PSScriptAnalyzer -ListAvailable returns a result)</criterion>
+    <criterion>PSScriptAnalyzerSettings.psd1 committed to repository root</criterion>
+    <criterion>scripts/quality/Invoke-PSAnalysis.ps1 runs without errors against the scripts/ directory</criterion>
+    <criterion>Invoke-PSAnalysis.ps1 supports -Path, -Severity, -OutputFormat, and -FailOnError parameters</criterion>
+    <criterion>-FailOnError causes exit code 1 when analyzer errors are found</criterion>
+    <criterion>Baseline finding counts (Error, Warning, total) documented</criterion>
+    <criterion>Security rules (plain text passwords) configured as Error severity</criterion>
+  </acceptance-criteria>
+</task>

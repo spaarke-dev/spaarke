@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Enable Blocking Quality Gates on PRs</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>043</blocks>
+    <tags>enforcement, github-actions, ci-cd</tags>
+  </metadata>
+
+  <prompt>
+    Enable blocking quality gates on pull requests. Transition the following gates from advisory to
+    required: SonarCloud quality gate (if it has been passing consistently for 2+ weeks), test failures
+    (remove continue-on-error — already done in task 035), and coverage threshold of 70% for new code.
+    Configure GitHub branch protection rules on the master branch to require these status checks before
+    merging. AI reviews (CodeRabbit, Claude Code Action) remain advisory — only automated objective
+    checks become blocking.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in GitHub branch protection policies and CI/CD quality enforcement.
+    Expert in GitHub branch protection API via gh CLI and SonarCloud quality gate configuration.
+  </role>
+
+  <goal>
+    The master branch is protected by required status checks that prevent merging PRs with test
+    failures, coverage below 70% on new code, or a failing SonarCloud quality gate. AI review
+    findings remain advisory (informational) and do not block merges.
+  </goal>
+
+  <context>
+    <background>
+      After completing the remediation phase (tasks 030-036), the codebase consistently passes all
+      quality checks. This task formalizes those checks as required gates, completing the enforcement
+      layer of the quality system.
+
+      Gates to enable as required:
+      1. Test suite (already blocking per task 035 — verify this is enforced in branch protection)
+      2. SonarCloud quality gate: Enable only after confirming it has been passing for the last 5+
+         nightly runs. Check via `gh run list --workflow=nightly-quality.yml` for recent SonarCloud
+         results. If it has been failing, keep advisory and document what needs to pass first.
+      3. Coverage threshold (≥70% new code): Configure in either the CI workflow or SonarCloud.
+         SonarCloud quality gate conditions are the preferred place to configure this threshold.
+
+      Gates that remain ADVISORY (never block):
+      - CodeRabbit review findings
+      - Claude Code Action review comments
+      - Nightly workflow findings (these run after merge, not before)
+
+      GitHub branch protection configuration via gh CLI:
+      `gh api repos/{owner}/{repo}/branches/master/protection -X PUT -f ...`
+      OR using the GitHub UI (document both approaches).
+
+      The branch protection should require:
+      - Required status checks: list the exact check names as they appear in GitHub Actions
+      - Require branches to be up to date before merging (prevents stale PRs from bypassing checks)
+      - Dismiss stale reviews when new commits are pushed
+
+      Check name discovery: Run `gh run view {run_id} --json jobs` to find the exact job names
+      that appear as status checks in GitHub's branch protection UI.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/sdap-ci.yml (read — identify the exact job names for required status checks)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec Domain H">Only enable blocking gates after 2+ weeks of consistent passing. Check recent nightly workflow results before enabling SonarCloud as blocking. If less than 2 weeks of data, enable it as advisory-only for now and document the timeline to promote it.</constraint>
+    <constraint source="spec FR-13">AI reviews (CodeRabbit, Claude Code Action) MUST remain advisory. These produce subjective findings that should inform but not block the development workflow.</constraint>
+    <constraint source="spec">Coverage threshold of ≥70% applies to NEW code only (line coverage on the diff), not overall codebase coverage. Configure the threshold accordingly in SonarCloud or the CI workflow.</constraint>
+    <constraint source="spec">Document the exact branch protection settings applied so they can be recreated if the repository is migrated or settings are reset.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .github/workflows/sdap-ci.yml to extract the exact job names that appear as status checks in GitHub. These names are used in the branch protection required-status-checks list.</step>
+    <step order="2">Run `gh run list --workflow=nightly-quality.yml --limit=10` to review recent nightly results. Assess whether SonarCloud has been consistently passing. Document the finding (passing consistently → enable blocking; not consistent → keep advisory with note).</step>
+    <step order="3">Run `gh api repos/{owner}/{repo}/branches/master/protection` to check the current branch protection settings. Document what is currently configured before making changes.</step>
+    <step order="4">Determine the exact status check names to require: run `gh run view {recent_run_id} --json jobs --jq '.jobs[].name'` on a recent sdap-ci.yml run to get the precise names GitHub uses.</step>
+    <step order="5">Configure required status checks via gh CLI or document the UI steps. Required checks to add: the test job name, the ESLint/Prettier job name (from task 035), and SonarCloud quality gate check (if assessment in step 2 shows consistent passing).</step>
+    <step order="6">Enable "Require branches to be up to date before merging" in branch protection — this ensures PRs are tested against the latest master, not a stale baseline.</step>
+    <step order="7">Verify the coverage threshold is configured: check if SonarCloud quality gate conditions include a new-code coverage threshold of ≥70%. If not, document the steps to configure it in SonarCloud UI (or via SonarCloud API if available). Add a note to the onboarding guide (task 042) about this threshold.</step>
+    <step order="8">Create a branch protection documentation file at projects/code-quality-and-assurance-r1/notes/branch-protection-config.md. Document: which checks are required, the gh CLI command used to configure them, and the rationale for each gate (blocking vs. advisory).</step>
+    <step order="9">Test the configuration: create a test PR that intentionally fails a required check (or verify on an existing PR) to confirm blocking gates are actually enforced.</step>
+    <step order="10">Update TASK-INDEX.md: change task 040 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="configuration">GitHub branch protection rules on master branch</output>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/branch-protection-config.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Branch protection on master requires the test job status check before merging</criterion>
+    <criterion>Branch protection on master requires the ESLint/Prettier quality check status check</criterion>
+    <criterion>SonarCloud quality gate is configured as required (if consistent passing confirmed) or documented as advisory-pending-promotion (if not yet consistent)</criterion>
+    <criterion>"Require branches to be up to date before merging" is enabled</criterion>
+    <criterion>AI review checks (CodeRabbit, Claude Code Action) are NOT in the required checks list</criterion>
+    <criterion>Coverage threshold of ≥70% for new code is configured in SonarCloud or equivalent, or documented with steps to configure</criterion>
+    <criterion>branch-protection-config.md exists documenting the configuration applied</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

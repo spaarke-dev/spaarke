@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Create Quarterly Comprehensive Audit Runbook</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, audit</tags>
+  </metadata>
+
+  <prompt>
+    Create a runbook for quarterly comprehensive code quality audits at docs/guides/quarterly-audit-runbook.md.
+    Include: the full codebase sweep procedure, a metric comparison template (for comparing current state
+    to previous quarter), a tech debt inventory process, a dependency audit checklist, and an architecture
+    review checklist. Reference the initial audit from Phase 1 of this project as the model for the
+    codebase sweep section.
+  </prompt>
+
+  <role>
+    Senior software architect and technical writer specializing in code quality governance. Expert at
+    creating repeatable audit procedures that can be executed by different team members or AI agents
+    each quarter with consistent results.
+  </role>
+
+  <goal>
+    A comprehensive quarterly audit runbook that enables any developer or AI agent to execute a
+    structured quarterly code quality review producing consistent, comparable results quarter over
+    quarter. The runbook uses the Phase 1 audit of this project as its reference model.
+  </goal>
+
+  <context>
+    <background>
+      Quarterly audits complement the automated daily/weekly quality monitoring by providing deep,
+      human-directed analysis that automated tools miss: evaluating architectural direction, assessing
+      tech debt accumulation trends, reviewing dependency health holistically, and checking alignment
+      with evolving ADRs.
+
+      The runbook must be structured as a reproducible procedure — not a one-time artifact. Each
+      section should be executable by someone who was not involved in the previous quarter's audit.
+
+      Five sections to include:
+
+      1. Full Codebase Sweep Procedure:
+         Modeled on Phase 1 tasks (001-008 of this project). Lists what areas to audit:
+         BFF API C# code, TypeScript/PCF controls, configuration files, dependencies, test coverage,
+         existing tooling. References the task files (001-008) as examples of what a thorough audit
+         looks like. Includes the commands to run for each area.
+
+      2. Metric Comparison Template:
+         A markdown table template for recording current-quarter metrics alongside previous-quarter
+         values. Metrics: test coverage %, TODO/FIXME count, violation count, vulnerable dep count,
+         Program.cs line count, largest file line count. Includes a "trend signal" column (improved/
+         degraded/stable) and a "notes" column.
+
+      3. Tech Debt Inventory Process:
+         How to generate a current tech debt inventory: running the nightly AI review, exporting
+         SonarCloud issues, listing open GitHub issues with label 'tech-debt'. How to categorize
+         items (structural, test coverage, dependency, documentation). How to prioritize for the
+         next quarter's remediation work.
+
+      4. Dependency Audit Checklist:
+         Checklist for quarterly dependency review beyond automated vulnerability scanning: check
+         for abandoned packages (last release > 18 months), check for major versions available
+         (significant upgrades deferred), check for packages with < 1000 weekly downloads (risk of
+         abandonment), check license compliance for any new packages added since last quarter.
+
+      5. Architecture Review Checklist:
+         Checklist for reviewing architectural alignment: are new features following ADR decisions?
+         Are there new patterns emerging that should become ADRs? Are existing ADRs still relevant?
+         Has the ADR count grown appropriately or stagnated? Are architecture tests covering the
+         main ADR constraints?
+
+      The runbook should conclude with a "Quarterly Audit Report Template" — a markdown template
+      for the output document, parallel to the notes/ files produced in Phase 1 of this project.
+    </background>
+    <relevant-files>
+      <file>docs/guides/quarterly-audit-runbook.md (create)</file>
+      <file>projects/code-quality-and-assurance-r1/tasks/ (read — reference Phase 1 task files 001-008 as the audit model)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/ (read — reference the Phase 1 audit output files as examples)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">The runbook must be self-contained — someone running it for the first time should be able to execute it without needing to read any other document. Include all necessary commands inline.</constraint>
+    <constraint source="spec">Reference the Phase 1 audit tasks (001-008) explicitly in the codebase sweep section, but do not copy their content verbatim — summarize the areas covered and provide the commands, not the full task instructions.</constraint>
+    <constraint source="spec">The metric comparison template must use specific column headers that match the metrics produced by the nightly quality system (coverage %, violation count, etc.) so quarterly audit data is comparable to automated monitoring data.</constraint>
+    <constraint source="spec">Each checklist item in the dependency audit and architecture review sections must be a yes/no question followed by the action to take if the answer triggers concern. Checklists without actions are not useful runbook content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the Phase 1 audit task files (001-008) and the notes/ files they produced to understand the scope and format of a thorough audit. Use these as the model for the codebase sweep section of the runbook.</step>
+    <step order="2">Draft the runbook outline with all five sections and the report template. Verify the outline covers all the content specified in the background before writing the full document.</step>
+    <step order="3">Write Section 1 (Full Codebase Sweep Procedure): list the eight audit areas with the key commands to run for each. Reference the Phase 1 task files as detailed examples. Include timing estimate per area.</step>
+    <step order="4">Write Section 2 (Metric Comparison Template): create the markdown table template with columns: Metric, Q-Previous, Q-Current, Change, Trend, Notes. Pre-populate rows for each of the six tracked metrics. Add instructions on where to find each metric's current value.</step>
+    <step order="5">Write Section 3 (Tech Debt Inventory Process): provide step-by-step instructions for generating a tech debt inventory using the three data sources (AI review, SonarCloud, GitHub issues). Include categorization criteria and prioritization scoring guidance.</step>
+    <step order="6">Write Section 4 (Dependency Audit Checklist): create a yes/no checklist with 8-10 items covering: vulnerability scan results, abandoned packages (last release > 18 months), major version availability, download count risk, license compliance. Each item has an "If no/concern:" action.</step>
+    <step order="7">Write Section 5 (Architecture Review Checklist): create a yes/no checklist with 8-10 items covering: new feature ADR alignment, emerging pattern detection, ADR relevance review, ADR count health, architecture test coverage of main constraints. Each item has an "If no/concern:" action.</step>
+    <step order="8">Write the Quarterly Audit Report Template: a markdown template at the end of the runbook that an auditor fills in, with sections mirroring the Phase 1 notes/ files (executive summary, findings by area, metric comparison table, recommended remediation priorities).</step>
+    <step order="9">Review the complete runbook for self-containment (can it be executed without other documents?), completeness (covers all five sections?), and actionability (every item has a clear action). Target 300-500 lines.</step>
+    <step order="10">Update TASK-INDEX.md: change task 044 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">docs/guides/quarterly-audit-runbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>docs/guides/quarterly-audit-runbook.md exists with all five sections and the report template</criterion>
+    <criterion>Section 1 (Codebase Sweep) references Phase 1 audit tasks as examples and includes commands for each area</criterion>
+    <criterion>Section 2 (Metric Comparison) includes a markdown table template with all six tracked metrics and instructions for finding current values</criterion>
+    <criterion>Section 3 (Tech Debt Inventory) provides step-by-step instructions using all three data sources</criterion>
+    <criterion>Section 4 (Dependency Audit) is a yes/no checklist with 8+ items, each with an "If concern:" action</criterion>
+    <criterion>Section 5 (Architecture Review) is a yes/no checklist with 8+ items, each with an "If concern:" action</criterion>
+    <criterion>Quarterly Audit Report Template is included at the end of the runbook</criterion>
+    <criterion>Runbook is self-contained (no external document required to execute it)</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>
