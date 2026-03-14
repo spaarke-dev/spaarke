@@ -1,7 +1,7 @@
 <task id="SPE-035" project="SDAP SPE Admin App">
   <metadata>
     <title>Create PermissionPanel Component</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <tags>code-page, frontend, fluent-ui, phase-1</tags>
     <phase>1</phase>

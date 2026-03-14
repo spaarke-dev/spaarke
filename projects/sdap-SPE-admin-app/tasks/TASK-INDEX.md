@@ -101,7 +101,7 @@
 |---|------|--------|------|-----|
 | 033 | Create ContainersPage | ✅ | 029, 027, 028 | 3h |
 | 034 | Create ContainerDetail side panel | ✅ | 033 | 3h |
-| 035 | Create PermissionPanel component | 🔲 | 034 | 3h |
+| 035 | Create PermissionPanel component | ✅ | 034 | 3h |
 
 ### 1.11 Code Page — File Browser
 
@@ -128,8 +128,8 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 042 | Build Code Page and verify | 🔲 | 032-041 | 2h |
-| 043 | Deploy BFF API with SPE endpoints | 🔲 | 010-023 | 2h |
+| 042 | Build Code Page and verify | ✅ | 032-041 | 2h |
+| 043 | Deploy BFF API with SPE endpoints | ✅ | 010-023 | 2h |
 | 044 | Deploy Code Page to Dataverse | 🔲 | 042 | 2h |
 | 045 | Create Dataverse tables in environment | ✅ | 001-003 | 2h |
 | 046 | Phase 1 end-to-end integration testing | 🔲 | 042-045 | 4h |
