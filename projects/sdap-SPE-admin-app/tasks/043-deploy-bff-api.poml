@@ -1,0 +1,39 @@
+<task id="SPE-043" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Deploy BFF API with SPE Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>deploy, bff-api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-010, SPE-011, SPE-012, SPE-013, SPE-014, SPE-015, SPE-016, SPE-017, SPE-018, SPE-019, SPE-020, SPE-021, SPE-022, SPE-023</dependencies>
+  </metadata>
+  <prompt>Deploy the BFF API with all SPE endpoints to the Azure App Service. Build the API, run tests to verify correctness, then deploy using the existing deployment script. Verify the deployed endpoints are responding correctly.</prompt>
+  <role>DevOps engineer with Azure App Service deployment experience</role>
+  <goal>BFF API is deployed to Azure App Service with all /api/spe/* endpoints responding correctly, verified by a health check on /api/spe/environments.</goal>
+  <constraints>
+    <constraint source="ADR-001">Deploy as Minimal API to Azure App Service; no Azure Functions.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The BFF API hosts all SPE management endpoints that the admin app frontend calls. It must be deployed to the Azure App Service before the frontend can function. The deployment uses the existing Deploy-BffApi.ps1 script which handles build, publish, and zip deploy to the App Service.</background>
+  </context>
+  <steps>
+    <step order="1" name="build">Build the API project: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="2" name="test">Run tests: dotnet test to verify all SPE-related tests pass.</step>
+    <step order="3" name="deploy">Deploy to Azure App Service using scripts/Deploy-BffApi.ps1.</step>
+    <step order="4" name="verify">Verify deployment by calling GET /api/spe/environments and confirming a 200 response.</step>
+    <step order="5" name="smoke-test">Run a quick smoke test on key endpoints: containers list, configs list.</step>
+  </steps>
+  <outputs>
+    <output type="code">Deployed BFF API at https://spe-api-dev-67e2xz.azurewebsites.net</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">BFF API deploys successfully to Azure App Service.</criterion>
+    <criterion testable="true">/api/spe/environments returns HTTP 200.</criterion>
+    <criterion testable="true">All /api/spe/* endpoints are responding.</criterion>
+  </acceptance-criteria>
+</task>

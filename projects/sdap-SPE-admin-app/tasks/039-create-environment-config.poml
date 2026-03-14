@@ -1,0 +1,39 @@
+<task id="SPE-039" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create EnvironmentConfig Component</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-038</dependencies>
+  </metadata>
+  <prompt>Create the EnvironmentConfig component that manages SPE environment records. It shows a list grid of environments with an add/edit form dialog for CRUD operations. Fields include name, tenantId, tenantName, rootSiteUrl, graphEndpoint, isDefault, and status.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>EnvironmentConfig renders a grid of environments with functional add/edit/delete operations and form validation on required fields.</goal>
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Environment records define the Azure tenant configurations that the SPE Admin App connects to. Each environment specifies the tenant ID, root site URL, and Graph endpoint. Administrators need to create, edit, and manage these environments, with one marked as the default.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/settings/EnvironmentConfig.tsx with a data grid listing environments.</step>
+    <step order="2" name="add-edit-dialog">Implement an add/edit form dialog with fields: name, tenantId, tenantName, rootSiteUrl, graphEndpoint, isDefault (toggle), status (dropdown).</step>
+    <step order="3" name="validation">Add validation for required fields (name, tenantId, rootSiteUrl).</step>
+    <step order="4" name="crud-operations">Wire CRUD operations to the environment config API endpoints.</step>
+    <step order="5" name="delete-confirmation">Add delete confirmation dialog before removing an environment.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/settings/EnvironmentConfig.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Environment CRUD operations (create, read, update, delete) work correctly.</criterion>
+    <criterion testable="true">Required field validation prevents saving incomplete records.</criterion>
+  </acceptance-criteria>
+</task>

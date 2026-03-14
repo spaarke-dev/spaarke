@@ -1,0 +1,42 @@
+<task id="SPE-007" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SpeAuditService - Audit Logging</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, audit, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-005</dependencies>
+  </metadata>
+  <prompt>Create the SpeAuditService that logs all administrative operations to the sprk_speauditlog Dataverse table. Every mutation performed through the SPE Admin endpoints must be recorded with full context: operation name, category, target resource, response status, business unit, config reference, performing user, and timestamp.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>SpeAuditService logs audit entries to the sprk_speauditlog Dataverse table with all required context fields and compiles successfully.</goal>
+  <constraints>
+    <constraint source="ADR-001">Minimal API — service should be lightweight and scoped per request.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Audit logging is essential for the SPE Admin App because it manages sensitive infrastructure (Azure AD app credentials, container type permissions, billing). Every create, update, delete, and significant read operation must be logged. The audit service writes to the sprk_speauditlog Dataverse table via the Dataverse Web API, capturing the full context of each operation for compliance and troubleshooting.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create service file">Create SpeAuditService.cs in src/server/api/Sprk.Bff.Api/Services/SpeAdmin/ or an appropriate subfolder.</step>
+    <step order="2" name="Define LogOperation method">Implement LogOperationAsync(string operation, string category, string targetResource, int responseStatus, Guid? configId, Guid? environmentId, Guid? businessUnitId) method.</step>
+    <step order="3" name="Resolve user context">Extract the performing user's identity from the current HTTP context (claims principal).</step>
+    <step order="4" name="Create Dataverse record">Use the Dataverse Web API client to create a sprk_speauditlog record with all fields populated, including lookup references.</step>
+    <step order="5" name="Handle errors gracefully">Audit logging failures should be logged to ILogger but must not throw exceptions that would fail the primary operation.</step>
+    <step order="6" name="Verify compilation">Run dotnet build to confirm the service compiles correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAuditService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAuditService.cs exists and compiles without errors.</criterion>
+    <criterion testable="true">LogOperationAsync writes a record to sprk_speauditlog with operation, category, targetResource, responseStatus, performedBy, and performedOn fields.</criterion>
+    <criterion testable="true">Lookup references to environment, config, and business unit are set when provided.</criterion>
+    <criterion testable="true">Audit logging failures are caught and logged without propagating exceptions to the caller.</criterion>
+  </acceptance-criteria>
+</task>

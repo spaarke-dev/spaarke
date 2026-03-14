@@ -1,0 +1,41 @@
+<task id="SPE-040" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainerTypeConfig Component</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-038</dependencies>
+  </metadata>
+  <prompt>Create the ContainerTypeConfig component that manages SPE container type configuration records. It shows a list grid with an add/edit form containing all fields from the sprk_specontainertypeconfig table, including BU and environment lookups, Key Vault secret name (never actual secrets), and permission checkboxes.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>ContainerTypeConfig renders a grid of configs with functional CRUD, BU/environment lookup fields, Key Vault secret name field (never showing actual secrets), and permission checkboxes.</goal>
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid and LookupField from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type configurations define how SPE containers are provisioned for a given Business Unit and environment. Each config specifies the container type ID, associated Azure app registration, Key Vault secret name for credentials (never the actual secret value), and permission settings. These configs are the bridge between Dataverse BU context and SPE tenant operations.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/settings/ContainerTypeConfig.tsx with a data grid listing configs.</step>
+    <step order="2" name="add-edit-form">Implement add/edit form with all fields from the sprk_specontainertypeconfig table.</step>
+    <step order="3" name="lookup-fields">Add BU and environment lookup fields using LookupField from the shared library.</step>
+    <step order="4" name="secret-name-field">Add Key Vault secret name field — display and accept only the secret name, never the actual secret value.</step>
+    <step order="5" name="permission-checkboxes">Add permission checkboxes for configuring default container permissions.</step>
+    <step order="6" name="crud-operations">Wire CRUD operations to the config API endpoints.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/settings/ContainerTypeConfig.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Config CRUD operations work correctly.</criterion>
+    <criterion testable="true">The component never shows or accepts actual secret values — only Key Vault secret names.</criterion>
+    <criterion testable="true">BU and environment lookup fields populate and filter correctly.</criterion>
+  </acceptance-criteria>
+</task>

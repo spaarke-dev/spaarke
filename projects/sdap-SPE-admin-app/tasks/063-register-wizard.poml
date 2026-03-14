@@ -1,0 +1,58 @@
+<task id="SPE-063" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create RegisterWizard</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-061</dependencies>
+  </metadata>
+  <prompt>Create the RegisterWizard component that guides administrators through registering a container type with a consuming application. Registration is the critical step that enables containers to be created from a type — without it, the type exists but cannot be used. The wizard provides a step-by-step flow for selecting permissions and confirming the registration.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working multi-step registration wizard using WizardShell that collects permission selections and calls the registration endpoint, verified by manual testing.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use WizardShell from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type registration grants a consuming application specific permissions to create and manage containers of a given type. The available delegated permissions include ReadContent, WriteContent, Create, Delete, ManagePermissions, AddAllPermissions, ReadAllPermissions, WriteAllPermissions, DeleteAllPermissions, and EnumeratePermissions. Application permissions follow a similar pattern. The wizard guides admins through selecting appropriate permissions for the consuming app.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-wizard-component">Create components/container-types/RegisterWizard.tsx using WizardShell with 4 steps</step>
+    <step order="2" name="step-1-select-type">Step 1 - Select Container Type: show dropdown or pre-filled if opened from a specific type, display type info (name, description, billing classification)</step>
+    <step order="3" name="step-2-delegated-permissions">Step 2 - Choose Delegated Permissions: render checkboxes for each delegated permission (ReadContent, WriteContent, Create, Delete, ManagePermissions, etc.) with descriptions</step>
+    <step order="4" name="step-3-app-permissions">Step 3 - Choose Application Permissions: render checkboxes for each application permission with descriptions</step>
+    <step order="5" name="step-4-confirm">Step 4 - Confirm and Register: show summary of selected type, delegated permissions, and app permissions with a Register button</step>
+    <step order="6" name="add-submit-handler">Implement submit handler that calls POST /api/spe/containertypes/{id}/register with selected permissions</step>
+    <step order="7" name="add-validation">Add step validation — at least one delegated permission must be selected, at least one app permission must be selected</step>
+    <step order="8" name="add-success-failure">Add success message with option to go back to container types list, and error handling with retry option</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/RegisterWizard.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/steps/SelectContainerTypeStep.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/steps/DelegatedPermissionsStep.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/steps/ApplicationPermissionsStep.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/steps/ConfirmRegistrationStep.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">RegisterWizard renders 4 steps using WizardShell</criterion>
+    <criterion testable="true">Step 1 shows container type selection or pre-filled type info</criterion>
+    <criterion testable="true">Step 2 shows delegated permission checkboxes with descriptions</criterion>
+    <criterion testable="true">Step 3 shows application permission checkboxes with descriptions</criterion>
+    <criterion testable="true">Step 4 shows full summary of selections before registration</criterion>
+    <criterion testable="true">Cannot proceed past Step 2 without selecting at least one delegated permission</criterion>
+    <criterion testable="true">Cannot proceed past Step 3 without selecting at least one application permission</criterion>
+    <criterion testable="true">Register button calls POST /api/spe/containertypes/{id}/register</criterion>
+    <criterion testable="true">Success state shows confirmation message</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

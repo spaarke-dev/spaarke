@@ -1,0 +1,43 @@
+<task id="SPE-019" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Download/Preview/Delete File Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-017, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement file operation endpoints for downloading, previewing, and deleting files within SPE containers. These are essential admin operations for content management and troubleshooting.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>Three working endpoints: download (stream file content), preview (return preview URL), and delete (remove item) with audit logging on deletions.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Administrators need to download files for inspection, preview documents in-browser, and delete items for cleanup. Download streams the file content with appropriate Content-Type and Content-Disposition headers. Preview returns a temporary URL for browser-based viewing. Delete removes the item and must be audit logged as a destructive operation.</background>
+  </context>
+  <steps>
+    <step order="1" name="Implement download endpoint">Add GET /api/spe/containers/{id}/items/{itemId}/content?configId={id} that streams file content from Graph API with correct Content-Type and Content-Disposition headers.</step>
+    <step order="2" name="Implement preview endpoint">Add GET /api/spe/containers/{id}/items/{itemId}/preview?configId={id} that returns a temporary preview URL from Graph API.</step>
+    <step order="3" name="Implement delete endpoint">Add DELETE /api/spe/containers/{id}/items/{itemId}?configId={id} that deletes the item via Graph API.</step>
+    <step order="4" name="Audit deletions">Write audit log entries for deletions with category "FileDeleted" including file name and container.</step>
+    <step order="5" name="Test endpoints">Verify download streams correctly, preview returns valid URL, delete removes item and logs audit entry.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerItemEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET content endpoint streams the file with correct Content-Type header.</criterion>
+    <criterion testable="true">GET preview endpoint returns a temporary preview URL.</criterion>
+    <criterion testable="true">DELETE endpoint removes the item from the container.</criterion>
+    <criterion testable="true">Deletion writes an audit log entry with category "FileDeleted".</criterion>
+    <criterion testable="true">Non-existent itemId returns 404 Not Found for all three endpoints.</criterion>
+  </acceptance-criteria>
+</task>

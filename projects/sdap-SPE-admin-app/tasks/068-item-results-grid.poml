@@ -1,0 +1,54 @@
+<task id="SPE-068" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ItemResultsGrid</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-066</dependencies>
+  </metadata>
+  <prompt>Create the ItemResultsGrid component that displays item search results with management toolbar actions and context menu. This grid allows administrators to view and manage files found through search, including delete, download, permission management, and CSV export operations.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working ItemResultsGrid with UniversalDatasetGrid, toolbar actions (Delete, Download, Manage Permissions, Export CSV), and context menu (View Details, Copy ID, Open in Browser).</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid and CommandToolbar from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Item search results show files and documents found across containers. Administrators need to manage these items individually or in bulk — deleting files, downloading copies, adjusting permissions, or exporting lists for reporting. The context menu provides quick single-item actions like viewing details, copying the item ID for API calls, or opening the item in a browser.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-grid-component">Create components/search/ItemResultsGrid.tsx with UniversalDatasetGrid configured for item result columns (name, size, lastModifiedDateTime, container name)</step>
+    <step order="2" name="add-multi-select">Enable multi-row selection on the grid</step>
+    <step order="3" name="add-toolbar">Add CommandToolbar with Delete, Download, Manage Permissions, and Export CSV buttons</step>
+    <step order="4" name="add-context-menu">Add right-click context menu with View Details, Copy ID, and Open in Browser options</step>
+    <step order="5" name="add-delete-confirmation">Add confirmation dialog for Delete action</step>
+    <step order="6" name="add-download">Implement Download action for single and multi-file download</step>
+    <step order="7" name="add-csv-export">Implement Export CSV for item results</step>
+    <step order="8" name="add-pagination">Add pagination support using skipToken from search API</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/search/ItemResultsGrid.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ItemResultsGrid renders search results in UniversalDatasetGrid</criterion>
+    <criterion testable="true">Multi-row selection is supported</criterion>
+    <criterion testable="true">Toolbar shows Delete, Download, Manage Permissions, Export CSV buttons</criterion>
+    <criterion testable="true">Context menu shows View Details, Copy ID, Open in Browser options</criterion>
+    <criterion testable="true">Delete shows confirmation dialog before executing</criterion>
+    <criterion testable="true">Download triggers file download for selected items</criterion>
+    <criterion testable="true">Copy ID copies the item identifier to clipboard</criterion>
+    <criterion testable="true">Export CSV generates and downloads a valid CSV file</criterion>
+    <criterion testable="true">Pagination loads more results</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

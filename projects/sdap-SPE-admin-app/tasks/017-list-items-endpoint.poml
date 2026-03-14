@@ -1,0 +1,43 @@
+<task id="SPE-017" project="SDAP SPE Admin App">
+  <metadata>
+    <title>List Items in Container Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-006, SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement the List Items endpoint so the admin UI can browse files and folders within an SPE container. This endpoint must support folder navigation by accepting an optional folderId parameter to drill into subfolders.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>A working endpoint that returns files and folders in a specified container or subfolder, using the Graph drive items API.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-endpoints-catalog.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Administrators need to browse container contents to inspect files, verify uploads, and manage content. The endpoint uses the Graph drive items API to list children of the container root or a specific folder. Each item in the response includes name, size, lastModified, type (file/folder), and other DriveItem metadata.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create endpoint class">Create ContainerItemEndpoints.cs in src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ with static MapContainerItemEndpoints extension method.</step>
+    <step order="2" name="Implement list items endpoint">Add GET /api/spe/containers/{id}/items?configId={id}&amp;folderId={folderId} that calls Graph API to list drive item children.</step>
+    <step order="3" name="Support folder navigation">When folderId is provided, list children of that folder. When omitted, list root-level items.</step>
+    <step order="4" name="Map response">Map Graph DriveItem responses to typed API response objects including name, size, lastModifiedDateTime, createdBy, file/folder indicators.</step>
+    <step order="5" name="Register endpoints">Register MapContainerItemEndpoints in the endpoint registration pipeline.</step>
+    <step order="6" name="Test endpoint">Verify listing root items and subfolder items returns correct DriveItem data.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerItemEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/containers/{id}/items returns files and folders at the container root.</criterion>
+    <criterion testable="true">Providing folderId returns children of that specific folder.</criterion>
+    <criterion testable="true">Response includes name, size, lastModifiedDateTime, and file/folder type for each item.</criterion>
+    <criterion testable="true">Empty container/folder returns empty array, not an error.</criterion>
+  </acceptance-criteria>
+</task>

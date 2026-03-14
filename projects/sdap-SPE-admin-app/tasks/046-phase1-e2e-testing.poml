@@ -1,0 +1,46 @@
+<task id="SPE-046" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Phase 1 End-to-End Integration Testing</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>testing, integration-test, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-042, SPE-043, SPE-044, SPE-045</dependencies>
+  </metadata>
+  <prompt>Perform comprehensive end-to-end integration testing of the Phase 1 SPE Admin App. Test the full user flow from opening the app via sitemap, selecting a BU context, through container management, file browsing, audit log viewing, and dashboard metrics. Verify dark mode works across all pages.</prompt>
+  <role>QA engineer with end-to-end testing expertise for Dataverse and web applications</role>
+  <goal>All Phase 1 features work end-to-end: BU selection flows through to container operations, file browsing, audit logging, and dashboard metrics with dark mode support across all pages.</goal>
+  <constraints>
+    <constraint source="ADR-021">All pages must render correctly in both light and dark mode.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/sdap-SPE-admin-app/spec.md</file>
+      <file>projects/sdap-SPE-admin-app/plan.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Phase 1 delivers the complete SPE Admin App with all core features: BU-scoped container management, file browsing, audit logging, dashboard metrics, and settings management. This end-to-end test validates that all components work together as expected, from the Dataverse sitemap entry through the code page frontend to the BFF API backend and back to Dataverse for audit logging.</background>
+  </context>
+  <steps>
+    <step order="1" name="open-app">Open the SPE Admin App from the Dataverse sitemap and verify it loads.</step>
+    <step order="2" name="select-bu">Select a Business Unit in the BuContextPicker and verify configs load.</step>
+    <step order="3" name="select-config">Select a Container Type Config and verify environment populates.</step>
+    <step order="4" name="view-dashboard">Navigate to Dashboard and verify metrics cards and activity grid display.</step>
+    <step order="5" name="create-container">Navigate to Containers, create a new container, and verify it appears in the grid.</step>
+    <step order="6" name="browse-files">Navigate to File Browser, select the new container, and verify empty state.</step>
+    <step order="7" name="upload-file">Upload a test file via drag-drop and verify it appears in the grid.</step>
+    <step order="8" name="check-audit">Navigate to Audit Log and verify entries for container creation and file upload.</step>
+    <step order="9" name="refresh-dashboard">Return to Dashboard, click Refresh, and verify updated metrics.</step>
+    <step order="10" name="test-dark-mode">Toggle dark mode and verify all pages render correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">Test results report documenting pass/fail for each step</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Full BU selection through container creation through file upload flow works end-to-end.</criterion>
+    <criterion testable="true">Audit log captures entries for all operations performed during testing.</criterion>
+    <criterion testable="true">Dashboard metrics update after refresh.</criterion>
+    <criterion testable="true">Dark mode toggle works correctly across all pages.</criterion>
+  </acceptance-criteria>
+</task>

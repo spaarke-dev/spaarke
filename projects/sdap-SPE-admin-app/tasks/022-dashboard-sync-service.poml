@@ -1,0 +1,46 @@
+<task id="SPE-022" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Dashboard Metrics + SpeDashboardSyncService</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, background, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-006, SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement the SpeDashboardSyncService as a BackgroundService that periodically syncs container metrics (counts, storage usage) from the Graph API and caches them. Also implement the dashboard metrics endpoint and manual refresh trigger so the admin UI can display real-time infrastructure health.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs, BackgroundService, and caching patterns</role>
+  <goal>A BackgroundService that periodically fetches container metrics from Graph and caches them, plus two endpoints (GET metrics, POST refresh) for the admin UI dashboard.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService for periodic work — no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The admin dashboard needs to display aggregate metrics like total container count, total storage used, container count by status, and recent activity. Fetching these from Graph on every page load would be slow and rate-limit-prone, so a BackgroundService syncs periodically (default 15 minutes) and caches results. The DailySendCountResetService in the codebase is a good reference for the BackgroundService pattern used in this project.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create BackgroundService">Create SpeDashboardSyncService inheriting from BackgroundService in src/server/api/Sprk.Bff.Api/Services/SpeAdmin/ with configurable sync interval (default 15 minutes).</step>
+    <step order="2" name="Implement sync logic">In ExecuteAsync, periodically fetch container counts and storage metrics from Graph API for each registered container type config.</step>
+    <step order="3" name="Cache metrics">Store fetched metrics in Redis (via IDistributedCache) or in-memory cache with expiration matching the sync interval.</step>
+    <step order="4" name="Create metrics endpoint">Add GET /api/spe/dashboard/metrics that returns cached dashboard metrics.</step>
+    <step order="5" name="Create refresh endpoint">Add POST /api/spe/dashboard/refresh that triggers an immediate on-demand sync and returns updated metrics.</step>
+    <step order="6" name="Register service">Register SpeDashboardSyncService in the DI container and endpoint pipeline.</step>
+    <step order="7" name="Test service">Verify periodic sync runs, metrics endpoint returns cached data, and refresh triggers on-demand sync.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeDashboardSyncService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/DashboardEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeDashboardSyncService runs as a BackgroundService and syncs metrics at the configured interval.</criterion>
+    <criterion testable="true">GET /api/spe/dashboard/metrics returns cached container counts and storage metrics.</criterion>
+    <criterion testable="true">POST /api/spe/dashboard/refresh triggers an immediate sync and returns updated metrics.</criterion>
+    <criterion testable="true">Sync interval is configurable via appsettings (default 15 minutes).</criterion>
+    <criterion testable="true">Service handles Graph API errors gracefully without crashing the background loop.</criterion>
+  </acceptance-criteria>
+</task>

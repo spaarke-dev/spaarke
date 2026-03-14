@@ -1,0 +1,46 @@
+<task id="SPE-005" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SpeAdminModule DI Feature Module</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, di, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Create the SpeAdminModule dependency injection feature module that registers all SPE Admin services following the established feature module pattern. This module encapsulates SpeAdminGraphService, SpeAuditService, and SpeDashboardSyncService (as a HostedService), plus configuration options. It must stay within the ADR-010 limit of 15 non-framework DI registrations.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>SpeAdminModule.cs compiles, is registered in Program.cs, and contains no more than 15 non-framework DI registrations.</goal>
+  <constraints>
+    <constraint source="ADR-010">No more than 15 non-framework DI registrations per feature module. Use concrete types unless a seam is required. Follow the feature module pattern.</constraint>
+    <constraint source="ADR-001">Minimal API architecture — no controllers, no global middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The BFF API uses feature modules to organize DI registrations by domain. Each module provides an AddXxxModule() extension method called from Program.cs. The SpeAdminModule groups all SPE Admin-related services: the Graph client service for multi-config SPE operations, the audit logging service, and the background sync service. Reference CommunicationModule.cs for the established pattern.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create module file">Create SpeAdminModule.cs in src/server/api/Sprk.Bff.Api/Infrastructure/DI/ following the pattern from CommunicationModule.cs.</step>
+    <step order="2" name="Define AddSpeAdminModule extension">Implement the AddSpeAdminModule(this IServiceCollection services, IConfiguration config) extension method.</step>
+    <step order="3" name="Register services">Register SpeAdminGraphService (singleton), SpeAuditService (scoped), and SpeDashboardSyncService as IHostedService (singleton).</step>
+    <step order="4" name="Register configuration">Bind configuration options from appsettings.json section (e.g., SpeAdmin:*).</step>
+    <step order="5" name="Call from Program.cs">Add builder.Services.AddSpeAdminModule(builder.Configuration) call in Program.cs.</step>
+    <step order="6" name="Verify compilation">Run dotnet build to confirm the module compiles and integrates correctly.</step>
+    <step order="7" name="Count registrations">Verify the total non-framework DI registrations do not exceed 15.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpeAdminModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminModule.cs exists and compiles without errors.</criterion>
+    <criterion testable="true">AddSpeAdminModule() is called from Program.cs.</criterion>
+    <criterion testable="true">SpeAdminGraphService, SpeAuditService, and SpeDashboardSyncService are registered.</criterion>
+    <criterion testable="true">Total non-framework DI registrations in the module do not exceed 15.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

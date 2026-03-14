@@ -1,0 +1,53 @@
+<task id="SPE-084" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Multi-App Registration Support</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>bff-api, auth, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-072</dependencies>
+  </metadata>
+  <prompt>Extend SpeAdminGraphService to fully support different owning app registrations per business unit configuration, including OBO (On-Behalf-Of) token flow. This enables organizations with multiple Azure AD app registrations to manage all their SPE container types through a single admin interface, each BU config using its own app identity.</prompt>
+  <role>Senior .NET Developer with Azure AD authentication and OBO token flow expertise</role>
+  <goal>SpeAdminGraphService supports multiple owning app registrations with proper token acquisition per BU config, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-010">Maintain DI minimalism — avoid per-config service instances</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Each business unit configuration in the SPE Admin App can point to a different owning Azure AD app registration. The SpeAdminGraphService needs to acquire tokens using the correct app identity for each request — not a single global app identity. This requires implementing the OBO (On-Behalf-Of) flow where the admin user's token is exchanged for a token scoped to the owning app, or using client credentials flow with the owning app's credentials stored in Key Vault. Token caching must be per-app to avoid cross-contamination.</background>
+  </context>
+  <steps>
+    <step order="1" name="extend-config-model">Extend SpeContainerTypeConfig with owningAppId, owningAppTenantId, and Key Vault secret reference for app credentials</step>
+    <step order="2" name="implement-token-provider">Create SpeAdminTokenProvider that resolves credentials from Key Vault and acquires tokens per owning app</step>
+    <step order="3" name="add-obo-flow">Implement OBO token exchange: user token -> owning app token with Graph API permissions</step>
+    <step order="4" name="add-token-caching">Add per-app token caching to avoid redundant token acquisitions</step>
+    <step order="5" name="refactor-graph-service">Refactor SpeAdminGraphService to accept token provider per request based on configId</step>
+    <step order="6" name="add-config-validation">Add startup validation that all owning app credentials are accessible in Key Vault</step>
+    <step order="7" name="add-tests">Write unit tests for token provider, OBO flow, and per-config graph service calls</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminTokenProvider.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SpeContainerTypeConfig.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/MultiAppSupportTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminGraphService acquires tokens using the owning app identity from the BU config</criterion>
+    <criterion testable="true">OBO token exchange produces valid Graph API tokens scoped to the owning app</criterion>
+    <criterion testable="true">Token caching is per-app — different configs use different cached tokens</criterion>
+    <criterion testable="true">Key Vault credentials are resolved at request time (not startup only)</criterion>
+    <criterion testable="true">Startup validation warns about inaccessible Key Vault secrets</criterion>
+    <criterion testable="true">Existing single-app scenarios continue to work without config changes</criterion>
+    <criterion testable="true">Unit tests pass for all token acquisition scenarios</criterion>
+  </acceptance-criteria>
+</task>

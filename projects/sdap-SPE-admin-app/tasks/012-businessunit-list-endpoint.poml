@@ -1,0 +1,41 @@
+<task id="SPE-012" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Implement Business Unit List Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api, api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement a read-only endpoint to list Dataverse business units at GET /api/spe/businessunits. The SPE Admin UI needs this to populate business unit dropdowns when creating or filtering container type configs. The endpoint queries the built-in businessunit Dataverse table and returns id, name, and parent BU id.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>GET /api/spe/businessunits returns a list of business units from Dataverse with id, name, and parentBuId fields.</goal>
+  <constraints>
+    <constraint source="ADR-001">Minimal API — use lambda or static method handler.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Business units are a built-in Dataverse concept used for organizational segmentation. The SPE Admin App uses BU assignment to scope container type configs to specific organizational units. The admin UI needs a list of available BUs for dropdown selection. This is a simple read-only endpoint that queries the standard businessunit table — no audit logging is needed since it is a non-mutating operation.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define response model">Create a BusinessUnitDto with properties: id (Guid), name (string), parentBusinessUnitId (Guid?).</step>
+    <step order="2" name="Implement GET endpoint">Add GET /api/spe/businessunits endpoint to the SpeAdmin route group that queries the Dataverse businessunit table.</step>
+    <step order="3" name="Query Dataverse">Use the Dataverse Web API client to query businessunit table, selecting businessunitid, name, and _parentbusinessunitid_value columns.</step>
+    <step order="4" name="Map and return">Map Dataverse response to BusinessUnitDto array and return 200.</step>
+    <step order="5" name="Verify compilation">Run dotnet build to confirm the endpoint compiles correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/BusinessUnitEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/BusinessUnitDto.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/businessunits returns a JSON array of business units.</criterion>
+    <criterion testable="true">Each business unit includes id, name, and parentBusinessUnitId fields.</criterion>
+    <criterion testable="true">The endpoint queries the Dataverse businessunit table.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,52 @@
+<task id="SPE-070" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SecurityPage</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-029, SPE-060</dependencies>
+  </metadata>
+  <prompt>Create the SecurityPage component that displays security alerts and the secure score for the SharePoint Embedded environment. This read-only dashboard provides administrators with visibility into security events and the overall security posture without leaving the admin tool.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working SecurityPage with an alerts grid and secure score card, displaying read-only data from Graph security API.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The security dashboard provides a centralized view of security-relevant information from Microsoft Graph. The secure score card shows the current score vs. maximum score as a percentage with a visual gauge. The alerts grid lists recent security alerts with severity levels (low, medium, high, critical), status, and timestamps. This is a read-only view — security remediation happens in the Microsoft 365 security center.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page-component">Create components/security/SecurityPage.tsx with two sections: Secure Score card and Alerts grid</step>
+    <step order="2" name="add-secure-score-card">Create SecureScoreCard.tsx displaying currentScore/maxScore as percentage with visual progress indicator</step>
+    <step order="3" name="add-alerts-grid">Add UniversalDatasetGrid showing alerts with title, severity (with color-coded badge), status, and created date columns</step>
+    <step order="4" name="add-severity-badges">Add severity-level badges using Fluent v9 Badge component with semantic colors (info, warning, danger)</step>
+    <step order="5" name="add-data-fetching">Implement parallel data fetching from GET /api/spe/security/alerts and GET /api/spe/security/score</step>
+    <step order="6" name="add-navigation-route">Register SecurityPage in app shell navigation/routing</step>
+    <step order="7" name="add-loading-empty-states">Add loading skeletons and empty states for both sections</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/security/SecurityPage.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/security/SecureScoreCard.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SecurityPage renders with Secure Score card and Alerts grid</criterion>
+    <criterion testable="true">Secure Score card shows currentScore/maxScore as percentage</criterion>
+    <criterion testable="true">Alerts grid displays title, severity, status, and date columns</criterion>
+    <criterion testable="true">Severity badges use semantic colors (not hard-coded)</criterion>
+    <criterion testable="true">Both data sources are fetched in parallel</criterion>
+    <criterion testable="true">Loading skeletons display while data is fetching</criterion>
+    <criterion testable="true">Empty state shows when no alerts exist</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

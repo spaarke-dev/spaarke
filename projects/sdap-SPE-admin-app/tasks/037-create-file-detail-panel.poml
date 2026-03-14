@@ -1,0 +1,41 @@
+<task id="SPE-037" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create FileDetailPanel</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-036</dependencies>
+  </metadata>
+  <prompt>Create the FileDetailPanel component that shows detailed file information in a side panel when a file is selected. It displays file metadata, version history, sharing link management, and a thumbnail preview.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>FileDetailPanel opens on file selection, displays metadata, version history, sharing links, and thumbnail preview using shared library components.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse SidePaneShell and FilePreview from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>When an administrator selects a file in the FileBrowserPage grid, this side panel opens to show comprehensive file details. It provides metadata (name, size, dates, MIME type), version history for tracking changes, sharing link management for controlling access, and a thumbnail preview when available.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/files/FileDetailPanel.tsx using SidePaneShell from the shared library.</step>
+    <step order="2" name="metadata-section">Display file metadata: name, size, created/modified dates, MIME type.</step>
+    <step order="3" name="version-history">Add version history list showing past versions with dates and authors.</step>
+    <step order="4" name="sharing-links">Add sharing link management section for creating and revoking sharing links.</step>
+    <step order="5" name="thumbnail-preview">Add thumbnail preview using FilePreview from the shared library.</step>
+    <step order="6" name="api-integration">Wire data loading and actions to the file detail API endpoints.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/files/FileDetailPanel.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">File detail panel shows metadata (name, size, dates, MIME type).</criterion>
+    <criterion testable="true">Version history list displays correctly.</criterion>
+    <criterion testable="true">Sharing link management and thumbnail preview render.</criterion>
+  </acceptance-criteria>
+</task>

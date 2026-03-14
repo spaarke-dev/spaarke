@@ -1,0 +1,51 @@
+<task id="SPE-067" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainerResultsGrid</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-066</dependencies>
+  </metadata>
+  <prompt>Create the ContainerResultsGrid component that displays container search results with management toolbar actions. This grid allows administrators to view, select, and perform bulk operations on containers found through search, including delete, lock, and CSV export.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working ContainerResultsGrid with UniversalDatasetGrid, multi-row selection, and toolbar actions (Delete, Lock, Export CSV) with confirmation dialogs for destructive actions.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid and CommandToolbar from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>When administrators search for containers, they need to be able to act on the results. The ContainerResultsGrid displays search hits with columns for container name, type, created date, and status. Toolbar actions allow batch operations — delete moves containers to the recycle bin, lock changes the container status, and export generates a CSV of the results for reporting.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-grid-component">Create components/search/ContainerResultsGrid.tsx with UniversalDatasetGrid configured for container result columns (name, containerTypeId, createdDateTime, status)</step>
+    <step order="2" name="add-multi-select">Enable multi-row selection on the grid</step>
+    <step order="3" name="add-toolbar">Add CommandToolbar with Delete, Lock, and Export CSV buttons that enable/disable based on selection</step>
+    <step order="4" name="add-delete-confirmation">Add confirmation dialog for Delete action: "Are you sure you want to delete {n} containers? They will be moved to the recycle bin."</step>
+    <step order="5" name="add-lock-action">Implement Lock action that updates container status</step>
+    <step order="6" name="add-csv-export">Implement Export CSV action that generates and downloads a CSV file of the search results</step>
+    <step order="7" name="add-pagination">Add pagination support using skipToken from search API</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/search/ContainerResultsGrid.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ContainerResultsGrid renders search results in UniversalDatasetGrid</criterion>
+    <criterion testable="true">Multi-row selection is supported</criterion>
+    <criterion testable="true">Delete button is disabled when no rows are selected</criterion>
+    <criterion testable="true">Delete shows confirmation dialog before executing</criterion>
+    <criterion testable="true">Lock button updates container status for selected rows</criterion>
+    <criterion testable="true">Export CSV generates and downloads a valid CSV file</criterion>
+    <criterion testable="true">Pagination loads more results on scroll or page navigation</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

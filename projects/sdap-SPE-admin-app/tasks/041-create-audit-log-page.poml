@@ -1,0 +1,40 @@
+<task id="SPE-041" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create AuditLogPage</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027</dependencies>
+  </metadata>
+  <prompt>Create the AuditLogPage component that displays a filterable grid of SPE audit log entries. Users can filter by date range, category, BU, and config. The grid shows operation, target, status, user, and timestamp columns with pagination support.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>AuditLogPage renders a filterable, paginated grid of audit log entries with working date range, category, BU, and config filters.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The Audit Log page provides administrators with a comprehensive record of all SPE operations performed through the admin app. It is essential for compliance, troubleshooting, and monitoring. Entries capture what operation was performed, on what target, by whom, and whether it succeeded. Filtering allows administrators to narrow down to specific time periods, operation categories, or organizational contexts.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page">Create components/audit/AuditLogPage.tsx with the audit log layout.</step>
+    <step order="2" name="filter-bar">Add filter bar with date range picker, category dropdown, BU dropdown, and config dropdown.</step>
+    <step order="3" name="data-grid">Add UniversalDatasetGrid with columns: operation, target, status, user, timestamp.</step>
+    <step order="4" name="pagination">Implement pagination for large result sets.</step>
+    <step order="5" name="api-integration">Wire data loading and filter application to the audit log API endpoint.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/audit/AuditLogPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Audit log loads and displays entries with correct columns.</criterion>
+    <criterion testable="true">Pagination works for large result sets.</criterion>
+    <criterion testable="true">Category filter narrows results to the selected category.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,50 @@
+<task id="SPE-011" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Implement Container Type Config CRUD Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-009, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement the full set of CRUD endpoints for container type configurations under /api/spe/configs. These endpoints allow administrators to manage SharePoint Embedded container type registrations, supporting filtering by business unit and environment. Key Vault secret name format must be validated on create/update. All mutations must be audit-logged.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>All four CRUD endpoints work correctly for /api/spe/configs with BU/environment filtering, Key Vault secret name validation, audit logging, and ProblemDetails error responses.</goal>
+  <constraints>
+    <constraint source="ADR-001">Minimal API — use lambda or static method handlers, not controllers.</constraint>
+    <constraint source="ADR-019">All error responses must use ProblemDetails format with correlation IDs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type configs are the primary data entity of the SPE Admin App. Each config represents a SharePoint Embedded container type registration tied to an Azure AD application. Configs are scoped to a business unit and environment. The API must support listing configs with optional BU and environment filters, creating new configs with validated Key Vault secret names (alphanumeric + hyphens, 1-127 chars), updating config properties, and deleting configs. All state changes are recorded in the audit log.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define request/response models">Create DTOs for config create/update requests and list/detail responses, including all 20+ fields from the table schema.</step>
+    <step order="2" name="Implement GET /api/spe/configs">Add endpoint to list configs with optional query parameters: businessUnitId, environmentId. Query Dataverse with OData filters.</step>
+    <step order="3" name="Implement GET /api/spe/configs/{id}">Add endpoint to retrieve a single config by ID with expanded lookups.</step>
+    <step order="4" name="Implement POST /api/spe/configs">Add endpoint to create a new config. Validate required fields and Key Vault secret name format. Log to audit.</step>
+    <step order="5" name="Implement PUT /api/spe/configs/{id}">Add endpoint to update an existing config. Validate Key Vault secret name format on change. Log to audit.</step>
+    <step order="6" name="Implement DELETE /api/spe/configs/{id}">Add endpoint to delete a config. Consider checking for active containers before allowing deletion. Log to audit.</step>
+    <step order="7" name="Validate Key Vault secret name">Implement validation for Key Vault secret name format: alphanumeric characters and hyphens only, 1-127 characters long.</step>
+    <step order="8" name="Verify compilation">Run dotnet build to confirm all endpoints compile correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ConfigEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ConfigDtos.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/configs returns a list of configs, optionally filtered by businessUnitId and environmentId.</criterion>
+    <criterion testable="true">GET /api/spe/configs/{id} returns a single config or 404.</criterion>
+    <criterion testable="true">POST /api/spe/configs creates a new config and returns 201.</criterion>
+    <criterion testable="true">PUT /api/spe/configs/{id} updates a config and returns 200.</criterion>
+    <criterion testable="true">DELETE /api/spe/configs/{id} deletes a config and returns 204.</criterion>
+    <criterion testable="true">Key Vault secret name validation rejects invalid formats with ProblemDetails 400.</criterion>
+    <criterion testable="true">All mutation operations are logged via SpeAuditService.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

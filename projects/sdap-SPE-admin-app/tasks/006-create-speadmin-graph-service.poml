@@ -1,0 +1,50 @@
+<task id="SPE-006" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SpeAdminGraphService - Multi-Config Graph Client</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>bff-api, auth, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-005</dependencies>
+  </metadata>
+  <prompt>Create the SpeAdminGraphService that manages multiple Graph API clients, one per container type configuration. Each config has its own Azure AD app registration with distinct credentials stored in Key Vault. The service must resolve credentials dynamically (read config from Dataverse, fetch secret from Key Vault), create and cache GraphServiceClient instances by configId with a TTL, and handle Graph API pagination and 429 throttling with exponential backoff.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>SpeAdminGraphService resolves credentials from Dataverse + Key Vault, creates Graph clients per config, caches them with TTL, handles pagination and throttling, and compiles successfully.</goal>
+  <constraints>
+    <constraint source="ADR-010">Do not inject GraphServiceClient directly — use a factory/service pattern to create clients per configuration.</constraint>
+    <constraint source="ADR-001">Minimal API architecture — service must be stateless except for the client cache.</constraint>
+    <constraint source="ADR-007">No Graph SDK types should leak above the facade — wrap Graph responses in domain models.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App manages container types across multiple Azure AD app registrations. Each container type config in Dataverse stores a client ID and a Key Vault secret name (not the secret itself). When an admin operation targets a specific config, the service must: (1) read the config from Dataverse to get the client ID and secret name, (2) fetch the actual secret from Key Vault, (3) create a GraphServiceClient with those credentials, (4) cache the client to avoid repeated Key Vault lookups. Reference GraphClientFactory.cs for the existing pattern.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create service file">Create SpeAdminGraphService.cs in src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ or a new SpeAdmin/ subfolder.</step>
+    <step order="2" name="Implement config resolution">Implement GetClientForConfig(Guid configId) that reads sprk_specontainertypeconfig from Dataverse to retrieve clientId and secretKeyVaultName.</step>
+    <step order="3" name="Implement Key Vault lookup">Fetch the client secret from Azure Key Vault using the secret name from the config record.</step>
+    <step order="4" name="Create Graph client">Create a GraphServiceClient using ClientSecretCredential with the resolved tenantId, clientId, and client secret.</step>
+    <step order="5" name="Implement caching">Cache GraphServiceClient instances by configId using ConcurrentDictionary with a configurable TTL (default 30 minutes). Evict expired entries.</step>
+    <step order="6" name="Handle pagination">Implement helper methods for Graph API pagination using PageIterator or manual nextLink following.</step>
+    <step order="7" name="Handle throttling">Implement retry logic with exponential backoff for HTTP 429 responses, respecting the Retry-After header.</step>
+    <step order="8" name="Verify compilation">Run dotnet build to confirm the service compiles correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminGraphService.cs exists and compiles without errors.</criterion>
+    <criterion testable="true">GetClientForConfig(Guid configId) resolves credentials from Dataverse and Key Vault.</criterion>
+    <criterion testable="true">Graph clients are cached by configId with a configurable TTL.</criterion>
+    <criterion testable="true">Pagination helper is implemented for Graph API collection responses.</criterion>
+    <criterion testable="true">Retry logic with exponential backoff handles HTTP 429 responses.</criterion>
+    <criterion testable="true">No Graph SDK types are exposed in the public API surface — responses are wrapped in domain models.</criterion>
+  </acceptance-criteria>
+</task>

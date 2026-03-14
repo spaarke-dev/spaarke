@@ -1,0 +1,49 @@
+<task id="SPE-062" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainerTypeDetail Panel</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-061</dependencies>
+  </metadata>
+  <prompt>Create the ContainerTypeDetail panel that displays and allows editing of container type settings. This panel opens when an administrator clicks on a container type in the grid, providing a focused editing experience for sharing capability, versioning, storage limits, and discoverability settings.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working ContainerTypeDetail panel using SidePaneShell that shows container type settings with inline editing, calling the update settings endpoint on save.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use SidePaneShell from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type settings control the defaults for all containers created from that type. The settings editor allows administrators to configure: sharing capability (disabled, view-only, edit, full), versioning (enabled/disabled with major version limit), storage limits, discoverability (whether containers appear in search results), and whether search is enabled for items within containers.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-detail-component">Create components/container-types/ContainerTypeDetail.tsx using SidePaneShell with header showing container type name and ID</step>
+    <step order="2" name="add-settings-form">Add settings form with: sharing capability dropdown (disabled/viewOnly/edit/full), versioning toggle with major version limit input, storage quota input, discoverability toggle, search enabled toggle</step>
+    <step order="3" name="add-permissions-section">Add read-only permissions section showing current app permissions (from SPE-054 endpoint)</step>
+    <step order="4" name="add-save-handler">Implement save handler that calls PUT /api/spe/containertypes/{typeId}/settings</step>
+    <step order="5" name="add-dirty-tracking">Add form dirty state tracking with unsaved changes warning on close</step>
+    <step order="6" name="add-loading-error-states">Add loading and error states</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/ContainerTypeDetail.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/ContainerTypeSettingsForm.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ContainerTypeDetail renders in a SidePaneShell with container type name as title</criterion>
+    <criterion testable="true">Settings form displays all editable settings with current values</criterion>
+    <criterion testable="true">Save button calls PUT endpoint and shows success toast</criterion>
+    <criterion testable="true">Unsaved changes trigger confirmation dialog on close</criterion>
+    <criterion testable="true">Permissions section shows current app permissions as read-only</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

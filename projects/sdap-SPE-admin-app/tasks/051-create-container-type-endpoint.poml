@@ -1,0 +1,51 @@
+<task id="SPE-051" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create Container Type Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-050, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement the endpoint to create new container types via the Microsoft Graph API. Creating container types is a critical administrative action that defines new storage templates, so it requires input validation, proper Graph API calls, and audit logging for compliance tracking.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>A working POST endpoint that creates a container type in Graph API with validation and audit logging, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+    <constraint source="ADR-010">Maintain DI minimalism — reuse existing services</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container types define the template for storage containers in SharePoint Embedded. When creating a container type, the admin specifies the display name, description, and billing classification (standard or premium). This is a privileged operation that must be audited. The Graph API endpoint is POST /storage/fileStorage/containerTypes.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-request-dto">Define CreateContainerTypeRequest with displayName (required), description (optional), and billingClassification (standard/premium enum)</step>
+    <step order="2" name="add-validation">Add FluentValidation or manual validation for required fields and enum values</step>
+    <step order="3" name="add-graph-method">Add CreateContainerTypeAsync method to SpeAdminGraphService that POSTs to Graph API /storage/fileStorage/containerTypes</step>
+    <step order="4" name="add-endpoint">Add POST /api/spe/containertypes?configId={id} endpoint with validation, graph call, and audit logging via SpeAuditService</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="6" name="add-tests">Write unit tests covering success, validation failure, Graph API error, and audit log creation</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/CreateContainerTypeRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/CreateContainerTypeTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/containertypes?configId={id} creates a container type in Graph API and returns the created resource</criterion>
+    <criterion testable="true">Request validation rejects missing displayName with 400</criterion>
+    <criterion testable="true">Request validation rejects invalid billingClassification with 400</criterion>
+    <criterion testable="true">Audit log entry is created for successful container type creation</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

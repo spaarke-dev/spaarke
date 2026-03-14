@@ -1,0 +1,40 @@
+<task id="SPE-035" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create PermissionPanel Component</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-034</dependencies>
+  </metadata>
+  <prompt>Create the PermissionPanel component that displays and manages container permissions. It shows a grid of current permission assignments (user/group, roles, actions) and provides Add, Edit, and Remove dialogs for CRUD operations via the permission API endpoints.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>PermissionPanel renders a permissions grid with functional Add/Edit/Remove dialogs that call the container permission CRUD API endpoints.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse ChoiceDialog from @spaarke/ui-components shared library for confirmation dialogs.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container permissions control which users and groups can access SPE containers and what operations they can perform. The PermissionPanel is embedded in the ContainerDetail side panel's Permissions tab. Administrators need to view, add, edit, and remove permission assignments with confirmation dialogs to prevent accidental changes.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/containers/PermissionPanel.tsx with a permissions data grid showing user/group, roles, and actions columns.</step>
+    <step order="2" name="add-dialog">Implement Add Permission dialog for assigning new user/group permissions with role selection.</step>
+    <step order="3" name="edit-dialog">Implement Edit Permission dialog for modifying existing permission assignments.</step>
+    <step order="4" name="remove-dialog">Implement Remove Permission dialog using ChoiceDialog for confirmation before deletion.</step>
+    <step order="5" name="api-integration">Wire all CRUD operations to the permission API endpoints.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/containers/PermissionPanel.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Permission list loads and displays user/group, roles, and actions.</criterion>
+    <criterion testable="true">Add, Edit, and Remove operations work with confirmation dialogs.</criterion>
+    <criterion testable="true">CRUD operations call the correct permission API endpoints.</criterion>
+  </acceptance-criteria>
+</task>

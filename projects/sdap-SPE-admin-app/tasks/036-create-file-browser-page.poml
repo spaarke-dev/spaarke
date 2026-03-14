@@ -1,0 +1,42 @@
+<task id="SPE-036" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create FileBrowserPage</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027, SPE-028</dependencies>
+  </metadata>
+  <prompt>Create the FileBrowserPage component that provides a full file and folder browsing experience within SPE containers. It includes breadcrumb navigation, a file/folder grid, a command toolbar (Upload, New Folder, Delete, Download), double-click folder navigation, and drag-drop file upload.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>FileBrowserPage renders a navigable file/folder grid with breadcrumbs, toolbar actions, double-click folder navigation, and drag-drop file upload support.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid, FileUploadZone, and CommandToolbar from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The File Browser is a core admin tool that lets administrators explore the contents of SPE containers. It provides a familiar file-manager experience with folder navigation, file upload (including drag-drop), and file management operations. This is essential for verifying container contents and managing files directly.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page">Create components/files/FileBrowserPage.tsx with the file browser layout.</step>
+    <step order="2" name="breadcrumbs">Add breadcrumb navigation showing the current folder path with clickable segments.</step>
+    <step order="3" name="data-grid">Add UniversalDatasetGrid displaying files and folders with name, type, size, and modified date columns.</step>
+    <step order="4" name="command-toolbar">Add CommandToolbar with Upload, New Folder, Delete, and Download action buttons.</step>
+    <step order="5" name="folder-navigation">Implement double-click on folders to navigate into them, updating breadcrumbs and grid content.</step>
+    <step order="6" name="drag-drop-upload">Add FileUploadZone from the shared library for drag-drop file upload support.</step>
+    <step order="7" name="api-integration">Wire all operations to the file management API endpoints.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/files/FileBrowserPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Files and folders display in the grid with correct columns.</criterion>
+    <criterion testable="true">Breadcrumb navigation works — clicking a segment navigates to that folder.</criterion>
+    <criterion testable="true">Drag-drop file upload works via FileUploadZone.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,42 @@
+<task id="SPE-026" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create TypeScript Types</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-024</dependencies>
+  </metadata>
+  <prompt>Create the TypeScript type definitions for all domain models used in the SPE Admin App, derived from the spec.md. These types ensure type safety across the entire frontend codebase and must match the API response shapes.</prompt>
+  <role>Frontend developer with TypeScript expertise</role>
+  <goal>A comprehensive types file containing all interfaces and types defined in the spec.md, compiling without errors.</goal>
+  <constraints>
+    <constraint source="ADR-006">Types must align with Code Page architecture — standalone, self-contained.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/sdap-SPE-admin-app/spec.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App handles multiple domain entities: business units, SPE environments, container type configurations, containers, permissions, drive items, column definitions, and audit log entries. All these types must be defined in TypeScript to provide type safety for API calls, state management, and component props throughout the frontend.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create types file">Create src/solutions/SpeAdminApp/src/types/spe.ts with all interface definitions.</step>
+    <step order="2" name="Define core types">Define BusinessUnit, SpeEnvironment, SpeContainerTypeConfig, ContainerType interfaces.</step>
+    <step order="3" name="Define container types">Define Container, ContainerPermission, ContainerRole (enum or union type) interfaces.</step>
+    <step order="4" name="Define file types">Define DriveItem, DriveItemVersion, Thumbnail, SharingLink, ColumnDefinition interfaces.</step>
+    <step order="5" name="Define audit types">Define AuditLogEntry, AuditCategory (union type) interfaces.</step>
+    <step order="6" name="Define dashboard types">Define DashboardMetrics, ContainerMetrics interfaces for the dashboard view.</step>
+    <step order="7" name="Verify compilation">Ensure all types compile without errors and are exported correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/types/spe.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All interfaces from spec.md are defined in types/spe.ts.</criterion>
+    <criterion testable="true">Types compile without TypeScript errors.</criterion>
+    <criterion testable="true">All types are exported and importable from other modules.</criterion>
+    <criterion testable="true">Container role values match Graph API role names (reader, writer, manager, owner).</criterion>
+  </acceptance-criteria>
+</task>

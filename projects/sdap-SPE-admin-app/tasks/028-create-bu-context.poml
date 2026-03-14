@@ -1,0 +1,44 @@
+<task id="SPE-028" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create BuContext State Management</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-024, SPE-026</dependencies>
+  </metadata>
+  <prompt>Create the BuContext React context that manages the selected business unit, container type config, and environment state across the admin app. This context is the primary state driver for all data-fetching and UI rendering in the app.</prompt>
+  <role>Frontend developer with React 18 context and state management expertise</role>
+  <goal>A React context provider that manages BU/config/environment selection state, persists it in localStorage, and provides it to the entire component tree.</goal>
+  <constraints>
+    <constraint source="ADR-021">Context must support theme-aware components — provide theme-relevant state if needed.</constraint>
+    <constraint source="ADR-022">Use React 18 APIs — useId, useSyncExternalStore if appropriate.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/sdap-SPE-admin-app/spec.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App is scoped by business unit. When an administrator selects a BU, the available container type configs and environments filter accordingly. This selection must persist across page loads (via localStorage) so administrators don't have to re-select their BU every time they open the app. The context provides selectedBu, selectedConfig, selectedEnvironment, and setter functions to the entire component tree.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create context file">Create src/solutions/SpeAdminApp/src/contexts/BuContext.tsx with BuContext and BuProvider.</step>
+    <step order="2" name="Define context shape">Define the context value type with selectedBu, selectedConfig, selectedEnvironment, and their setter functions.</step>
+    <step order="3" name="Implement BuProvider">Create BuProvider component that manages state via useState hooks and wraps children in BuContext.Provider.</step>
+    <step order="4" name="Add localStorage persistence">On state change, persist selectedBu/selectedConfig/selectedEnvironment IDs to localStorage. On mount, restore from localStorage.</step>
+    <step order="5" name="Create useBuContext hook">Create a custom useBuContext hook that throws if used outside BuProvider.</step>
+    <step order="6" name="Integrate with App">Wrap the App component tree with BuProvider in main.tsx or App.tsx.</step>
+    <step order="7" name="Test persistence">Verify selection persists across page reloads and clears gracefully when localStorage data is stale.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/contexts/BuContext.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">BuContext provides selectedBu, selectedConfig, and selectedEnvironment to the component tree.</criterion>
+    <criterion testable="true">Selection state persists in localStorage across page reloads.</criterion>
+    <criterion testable="true">useBuContext hook throws a descriptive error when used outside BuProvider.</criterion>
+    <criterion testable="true">Stale localStorage data (e.g., deleted BU) is handled gracefully without crashes.</criterion>
+    <criterion testable="true">Context compiles without TypeScript errors and uses types from types/spe.ts.</criterion>
+  </acceptance-criteria>
+</task>

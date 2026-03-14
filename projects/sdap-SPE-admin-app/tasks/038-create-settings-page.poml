@@ -1,0 +1,37 @@
+<task id="SPE-038" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SettingsPage</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027</dependencies>
+  </metadata>
+  <prompt>Create the SettingsPage component that provides configuration management for SPE environments and container type configs. It uses a tabbed layout with Fluent v9 TabList to organize the two configuration areas.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>SettingsPage renders with two navigable tabs (Environments and Container Type Configs) using Fluent v9 TabList.</goal>
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components (Tab, TabList) and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The Settings page is where administrators manage the foundational configuration for the SPE Admin App — the environments (Azure tenants) and container type configurations that define how SPE containers are provisioned. This page hosts two sub-components (EnvironmentConfig and ContainerTypeConfig) in a tabbed layout.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page">Create components/settings/SettingsPage.tsx with a Fluent v9 TabList.</step>
+    <step order="2" name="environments-tab">Add Environments tab that renders the EnvironmentConfig component.</step>
+    <step order="3" name="configs-tab">Add Container Type Configs tab that renders the ContainerTypeConfig component.</step>
+    <step order="4" name="tab-navigation">Implement tab switching with proper state management and content rendering.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/settings/SettingsPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Settings page renders with two tabs: Environments and Container Type Configs.</criterion>
+    <criterion testable="true">Tabs are navigable and switch content correctly.</criterion>
+  </acceptance-criteria>
+</task>
