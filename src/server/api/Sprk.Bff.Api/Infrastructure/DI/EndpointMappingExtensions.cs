@@ -127,8 +127,13 @@ public static class EndpointMappingExtensions
             app.MapRecordMatchingAdminEndpoints();
         }
 
-        app.MapAdminKnowledgeEndpoints();
-        app.MapBuilderScopeAdminEndpoints();
+        // Admin endpoints that depend on Analysis services (ReferenceIndexingService, BuilderScopeImporter)
+        if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+            app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+        {
+            app.MapAdminKnowledgeEndpoints();
+            app.MapBuilderScopeAdminEndpoints();
+        }
 
         app.MapWorkspaceEndpoints();
         app.MapWorkspaceAiEndpoints();
