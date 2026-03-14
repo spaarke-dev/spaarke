@@ -143,27 +143,27 @@
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 050 | List/Get container types endpoints | ✅ | 006, 009 | 2h |
-| 051 | Create container type endpoint | 🔲 | 050, 007 | 2h |
-| 052 | Update container type settings endpoint | 🔲 | 050 | 2h |
-| 053 | Register container type endpoint | 🔲 | 050 | 3h |
-| 054 | List container type app permissions endpoint | 🔲 | 050 | 2h |
+| 051 | Create container type endpoint | ✅ | 050, 007 | 2h |
+| 052 | Update container type settings endpoint | ✅ | 050 | 2h |
+| 053 | Register container type endpoint | ✅ | 050 | 3h |
+| 054 | List container type app permissions endpoint | ✅ | 050 | 2h |
 
 ### 2.2 BFF API — Additional Endpoints
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 055 | Container column CRUD endpoints | 🔲 | 013 | 2h |
-| 056 | Container custom property endpoints | 🔲 | 013 | 2h |
-| 057 | Search containers endpoint | 🔲 | 006, 009 | 3h |
-| 058 | Search items endpoint | 🔲 | 006, 009 | 3h |
-| 059 | Recycle bin endpoints | 🔲 | 013, 007 | 2h |
-| 060 | Security alerts and score endpoints | 🔲 | 009 | 2h |
+| 055 | Container column CRUD endpoints | ✅ | 013 | 2h |
+| 056 | Container custom property endpoints | ✅ | 013 | 2h |
+| 057 | Search containers endpoint | ✅ | 006, 009 | 3h |
+| 058 | Search items endpoint | ✅ | 006, 009 | 3h |
+| 059 | Recycle bin endpoints | ✅ | 013, 007 | 2h |
+| 060 | Security alerts and score endpoints | ✅ | 009 | 2h |
 
 ### 2.3 Code Page — Container Types UI
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 061 | Create ContainerTypesPage UI | 🔲 | 029, 050-054 | 3h |
+| 061 | Create ContainerTypesPage UI | ✅ | 029, 050-054 | 3h |
 | 062 | Create ContainerTypeDetail panel | 🔲 | 061 | 3h |
 | 063 | Create RegisterWizard | 🔲 | 061 | 4h |
 
@@ -171,23 +171,23 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 064 | Create ColumnEditor | 🔲 | 034 | 3h |
-| 065 | Create CustomPropertyEditor | 🔲 | 034 | 3h |
+| 064 | Create ColumnEditor | ✅ | 034 | 3h |
+| 065 | Create CustomPropertyEditor | ✅ | 034 | 3h |
 
 ### 2.5 Code Page — Search
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 066 | Create SearchPage | 🔲 | 029, 057, 058 | 3h |
-| 067 | Create ContainerResultsGrid | 🔲 | 066 | 3h |
-| 068 | Create ItemResultsGrid | 🔲 | 066 | 3h |
+| 066 | Create SearchPage | ✅ | 029, 057, 058 | 3h |
+| 067 | Create ContainerResultsGrid | ✅ | 066 | 3h |
+| 068 | Create ItemResultsGrid | ✅ | 066 | 3h |
 
 ### 2.6 Code Page — Recycle Bin & Security
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 069 | Create RecycleBinPage | 🔲 | 029, 059 | 2h |
-| 070 | Create SecurityPage | 🔲 | 029, 060 | 3h |
+| 069 | Create RecycleBinPage | ✅ | 029, 059 | 2h |
+| 070 | Create SecurityPage | ✅ | 029, 060 | 3h |
 
 ### 2.7 Phase 2 Integration & Deploy
 
