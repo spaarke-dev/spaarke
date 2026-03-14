@@ -13,7 +13,7 @@
  * Bundle: Uses CodeMirror (~300KB) NOT Monaco (~4MB).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -27,14 +27,14 @@ import {
   MessageBar,
   MessageBarBody,
   Spinner,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 // CodeMirror imports — bundled (not a platform library)
 // Minimal individual @codemirror packages — kept small to satisfy < 1MB budget.
-import { EditorState } from "@codemirror/state";
-import { EditorView, lineNumbers, keymap } from "@codemirror/view";
-import { defaultKeymap } from "@codemirror/commands";
-import { json } from "@codemirror/lang-json";
+import { EditorState } from '@codemirror/state';
+import { EditorView, lineNumbers, keymap } from '@codemirror/view';
+import { defaultKeymap } from '@codemirror/commands';
+import { json } from '@codemirror/lang-json';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -62,44 +62,44 @@ interface IHandlerOption {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    width: "100%",
-    boxSizing: "border-box",
+    width: '100%',
+    boxSizing: 'border-box',
   },
   labelRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   handlerSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   handlerControls: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   dropdown: {
-    minWidth: "300px",
+    minWidth: '300px',
   },
   fallbackInput: {
-    minWidth: "300px",
+    minWidth: '300px',
   },
   editorSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   editorContainer: {
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    minHeight: "300px",
+    overflow: 'hidden',
+    minHeight: '300px',
     // We override the background to match Fluent tokens
     backgroundColor: tokens.colorNeutralBackground1,
   },
@@ -150,10 +150,10 @@ function useHandlers(apiBaseUrl: string): {
       }
 
       try {
-        const url = `${apiBaseUrl.replace(/\/$/, "")}/api/ai/tools/handlers`;
+        const url = `${apiBaseUrl.replace(/\/$/, '')}/api/ai/tools/handlers`;
         const response = await fetch(url, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(5000),
         });
 
@@ -161,24 +161,21 @@ function useHandlers(apiBaseUrl: string): {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const data: { handlerClass: string; displayName?: string }[] =
-          await response.json();
+        const data: { handlerClass: string; displayName?: string }[] = await response.json();
 
         if (!cancelled) {
           setHandlers(
-            data.map((h) => ({
+            data.map(h => ({
               handlerClass: h.handlerClass,
               displayName: h.displayName ?? h.handlerClass,
-            })),
+            }))
           );
           setApiAvailable(true);
         }
       } catch (err) {
         if (!cancelled) {
-          const message = err instanceof Error ? err.message : "Unknown error";
-          setError(
-            `Unable to load handler list (${message}). Enter the handler class manually.`,
-          );
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          setError(`Unable to load handler list (${message}). Enter the handler class manually.`);
           setApiAvailable(false);
         }
       } finally {
@@ -209,7 +206,7 @@ function validateJson(text: string): string | null {
     JSON.parse(text);
     return null;
   } catch (err) {
-    return err instanceof Error ? err.message : "Invalid JSON";
+    return err instanceof Error ? err.message : 'Invalid JSON';
   }
 }
 
@@ -239,7 +236,7 @@ const CodeMirrorEditor: React.FC<ICodeMirrorEditorProps> = ({
   React.useEffect(() => {
     if (!editorRef.current) return;
 
-    const updateListener = EditorView.updateListener.of((update) => {
+    const updateListener = EditorView.updateListener.of(update => {
       if (update.docChanged) {
         const newValue = update.state.doc.toString();
         internalChangeRef.current = true;
@@ -297,36 +294,19 @@ const CodeMirrorEditor: React.FC<ICodeMirrorEditorProps> = ({
     }
   }, [value]);
 
-  return (
-    <div
-      ref={editorRef}
-      className={containerClassName}
-      data-testid="codemirror-editor"
-    />
-  );
+  return <div ref={editorRef} className={containerClassName} data-testid="codemirror-editor" />;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ToolEditor: React.FC<IToolEditorProps> = ({
-  value,
-  apiBaseUrl,
-  onChange,
-  readOnly = false,
-}) => {
+export const ToolEditor: React.FC<IToolEditorProps> = ({ value, apiBaseUrl, onChange, readOnly = false }) => {
   const styles = useStyles();
-  const {
-    handlers,
-    loading,
-    error: handlerError,
-    apiAvailable,
-  } = useHandlers(apiBaseUrl);
+  const { handlers, loading, error: handlerError, apiAvailable } = useHandlers(apiBaseUrl);
 
-  const [handlerClass, setHandlerClass] = React.useState<string>("");
-  const [fallbackHandlerText, setFallbackHandlerText] =
-    React.useState<string>("");
+  const [handlerClass, setHandlerClass] = React.useState<string>('');
+  const [fallbackHandlerText, setFallbackHandlerText] = React.useState<string>('');
   const [jsonError, setJsonError] = React.useState<string | null>(null);
 
   // Validate JSON on every value change
@@ -339,24 +319,16 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
     // Validation will run via the effect above
   };
 
-  const handleHandlerSelect = (
-    _ev: React.SyntheticEvent,
-    data: { optionValue?: string },
-  ) => {
-    const selected = data.optionValue ?? "";
+  const handleHandlerSelect = (_ev: React.SyntheticEvent, data: { optionValue?: string }) => {
+    const selected = data.optionValue ?? '';
     setHandlerClass(selected);
   };
 
-  const handleFallbackInput = (
-    _ev: React.ChangeEvent<HTMLInputElement>,
-    data: { value: string },
-  ) => {
+  const handleFallbackInput = (_ev: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
     setFallbackHandlerText(data.value);
   };
 
-  const editorContainerClass = `${styles.editorContainer}${
-    jsonError ? ` ${styles.editorContainerError}` : ""
-  }`;
+  const editorContainerClass = `${styles.editorContainer}${jsonError ? ` ${styles.editorContainerError}` : ''}`;
 
   return (
     <div className={styles.container}>
@@ -370,13 +342,7 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
         </div>
 
         <div className={styles.handlerControls}>
-          {loading && (
-            <Spinner
-              size="tiny"
-              label="Loading handlers..."
-              labelPosition="after"
-            />
-          )}
+          {loading && <Spinner size="tiny" label="Loading handlers..." labelPosition="after" />}
 
           {!loading && apiAvailable && (
             <Dropdown
@@ -389,7 +355,7 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
               aria-label="Select tool handler class"
               data-testid="handler-dropdown"
             >
-              {handlers.map((h) => (
+              {handlers.map(h => (
                 <Option key={h.handlerClass} value={h.handlerClass}>
                   {h.displayName}
                 </Option>
@@ -409,9 +375,7 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
             />
           )}
 
-          {handlerError && (
-            <Text className={styles.helperText}>{handlerError}</Text>
-          )}
+          {handlerError && <Text className={styles.helperText}>{handlerError}</Text>}
         </div>
       </div>
 
@@ -420,20 +384,12 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
         <div className={styles.labelRow}>
           <Label weight="semibold">Tool Configuration (JSON)</Label>
           {!jsonError && value.trim() && (
-            <Text
-              className={styles.validationSuccess}
-              data-testid="json-valid-indicator"
-              role="status"
-            >
+            <Text className={styles.validationSuccess} data-testid="json-valid-indicator" role="status">
               Valid JSON
             </Text>
           )}
           {jsonError && (
-            <Text
-              className={styles.validationMessage}
-              data-testid="json-error-indicator"
-              role="alert"
-            >
+            <Text className={styles.validationMessage} data-testid="json-error-indicator" role="alert">
               JSON error
             </Text>
           )}
@@ -455,8 +411,7 @@ export const ToolEditor: React.FC<IToolEditorProps> = ({
         )}
 
         <Text className={styles.helperText}>
-          Enter a valid JSON object defining the tool&apos;s parameters and
-          configuration.
+          Enter a valid JSON object defining the tool&apos;s parameters and configuration.
         </Text>
       </div>
     </div>

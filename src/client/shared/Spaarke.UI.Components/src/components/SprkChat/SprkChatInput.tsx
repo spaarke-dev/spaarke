@@ -11,17 +11,10 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Textarea,
-  Button,
-  Text,
-} from "@fluentui/react-components";
-import { SendRegular } from "@fluentui/react-icons";
-import { ISprkChatInputProps } from "./types";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens, Textarea, Button, Text } from '@fluentui/react-components';
+import { SendRegular } from '@fluentui/react-icons';
+import { ISprkChatInputProps } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -29,25 +22,25 @@ import { ISprkChatInputProps } from "./types";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   inputRow: {
-    display: "flex",
-    alignItems: "flex-end",
+    display: 'flex',
+    alignItems: 'flex-end',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   textarea: {
     flexGrow: 1,
   },
   footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   charCount: {
     fontSize: tokens.fontSizeBase100,
@@ -85,10 +78,10 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
   onSend,
   disabled = false,
   maxCharCount = DEFAULT_MAX_CHAR_COUNT,
-  placeholder = "Type a message...",
+  placeholder = 'Type a message...',
 }) => {
   const styles = useStyles();
-  const [value, setValue] = React.useState<string>("");
+  const [value, setValue] = React.useState<string>('');
 
   const charCount = value.length;
   const isOverLimit = charCount > maxCharCount;
@@ -98,29 +91,23 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
     const trimmed = value.trim();
     if (trimmed && !disabled && !isOverLimit) {
       onSend(trimmed);
-      setValue("");
+      setValue('');
     }
   }, [value, disabled, isOverLimit, onSend]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend],
+    [handleSend]
   );
 
-  const handleChange = React.useCallback(
-    (
-      _event: React.ChangeEvent<HTMLTextAreaElement>,
-      data: { value: string },
-    ) => {
-      setValue(data.value);
-    },
-    [],
-  );
+  const handleChange = React.useCallback((_event: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
+    setValue(data.value);
+  }, []);
 
   return (
     <div className={styles.root} role="form" aria-label="Chat input">
@@ -147,9 +134,7 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
       </div>
       <div className={styles.footer}>
         <Text className={styles.hint}>Ctrl+Enter to send</Text>
-        <Text
-          className={isOverLimit ? styles.charCountWarning : styles.charCount}
-        >
+        <Text className={isOverLimit ? styles.charCountWarning : styles.charCount}>
           {charCount}/{maxCharCount}
         </Text>
       </div>

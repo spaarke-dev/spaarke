@@ -2,12 +2,7 @@
  * Stores barrel export
  */
 
-export {
-  useCanvasStore,
-  type PlaybookNodeType,
-  type PlaybookNodeData,
-  type PlaybookNode,
-} from "./canvasStore";
+export { useCanvasStore, type PlaybookNodeType, type PlaybookNodeData, type PlaybookNode } from './canvasStore';
 
 export {
   useScopeStore,
@@ -16,7 +11,7 @@ export {
   type KnowledgeItem,
   type ToolItem,
   type ActionTypeCapabilities,
-} from "./scopeStore";
+} from './scopeStore';
 
 export {
   useExecutionStore,
@@ -25,21 +20,16 @@ export {
   type NodeExecutionState,
   type ExecutionState,
   type ExecutionEvent,
-} from "./executionStore";
+} from './executionStore';
 
-export {
-  useModelStore,
-  type AiProvider,
-  type AiCapability,
-  type ModelDeploymentItem,
-} from "./modelStore";
+export { useModelStore, type AiProvider, type AiCapability, type ModelDeploymentItem } from './modelStore';
 
 export {
   useTemplateStore,
   type PlaybookTemplate,
   type TemplateListResponse,
   type ClonedPlaybook,
-} from "./templateStore";
+} from './templateStore';
 
 export {
   useAiAssistantStore,
@@ -52,4 +42,4 @@ export {
   type CanvasPatchEdge,
   type SseEventType,
   type StreamingState,
-} from "./aiAssistantStore";
+} from './aiAssistantStore';

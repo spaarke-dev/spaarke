@@ -10,15 +10,8 @@
  * @see spec.md Section 6.6 / FR-09 — command bar specification
  */
 
-import React, { useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
-  Tooltip,
-} from "@fluentui/react-components";
+import React, { useCallback } from 'react';
+import { makeStyles, tokens, Toolbar, ToolbarButton, ToolbarDivider, Tooltip } from '@fluentui/react-components';
 import {
   DeleteRegular,
   ArrowClockwiseRegular,
@@ -28,8 +21,8 @@ import {
   ArrowDownloadRegular,
   DatabaseSearchRegular,
   SaveRegular,
-} from "@fluentui/react-icons";
-import type { SearchDomain } from "../types";
+} from '@fluentui/react-icons';
+import type { SearchDomain } from '../types';
 
 // =============================================
 // Props
@@ -88,7 +81,7 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
 
   const hasSelection = selectedIds.length > 0;
   const isSingle = selectedIds.length === 1;
-  const isDocumentDomain = activeDomain === "documents";
+  const isDocumentDomain = activeDomain === 'documents';
 
   const handleDelete = useCallback(() => {
     if (hasSelection) onDelete(selectedIds);
@@ -115,11 +108,7 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
   }, [hasSelection, onSendToIndex, selectedIds]);
 
   return (
-    <Toolbar
-      className={styles.toolbar}
-      size="small"
-      aria-label="Search actions"
-    >
+    <Toolbar className={styles.toolbar} size="small" aria-label="Search actions">
       {/* Always available */}
       <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={onRefresh}>
         Refresh
@@ -128,28 +117,14 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
       <ToolbarDivider />
 
       {/* Selection-dependent */}
-      <Tooltip
-        content={hasSelection ? "Delete selected" : "Select items to delete"}
-        relationship="label"
-      >
-        <ToolbarButton
-          icon={<DeleteRegular />}
-          disabled={!hasSelection}
-          onClick={handleDelete}
-        >
+      <Tooltip content={hasSelection ? 'Delete selected' : 'Select items to delete'} relationship="label">
+        <ToolbarButton icon={<DeleteRegular />} disabled={!hasSelection} onClick={handleDelete}>
           Delete
         </ToolbarButton>
       </Tooltip>
 
-      <Tooltip
-        content={isSingle ? "Email a link" : "Select one item to email"}
-        relationship="label"
-      >
-        <ToolbarButton
-          icon={<MailRegular />}
-          disabled={!isSingle}
-          onClick={handleEmailLink}
-        >
+      <Tooltip content={isSingle ? 'Email a link' : 'Select one item to email'} relationship="label">
+        <ToolbarButton icon={<MailRegular />} disabled={!isSingle} onClick={handleEmailLink}>
           Email a Link
         </ToolbarButton>
       </Tooltip>
@@ -159,56 +134,26 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
         <>
           <ToolbarDivider />
 
-          <Tooltip
-            content={isSingle ? "Open in browser" : "Select one document"}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={<OpenRegular />}
-              disabled={!isSingle}
-              onClick={handleOpenInWeb}
-            >
+          <Tooltip content={isSingle ? 'Open in browser' : 'Select one document'} relationship="label">
+            <ToolbarButton icon={<OpenRegular />} disabled={!isSingle} onClick={handleOpenInWeb}>
               Open in Web
             </ToolbarButton>
           </Tooltip>
 
-          <Tooltip
-            content={isSingle ? "Open in desktop app" : "Select one document"}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={<DesktopRegular />}
-              disabled={!isSingle}
-              onClick={handleOpenInDesktop}
-            >
+          <Tooltip content={isSingle ? 'Open in desktop app' : 'Select one document'} relationship="label">
+            <ToolbarButton icon={<DesktopRegular />} disabled={!isSingle} onClick={handleOpenInDesktop}>
               Open in Desktop
             </ToolbarButton>
           </Tooltip>
 
-          <Tooltip
-            content={isSingle ? "Download file" : "Select one document"}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={<ArrowDownloadRegular />}
-              disabled={!isSingle}
-              onClick={handleDownload}
-            >
+          <Tooltip content={isSingle ? 'Download file' : 'Select one document'} relationship="label">
+            <ToolbarButton icon={<ArrowDownloadRegular />} disabled={!isSingle} onClick={handleDownload}>
               Download
             </ToolbarButton>
           </Tooltip>
 
-          <Tooltip
-            content={
-              hasSelection ? "Send to AI index" : "Select documents to index"
-            }
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={<DatabaseSearchRegular />}
-              disabled={!hasSelection}
-              onClick={handleSendToIndex}
-            >
+          <Tooltip content={hasSelection ? 'Send to AI index' : 'Select documents to index'} relationship="label">
+            <ToolbarButton icon={<DatabaseSearchRegular />} disabled={!hasSelection} onClick={handleSendToIndex}>
               Send to Index
             </ToolbarButton>
           </Tooltip>

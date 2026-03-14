@@ -7,14 +7,14 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Badge, Tooltip } from "@fluentui/react-components";
-import { ISimilarityBadgeProps } from "../types";
+import * as React from 'react';
+import { makeStyles, tokens, Badge, Tooltip } from '@fluentui/react-components';
+import { ISimilarityBadgeProps } from '../types';
 
 const useStyles = makeStyles({
   badge: {
-    minWidth: "48px",
-    justifyContent: "center",
+    minWidth: '48px',
+    justifyContent: 'center',
   },
   // High relevance (>=80%) - success/green
   high: {
@@ -36,10 +36,7 @@ const useStyles = makeStyles({
 /**
  * Get the appropriate style class based on score.
  */
-function getScoreClass(
-  score: number,
-  styles: ReturnType<typeof useStyles>,
-): string {
+function getScoreClass(score: number, styles: ReturnType<typeof useStyles>): string {
   // Score is 0-1, convert to percentage
   const percentage = score * 100;
 
@@ -55,11 +52,11 @@ function getScoreClass(
 /**
  * Get the appropriate appearance based on score.
  */
-function getAppearance(score: number): "filled" | "outline" | "tint" | "ghost" {
+function getAppearance(score: number): 'filled' | 'outline' | 'tint' | 'ghost' {
   const percentage = score * 100;
-  if (percentage >= 80) return "filled";
-  if (percentage >= 60) return "filled";
-  return "tint";
+  if (percentage >= 80) return 'filled';
+  if (percentage >= 60) return 'filled';
+  return 'tint';
 }
 
 /**
@@ -76,11 +73,7 @@ export const SimilarityBadge: React.FC<ISimilarityBadgeProps> = ({ score }) => {
 
   return (
     <Tooltip content="Relevance score" relationship="label">
-      <Badge
-        className={`${styles.badge} ${scoreClass}`}
-        appearance={getAppearance(score)}
-        size="medium"
-      >
+      <Badge className={`${styles.badge} ${scoreClass}`} appearance={getAppearance(score)} size="medium">
         {percentage}%
       </Badge>
     </Tooltip>

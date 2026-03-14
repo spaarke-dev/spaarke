@@ -14,7 +14,7 @@ import type {
   IDocumentResult,
   IRecordResult,
   IFindSimilarResults,
-} from "./findSimilarTypes";
+} from './findSimilarTypes';
 
 /** File shape needed by the service — matches IUploadedFile from FileUpload. */
 interface IUploadableFile {
@@ -22,7 +22,7 @@ interface IUploadableFile {
   file: File;
 }
 
-const LOG_PREFIX = "[FindSimilarService]";
+const LOG_PREFIX = '[FindSimilarService]';
 
 /**
  * Extracts text content from uploaded files using the BFF text extraction endpoint.
@@ -31,29 +31,27 @@ const LOG_PREFIX = "[FindSimilarService]";
 async function extractTextFromFiles(
   files: IUploadableFile[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/workspace/files/extract-text`;
 
   const formData = new FormData();
   for (const f of files) {
-    formData.append("files", f.file, f.name);
+    formData.append('files', f.file, f.name);
   }
 
   console.info(`${LOG_PREFIX} Extracting text from ${files.length} file(s)`);
 
   const response = await config.authenticatedFetch(url, {
-    method: "POST",
+    method: 'POST',
     body: formData,
     signal,
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "Unknown error");
-    throw new Error(
-      `Text extraction failed (${response.status}): ${errorText}`,
-    );
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new Error(`Text extraction failed (${response.status}): ${errorText}`);
   }
 
   const json = await response.json();
@@ -66,32 +64,30 @@ async function extractTextFromFiles(
 async function searchDocuments(
   query: string,
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ results: IDocumentResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/ai/search`;
 
   const response = await config.authenticatedFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     signal,
     body: JSON.stringify({
       query,
-      scope: "all",
+      scope: 'all',
       options: {
         limit: 20,
         offset: 0,
         includeHighlights: true,
-        hybridMode: "rrf",
+        hybridMode: 'rrf',
       },
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "Unknown error");
-    throw new Error(
-      `Document search failed (${response.status}): ${errorText}`,
-    );
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new Error(`Document search failed (${response.status}): ${errorText}`);
   }
 
   const json = await response.json();
@@ -108,14 +104,14 @@ async function searchRecords(
   query: string,
   recordTypes: string[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ results: IRecordResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/ai/search/records`;
 
   const response = await config.authenticatedFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     signal,
     body: JSON.stringify({
       query,
@@ -123,13 +119,13 @@ async function searchRecords(
       options: {
         limit: 20,
         offset: 0,
-        hybridMode: "rrf",
+        hybridMode: 'rrf',
       },
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "Unknown error");
+    const errorText = await response.text().catch(() => 'Unknown error');
     throw new Error(`Record search failed (${response.status}): ${errorText}`);
   }
 
@@ -155,26 +151,24 @@ async function searchRecords(
 export async function runFindSimilar(
   files: IUploadableFile[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<IFindSimilarResults> {
   // Step 1: Extract text
   const extractedText = await extractTextFromFiles(files, config, signal);
 
   if (!extractedText || extractedText.trim().length === 0) {
-    throw new Error("No text could be extracted from the uploaded files.");
+    throw new Error('No text could be extracted from the uploaded files.');
   }
 
   // Truncate to max 1000 chars for search query
   const query = extractedText.trim().substring(0, 1000);
-  console.info(
-    `${LOG_PREFIX} Running semantic search with ${query.length} chars`,
-  );
+  console.info(`${LOG_PREFIX} Running semantic search with ${query.length} chars`);
 
   // Step 2: Search in parallel
   const [docResults, matterResults, projectResults] = await Promise.all([
     searchDocuments(query, config, signal),
-    searchRecords(query, ["sprk_matter"], config, signal),
-    searchRecords(query, ["sprk_project"], config, signal),
+    searchRecords(query, ['sprk_matter'], config, signal),
+    searchRecords(query, ['sprk_project'], config, signal),
   ]);
 
   return {

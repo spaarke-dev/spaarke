@@ -39,7 +39,7 @@ interface SidePane {
 
 /** Page input for pane.navigate() — web resource variant */
 interface SidePanePageInput {
-  pageType: "webresource";
+  pageType: 'webresource';
   webresourceName: string;
   data?: string;
 }

@@ -15,20 +15,15 @@
  *   setupThemeListener()  — subscribes to system theme changes
  */
 
-import {
-  Theme,
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-} from "@fluentui/react-components";
+import { Theme, webLightTheme, webDarkTheme, teamsHighContrastTheme } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-type ThemeValue = "light" | "dark" | "highcontrast";
+type ThemeValue = 'light' | 'dark' | 'highcontrast';
 
 // ---------------------------------------------------------------------------
 // Level 1: URL parameter
@@ -41,8 +36,8 @@ type ThemeValue = "light" | "dark" | "highcontrast";
  */
 function getThemeFromParams(params?: URLSearchParams): ThemeValue | null {
   if (!params) return null;
-  const value = params.get("theme")?.toLowerCase();
-  if (value === "dark" || value === "light" || value === "highcontrast") {
+  const value = params.get('theme')?.toLowerCase();
+  if (value === 'dark' || value === 'light' || value === 'highcontrast') {
     return value;
   }
   return null;
@@ -74,8 +69,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
   } catch {
     /* cross-origin */
   }
@@ -93,8 +87,8 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
       // Check user's Dataverse dark mode setting (Settings → Personalization)
       // Available in newer Dataverse builds (2024+)
       const userSettings = ctx?.userSettings;
-      if (userSettings?.isDarkMode === true) return "dark";
-      if (userSettings?.isDarkMode === false) return "light";
+      if (userSettings?.isDarkMode === true) return 'dark';
+      if (userSettings?.isDarkMode === false) return 'light';
 
       // Fallback: getCurrentTheme() API — check the content area background
       // Note: themeInfo.navbarbackgroundcolor is the brand color (always dark),
@@ -103,7 +97,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
         const themeInfo = ctx.getCurrentTheme();
         if (themeInfo?.backgroundcolor) {
           const isDark = isColorDark(themeInfo.backgroundcolor);
-          if (isDark !== null) return isDark ? "dark" : "light";
+          if (isDark !== null) return isDark ? 'dark' : 'light';
         }
       }
     } catch {
@@ -116,8 +110,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
   // area reflects the user's dark mode choice.
   const framesToCheck: Window[] = [];
   try {
-    if (window.parent && window.parent !== window)
-      framesToCheck.push(window.parent);
+    if (window.parent && window.parent !== window) framesToCheck.push(window.parent);
   } catch {
     /* */
   }
@@ -131,18 +124,11 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
     try {
       const doc = frame.document;
       // Check the main content area element (Dataverse uses #mainContent or similar)
-      const contentArea =
-        doc.getElementById("mainContent") ??
-        doc.getElementById("crmContentPanel") ??
-        doc.body;
+      const contentArea = doc.getElementById('mainContent') ?? doc.getElementById('crmContentPanel') ?? doc.body;
       const bgColor = frame.getComputedStyle(contentArea).backgroundColor;
-      if (
-        bgColor &&
-        bgColor !== "rgba(0, 0, 0, 0)" &&
-        bgColor !== "transparent"
-      ) {
+      if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
         const isDark = isColorDark(bgColor);
-        if (isDark !== null) return isDark ? "dark" : "light";
+        if (isDark !== null) return isDark ? 'dark' : 'light';
       }
     } catch {
       /* cross-origin or DOM access failed */
@@ -152,7 +138,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
   // If we found Xrm but couldn't determine dark/light from any API or DOM check,
   // default to light. Dataverse defaults to light mode, and we should NOT fall
   // through to system preference (which may differ from the app setting).
-  if (xrmFound) return "light";
+  if (xrmFound) return 'light';
 
   return null;
 }
@@ -171,9 +157,9 @@ function isColorDark(color: string): boolean | null {
   const rgbMatch = color.match(/\d+/g)?.map(Number);
   if (rgbMatch && rgbMatch.length >= 3) {
     [r, g, b] = rgbMatch;
-  } else if (color.startsWith("#")) {
+  } else if (color.startsWith('#')) {
     // Try hex format
-    const hex = color.replace("#", "");
+    const hex = color.replace('#', '');
     if (hex.length === 3) {
       r = parseInt(hex[0] + hex[0], 16);
       g = parseInt(hex[1] + hex[1], 16);
@@ -202,13 +188,10 @@ function isColorDark(color: string): boolean | null {
 
 function getSystemThemePreference(): ThemeValue | null {
   try {
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-      return "dark";
-    if (window.matchMedia("(prefers-color-scheme: light)").matches)
-      return "light";
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
     // If forced-colors is active, treat as high contrast
-    if (window.matchMedia("(forced-colors: active)").matches)
-      return "highcontrast";
+    if (window.matchMedia('(forced-colors: active)').matches) return 'highcontrast';
   } catch {
     /* matchMedia not available */
   }
@@ -224,11 +207,11 @@ function getSystemThemePreference(): ThemeValue | null {
  */
 function themeValueToFluentTheme(value: ThemeValue): Theme {
   switch (value) {
-    case "dark":
+    case 'dark':
       return webDarkTheme;
-    case "highcontrast":
+    case 'highcontrast':
       return teamsHighContrastTheme;
-    case "light":
+    case 'light':
     default:
       return webLightTheme;
   }
@@ -290,19 +273,19 @@ export function setupThemeListener(callback: () => void): () => void {
   const handleChange = () => callback();
 
   // System preference changes
-  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  darkQuery.addEventListener("change", handleChange);
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  darkQuery.addEventListener('change', handleChange);
 
   // Forced colors (high contrast) changes
-  const hcQuery = window.matchMedia("(forced-colors: active)");
-  hcQuery.addEventListener("change", handleChange);
+  const hcQuery = window.matchMedia('(forced-colors: active)');
+  hcQuery.addEventListener('change', handleChange);
 
   // Custom spaarke theme change event
   window.addEventListener(THEME_CHANGE_EVENT, handleChange);
 
   return () => {
-    darkQuery.removeEventListener("change", handleChange);
-    hcQuery.removeEventListener("change", handleChange);
+    darkQuery.removeEventListener('change', handleChange);
+    hcQuery.removeEventListener('change', handleChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleChange);
   };
 }

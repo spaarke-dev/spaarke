@@ -10,7 +10,7 @@
  * @see DataverseMetadataService.ts (PCF version) for reference
  */
 
-import type { FilterOption } from "../types";
+import type { FilterOption } from '../types';
 
 // =============================================
 // Module-level cache (singleton pattern)
@@ -23,16 +23,16 @@ const cache = new Map<string, FilterOption[]>();
 // =============================================
 
 const STATIC_FILE_TYPES: FilterOption[] = [
-  { value: "pdf", label: "PDF" },
-  { value: "doc", label: "Word (DOC)" },
-  { value: "docx", label: "Word (DOCX)" },
-  { value: "xls", label: "Excel (XLS)" },
-  { value: "xlsx", label: "Excel (XLSX)" },
-  { value: "ppt", label: "PowerPoint (PPT)" },
-  { value: "pptx", label: "PowerPoint (PPTX)" },
-  { value: "txt", label: "Text (TXT)" },
-  { value: "msg", label: "Email (MSG)" },
-  { value: "eml", label: "Email (EML)" },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'doc', label: 'Word (DOC)' },
+  { value: 'docx', label: 'Word (DOCX)' },
+  { value: 'xls', label: 'Excel (XLS)' },
+  { value: 'xlsx', label: 'Excel (XLSX)' },
+  { value: 'ppt', label: 'PowerPoint (PPT)' },
+  { value: 'pptx', label: 'PowerPoint (PPTX)' },
+  { value: 'txt', label: 'Text (TXT)' },
+  { value: 'msg', label: 'Email (MSG)' },
+  { value: 'eml', label: 'Email (EML)' },
 ];
 
 // =============================================
@@ -70,9 +70,9 @@ export function getOrgUrl(): string {
 
 /** Standard OData headers for Dataverse WebAPI requests. */
 const ODATA_HEADERS: HeadersInit = {
-  Accept: "application/json",
-  "OData-MaxVersion": "4.0",
-  "OData-Version": "4.0",
+  Accept: 'application/json',
+  'OData-MaxVersion': '4.0',
+  'OData-Version': '4.0',
 };
 
 // =============================================
@@ -86,10 +86,7 @@ const ODATA_HEADERS: HeadersInit = {
  *   /Attributes(LogicalName='{attributeName}')
  *   /Microsoft.Dynamics.CRM.PicklistAttributeMetadata?$expand=OptionSet($select=Options)
  */
-export async function fetchOptionsetValues(
-  entityName: string,
-  attributeName: string,
-): Promise<FilterOption[]> {
+export async function fetchOptionsetValues(entityName: string, attributeName: string): Promise<FilterOption[]> {
   const cacheKey = `optionset:${entityName}.${attributeName}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
@@ -108,34 +105,26 @@ export async function fetchOptionsetValues(
     }
 
     if (!response.ok) {
-      console.error(
-        `Failed to fetch optionset ${entityName}.${attributeName}: ${response.status}`,
-      );
+      console.error(`Failed to fetch optionset ${entityName}.${attributeName}: ${response.status}`);
       return [];
     }
 
     const data = await response.json();
 
     // Extract options from OptionSet.Options or top-level Options
-    const rawOptions: OptionMetadata[] =
-      data.OptionSet?.Options ?? data.Options ?? [];
+    const rawOptions: OptionMetadata[] = data.OptionSet?.Options ?? data.Options ?? [];
 
     const options: FilterOption[] = rawOptions
       .map((opt: OptionMetadata) => ({
         value: opt.Value.toString(),
         label: opt.Label?.UserLocalizedLabel?.Label ?? `Value ${opt.Value}`,
       }))
-      .sort((a: FilterOption, b: FilterOption) =>
-        a.label.localeCompare(b.label),
-      );
+      .sort((a: FilterOption, b: FilterOption) => a.label.localeCompare(b.label));
 
     cache.set(cacheKey, options);
     return options;
   } catch (error) {
-    console.error(
-      `Failed to fetch optionset ${entityName}.${attributeName}:`,
-      error,
-    );
+    console.error(`Failed to fetch optionset ${entityName}.${attributeName}:`, error);
     return [];
   }
 }
@@ -146,18 +135,13 @@ export async function fetchOptionsetValues(
  *
  * Queries: /api/data/v9.2/{entitySetName}?$select={nameAttribute}&$filter=statecode eq 0&$orderby={nameAttribute} asc
  */
-export async function fetchLookupValues(
-  entitySetName: string,
-  nameAttribute: string,
-): Promise<FilterOption[]> {
+export async function fetchLookupValues(entitySetName: string, nameAttribute: string): Promise<FilterOption[]> {
   const cacheKey = `lookup:${entitySetName}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const entityLogicalName = entitySetName.endsWith("s")
-      ? entitySetName.slice(0, -1)
-      : entitySetName;
+    const entityLogicalName = entitySetName.endsWith('s') ? entitySetName.slice(0, -1) : entitySetName;
     const primaryKey = `${entityLogicalName}id`;
 
     const url =
@@ -173,32 +157,22 @@ export async function fetchLookupValues(
     }
 
     if (!response.ok) {
-      console.error(
-        `Failed to fetch lookup options from ${entitySetName}: ${response.status}`,
-      );
+      console.error(`Failed to fetch lookup options from ${entitySetName}: ${response.status}`);
       return [];
     }
 
     const data = await response.json();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const options: FilterOption[] = (data.value || []).map(
-      (record: Record<string, any>) => ({
-        value: typeof record[primaryKey] === "string" ? record[primaryKey] : "",
-        label:
-          typeof record[nameAttribute] === "string"
-            ? record[nameAttribute]
-            : "Unknown",
-      }),
-    );
+    const options: FilterOption[] = (data.value || []).map((record: Record<string, any>) => ({
+      value: typeof record[primaryKey] === 'string' ? record[primaryKey] : '',
+      label: typeof record[nameAttribute] === 'string' ? record[nameAttribute] : 'Unknown',
+    }));
 
     cache.set(cacheKey, options);
     return options;
   } catch (error) {
-    console.error(
-      `Failed to fetch lookup options from ${entitySetName}:`,
-      error,
-    );
+    console.error(`Failed to fetch lookup options from ${entitySetName}:`, error);
     return [];
   }
 }

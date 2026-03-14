@@ -4,18 +4,13 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
-import { useRef, useState, useEffect } from "react";
-import {
-  LineChart as FluentLineChart,
-  AreaChart,
-  ILineChartPoints,
-  IChartProps,
-} from "@fluentui/react-charting";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../types";
+import * as React from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { LineChart as FluentLineChart, AreaChart, ILineChartPoints, IChartProps } from '@fluentui/react-charting';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { DrillInteraction, IAggregatedDataPoint } from '../types';
 
-export type ChartVariant = "line" | "area";
+export type ChartVariant = 'line' | 'area';
 
 export interface ILineChartProps {
   /** Data points to display */
@@ -42,11 +37,11 @@ export interface ILineChartProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    minHeight: '200px',
   },
   title: {
     marginBottom: tokens.spacingVerticalS,
@@ -55,14 +50,14 @@ const useStyles = makeStyles({
   },
   chartWrapper: {
     flex: 1,
-    position: "relative",
-    minHeight: "150px",
+    position: 'relative',
+    minHeight: '150px',
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -73,7 +68,7 @@ const useStyles = makeStyles({
 export const LineChart: React.FC<ILineChartProps> = ({
   data,
   title,
-  variant = "line",
+  variant = 'line',
   showLabels = false,
   showLegend = false,
   onDrillInteraction,
@@ -89,7 +84,7 @@ export const LineChart: React.FC<ILineChartProps> = ({
   useEffect(() => {
     if (!responsive || !containerRef.current) return;
 
-    const resizeObserver = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         setContainerWidth(entry.contentRect.width);
       }
@@ -103,7 +98,7 @@ export const LineChart: React.FC<ILineChartProps> = ({
     if (onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: dataPoint.fieldValue,
         label: dataPoint.label,
       });
@@ -125,7 +120,7 @@ export const LineChart: React.FC<ILineChartProps> = ({
 
   const chartData: ILineChartPoints[] = [
     {
-      legend: title || "Data",
+      legend: title || 'Data',
       data: data.map((point, index) => ({
         x: index,
         y: point.value,
@@ -144,7 +139,7 @@ export const LineChart: React.FC<ILineChartProps> = ({
     <div className={styles.container} ref={containerRef}>
       {title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.chartWrapper}>
-        {variant === "line" ? (
+        {variant === 'line' ? (
           <FluentLineChart
             data={{ lineChartData: chartData }}
             width={responsive ? containerWidth : undefined}

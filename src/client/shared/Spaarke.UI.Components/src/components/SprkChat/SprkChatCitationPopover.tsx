@@ -15,7 +15,7 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -25,13 +25,9 @@ import {
   PopoverSurface,
   Text,
   Link,
-} from "@fluentui/react-components";
-import { Open16Regular } from "@fluentui/react-icons";
-import {
-  ICitation,
-  ICitationMarkerProps,
-  ISprkChatCitationPopoverProps,
-} from "./types";
+} from '@fluentui/react-components';
+import { Open16Regular } from '@fluentui/react-icons';
+import { ICitation, ICitationMarkerProps, ISprkChatCitationPopoverProps } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -47,33 +43,33 @@ const MAX_EXCERPT_LENGTH = 200;
 const useMarkerStyles = makeStyles({
   marker: {
     color: tokens.colorBrandForeground1,
-    cursor: "pointer",
+    cursor: 'pointer',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
-    verticalAlign: "super",
-    lineHeight: "1",
-    textDecorationLine: "none",
-    ...shorthands.padding("0px", "2px"),
+    verticalAlign: 'super',
+    lineHeight: '1',
+    textDecorationLine: 'none',
+    ...shorthands.padding('0px', '2px'),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    ":hover": {
+    ':hover': {
       color: tokens.colorBrandForeground2,
       backgroundColor: tokens.colorNeutralBackground1Hover,
-      textDecorationLine: "underline",
+      textDecorationLine: 'underline',
     },
-    ":focus-visible": {
-      outlineWidth: "2px",
-      outlineStyle: "solid",
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
       outlineColor: tokens.colorStrokeFocus2,
-      outlineOffset: "1px",
+      outlineOffset: '1px',
     },
   },
 });
 
 const usePopoverStyles = makeStyles({
   surface: {
-    maxWidth: "320px",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '320px',
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
   },
@@ -92,8 +88,8 @@ const usePopoverStyles = makeStyles({
     lineHeight: tokens.lineHeightBase200,
   },
   linkRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
 });
@@ -109,7 +105,7 @@ function truncateExcerpt(text: string, maxLen: number): string {
   if (text.length <= maxLen) {
     return text;
   }
-  return text.slice(0, maxLen - 1).trimEnd() + "\u2026";
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,9 +125,7 @@ function truncateExcerpt(text: string, maxLen: number): string {
  * <CitationMarker citation={citation} />
  * ```
  */
-export const CitationMarker: React.FC<ICitationMarkerProps> = ({
-  citation,
-}) => {
+export const CitationMarker: React.FC<ICitationMarkerProps> = ({ citation }) => {
   const styles = useMarkerStyles();
 
   return (
@@ -161,9 +155,7 @@ export const CitationMarker: React.FC<ICitationMarkerProps> = ({
  * Internal popover surface content. Extracted so that both CitationMarker
  * (self-contained) and SprkChatCitationPopover (controlled) can reuse it.
  */
-const CitationPopoverContent: React.FC<{ citation: ICitation }> = ({
-  citation,
-}) => {
+const CitationPopoverContent: React.FC<{ citation: ICitation }> = ({ citation }) => {
   const styles = usePopoverStyles();
   const excerptText = truncateExcerpt(citation.excerpt, MAX_EXCERPT_LENGTH);
 
@@ -177,9 +169,7 @@ const CitationPopoverContent: React.FC<{ citation: ICitation }> = ({
       <Text className={styles.sourceName}>{citation.source}</Text>
 
       {/* Page number (optional) */}
-      {citation.page !== undefined && (
-        <Text className={styles.pageInfo}>Page {citation.page}</Text>
-      )}
+      {citation.page !== undefined && <Text className={styles.pageInfo}>Page {citation.page}</Text>}
 
       {/* Excerpt */}
       <Text className={styles.excerpt}>{excerptText}</Text>
@@ -227,26 +217,23 @@ const CitationPopoverContent: React.FC<{ citation: ICitation }> = ({
  * </SprkChatCitationPopover>
  * ```
  */
-export const SprkChatCitationPopover: React.FC<
-  ISprkChatCitationPopoverProps
-> = ({ citation, open, onOpenChange, children }) => {
+export const SprkChatCitationPopover: React.FC<ISprkChatCitationPopoverProps> = ({
+  citation,
+  open,
+  onOpenChange,
+  children,
+}) => {
   const handleOpenChange = React.useCallback(
     (_event: unknown, data: { open: boolean }) => {
       if (onOpenChange) {
         onOpenChange(data.open);
       }
     },
-    [onOpenChange],
+    [onOpenChange]
   );
 
   return (
-    <Popover
-      positioning="below"
-      withArrow
-      trapFocus
-      open={open}
-      onOpenChange={handleOpenChange}
-    >
+    <Popover positioning="below" withArrow trapFocus open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger disableButtonEnhancement>{children}</PopoverTrigger>
 
       <CitationPopoverContent citation={citation} />

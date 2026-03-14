@@ -12,19 +12,19 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import { renderHook, act } from "@testing-library/react";
-import { useSseStream, parseSseEvent } from "../hooks/useSseStream";
+import { renderHook, act } from '@testing-library/react';
+import { useSseStream, parseSseEvent } from '../hooks/useSseStream';
 
 // ---------------------------------------------------------------------------
 // Polyfills for jsdom (TextEncoder, TextDecoder, ReadableStream)
 // ---------------------------------------------------------------------------
 
-import { TextEncoder, TextDecoder } from "util";
+import { TextEncoder, TextDecoder } from 'util';
 (global as any).TextEncoder = TextEncoder;
 (global as any).TextDecoder = TextDecoder;
 
 // Minimal ReadableStream polyfill for fetch body mocking
-if (typeof globalThis.ReadableStream === "undefined") {
+if (typeof globalThis.ReadableStream === 'undefined') {
   (globalThis as any).ReadableStream = class ReadableStream {
     private _source: any;
     constructor(source: any) {
@@ -71,11 +71,11 @@ function createSseStream(
     content?: string | null;
     suggestions?: string[];
     data?: Record<string, unknown>;
-  }>,
+  }>
 ): any {
   const encoder = new TextEncoder();
-  const lines = events.map((evt) => `data: ${JSON.stringify(evt)}\n\n`);
-  const fullText = lines.join("");
+  const lines = events.map(evt => `data: ${JSON.stringify(evt)}\n\n`);
+  const fullText = lines.join('');
   const encoded = encoder.encode(fullText);
 
   return new ReadableStream({
@@ -93,19 +93,19 @@ function createSseResponse(
     suggestions?: string[];
     data?: Record<string, unknown>;
   }>,
-  status = 200,
+  status = 200
 ): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
     body: createSseStream(events),
-    text: jest.fn().mockResolvedValue(""),
+    text: jest.fn().mockResolvedValue(''),
     headers: new Headers(),
   } as unknown as Response;
 }
 
 // A simple JWT-like token for extractTenantId (base64-encoded payload with tid)
-const TEST_TOKEN = `header.${btoa(JSON.stringify({ tid: "tenant-1" }))}.signature`;
+const TEST_TOKEN = `header.${btoa(JSON.stringify({ tid: 'tenant-1' }))}.signature`;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -115,34 +115,31 @@ beforeEach(() => {
 // parseSseEvent - Suggestions-Specific Tests
 // ---------------------------------------------------------------------------
 
-describe("parseSseEvent - Suggestions Events", () => {
-  it("parseSseEvent_SuggestionsEventWithDataProperty_ParsedCorrectly", () => {
-    const line =
-      'data: {"type":"suggestions","content":null,"data":{"suggestions":["s1","s2","s3"]}}';
+describe('parseSseEvent - Suggestions Events', () => {
+  it('parseSseEvent_SuggestionsEventWithDataProperty_ParsedCorrectly', () => {
+    const line = 'data: {"type":"suggestions","content":null,"data":{"suggestions":["s1","s2","s3"]}}';
     const result = parseSseEvent(line);
 
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("suggestions");
-    expect(result!.data?.suggestions).toEqual(["s1", "s2", "s3"]);
+    expect(result!.type).toBe('suggestions');
+    expect(result!.data?.suggestions).toEqual(['s1', 's2', 's3']);
   });
 
-  it("parseSseEvent_SuggestionsEventWithTopLevelProperty_ParsedCorrectly", () => {
-    const line =
-      'data: {"type":"suggestions","content":null,"suggestions":["s1","s2"]}';
+  it('parseSseEvent_SuggestionsEventWithTopLevelProperty_ParsedCorrectly', () => {
+    const line = 'data: {"type":"suggestions","content":null,"suggestions":["s1","s2"]}';
     const result = parseSseEvent(line);
 
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("suggestions");
-    expect(result!.suggestions).toEqual(["s1", "s2"]);
+    expect(result!.type).toBe('suggestions');
+    expect(result!.suggestions).toEqual(['s1', 's2']);
   });
 
-  it("parseSseEvent_SuggestionsEventWithEmptyArray_ParsedCorrectly", () => {
-    const line =
-      'data: {"type":"suggestions","content":null,"data":{"suggestions":[]}}';
+  it('parseSseEvent_SuggestionsEventWithEmptyArray_ParsedCorrectly', () => {
+    const line = 'data: {"type":"suggestions","content":null,"data":{"suggestions":[]}}';
     const result = parseSseEvent(line);
 
     expect(result).not.toBeNull();
-    expect(result!.type).toBe("suggestions");
+    expect(result!.type).toBe('suggestions');
     expect(result!.data?.suggestions).toEqual([]);
   });
 });
@@ -151,248 +148,202 @@ describe("parseSseEvent - Suggestions Events", () => {
 // useSseStream Hook - Suggestions State Tests
 // ---------------------------------------------------------------------------
 
-describe("useSseStream - Suggestions Handling", () => {
-  it("startStream_WithSuggestionsEvent_UpdatesSuggestionsState", async () => {
+describe('useSseStream - Suggestions Handling', () => {
+  it('startStream_WithSuggestionsEvent_UpdatesSuggestionsState', async () => {
     const events = [
-      { type: "token", content: "Hello" },
+      { type: 'token', content: 'Hello' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Ask about risks", "Summarize", "Next steps"] },
+        data: { suggestions: ['Ask about risks', 'Summarize', 'Next steps'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
       // Wait for stream to complete
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 50));
     });
 
-    expect(result.current.suggestions).toEqual([
-      "Ask about risks",
-      "Summarize",
-      "Next steps",
-    ]);
-    expect(result.current.content).toBe("Hello");
+    expect(result.current.suggestions).toEqual(['Ask about risks', 'Summarize', 'Next steps']);
+    expect(result.current.content).toBe('Hello');
     expect(result.current.isDone).toBe(true);
   });
 
-  it("startStream_WithTopLevelSuggestions_UpdatesSuggestionsState", async () => {
+  it('startStream_WithTopLevelSuggestions_UpdatesSuggestionsState', async () => {
     const events = [
-      { type: "token", content: "Response text" },
+      { type: 'token', content: 'Response text' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        suggestions: ["Option A", "Option B"],
+        suggestions: ['Option A', 'Option B'],
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
-    expect(result.current.suggestions).toEqual(["Option A", "Option B"]);
+    expect(result.current.suggestions).toEqual(['Option A', 'Option B']);
   });
 
-  it("startStream_NewStream_ClearsPreviousSuggestions", async () => {
+  it('startStream_NewStream_ClearsPreviousSuggestions', async () => {
     // First stream with suggestions
     const events1 = [
-      { type: "token", content: "First" },
+      { type: 'token', content: 'First' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Old suggestion"] },
+        data: { suggestions: ['Old suggestion'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events1));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "first" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'first' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
-    expect(result.current.suggestions).toEqual(["Old suggestion"]);
+    expect(result.current.suggestions).toEqual(['Old suggestion']);
 
     // Second stream - suggestions should be cleared at start
     const events2 = [
-      { type: "token", content: "Second" },
-      { type: "done", content: null },
+      { type: 'token', content: 'Second' },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events2));
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "second" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'second' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     // Suggestions should be cleared because second stream had no suggestions event
     expect(result.current.suggestions).toEqual([]);
-    expect(result.current.content).toBe("Second");
+    expect(result.current.content).toBe('Second');
   });
 
-  it("startStream_MultipleSuggestionsEvents_LastWins", async () => {
+  it('startStream_MultipleSuggestionsEvents_LastWins', async () => {
     const events = [
-      { type: "token", content: "Hello" },
+      { type: 'token', content: 'Hello' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["First batch"] },
+        data: { suggestions: ['First batch'] },
       },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Second batch", "Updated"] },
+        data: { suggestions: ['Second batch', 'Updated'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     // The last suggestions event should have overwritten the first
-    expect(result.current.suggestions).toEqual(["Second batch", "Updated"]);
+    expect(result.current.suggestions).toEqual(['Second batch', 'Updated']);
   });
 
-  it("startStream_EmptySuggestionsArray_KeepsEmptyState", async () => {
+  it('startStream_EmptySuggestionsArray_KeepsEmptyState', async () => {
     const events = [
-      { type: "token", content: "Hello" },
-      { type: "suggestions", content: null, data: { suggestions: [] } },
-      { type: "done", content: null },
+      { type: 'token', content: 'Hello' },
+      { type: 'suggestions', content: null, data: { suggestions: [] } },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     // Empty suggestions array should not update state (filtered by parseSuggestions)
     expect(result.current.suggestions).toEqual([]);
   });
 
-  it("startStream_SuggestionsWithNonStringElements_FiltersInvalid", async () => {
+  it('startStream_SuggestionsWithNonStringElements_FiltersInvalid', async () => {
     // Simulate malformed suggestions where some elements are not strings
     const events = [
-      { type: "token", content: "Hello" },
+      { type: 'token', content: 'Hello' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Valid suggestion", "", "Another valid one"] },
+        data: { suggestions: ['Valid suggestion', '', 'Another valid one'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     // Empty strings should be filtered out by parseSuggestions
-    expect(result.current.suggestions).toEqual([
-      "Valid suggestion",
-      "Another valid one",
-    ]);
+    expect(result.current.suggestions).toEqual(['Valid suggestion', 'Another valid one']);
   });
 
-  it("startStream_NoSuggestionsEvent_SuggestionsRemainEmpty", async () => {
+  it('startStream_NoSuggestionsEvent_SuggestionsRemainEmpty', async () => {
     const events = [
-      { type: "token", content: "Hello world" },
-      { type: "done", content: null },
+      { type: 'token', content: 'Hello world' },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     expect(result.current.suggestions).toEqual([]);
-    expect(result.current.content).toBe("Hello world");
+    expect(result.current.content).toBe('Hello world');
   });
 
-  it("clearSuggestions_WithExistingSuggestions_ClearsState", async () => {
+  it('clearSuggestions_WithExistingSuggestions_ClearsState', async () => {
     const events = [
-      { type: "token", content: "Hello" },
+      { type: 'token', content: 'Hello' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Suggestion 1", "Suggestion 2"] },
+        data: { suggestions: ['Suggestion 1', 'Suggestion 2'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
-    expect(result.current.suggestions).toEqual([
-      "Suggestion 1",
-      "Suggestion 2",
-    ]);
+    expect(result.current.suggestions).toEqual(['Suggestion 1', 'Suggestion 2']);
 
     // Call clearSuggestions
     act(() => {
@@ -402,7 +353,7 @@ describe("useSseStream - Suggestions Handling", () => {
     expect(result.current.suggestions).toEqual([]);
   });
 
-  it("clearSuggestions_WhenAlreadyEmpty_RemainsEmpty", () => {
+  it('clearSuggestions_WhenAlreadyEmpty_RemainsEmpty', () => {
     const { result } = renderHook(() => useSseStream());
 
     // Initial state should have empty suggestions
@@ -415,31 +366,27 @@ describe("useSseStream - Suggestions Handling", () => {
     expect(result.current.suggestions).toEqual([]);
   });
 
-  it("startStream_SuggestionsWithMissingSuggestionsProperty_HandledGracefully", async () => {
+  it('startStream_SuggestionsWithMissingSuggestionsProperty_HandledGracefully', async () => {
     // Event with type "suggestions" but no suggestions data at all
     const events = [
-      { type: "token", content: "Hello" },
-      { type: "suggestions", content: null, data: {} },
-      { type: "done", content: null },
+      { type: 'token', content: 'Hello' },
+      { type: 'suggestions', content: null, data: {} },
+      { type: 'done', content: null },
     ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
 
     await act(async () => {
-      result.current.startStream(
-        "https://api.example.com/stream",
-        { message: "hi" },
-        TEST_TOKEN,
-      );
-      await new Promise((r) => setTimeout(r, 50));
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
     });
 
     // No suggestions should be set — parseSuggestions returns [] for missing data
     expect(result.current.suggestions).toEqual([]);
   });
 
-  it("startStream_InitialState_SuggestionsAreEmpty", () => {
+  it('startStream_InitialState_SuggestionsAreEmpty', () => {
     const { result } = renderHook(() => useSseStream());
 
     expect(result.current.suggestions).toEqual([]);

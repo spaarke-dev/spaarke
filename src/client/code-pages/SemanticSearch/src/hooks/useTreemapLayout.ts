@@ -9,21 +9,10 @@
  * All computation runs synchronously inside useMemo.
  */
 
-import { useMemo } from "react";
-import {
-  hierarchy,
-  treemap,
-  treemapSquarify,
-  type HierarchyRectangularNode,
-} from "d3-hierarchy";
-import type { VisualizationColorBy } from "../types";
-import {
-  type SearchResult,
-  getScore,
-  getResultId,
-  getResultName,
-  groupResults,
-} from "../utils/groupResults";
+import { useMemo } from 'react';
+import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
+import type { VisualizationColorBy } from '../types';
+import { type SearchResult, getScore, getResultId, getResultName, groupResults } from '../utils/groupResults';
 
 // =============================================
 // Public types
@@ -119,7 +108,7 @@ export function useTreemapLayout(
   results: SearchResult[],
   groupBy: VisualizationColorBy,
   width: number,
-  height: number,
+  height: number
 ): { tiles: TreemapTile[]; groups: TreemapGroup[] } {
   return useMemo(() => {
     // Guard: invalid dimensions or empty results
@@ -136,10 +125,10 @@ export function useTreemapLayout(
 
     // 2. Build d3-hierarchy data tree
     const rootData: TreemapRootDatum = {
-      name: "root",
-      children: resultGroups.map((group) => ({
+      name: 'root',
+      children: resultGroups.map(group => ({
         name: group.key,
-        children: group.results.map((result) => ({
+        children: group.results.map(result => ({
           name: getResultName(result),
           value: Math.max(getScore(result) * 100, 1),
           result,
@@ -148,9 +137,7 @@ export function useTreemapLayout(
     };
 
     // 3. Create hierarchy and compute sums
-    const root = hierarchy<TreemapDatum>(rootData).sum(
-      (d) => (d as TreemapLeafDatum).value ?? 0,
-    );
+    const root = hierarchy<TreemapDatum>(rootData).sum(d => (d as TreemapLeafDatum).value ?? 0);
 
     // 4. Apply treemap layout
     const treemapLayout = treemap<TreemapDatum>()
@@ -176,7 +163,7 @@ export function useTreemapLayout(
 
       // Determine parent group key
       const parentGroup = leaf.parent?.data as TreemapBranchDatum | undefined;
-      const groupKey = parentGroup?.name ?? "Uncategorized";
+      const groupKey = parentGroup?.name ?? 'Uncategorized';
 
       tiles.push({
         id: getResultId(leafData.result),
@@ -194,7 +181,7 @@ export function useTreemapLayout(
     }
 
     // 6. Build group summaries
-    const groups: TreemapGroup[] = resultGroups.map((group) => ({
+    const groups: TreemapGroup[] = resultGroups.map(group => ({
       key: group.key,
       label: group.label,
       count: group.results.length,

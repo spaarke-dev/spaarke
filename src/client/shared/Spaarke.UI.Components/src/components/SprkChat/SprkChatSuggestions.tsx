@@ -14,15 +14,9 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  InteractionTag,
-  InteractionTagPrimary,
-} from "@fluentui/react-components";
-import { ISprkChatSuggestionsProps } from "./types";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens, InteractionTag, InteractionTagPrimary } from '@fluentui/react-components';
+import { ISprkChatSuggestionsProps } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -40,34 +34,34 @@ const MAX_TEXT_LENGTH = 50;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(tokens.spacingVerticalXS, "0px"),
-    alignItems: "center",
-    transitionProperty: "opacity, transform",
-    transitionDuration: "200ms",
-    transitionTimingFunction: "ease-out",
+    ...shorthands.padding(tokens.spacingVerticalXS, '0px'),
+    alignItems: 'center',
+    transitionProperty: 'opacity, transform',
+    transitionDuration: '200ms',
+    transitionTimingFunction: 'ease-out',
   },
   visible: {
     opacity: 1,
-    transform: "translateY(0)",
+    transform: 'translateY(0)',
   },
   hidden: {
     opacity: 0,
-    transform: "translateY(8px)",
-    pointerEvents: "none",
+    transform: 'translateY(8px)',
+    pointerEvents: 'none',
   },
   chip: {
-    cursor: "pointer",
-    maxWidth: "280px",
+    cursor: 'pointer',
+    maxWidth: '280px',
   },
   chipText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    display: "block",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
   },
 });
 
@@ -82,7 +76,7 @@ function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) {
     return text;
   }
-  return text.slice(0, maxLen - 1).trimEnd() + "\u2026";
+  return text.slice(0, maxLen - 1).trimEnd() + '\u2026';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,53 +95,41 @@ function truncateText(text: string, maxLen: number): string {
  * />
  * ```
  */
-export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({
-  suggestions,
-  onSelect,
-  visible,
-}) => {
+export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ suggestions, onSelect, visible }) => {
   const styles = useStyles();
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   // Limit to MAX_SUGGESTIONS chips
-  const displaySuggestions = React.useMemo(
-    () => suggestions.slice(0, MAX_SUGGESTIONS),
-    [suggestions],
-  );
+  const displaySuggestions = React.useMemo(() => suggestions.slice(0, MAX_SUGGESTIONS), [suggestions]);
 
   // Keyboard navigation: Arrow Left/Right between chips, Enter/Space to select
-  const handleKeyDown = React.useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const container = containerRef.current;
-      if (!container) {
-        return;
-      }
+  const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
 
-      const focusable = Array.from(
-        container.querySelectorAll<HTMLElement>("[data-suggestion-chip]"),
-      );
-      const currentIndex = focusable.indexOf(event.target as HTMLElement);
+    const focusable = Array.from(container.querySelectorAll<HTMLElement>('[data-suggestion-chip]'));
+    const currentIndex = focusable.indexOf(event.target as HTMLElement);
 
-      if (currentIndex === -1) {
-        return;
-      }
+    if (currentIndex === -1) {
+      return;
+    }
 
-      let nextIndex = -1;
+    let nextIndex = -1;
 
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        nextIndex = (currentIndex + 1) % focusable.length;
-      } else if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        nextIndex = (currentIndex - 1 + focusable.length) % focusable.length;
-      }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      nextIndex = (currentIndex + 1) % focusable.length;
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      nextIndex = (currentIndex - 1 + focusable.length) % focusable.length;
+    }
 
-      if (nextIndex >= 0) {
-        focusable[nextIndex].focus();
-      }
-    },
-    [],
-  );
+    if (nextIndex >= 0) {
+      focusable[nextIndex].focus();
+    }
+  }, []);
 
   if (displaySuggestions.length === 0) {
     return null;

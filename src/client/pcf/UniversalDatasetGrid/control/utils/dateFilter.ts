@@ -8,12 +8,7 @@
  * Task: 011 - Implement Date Filtering on Dataset
  */
 
-import {
-  CalendarFilter,
-  isSingleDateFilter,
-  isRangeFilter,
-  isClearFilter,
-} from "../types";
+import { CalendarFilter, isSingleDateFilter, isRangeFilter, isClearFilter } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -22,23 +17,18 @@ import {
 /**
  * Dataverse field name for due date filtering
  */
-export const DATE_FILTER_FIELD = "sprk_duedate";
+export const DATE_FILTER_FIELD = 'sprk_duedate';
 
 /**
  * PCF ConditionOperator values
  * @see https://docs.microsoft.com/en-us/dotnet/api/microsoft.xrm.sdk.query.conditionoperator
  */
 const ConditionOperator = {
-  Equal:
-    0 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-  GreaterEqual:
-    4 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-  LessEqual:
-    5 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-  OnOrAfter:
-    25 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-  OnOrBefore:
-    26 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  Equal: 0 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  GreaterEqual: 4 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  LessEqual: 5 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  OnOrAfter: 25 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  OnOrBefore: 26 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
   On: 27 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
 };
 
@@ -91,9 +81,7 @@ export interface DateFilterResult {
  * dataset.refresh();
  * ```
  */
-export function buildDateFilter(
-  calendarFilter: CalendarFilter | null | undefined,
-): DateFilterResult {
+export function buildDateFilter(calendarFilter: CalendarFilter | null | undefined): DateFilterResult {
   // No filter or null - clear
   if (!calendarFilter) {
     return {
@@ -167,10 +155,10 @@ export function buildDateFilter(
  */
 export function applyDateFilter(
   dataset: ComponentFramework.PropertyTypes.DataSet,
-  calendarFilter: CalendarFilter | null | undefined,
+  calendarFilter: CalendarFilter | null | undefined
 ): boolean {
   if (!dataset?.filtering) {
-    console.warn("[dateFilter] Dataset filtering API not available");
+    console.warn('[dateFilter] Dataset filtering API not available');
     return false;
   }
 

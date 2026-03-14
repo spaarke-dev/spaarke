@@ -11,7 +11,7 @@
  * - Typed generics: Node<PlaybookNodeData>, Edge<ConditionEdgeData>
  */
 
-import { create } from "zustand";
+import { create } from 'zustand';
 import {
   type Connection,
   type NodeChange,
@@ -20,29 +20,19 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
-} from "@xyflow/react";
-import type {
-  PlaybookNodeType,
-  PlaybookNodeData,
-  PlaybookNode,
-  PlaybookEdge,
-  CanvasJson,
-} from "../types/canvas";
-import { CANVAS_JSON_VERSION } from "../types/canvas";
+} from '@xyflow/react';
+import type { PlaybookNodeType, PlaybookNodeData, PlaybookNode, PlaybookEdge, CanvasJson } from '../types/canvas';
+import { CANVAS_JSON_VERSION } from '../types/canvas';
 
 /** Generate a unique ID for new nodes */
-const generateNodeId = (): string =>
-  `node_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+const generateNodeId = (): string => `node_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
 // ---------------------------------------------------------------------------
 // Store interface
 // ---------------------------------------------------------------------------
 
 /** Snapshot of N:N scopes at load time, keyed by canvas node ID. */
-type InitialScopeMap = Map<
-  string,
-  { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }
->;
+type InitialScopeMap = Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>;
 
 interface CanvasState {
   // State
@@ -71,11 +61,7 @@ interface CanvasState {
   selectNode: (nodeId: string | null) => void;
 
   // Drag and drop
-  onDrop: (
-    position: XYPosition,
-    nodeType: PlaybookNodeType,
-    label: string,
-  ) => void;
+  onDrop: (position: XYPosition, nodeType: PlaybookNodeType, label: string) => void;
 
   // Persistence
   loadFromCanvasJson: (json: string) => void;
@@ -120,38 +106,31 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Node actions
   // -----------------------------------------------------------------------
 
-  setNodes: (nodes) => set({ nodes, isDirty: true }),
+  setNodes: nodes => set({ nodes, isDirty: true }),
 
-  onNodesChange: (changes) =>
-    set((state) => ({
+  onNodesChange: changes =>
+    set(state => ({
       nodes: applyNodeChanges(changes, state.nodes),
       isDirty: true,
     })),
 
-  addNode: (node) =>
-    set((state) => ({
+  addNode: node =>
+    set(state => ({
       nodes: [...state.nodes, node],
       isDirty: true,
     })),
 
   updateNodeData: (nodeId, data) =>
-    set((state) => ({
-      nodes: state.nodes.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, ...data } }
-          : node,
-      ),
+    set(state => ({
+      nodes: state.nodes.map(node => (node.id === nodeId ? { ...node, data: { ...node.data, ...data } } : node)),
       isDirty: true,
     })),
 
-  removeNode: (nodeId) =>
-    set((state) => ({
-      nodes: state.nodes.filter((node) => node.id !== nodeId),
-      edges: state.edges.filter(
-        (edge) => edge.source !== nodeId && edge.target !== nodeId,
-      ),
-      selectedNodeId:
-        state.selectedNodeId === nodeId ? null : state.selectedNodeId,
+  removeNode: nodeId =>
+    set(state => ({
+      nodes: state.nodes.filter(node => node.id !== nodeId),
+      edges: state.edges.filter(edge => edge.source !== nodeId && edge.target !== nodeId),
+      selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
       isDirty: true,
     })),
 
@@ -159,32 +138,32 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Edge actions
   // -----------------------------------------------------------------------
 
-  setEdges: (edges) => set({ edges, isDirty: true }),
+  setEdges: edges => set({ edges, isDirty: true }),
 
-  onEdgesChange: (changes) =>
-    set((state) => ({
+  onEdgesChange: changes =>
+    set(state => ({
       edges: applyEdgeChanges(changes, state.edges),
       isDirty: true,
     })),
 
-  onConnect: (connection) =>
-    set((state) => {
+  onConnect: connection =>
+    set(state => {
       // Determine edge type based on source node and handle
-      let edgeType = "smoothstep";
+      let edgeType = 'smoothstep';
       let animated = true;
-      let edgeData: PlaybookEdge["data"] | undefined;
+      let edgeData: PlaybookEdge['data'] | undefined;
 
       // Check if source is a condition node
-      const sourceNode = state.nodes.find((n) => n.id === connection.source);
-      if (sourceNode?.data.type === "condition" && connection.sourceHandle) {
-        if (connection.sourceHandle === "true") {
-          edgeType = "trueBranch";
+      const sourceNode = state.nodes.find(n => n.id === connection.source);
+      if (sourceNode?.data.type === 'condition' && connection.sourceHandle) {
+        if (connection.sourceHandle === 'true') {
+          edgeType = 'trueBranch';
           animated = false;
-          edgeData = { branch: "true" as const };
-        } else if (connection.sourceHandle === "false") {
-          edgeType = "falseBranch";
+          edgeData = { branch: 'true' as const };
+        } else if (connection.sourceHandle === 'false') {
+          edgeType = 'falseBranch';
           animated = false;
-          edgeData = { branch: "false" as const };
+          edgeData = { branch: 'false' as const };
         }
       }
 
@@ -196,15 +175,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             animated,
             data: edgeData,
           },
-          state.edges,
+          state.edges
         ),
         isDirty: true,
       };
     }),
 
-  removeEdge: (edgeId) =>
-    set((state) => ({
-      edges: state.edges.filter((edge) => edge.id !== edgeId),
+  removeEdge: edgeId =>
+    set(state => ({
+      edges: state.edges.filter(edge => edge.id !== edgeId),
       isDirty: true,
     })),
 
@@ -212,7 +191,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Selection
   // -----------------------------------------------------------------------
 
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+  selectNode: nodeId => set({ selectedNodeId: nodeId }),
 
   // -----------------------------------------------------------------------
   // Drag and drop
@@ -222,17 +201,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const baseData: Record<string, unknown> = {
       label,
       type: nodeType,
-      outputVariable: nodeType === "start" ? undefined : `output_${nodeType}`,
+      outputVariable: nodeType === 'start' ? undefined : `output_${nodeType}`,
       isConfigured: false,
       validationErrors: [],
     };
 
     // Set type-specific defaults for structural nodes
-    if (nodeType === "deliverOutput") {
-      baseData.deliveryType = "markdown";
-    } else if (nodeType === "deliverToIndex") {
-      baseData.indexName = "knowledge";
-      baseData.indexSource = "document";
+    if (nodeType === 'deliverOutput') {
+      baseData.deliveryType = 'markdown';
+    } else if (nodeType === 'deliverToIndex') {
+      baseData.indexName = 'knowledge';
+      baseData.indexSource = 'document';
     }
 
     const newNode: PlaybookNode = {
@@ -259,16 +238,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         isDirty: false,
         lastSavedJson: json,
       });
-      console.info("[CanvasStore] Loaded canvas from JSON");
+      console.info('[CanvasStore] Loaded canvas from JSON');
     } catch (error) {
-      console.error("[CanvasStore] Failed to parse canvas JSON:", error);
+      console.error('[CanvasStore] Failed to parse canvas JSON:', error);
     }
   },
 
-  mergeNodeScopes: (scopeMap) => {
+  mergeNodeScopes: scopeMap => {
     const { nodes } = get();
     let merged = 0;
-    const updatedNodes = nodes.map((node) => {
+    const updatedNodes = nodes.map(node => {
       const scopes = scopeMap.get(node.id);
       if (!scopes) return node;
       merged++;
@@ -315,11 +294,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   initializeNewCanvas: () => {
     const startNode: PlaybookNode = {
       id: generateNodeId(),
-      type: "start",
+      type: 'start',
       position: { x: 100, y: 200 },
       data: {
-        label: "Start",
-        type: "start",
+        label: 'Start',
+        type: 'start',
         isConfigured: true,
         validationErrors: [],
       },

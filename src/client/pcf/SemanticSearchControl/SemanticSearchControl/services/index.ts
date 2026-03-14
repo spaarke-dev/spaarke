@@ -8,8 +8,8 @@ export {
   getUserThemePreference,
   setUserThemePreference,
   getEffectiveDarkMode,
-} from "./ThemeService";
+} from './ThemeService';
 
-export { SemanticSearchApiService } from "./SemanticSearchApiService";
-export { DataverseMetadataService } from "./DataverseMetadataService";
-export { NavigationService, NavigationTarget } from "./NavigationService";
+export { SemanticSearchApiService } from './SemanticSearchApiService';
+export { DataverseMetadataService } from './DataverseMetadataService';
+export { NavigationService, NavigationTarget } from './NavigationService';

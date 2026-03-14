@@ -13,20 +13,13 @@
  * @see CalendarMonth.tsx
  */
 
-import * as React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from "@fluentui/react-components";
-import { CalendarMonth, ICalendarMonthProps } from "../CalendarMonth";
+import * as React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { CalendarMonth, ICalendarMonthProps } from '../CalendarMonth';
 
 // Helper to render with Fluent theme
-const renderWithTheme = (
-  component: React.ReactElement,
-  theme = webLightTheme,
-) => {
+const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
   return render(<FluentProvider theme={theme}>{component}</FluentProvider>);
 };
 
@@ -34,15 +27,15 @@ const renderWithTheme = (
 const createEventCounts = (): Map<string, number> => {
   const map = new Map<string, number>();
   // Events for February 2026
-  map.set("2026-02-05", 1); // Single event
-  map.set("2026-02-10", 3); // Multiple events
-  map.set("2026-02-15", 7); // Many events
-  map.set("2026-02-20", 1); // Single event
+  map.set('2026-02-05', 1); // Single event
+  map.set('2026-02-10', 3); // Multiple events
+  map.set('2026-02-15', 7); // Many events
+  map.set('2026-02-20', 1); // Single event
   return map;
 };
 
 const createEventDates = (): Set<string> => {
-  return new Set(["2026-02-05", "2026-02-10", "2026-02-15", "2026-02-20"]);
+  return new Set(['2026-02-05', '2026-02-10', '2026-02-15', '2026-02-20']);
 };
 
 const defaultProps: ICalendarMonthProps = {
@@ -50,16 +43,16 @@ const defaultProps: ICalendarMonthProps = {
   month: 1, // February (0-indexed)
 };
 
-describe("CalendarMonth", () => {
-  describe("rendering", () => {
-    it("renders with required props", () => {
+describe('CalendarMonth', () => {
+  describe('rendering', () => {
+    it('renders with required props', () => {
       renderWithTheme(<CalendarMonth {...defaultProps} />);
 
       // Should render month/year header
-      expect(screen.getByText("February 2026")).toBeInTheDocument();
+      expect(screen.getByText('February 2026')).toBeInTheDocument();
     });
 
-    it("renders weekday headers (S M T W T F S)", () => {
+    it('renders weekday headers (S M T W T F S)', () => {
       renderWithTheme(<CalendarMonth {...defaultProps} />);
 
       // Check for weekday headers - there are multiple S, T entries
@@ -67,10 +60,8 @@ describe("CalendarMonth", () => {
       expect(weekdayHeaders).toHaveLength(7);
     });
 
-    it("renders day grid with correct number of cells", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} />,
-      );
+    it('renders day grid with correct number of cells', () => {
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} />);
 
       // 6 rows x 7 days = 42 cells
       const grid = container.querySelector('[role="grid"]');
@@ -81,10 +72,8 @@ describe("CalendarMonth", () => {
       expect(gridCells.length).toBeGreaterThan(0);
     });
 
-    it("displays correct days for February 2026", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} />,
-      );
+    it('displays correct days for February 2026', () => {
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} />);
 
       // February 2026 has 28 days
       // Check using data-date attributes which are unique
@@ -99,40 +88,34 @@ describe("CalendarMonth", () => {
       expect(day29).not.toBeInTheDocument();
     });
 
-    it("renders different months correctly", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth year={2026} month={0} />,
-      ); // January
+    it('renders different months correctly', () => {
+      const { container } = renderWithTheme(<CalendarMonth year={2026} month={0} />); // January
 
-      expect(screen.getByText("January 2026")).toBeInTheDocument();
+      expect(screen.getByText('January 2026')).toBeInTheDocument();
 
       // January 2026 has 31 days - use data-date to check
       const day31 = container.querySelector('[data-date="2026-01-31"]');
       expect(day31).toBeInTheDocument();
     });
 
-    it("marks today with special styling", () => {
+    it('marks today with special styling', () => {
       const today = new Date();
-      const { container } = renderWithTheme(
-        <CalendarMonth year={today.getFullYear()} month={today.getMonth()} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth year={today.getFullYear()} month={today.getMonth()} />);
 
       // Today's date should have aria-label containing today's date
       const todayCell = container.querySelector(
-        `[data-date="${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}"]`,
+        `[data-date="${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}"]`
       );
       expect(todayCell).toBeInTheDocument();
     });
   });
 
-  describe("event indicators", () => {
-    it("shows dot indicator for single event", () => {
+  describe('event indicators', () => {
+    it('shows dot indicator for single event', () => {
       const eventCounts = new Map<string, number>();
-      eventCounts.set("2026-02-05", 1);
+      eventCounts.set('2026-02-05', 1);
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} eventCounts={eventCounts} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} eventCounts={eventCounts} />);
 
       // Find the cell with an event
       const cellWithEvent = container.querySelector('[data-date="2026-02-05"]');
@@ -143,77 +126,62 @@ describe("CalendarMonth", () => {
       expect(indicator).toBeInTheDocument();
     });
 
-    it("shows badge with count for multiple events", () => {
+    it('shows badge with count for multiple events', () => {
       const eventCounts = new Map<string, number>();
-      eventCounts.set("2026-02-20", 8); // Use day 20 to avoid collisions with adjacent months
+      eventCounts.set('2026-02-20', 8); // Use day 20 to avoid collisions with adjacent months
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} eventCounts={eventCounts} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} eventCounts={eventCounts} />);
 
       // Badge should show count - look for the Fluent Badge component
       const cell = container.querySelector('[data-date="2026-02-20"]');
       expect(cell).toBeInTheDocument();
 
-      const badge = cell?.querySelector(".fui-Badge");
+      const badge = cell?.querySelector('.fui-Badge');
       expect(badge).toBeInTheDocument();
-      expect(badge?.textContent).toBe("8");
+      expect(badge?.textContent).toBe('8');
     });
 
     it('shows "99+" for more than 99 events', () => {
       const eventCounts = new Map<string, number>();
-      eventCounts.set("2026-02-18", 150); // Use day 18 to avoid collisions
+      eventCounts.set('2026-02-18', 150); // Use day 18 to avoid collisions
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} eventCounts={eventCounts} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} eventCounts={eventCounts} />);
 
       // Badge should show 99+ for large counts
       const cell = container.querySelector('[data-date="2026-02-18"]');
       expect(cell).toBeInTheDocument();
 
-      const badge = cell?.querySelector(".fui-Badge");
+      const badge = cell?.querySelector('.fui-Badge');
       expect(badge).toBeInTheDocument();
-      expect(badge?.textContent).toBe("99+");
+      expect(badge?.textContent).toBe('99+');
     });
 
-    it("supports legacy eventDates prop (Set)", () => {
+    it('supports legacy eventDates prop (Set)', () => {
       const eventDates = createEventDates();
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} eventDates={eventDates} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} eventDates={eventDates} />);
 
       // Cells with events should have indicators
       const cell = container.querySelector('[data-date="2026-02-05"]');
       expect(cell).toBeInTheDocument();
     });
 
-    it("includes event count in aria-label for accessibility", () => {
+    it('includes event count in aria-label for accessibility', () => {
       const eventCounts = new Map<string, number>();
-      eventCounts.set("2026-02-10", 3);
+      eventCounts.set('2026-02-10', 3);
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} eventCounts={eventCounts} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} eventCounts={eventCounts} />);
 
-      const cellWithEvents = container.querySelector(
-        '[data-date="2026-02-10"]',
-      );
-      expect(cellWithEvents).toHaveAttribute(
-        "aria-label",
-        expect.stringContaining("3 events"),
-      );
+      const cellWithEvents = container.querySelector('[data-date="2026-02-10"]');
+      expect(cellWithEvents).toHaveAttribute('aria-label', expect.stringContaining('3 events'));
     });
   });
 
-  describe("date selection", () => {
-    it("calls onDateClick when clicking a date", () => {
+  describe('date selection', () => {
+    it('calls onDateClick when clicking a date', () => {
       const onDateClick = jest.fn();
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} onDateClick={onDateClick} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} onDateClick={onDateClick} />);
 
       const dayCell = container.querySelector('[data-date="2026-02-10"]');
       expect(dayCell).toBeInTheDocument();
@@ -230,47 +198,33 @@ describe("CalendarMonth", () => {
       expect(calledDate.getDate()).toBe(10);
     });
 
-    it("highlights selected dates", () => {
-      const selectedDates = new Set(["2026-02-10"]);
+    it('highlights selected dates', () => {
+      const selectedDates = new Set(['2026-02-10']);
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} selectedDates={selectedDates} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} selectedDates={selectedDates} />);
 
       const selectedCell = container.querySelector('[data-date="2026-02-10"]');
-      expect(selectedCell).toHaveAttribute("aria-selected", "true");
+      expect(selectedCell).toHaveAttribute('aria-selected', 'true');
     });
 
-    it("supports multiple selected dates", () => {
-      const selectedDates = new Set(["2026-02-10", "2026-02-15", "2026-02-20"]);
+    it('supports multiple selected dates', () => {
+      const selectedDates = new Set(['2026-02-10', '2026-02-15', '2026-02-20']);
 
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} selectedDates={selectedDates} />,
-      );
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} selectedDates={selectedDates} />);
 
-      expect(
-        container.querySelector('[data-date="2026-02-10"]'),
-      ).toHaveAttribute("aria-selected", "true");
-      expect(
-        container.querySelector('[data-date="2026-02-15"]'),
-      ).toHaveAttribute("aria-selected", "true");
-      expect(
-        container.querySelector('[data-date="2026-02-20"]'),
-      ).toHaveAttribute("aria-selected", "true");
+      expect(container.querySelector('[data-date="2026-02-10"]')).toHaveAttribute('aria-selected', 'true');
+      expect(container.querySelector('[data-date="2026-02-15"]')).toHaveAttribute('aria-selected', 'true');
+      expect(container.querySelector('[data-date="2026-02-20"]')).toHaveAttribute('aria-selected', 'true');
     });
   });
 
-  describe("range selection", () => {
-    it("calls onDateShiftClick when shift-clicking a date", () => {
+  describe('range selection', () => {
+    it('calls onDateShiftClick when shift-clicking a date', () => {
       const onDateClick = jest.fn();
       const onDateShiftClick = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          onDateClick={onDateClick}
-          onDateShiftClick={onDateShiftClick}
-        />,
+        <CalendarMonth {...defaultProps} onDateClick={onDateClick} onDateShiftClick={onDateShiftClick} />
       );
 
       const dayCell = container.querySelector('[data-date="2026-02-15"]');
@@ -280,13 +234,9 @@ describe("CalendarMonth", () => {
       expect(onDateClick).not.toHaveBeenCalled();
     });
 
-    it("highlights range between start and end dates", () => {
+    it('highlights range between start and end dates', () => {
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          rangeStartDate="2026-02-05"
-          rangeEndDate="2026-02-10"
-        />,
+        <CalendarMonth {...defaultProps} rangeStartDate="2026-02-05" rangeEndDate="2026-02-10" />
       );
 
       // Dates in range should have aria-selected
@@ -294,110 +244,84 @@ describe("CalendarMonth", () => {
       const middleCell = container.querySelector('[data-date="2026-02-07"]');
       const endCell = container.querySelector('[data-date="2026-02-10"]');
 
-      expect(startCell).toHaveAttribute("aria-selected", "true");
-      expect(middleCell).toHaveAttribute("aria-selected", "true");
-      expect(endCell).toHaveAttribute("aria-selected", "true");
+      expect(startCell).toHaveAttribute('aria-selected', 'true');
+      expect(middleCell).toHaveAttribute('aria-selected', 'true');
+      expect(endCell).toHaveAttribute('aria-selected', 'true');
 
       // Date outside range should not be selected
       const outsideCell = container.querySelector('[data-date="2026-02-15"]');
-      expect(outsideCell).toHaveAttribute("aria-selected", "false");
+      expect(outsideCell).toHaveAttribute('aria-selected', 'false');
     });
 
-    it("includes range info in aria-label", () => {
+    it('includes range info in aria-label', () => {
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          rangeStartDate="2026-02-05"
-          rangeEndDate="2026-02-10"
-        />,
+        <CalendarMonth {...defaultProps} rangeStartDate="2026-02-05" rangeEndDate="2026-02-10" />
       );
 
       const startCell = container.querySelector('[data-date="2026-02-05"]');
-      expect(startCell).toHaveAttribute(
-        "aria-label",
-        expect.stringContaining("range start"),
-      );
+      expect(startCell).toHaveAttribute('aria-label', expect.stringContaining('range start'));
 
       const endCell = container.querySelector('[data-date="2026-02-10"]');
-      expect(endCell).toHaveAttribute(
-        "aria-label",
-        expect.stringContaining("range end"),
-      );
+      expect(endCell).toHaveAttribute('aria-label', expect.stringContaining('range end'));
     });
   });
 
-  describe("keyboard navigation", () => {
-    it("navigates with arrow keys", () => {
+  describe('keyboard navigation', () => {
+    it('navigates with arrow keys', () => {
       const onFocusDateChange = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          focusedDate="2026-02-10"
-          onFocusDateChange={onFocusDateChange}
-        />,
+        <CalendarMonth {...defaultProps} focusedDate="2026-02-10" onFocusDateChange={onFocusDateChange} />
       );
 
       const focusedCell = container.querySelector('[data-date="2026-02-10"]');
-      expect(focusedCell).toHaveAttribute("tabindex", "0");
+      expect(focusedCell).toHaveAttribute('tabindex', '0');
 
       // Arrow right should move to next day
-      fireEvent.keyDown(focusedCell!, { key: "ArrowRight" });
+      fireEvent.keyDown(focusedCell!, { key: 'ArrowRight' });
       expect(onFocusDateChange).toHaveBeenCalledWith(expect.any(Date));
 
       const calledDate = onFocusDateChange.mock.calls[0][0];
       expect(calledDate.getDate()).toBe(11);
     });
 
-    it("selects date with Enter key", () => {
+    it('selects date with Enter key', () => {
       const onDateClick = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          focusedDate="2026-02-10"
-          onDateClick={onDateClick}
-        />,
+        <CalendarMonth {...defaultProps} focusedDate="2026-02-10" onDateClick={onDateClick} />
       );
 
       const focusedCell = container.querySelector('[data-date="2026-02-10"]');
-      fireEvent.keyDown(focusedCell!, { key: "Enter" });
+      fireEvent.keyDown(focusedCell!, { key: 'Enter' });
 
       expect(onDateClick).toHaveBeenCalled();
     });
 
-    it("selects date with Space key", () => {
+    it('selects date with Space key', () => {
       const onDateClick = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          focusedDate="2026-02-15"
-          onDateClick={onDateClick}
-        />,
+        <CalendarMonth {...defaultProps} focusedDate="2026-02-15" onDateClick={onDateClick} />
       );
 
       const focusedCell = container.querySelector('[data-date="2026-02-15"]');
-      fireEvent.keyDown(focusedCell!, { key: " " });
+      fireEvent.keyDown(focusedCell!, { key: ' ' });
 
       expect(onDateClick).toHaveBeenCalled();
     });
 
-    it("navigates up/down by week", () => {
+    it('navigates up/down by week', () => {
       const onFocusDateChange = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          focusedDate="2026-02-10"
-          onFocusDateChange={onFocusDateChange}
-        />,
+        <CalendarMonth {...defaultProps} focusedDate="2026-02-10" onFocusDateChange={onFocusDateChange} />
       );
 
       const focusedCell = container.querySelector('[data-date="2026-02-10"]');
 
       // Arrow up should move to previous week
-      fireEvent.keyDown(focusedCell!, { key: "ArrowUp" });
+      fireEvent.keyDown(focusedCell!, { key: 'ArrowUp' });
 
       const upDate = onFocusDateChange.mock.calls[0][0];
       expect(upDate.getDate()).toBe(3); // 10 - 7 = 3
@@ -405,18 +329,16 @@ describe("CalendarMonth", () => {
       onFocusDateChange.mockClear();
 
       // Arrow down should move to next week
-      fireEvent.keyDown(focusedCell!, { key: "ArrowDown" });
+      fireEvent.keyDown(focusedCell!, { key: 'ArrowDown' });
 
       const downDate = onFocusDateChange.mock.calls[0][0];
       expect(downDate.getDate()).toBe(17); // 10 + 7 = 17
     });
   });
 
-  describe("adjacent months", () => {
-    it("hides adjacent month dates by default", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} showAdjacentMonths={false} />,
-      );
+  describe('adjacent months', () => {
+    it('hides adjacent month dates by default', () => {
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} showAdjacentMonths={false} />);
 
       // February 2026 starts on Sunday (day 0), so Jan 31 should be faded/hidden
       // Look for cells that are aria-hidden
@@ -424,15 +346,11 @@ describe("CalendarMonth", () => {
       expect(hiddenCells.length).toBeGreaterThan(0);
     });
 
-    it("does not trigger click on adjacent month dates when hidden", () => {
+    it('does not trigger click on adjacent month dates when hidden', () => {
       const onDateClick = jest.fn();
 
       const { container } = renderWithTheme(
-        <CalendarMonth
-          {...defaultProps}
-          showAdjacentMonths={false}
-          onDateClick={onDateClick}
-        />,
+        <CalendarMonth {...defaultProps} showAdjacentMonths={false} onDateClick={onDateClick} />
       );
 
       // Find a cell that's aria-hidden (outside current month)
@@ -444,53 +362,43 @@ describe("CalendarMonth", () => {
     });
   });
 
-  describe("theme support", () => {
-    it("renders correctly in light theme", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} />,
-        webLightTheme,
-      );
+  describe('theme support', () => {
+    it('renders correctly in light theme', () => {
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} />, webLightTheme);
 
       expect(container.firstChild).toBeInTheDocument();
-      expect(screen.getByText("February 2026")).toBeInTheDocument();
+      expect(screen.getByText('February 2026')).toBeInTheDocument();
     });
 
-    it("renders correctly in dark theme", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth {...defaultProps} />,
-        webDarkTheme,
-      );
+    it('renders correctly in dark theme', () => {
+      const { container } = renderWithTheme(<CalendarMonth {...defaultProps} />, webDarkTheme);
 
       expect(container.firstChild).toBeInTheDocument();
-      expect(screen.getByText("February 2026")).toBeInTheDocument();
+      expect(screen.getByText('February 2026')).toBeInTheDocument();
     });
   });
 
-  describe("edge cases", () => {
-    it("handles December to January transition", () => {
+  describe('edge cases', () => {
+    it('handles December to January transition', () => {
       renderWithTheme(<CalendarMonth year={2025} month={11} />); // December 2025
-      expect(screen.getByText("December 2025")).toBeInTheDocument();
+      expect(screen.getByText('December 2025')).toBeInTheDocument();
     });
 
-    it("handles leap year February", () => {
-      const { container } = renderWithTheme(
-        <CalendarMonth year={2024} month={1} />,
-      ); // February 2024 (leap year)
-      expect(screen.getByText("February 2024")).toBeInTheDocument();
+    it('handles leap year February', () => {
+      const { container } = renderWithTheme(<CalendarMonth year={2024} month={1} />); // February 2024 (leap year)
+      expect(screen.getByText('February 2024')).toBeInTheDocument();
 
       // Leap year has 29 days - use data-date to check
       const day29 = container.querySelector('[data-date="2024-02-29"]');
       expect(day29).toBeInTheDocument();
     });
 
-    it("renders with empty event counts", () => {
+    it('renders with empty event counts', () => {
       const eventCounts = new Map<string, number>();
 
-      renderWithTheme(
-        <CalendarMonth {...defaultProps} eventCounts={eventCounts} />,
-      );
+      renderWithTheme(<CalendarMonth {...defaultProps} eventCounts={eventCounts} />);
 
-      expect(screen.getByText("February 2026")).toBeInTheDocument();
+      expect(screen.getByText('February 2026')).toBeInTheDocument();
     });
   });
 });

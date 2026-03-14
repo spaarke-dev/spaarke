@@ -15,14 +15,14 @@
  * @see useFilterOptions.ts (PCF version) for reference pattern
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { FilterOption } from "../types";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { FilterOption } from '../types';
 import {
   fetchOptionsetValues,
   fetchLookupValues,
   getFileTypeOptions,
   clearCache,
-} from "../services/DataverseWebApiService";
+} from '../services/DataverseWebApiService';
 
 // =============================================
 // Return type
@@ -56,8 +56,8 @@ export function useFilterOptions(): UseFilterOptionsResult {
     try {
       // Fetch all three option sets in parallel
       const [docTypes, matTypes] = await Promise.all([
-        fetchOptionsetValues("sprk_document", "sprk_documenttype"),
-        fetchLookupValues("sprk_mattertype_refs", "sprk_mattertypename"),
+        fetchOptionsetValues('sprk_document', 'sprk_documenttype'),
+        fetchLookupValues('sprk_mattertype_refs', 'sprk_mattertypename'),
       ]);
 
       // File types are static — no fetch needed
@@ -70,9 +70,9 @@ export function useFilterOptions(): UseFilterOptionsResult {
         setIsLoading(false);
       }
     } catch (err) {
-      console.error("Failed to fetch filter options:", err);
+      console.error('Failed to fetch filter options:', err);
       if (mountedRef.current) {
-        setError("Failed to load filter options");
+        setError('Failed to load filter options');
         setIsLoading(false);
       }
     }

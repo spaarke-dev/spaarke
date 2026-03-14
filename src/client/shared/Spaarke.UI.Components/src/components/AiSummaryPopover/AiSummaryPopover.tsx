@@ -10,8 +10,8 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useCallback, useState } from "react";
+import * as React from 'react';
+import { useCallback, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -23,8 +23,8 @@ import {
   PopoverSurface,
   Spinner,
   shorthands,
-} from "@fluentui/react-components";
-import { Sparkle20Filled, CopyRegular } from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Sparkle20Filled, CopyRegular } from '@fluentui/react-icons';
 
 /**
  * Summary data returned by the fetch callback.
@@ -43,7 +43,7 @@ export interface IAiSummaryPopoverProps {
   /** Async callback to fetch summary data. Called once on first open. */
   onFetchSummary: () => Promise<ISummaryData>;
   /** Popover positioning relative to trigger. Default: "after". */
-  positioning?: "above" | "below" | "before" | "after";
+  positioning?: 'above' | 'below' | 'before' | 'after';
   /** Whether to show the arrow. Default: true. */
   withArrow?: boolean;
 }
@@ -54,35 +54,35 @@ export interface IAiSummaryPopoverProps {
 
 const useStyles = makeStyles({
   surface: {
-    width: "480px",
-    maxHeight: "400px",
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
+    width: '480px',
+    maxHeight: '400px',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   headerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingBottom: tokens.spacingVerticalXS,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
   },
   headerLabel: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
   },
   centered: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    ...shorthands.padding("16px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    ...shorthands.padding('16px'),
   },
 });
 
@@ -93,7 +93,7 @@ const useStyles = makeStyles({
 export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
   trigger,
   onFetchSummary,
-  positioning = "after",
+  positioning = 'after',
   withArrow = true,
 }) => {
   const styles = useStyles();
@@ -105,7 +105,7 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
 
   const handleCopy = useCallback(() => {
     if (!data) return;
-    const text = [data.tldr, data.summary].filter(Boolean).join("\n\n");
+    const text = [data.tldr, data.summary].filter(Boolean).join('\n\n');
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -118,7 +118,7 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
         setLoading(true);
         setError(false);
         void onFetchSummary()
-          .then((sd) => {
+          .then(sd => {
             setData(sd);
             setLoading(false);
             return sd;
@@ -129,15 +129,11 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
           });
       }
     },
-    [data, loading, onFetchSummary],
+    [data, loading, onFetchSummary]
   );
 
   return (
-    <Popover
-      positioning={positioning}
-      withArrow={withArrow}
-      onOpenChange={handleOpenChange}
-    >
+    <Popover positioning={positioning} withArrow={withArrow} onOpenChange={handleOpenChange}>
       <PopoverTrigger disableButtonEnhancement>{trigger}</PopoverTrigger>
       <PopoverSurface className={styles.surface}>
         <div className={styles.headerRow}>
@@ -146,7 +142,7 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
             AI Summary
           </Text>
           {data && !loading && (
-            <Tooltip content={copied ? "Copied!" : "Copy"} relationship="label">
+            <Tooltip content={copied ? 'Copied!' : 'Copy'} relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -166,12 +162,8 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
         {data && !loading && (
           <React.Fragment>
             {data.tldr && <Text weight="semibold">{data.tldr}</Text>}
-            {data.summary && (
-              <Text style={{ whiteSpace: "pre-wrap" }}>{data.summary}</Text>
-            )}
-            {!data.summary && !data.tldr && (
-              <Text>No summary available for this document.</Text>
-            )}
+            {data.summary && <Text style={{ whiteSpace: 'pre-wrap' }}>{data.summary}</Text>}
+            {!data.summary && !data.tldr && <Text>No summary available for this document.</Text>}
           </React.Fragment>
         )}
       </PopoverSurface>

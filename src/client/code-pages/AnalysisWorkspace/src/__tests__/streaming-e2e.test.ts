@@ -33,7 +33,7 @@ import {
   type DocumentStreamEndPayload,
   type DocumentReplacedPayload,
   type SprkChatBridgeEventName,
-} from "@spaarke/ui-components/services/SprkChatBridge";
+} from '@spaarke/ui-components/services/SprkChatBridge';
 
 // ---------------------------------------------------------------------------
 // MockBroadcastChannel - simulates cross-tab BroadcastChannel delivery
@@ -53,13 +53,9 @@ class MockBroadcastChannel {
   postMessage(data: unknown): void {
     // Deliver to all OTHER instances with same name (simulates cross-tab)
     for (const instance of MockBroadcastChannel.instances) {
-      if (
-        instance !== this &&
-        instance.name === this.name &&
-        !instance.closed
-      ) {
+      if (instance !== this && instance.name === this.name && !instance.closed) {
         if (instance.onmessage) {
-          instance.onmessage(new MessageEvent("message", { data }));
+          instance.onmessage(new MessageEvent('message', { data }));
         }
       }
     }
@@ -85,36 +81,24 @@ class MockBroadcastChannel {
 /** Creates a stream start payload */
 function makeStreamStart(
   operationId: string,
-  targetPosition = "end",
-  operationType: "insert" | "replace" = "insert",
+  targetPosition = 'end',
+  operationType: 'insert' | 'replace' = 'insert'
 ): DocumentStreamStartPayload {
   return { operationId, targetPosition, operationType };
 }
 
 /** Creates a stream token payload */
-function makeStreamToken(
-  operationId: string,
-  token: string,
-  index: number,
-): DocumentStreamTokenPayload {
+function makeStreamToken(operationId: string, token: string, index: number): DocumentStreamTokenPayload {
   return { operationId, token, index };
 }
 
 /** Creates a stream end payload */
-function makeStreamEnd(
-  operationId: string,
-  totalTokens: number,
-  cancelled = false,
-): DocumentStreamEndPayload {
+function makeStreamEnd(operationId: string, totalTokens: number, cancelled = false): DocumentStreamEndPayload {
   return { operationId, cancelled, totalTokens };
 }
 
 /** Creates a document replaced payload */
-function makeDocumentReplaced(
-  operationId: string,
-  html: string,
-  previousVersionId?: string,
-): DocumentReplacedPayload {
+function makeDocumentReplaced(operationId: string, html: string, previousVersionId?: string): DocumentReplacedPayload {
   return { operationId, html, previousVersionId };
 }
 
@@ -126,34 +110,22 @@ function emitStreamingSequence(
   producerBridge: SprkChatBridge,
   operationId: string,
   tokens: string[],
-  options?: { cancelAfter?: number; tokenDelayMs?: number },
+  options?: { cancelAfter?: number; tokenDelayMs?: number }
 ): void {
   // 1. Emit stream_start
-  producerBridge.emit("document_stream_start", makeStreamStart(operationId));
+  producerBridge.emit('document_stream_start', makeStreamStart(operationId));
 
   // 2. Emit tokens
   const emitCount = options?.cancelAfter ?? tokens.length;
   for (let i = 0; i < emitCount && i < tokens.length; i++) {
-    producerBridge.emit(
-      "document_stream_token",
-      makeStreamToken(operationId, tokens[i], i),
-    );
+    producerBridge.emit('document_stream_token', makeStreamToken(operationId, tokens[i], i));
   }
 
   // 3. Emit stream_end
-  if (
-    options?.cancelAfter !== undefined &&
-    options.cancelAfter < tokens.length
-  ) {
-    producerBridge.emit(
-      "document_stream_end",
-      makeStreamEnd(operationId, options.cancelAfter, true),
-    );
+  if (options?.cancelAfter !== undefined && options.cancelAfter < tokens.length) {
+    producerBridge.emit('document_stream_end', makeStreamEnd(operationId, options.cancelAfter, true));
   } else {
-    producerBridge.emit(
-      "document_stream_end",
-      makeStreamEnd(operationId, tokens.length, false),
-    );
+    producerBridge.emit('document_stream_end', makeStreamEnd(operationId, tokens.length, false));
   }
 }
 
@@ -162,7 +134,7 @@ function emitStreamingSequence(
  * Simulates the RichTextEditor ref API extended with streaming methods.
  */
 function createMockEditorRef() {
-  let htmlContent = "";
+  let htmlContent = '';
   const streamingCalls: Array<{
     method: string;
     args: unknown[];
@@ -174,7 +146,7 @@ function createMockEditorRef() {
   let undoIndex = -1;
 
   const mockHandle = {
-    id: "mock-stream-handle",
+    id: 'mock-stream-handle',
   };
 
   const editorRef = {
@@ -185,14 +157,14 @@ function createMockEditorRef() {
         htmlContent = html;
       }),
       clear: jest.fn(() => {
-        htmlContent = "";
+        htmlContent = '';
         streamedTokens = [];
       }),
       beginStreamingInsert: jest.fn((position: string) => {
         isStreamActive = true;
         streamedTokens = [];
         streamingCalls.push({
-          method: "beginStreamingInsert",
+          method: 'beginStreamingInsert',
           args: [position],
           timestamp: performance.now(),
         });
@@ -203,7 +175,7 @@ function createMockEditorRef() {
           streamedTokens.push(token);
           htmlContent += token;
           streamingCalls.push({
-            method: "appendStreamToken",
+            method: 'appendStreamToken',
             args: [handle, token],
             timestamp: performance.now(),
           });
@@ -212,7 +184,7 @@ function createMockEditorRef() {
       endStreamingInsert: jest.fn((handle: unknown) => {
         isStreamActive = false;
         streamingCalls.push({
-          method: "endStreamingInsert",
+          method: 'endStreamingInsert',
           args: [handle],
           timestamp: performance.now(),
         });
@@ -259,22 +231,19 @@ function createMockEditorRef() {
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("Streaming E2E Integration Tests", () => {
-  const originalBroadcastChannel = (globalThis as Record<string, unknown>)
-    .BroadcastChannel;
+describe('Streaming E2E Integration Tests', () => {
+  const originalBroadcastChannel = (globalThis as Record<string, unknown>).BroadcastChannel;
 
   beforeEach(() => {
     MockBroadcastChannel.reset();
-    (globalThis as Record<string, unknown>).BroadcastChannel =
-      MockBroadcastChannel;
+    (globalThis as Record<string, unknown>).BroadcastChannel = MockBroadcastChannel;
     jest.useFakeTimers({ legacyFakeTimers: false });
   });
 
   afterEach(() => {
     MockBroadcastChannel.reset();
     if (originalBroadcastChannel) {
-      (globalThis as Record<string, unknown>).BroadcastChannel =
-        originalBroadcastChannel;
+      (globalThis as Record<string, unknown>).BroadcastChannel = originalBroadcastChannel;
     } else {
       delete (globalThis as Record<string, unknown>).BroadcastChannel;
     }
@@ -285,13 +254,13 @@ describe("Streaming E2E Integration Tests", () => {
   // 1. Happy Path: stream_start -> tokens -> stream_end
   // -----------------------------------------------------------------------
 
-  describe("happy path: full streaming write flow", () => {
+  describe('happy path: full streaming write flow', () => {
     let producerBridge: SprkChatBridge;
     let consumerBridge: SprkChatBridge;
 
     beforeEach(() => {
-      producerBridge = new SprkChatBridge({ context: "e2e-session-1" });
-      consumerBridge = new SprkChatBridge({ context: "e2e-session-1" });
+      producerBridge = new SprkChatBridge({ context: 'e2e-session-1' });
+      consumerBridge = new SprkChatBridge({ context: 'e2e-session-1' });
     });
 
     afterEach(() => {
@@ -299,118 +268,105 @@ describe("Streaming E2E Integration Tests", () => {
       consumerBridge.disconnect();
     });
 
-    it("streamStart_TokensEmitted_StreamEnd_AllTokensReceivedInOrder", () => {
+    it('streamStart_TokensEmitted_StreamEnd_AllTokensReceivedInOrder', () => {
       // Arrange: subscribe to all stream events on consumer side
       const receivedEvents: Array<{ type: string; payload: unknown }> = [];
 
-      consumerBridge.subscribe("document_stream_start", (payload) => {
-        receivedEvents.push({ type: "document_stream_start", payload });
+      consumerBridge.subscribe('document_stream_start', payload => {
+        receivedEvents.push({ type: 'document_stream_start', payload });
       });
-      consumerBridge.subscribe("document_stream_token", (payload) => {
-        receivedEvents.push({ type: "document_stream_token", payload });
+      consumerBridge.subscribe('document_stream_token', payload => {
+        receivedEvents.push({ type: 'document_stream_token', payload });
       });
-      consumerBridge.subscribe("document_stream_end", (payload) => {
-        receivedEvents.push({ type: "document_stream_end", payload });
+      consumerBridge.subscribe('document_stream_end', payload => {
+        receivedEvents.push({ type: 'document_stream_end', payload });
       });
 
-      const tokens = ["The ", "analysis ", "reveals ", "key ", "findings."];
+      const tokens = ['The ', 'analysis ', 'reveals ', 'key ', 'findings.'];
 
       // Act: emit full streaming sequence from producer (SprkChat pane)
-      emitStreamingSequence(producerBridge, "op-happy-1", tokens);
+      emitStreamingSequence(producerBridge, 'op-happy-1', tokens);
 
       // Assert: consumer receives all events in exact order
       expect(receivedEvents).toHaveLength(tokens.length + 2); // start + tokens + end
 
       // First event is stream_start
-      expect(receivedEvents[0].type).toBe("document_stream_start");
-      expect(
-        (receivedEvents[0].payload as DocumentStreamStartPayload).operationId,
-      ).toBe("op-happy-1");
+      expect(receivedEvents[0].type).toBe('document_stream_start');
+      expect((receivedEvents[0].payload as DocumentStreamStartPayload).operationId).toBe('op-happy-1');
 
       // Middle events are tokens in order
       for (let i = 0; i < tokens.length; i++) {
         const event = receivedEvents[i + 1];
-        expect(event.type).toBe("document_stream_token");
+        expect(event.type).toBe('document_stream_token');
         const tokenPayload = event.payload as DocumentStreamTokenPayload;
         expect(tokenPayload.token).toBe(tokens[i]);
         expect(tokenPayload.index).toBe(i);
-        expect(tokenPayload.operationId).toBe("op-happy-1");
+        expect(tokenPayload.operationId).toBe('op-happy-1');
       }
 
       // Last event is stream_end
       const endEvent = receivedEvents[tokens.length + 1];
-      expect(endEvent.type).toBe("document_stream_end");
-      expect((endEvent.payload as DocumentStreamEndPayload).cancelled).toBe(
-        false,
-      );
-      expect((endEvent.payload as DocumentStreamEndPayload).totalTokens).toBe(
-        tokens.length,
-      );
+      expect(endEvent.type).toBe('document_stream_end');
+      expect((endEvent.payload as DocumentStreamEndPayload).cancelled).toBe(false);
+      expect((endEvent.payload as DocumentStreamEndPayload).totalTokens).toBe(tokens.length);
     });
 
-    it("streamTokens_ContentAppearsInEditor_ViaStreamConsumerFlow", () => {
+    it('streamTokens_ContentAppearsInEditor_ViaStreamConsumerFlow', () => {
       // Arrange: simulate the consumer hook wiring bridge to mock editor
       const mockEditor = createMockEditorRef();
       let streamingActive = false;
 
       // Wire consumer subscriptions (simulates useDocumentStreamConsumer)
-      consumerBridge.subscribe("document_stream_start", (payload) => {
+      consumerBridge.subscribe('document_stream_start', payload => {
         mockEditor.pushToUndoStack(); // FR-07: snapshot before write
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
         streamingActive = true;
       });
-      consumerBridge.subscribe("document_stream_token", (payload) => {
+      consumerBridge.subscribe('document_stream_token', payload => {
         if (streamingActive) {
-          mockEditor.editorRef.current.appendStreamToken(
-            mockEditor.getMockHandle(),
-            payload.token,
-          );
+          mockEditor.editorRef.current.appendStreamToken(mockEditor.getMockHandle(), payload.token);
         }
       });
-      consumerBridge.subscribe("document_stream_end", (_payload) => {
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+      consumerBridge.subscribe('document_stream_end', _payload => {
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
         streamingActive = false;
         mockEditor.pushToUndoStack(); // Snapshot after completion
       });
 
-      const tokens = ["Hello ", "world ", "from ", "streaming!"];
+      const tokens = ['Hello ', 'world ', 'from ', 'streaming!'];
 
       // Act: emit full streaming sequence
-      emitStreamingSequence(producerBridge, "op-content-1", tokens);
+      emitStreamingSequence(producerBridge, 'op-content-1', tokens);
 
       // Assert: content appears in editor
-      expect(mockEditor.getHtmlContent()).toBe("Hello world from streaming!");
+      expect(mockEditor.getHtmlContent()).toBe('Hello world from streaming!');
 
       // Assert: streaming methods called in correct order
       const calls = mockEditor.getStreamingCalls();
-      expect(calls[0].method).toBe("beginStreamingInsert");
-      expect(calls[calls.length - 1].method).toBe("endStreamingInsert");
+      expect(calls[0].method).toBe('beginStreamingInsert');
+      expect(calls[calls.length - 1].method).toBe('endStreamingInsert');
 
       // Assert: all tokens were inserted
       expect(mockEditor.getStreamedTokens()).toEqual(tokens);
 
       // Assert: undo stack has pre-stream and post-stream snapshots
       expect(mockEditor.getUndoStack()).toHaveLength(2);
-      expect(mockEditor.getUndoStack()[0]).toBe(""); // pre-stream empty
-      expect(mockEditor.getUndoStack()[1]).toBe("Hello world from streaming!");
+      expect(mockEditor.getUndoStack()[0]).toBe(''); // pre-stream empty
+      expect(mockEditor.getUndoStack()[1]).toBe('Hello world from streaming!');
     });
 
-    it("streamTokens_LargeDocument_AllTokensDeliveredWithoutDrops", () => {
+    it('streamTokens_LargeDocument_AllTokensDeliveredWithoutDrops', () => {
       // Arrange: 200+ tokens simulating a large document write
       const TOKEN_COUNT = 250;
       const receivedTokens: DocumentStreamTokenPayload[] = [];
 
-      consumerBridge.subscribe("document_stream_token", (payload) => {
+      consumerBridge.subscribe('document_stream_token', payload => {
         receivedTokens.push(payload);
       });
 
       // Act: emit 250 tokens
       const tokens = Array.from({ length: TOKEN_COUNT }, (_, i) => `word${i} `);
-      emitStreamingSequence(producerBridge, "op-large-doc", tokens);
+      emitStreamingSequence(producerBridge, 'op-large-doc', tokens);
 
       // Assert: all tokens delivered, none dropped
       expect(receivedTokens).toHaveLength(TOKEN_COUNT);
@@ -420,11 +376,11 @@ describe("Streaming E2E Integration Tests", () => {
       }
     });
 
-    it("streamEnd_AutoSaveTriggerable_AfterStreamingEnds", () => {
+    it('streamEnd_AutoSaveTriggerable_AfterStreamingEnds', () => {
       // Arrange: track auto-save trigger (simulated by stream end callback)
       const autoSaveCalled: boolean[] = [];
 
-      consumerBridge.subscribe("document_stream_end", (payload) => {
+      consumerBridge.subscribe('document_stream_end', payload => {
         if (!payload.cancelled) {
           // Simulate auto-save trigger after debounce window
           autoSaveCalled.push(true);
@@ -432,10 +388,7 @@ describe("Streaming E2E Integration Tests", () => {
       });
 
       // Act
-      emitStreamingSequence(producerBridge, "op-autosave", [
-        "token1 ",
-        "token2 ",
-      ]);
+      emitStreamingSequence(producerBridge, 'op-autosave', ['token1 ', 'token2 ']);
 
       // Assert: auto-save was triggered after stream end
       expect(autoSaveCalled).toHaveLength(1);
@@ -446,13 +399,13 @@ describe("Streaming E2E Integration Tests", () => {
   // 2. Cancel mid-stream: partial content preserved and undoable
   // -----------------------------------------------------------------------
 
-  describe("cancel mid-stream", () => {
+  describe('cancel mid-stream', () => {
     let producerBridge: SprkChatBridge;
     let consumerBridge: SprkChatBridge;
 
     beforeEach(() => {
-      producerBridge = new SprkChatBridge({ context: "e2e-cancel-session" });
-      consumerBridge = new SprkChatBridge({ context: "e2e-cancel-session" });
+      producerBridge = new SprkChatBridge({ context: 'e2e-cancel-session' });
+      consumerBridge = new SprkChatBridge({ context: 'e2e-cancel-session' });
     });
 
     afterEach(() => {
@@ -460,130 +413,99 @@ describe("Streaming E2E Integration Tests", () => {
       consumerBridge.disconnect();
     });
 
-    it("cancelMidStream_PartialContentPreserved_InEditor", () => {
+    it('cancelMidStream_PartialContentPreserved_InEditor', () => {
       // Arrange
       const mockEditor = createMockEditorRef();
       let streamingActive = false;
 
-      consumerBridge.subscribe("document_stream_start", (payload) => {
+      consumerBridge.subscribe('document_stream_start', payload => {
         mockEditor.pushToUndoStack(); // FR-07: snapshot before write
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
         streamingActive = true;
       });
-      consumerBridge.subscribe("document_stream_token", (payload) => {
+      consumerBridge.subscribe('document_stream_token', payload => {
         if (streamingActive) {
-          mockEditor.editorRef.current.appendStreamToken(
-            mockEditor.getMockHandle(),
-            payload.token,
-          );
+          mockEditor.editorRef.current.appendStreamToken(mockEditor.getMockHandle(), payload.token);
         }
       });
-      consumerBridge.subscribe("document_stream_end", (payload) => {
+      consumerBridge.subscribe('document_stream_end', payload => {
         // Per FR-06: cancelled writes PRESERVE partial content
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
         streamingActive = false;
         mockEditor.pushToUndoStack(); // Snapshot after (including partial)
       });
 
-      const allTokens = [
-        "The ",
-        "analysis ",
-        "reveals ",
-        "several ",
-        "key ",
-        "findings.",
-      ];
+      const allTokens = ['The ', 'analysis ', 'reveals ', 'several ', 'key ', 'findings.'];
 
       // Act: emit 3 tokens then cancel (cancelAfter = 3)
-      emitStreamingSequence(producerBridge, "op-cancel-1", allTokens, {
+      emitStreamingSequence(producerBridge, 'op-cancel-1', allTokens, {
         cancelAfter: 3,
       });
 
       // Assert: partial content is visible (first 3 tokens)
-      expect(mockEditor.getHtmlContent()).toBe("The analysis reveals ");
-      expect(mockEditor.getStreamedTokens()).toEqual([
-        "The ",
-        "analysis ",
-        "reveals ",
-      ]);
+      expect(mockEditor.getHtmlContent()).toBe('The analysis reveals ');
+      expect(mockEditor.getStreamedTokens()).toEqual(['The ', 'analysis ', 'reveals ']);
     });
 
-    it("cancelMidStream_PartialContentUndoable_ViaHistoryStack", () => {
+    it('cancelMidStream_PartialContentUndoable_ViaHistoryStack', () => {
       // Arrange
       const mockEditor = createMockEditorRef();
       let streamingActive = false;
 
-      consumerBridge.subscribe("document_stream_start", (payload) => {
+      consumerBridge.subscribe('document_stream_start', payload => {
         mockEditor.pushToUndoStack();
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
         streamingActive = true;
       });
-      consumerBridge.subscribe("document_stream_token", (payload) => {
+      consumerBridge.subscribe('document_stream_token', payload => {
         if (streamingActive) {
-          mockEditor.editorRef.current.appendStreamToken(
-            mockEditor.getMockHandle(),
-            payload.token,
-          );
+          mockEditor.editorRef.current.appendStreamToken(mockEditor.getMockHandle(), payload.token);
         }
       });
-      consumerBridge.subscribe("document_stream_end", (_payload) => {
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+      consumerBridge.subscribe('document_stream_end', _payload => {
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
         streamingActive = false;
         mockEditor.pushToUndoStack();
       });
 
       // Pre-populate editor with existing content
-      mockEditor.setHtmlContent("<p>Existing content</p>");
+      mockEditor.setHtmlContent('<p>Existing content</p>');
       mockEditor.pushToUndoStack(); // Initial state on undo stack
 
-      const tokens = ["New ", "streamed ", "content."];
+      const tokens = ['New ', 'streamed ', 'content.'];
 
       // Act: cancel after 2 tokens
-      emitStreamingSequence(producerBridge, "op-cancel-undo", tokens, {
+      emitStreamingSequence(producerBridge, 'op-cancel-undo', tokens, {
         cancelAfter: 2,
       });
 
       // Partial content is present
-      expect(mockEditor.getHtmlContent()).toContain("New ");
-      expect(mockEditor.getHtmlContent()).toContain("streamed ");
+      expect(mockEditor.getHtmlContent()).toContain('New ');
+      expect(mockEditor.getHtmlContent()).toContain('streamed ');
 
       // Assert: undo reverts to the pre-stream state
       mockEditor.undo();
-      expect(mockEditor.getHtmlContent()).toContain("Existing content");
+      expect(mockEditor.getHtmlContent()).toContain('Existing content');
     });
 
-    it("cancelMidStream_EditorReenabledForManualEditing", () => {
+    it('cancelMidStream_EditorReenabledForManualEditing', () => {
       // Arrange
       const mockEditor = createMockEditorRef();
 
-      consumerBridge.subscribe("document_stream_start", (payload) => {
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+      consumerBridge.subscribe('document_stream_start', payload => {
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
       });
-      consumerBridge.subscribe("document_stream_end", () => {
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+      consumerBridge.subscribe('document_stream_end', () => {
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
       });
 
       // Act: cancel mid-stream
-      emitStreamingSequence(producerBridge, "op-cancel-edit", ["partial "], {
+      emitStreamingSequence(producerBridge, 'op-cancel-edit', ['partial '], {
         cancelAfter: 1,
       });
 
       // Assert: endStreamingInsert was called (restores editability)
-      expect(
-        mockEditor.editorRef.current.endStreamingInsert,
-      ).toHaveBeenCalled();
+      expect(mockEditor.editorRef.current.endStreamingInsert).toHaveBeenCalled();
       expect(mockEditor.isStreamActive()).toBe(false);
     });
   });
@@ -592,13 +514,13 @@ describe("Streaming E2E Integration Tests", () => {
   // 3. Document replace: previous content pushed to undo stack
   // -----------------------------------------------------------------------
 
-  describe("document_replace flow", () => {
+  describe('document_replace flow', () => {
     let producerBridge: SprkChatBridge;
     let consumerBridge: SprkChatBridge;
 
     beforeEach(() => {
-      producerBridge = new SprkChatBridge({ context: "e2e-replace-session" });
-      consumerBridge = new SprkChatBridge({ context: "e2e-replace-session" });
+      producerBridge = new SprkChatBridge({ context: 'e2e-replace-session' });
+      consumerBridge = new SprkChatBridge({ context: 'e2e-replace-session' });
     });
 
     afterEach(() => {
@@ -606,31 +528,25 @@ describe("Streaming E2E Integration Tests", () => {
       consumerBridge.disconnect();
     });
 
-    it("documentReplace_PreviousContentPushedToUndoStack", () => {
+    it('documentReplace_PreviousContentPushedToUndoStack', () => {
       // Arrange
       const mockEditor = createMockEditorRef();
-      const originalContent = "<p>Original analysis content</p>";
+      const originalContent = '<p>Original analysis content</p>';
       mockEditor.setHtmlContent(originalContent);
       mockEditor.pushToUndoStack(); // Initial state
 
-      consumerBridge.subscribe(
-        "document_replaced",
-        (payload: DocumentReplacedPayload) => {
-          // FR-07: Push current content to undo stack BEFORE replacing
-          mockEditor.pushToUndoStack();
-          mockEditor.editorRef.current.setHtml(payload.html);
-          // Push new content to undo stack after replacement
-          mockEditor.pushToUndoStack();
-        },
-      );
+      consumerBridge.subscribe('document_replaced', (payload: DocumentReplacedPayload) => {
+        // FR-07: Push current content to undo stack BEFORE replacing
+        mockEditor.pushToUndoStack();
+        mockEditor.editorRef.current.setHtml(payload.html);
+        // Push new content to undo stack after replacement
+        mockEditor.pushToUndoStack();
+      });
 
-      const newContent = "<p>Completely new re-analysis result</p>";
+      const newContent = '<p>Completely new re-analysis result</p>';
 
       // Act: emit document_replaced (simulates re-analysis)
-      producerBridge.emit(
-        "document_replaced",
-        makeDocumentReplaced("op-replace-1", newContent, "prev-version-1"),
-      );
+      producerBridge.emit('document_replaced', makeDocumentReplaced('op-replace-1', newContent, 'prev-version-1'));
 
       // Assert: new content is in the editor
       expect(mockEditor.getHtmlContent()).toBe(newContent);
@@ -641,29 +557,23 @@ describe("Streaming E2E Integration Tests", () => {
       expect(undoStack[0]).toBe(originalContent); // Initial
     });
 
-    it("documentReplace_UndoRestoresPreviousContent", () => {
+    it('documentReplace_UndoRestoresPreviousContent', () => {
       // Arrange
       const mockEditor = createMockEditorRef();
-      const originalContent = "<p>Before replacement</p>";
+      const originalContent = '<p>Before replacement</p>';
       mockEditor.setHtmlContent(originalContent);
       mockEditor.pushToUndoStack();
 
-      consumerBridge.subscribe(
-        "document_replaced",
-        (payload: DocumentReplacedPayload) => {
-          mockEditor.pushToUndoStack(); // Snapshot before replace
-          mockEditor.editorRef.current.setHtml(payload.html);
-          mockEditor.pushToUndoStack(); // Snapshot after replace
-        },
-      );
+      consumerBridge.subscribe('document_replaced', (payload: DocumentReplacedPayload) => {
+        mockEditor.pushToUndoStack(); // Snapshot before replace
+        mockEditor.editorRef.current.setHtml(payload.html);
+        mockEditor.pushToUndoStack(); // Snapshot after replace
+      });
 
       // Act: replace content
-      producerBridge.emit(
-        "document_replaced",
-        makeDocumentReplaced("op-replace-undo", "<p>After replacement</p>"),
-      );
+      producerBridge.emit('document_replaced', makeDocumentReplaced('op-replace-undo', '<p>After replacement</p>'));
 
-      expect(mockEditor.getHtmlContent()).toBe("<p>After replacement</p>");
+      expect(mockEditor.getHtmlContent()).toBe('<p>After replacement</p>');
 
       // Act: undo
       mockEditor.undo();
@@ -672,18 +582,18 @@ describe("Streaming E2E Integration Tests", () => {
       expect(mockEditor.getHtmlContent()).toBe(originalContent);
     });
 
-    it("documentReplace_RejectedDuringActiveStreaming", () => {
+    it('documentReplace_RejectedDuringActiveStreaming', () => {
       // Arrange: start a streaming operation, then try to replace
       let streamingActive = false;
       const replaceAttempted: boolean[] = [];
 
-      consumerBridge.subscribe("document_stream_start", () => {
+      consumerBridge.subscribe('document_stream_start', () => {
         streamingActive = true;
       });
-      consumerBridge.subscribe("document_stream_end", () => {
+      consumerBridge.subscribe('document_stream_end', () => {
         streamingActive = false;
       });
-      consumerBridge.subscribe("document_replaced", () => {
+      consumerBridge.subscribe('document_replaced', () => {
         if (streamingActive) {
           replaceAttempted.push(true);
           // Replacement rejected during active stream (per useDocumentStreaming logic)
@@ -692,18 +602,9 @@ describe("Streaming E2E Integration Tests", () => {
       });
 
       // Act: start stream, then try to replace mid-stream
-      producerBridge.emit(
-        "document_stream_start",
-        makeStreamStart("op-conflict"),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-conflict", "token ", 0),
-      );
-      producerBridge.emit(
-        "document_replaced",
-        makeDocumentReplaced("op-conflict-replace", "<p>New</p>"),
-      );
+      producerBridge.emit('document_stream_start', makeStreamStart('op-conflict'));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-conflict', 'token ', 0));
+      producerBridge.emit('document_replaced', makeDocumentReplaced('op-conflict-replace', '<p>New</p>'));
 
       // Assert: replacement was attempted during active stream
       expect(replaceAttempted).toHaveLength(1);
@@ -714,93 +615,75 @@ describe("Streaming E2E Integration Tests", () => {
   // 4. Error scenarios
   // -----------------------------------------------------------------------
 
-  describe("error scenarios", () => {
-    it("bridgeDisconnect_MidStream_RemainingTokensNotDelivered", () => {
+  describe('error scenarios', () => {
+    it('bridgeDisconnect_MidStream_RemainingTokensNotDelivered', () => {
       // Arrange: simulate one pane closing (bridge disconnects mid-stream)
-      const producerBridge = new SprkChatBridge({ context: "e2e-err-disc" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-err-disc" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-err-disc' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-err-disc' });
 
       const receivedTokens: DocumentStreamTokenPayload[] = [];
-      consumerBridge.subscribe("document_stream_token", (p) => {
+      consumerBridge.subscribe('document_stream_token', p => {
         receivedTokens.push(p);
       });
 
       // Act: emit 3 tokens, disconnect consumer, emit 3 more
       for (let i = 0; i < 3; i++) {
-        producerBridge.emit(
-          "document_stream_token",
-          makeStreamToken("op-disc", `tok-${i}`, i),
-        );
+        producerBridge.emit('document_stream_token', makeStreamToken('op-disc', `tok-${i}`, i));
       }
 
       consumerBridge.disconnect();
 
       for (let i = 3; i < 6; i++) {
-        producerBridge.emit(
-          "document_stream_token",
-          makeStreamToken("op-disc", `tok-${i}`, i),
-        );
+        producerBridge.emit('document_stream_token', makeStreamToken('op-disc', `tok-${i}`, i));
       }
 
       // Assert: only first 3 tokens received before disconnect
       expect(receivedTokens).toHaveLength(3);
-      expect(receivedTokens.map((t) => t.token)).toEqual([
-        "tok-0",
-        "tok-1",
-        "tok-2",
-      ]);
+      expect(receivedTokens.map(t => t.token)).toEqual(['tok-0', 'tok-1', 'tok-2']);
 
       producerBridge.disconnect();
     });
 
-    it("emitAfterDisconnect_ThrowsError_GracefulDegradation", () => {
+    it('emitAfterDisconnect_ThrowsError_GracefulDegradation', () => {
       // Arrange
-      const producerBridge = new SprkChatBridge({ context: "e2e-err-emit" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-err-emit' });
       producerBridge.disconnect();
 
       // Act & Assert: emitting after disconnect throws
       expect(() => {
-        producerBridge.emit(
-          "document_stream_start",
-          makeStreamStart("op-dead"),
-        );
-      }).toThrow("Cannot emit after disconnect");
+        producerBridge.emit('document_stream_start', makeStreamStart('op-dead'));
+      }).toThrow('Cannot emit after disconnect');
     });
 
-    it("invalidTokenData_HandlerDoesNotCrash_RemainingEventsDelivered", () => {
+    it('invalidTokenData_HandlerDoesNotCrash_RemainingEventsDelivered', () => {
       // Arrange: test that a handler error doesn't prevent other events
-      const producerBridge = new SprkChatBridge({ context: "e2e-err-invalid" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-err-invalid" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-err-invalid' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-err-invalid' });
 
       const validTokens: DocumentStreamTokenPayload[] = [];
-      const consoleErrorSpy = jest
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
       // First subscriber throws on every event
-      consumerBridge.subscribe("document_stream_token", () => {
-        throw new Error("Handler error: simulated crash");
+      consumerBridge.subscribe('document_stream_token', () => {
+        throw new Error('Handler error: simulated crash');
       });
 
       // Second subscriber works fine
-      consumerBridge.subscribe("document_stream_token", (p) => {
+      consumerBridge.subscribe('document_stream_token', p => {
         validTokens.push(p);
       });
 
       // Act: emit tokens
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-invalid", "valid-token", 0),
-      );
+      producerBridge.emit('document_stream_token', makeStreamToken('op-invalid', 'valid-token', 0));
 
       // Assert: second subscriber still received the token despite first throwing
       expect(validTokens).toHaveLength(1);
-      expect(validTokens[0].token).toBe("valid-token");
+      expect(validTokens[0].token).toBe('valid-token');
 
       // Assert: error was logged (SprkChatBridge catches handler errors)
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Error in handler for "document_stream_token"'),
-        expect.any(Error),
+        expect.any(Error)
       );
 
       consoleErrorSpy.mockRestore();
@@ -808,44 +691,35 @@ describe("Streaming E2E Integration Tests", () => {
       consumerBridge.disconnect();
     });
 
-    it("networkDrop_StreamNeverEnds_ConsumerHandlesGracefully", () => {
+    it('networkDrop_StreamNeverEnds_ConsumerHandlesGracefully', () => {
       // Arrange: simulate network drop — stream_start and some tokens arrive,
       // but stream_end never comes (network failure)
-      const producerBridge = new SprkChatBridge({ context: "e2e-err-netdrop" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-err-netdrop" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-err-netdrop' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-err-netdrop' });
 
       let streamStarted = false;
       let streamEnded = false;
       const receivedTokens: string[] = [];
 
-      consumerBridge.subscribe("document_stream_start", () => {
+      consumerBridge.subscribe('document_stream_start', () => {
         streamStarted = true;
       });
-      consumerBridge.subscribe("document_stream_token", (p) => {
+      consumerBridge.subscribe('document_stream_token', p => {
         receivedTokens.push(p.token);
       });
-      consumerBridge.subscribe("document_stream_end", () => {
+      consumerBridge.subscribe('document_stream_end', () => {
         streamEnded = true;
       });
 
       // Act: emit start and some tokens, but NO end (simulates network drop)
-      producerBridge.emit(
-        "document_stream_start",
-        makeStreamStart("op-netdrop"),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-netdrop", "partial ", 0),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-netdrop", "content", 1),
-      );
+      producerBridge.emit('document_stream_start', makeStreamStart('op-netdrop'));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-netdrop', 'partial ', 0));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-netdrop', 'content', 1));
       // ... network drops, no stream_end emitted
 
       // Assert: stream started, tokens received, but end not received
       expect(streamStarted).toBe(true);
-      expect(receivedTokens).toEqual(["partial ", "content"]);
+      expect(receivedTokens).toEqual(['partial ', 'content']);
       expect(streamEnded).toBe(false);
 
       // Producer disconnects (simulates tab close / crash)
@@ -855,38 +729,33 @@ describe("Streaming E2E Integration Tests", () => {
       expect(() => consumerBridge.disconnect()).not.toThrow();
     });
 
-    it("subscribeAfterDisconnect_ThrowsError", () => {
+    it('subscribeAfterDisconnect_ThrowsError', () => {
       // Arrange
-      const bridge = new SprkChatBridge({ context: "e2e-err-sub" });
+      const bridge = new SprkChatBridge({ context: 'e2e-err-sub' });
       bridge.disconnect();
 
       // Act & Assert
       expect(() => {
-        bridge.subscribe("document_stream_start", jest.fn());
-      }).toThrow("Cannot subscribe after disconnect");
+        bridge.subscribe('document_stream_start', jest.fn());
+      }).toThrow('Cannot subscribe after disconnect');
     });
 
-    it("nullEditorRef_StreamStartSkippedGracefully", () => {
+    it('nullEditorRef_StreamStartSkippedGracefully', () => {
       // Arrange: simulate editor not being mounted when stream arrives
       // This tests that the consumer hook handles null editor ref gracefully
-      const producerBridge = new SprkChatBridge({ context: "e2e-err-null" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-err-null" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-err-null' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-err-null' });
 
-      const consoleWarnSpy = jest
-        .spyOn(console, "warn")
-        .mockImplementation(() => {});
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       let startHandled = false;
 
-      consumerBridge.subscribe("document_stream_start", () => {
+      consumerBridge.subscribe('document_stream_start', () => {
         // Simulate the consumer hook detecting null editor ref
         startHandled = true;
       });
 
       // Act
-      producerBridge.emit(
-        "document_stream_start",
-        makeStreamStart("op-null-editor"),
-      );
+      producerBridge.emit('document_stream_start', makeStreamStart('op-null-editor'));
 
       // Assert: event was delivered to consumer
       expect(startHandled).toBe(true);
@@ -901,20 +770,20 @@ describe("Streaming E2E Integration Tests", () => {
   // 5. Bridge channel naming consistency
   // -----------------------------------------------------------------------
 
-  describe("bridge channel naming consistency", () => {
-    it("channelNaming_FollowsPattern_SprkWorkspaceContext", () => {
+  describe('bridge channel naming consistency', () => {
+    it('channelNaming_FollowsPattern_SprkWorkspaceContext', () => {
       // Arrange & Act
-      const bridge = new SprkChatBridge({ context: "analysis-session-abc" });
+      const bridge = new SprkChatBridge({ context: 'analysis-session-abc' });
 
       // Assert: channel name follows the pattern sprk-workspace-{context}
-      expect(bridge.channelName).toBe("sprk-workspace-analysis-session-abc");
+      expect(bridge.channelName).toBe('sprk-workspace-analysis-session-abc');
 
       bridge.disconnect();
     });
 
-    it("channelNaming_ProducerAndConsumer_UseSameChannel", () => {
+    it('channelNaming_ProducerAndConsumer_UseSameChannel', () => {
       // Arrange: SprkChat pane (producer) and AW Code Page (consumer) use same context
-      const context = "shared-session-xyz";
+      const context = 'shared-session-xyz';
       const producerBridge = new SprkChatBridge({ context });
       const consumerBridge = new SprkChatBridge({ context });
 
@@ -926,54 +795,41 @@ describe("Streaming E2E Integration Tests", () => {
       consumerBridge.disconnect();
     });
 
-    it("channelNaming_DifferentContexts_DifferentChannels", () => {
+    it('channelNaming_DifferentContexts_DifferentChannels', () => {
       // Arrange: two different sessions
-      const bridge1 = new SprkChatBridge({ context: "session-1" });
-      const bridge2 = new SprkChatBridge({ context: "session-2" });
+      const bridge1 = new SprkChatBridge({ context: 'session-1' });
+      const bridge2 = new SprkChatBridge({ context: 'session-2' });
 
       // Assert: different contexts produce different channels
       expect(bridge1.channelName).not.toBe(bridge2.channelName);
-      expect(bridge1.channelName).toBe("sprk-workspace-session-1");
-      expect(bridge2.channelName).toBe("sprk-workspace-session-2");
+      expect(bridge1.channelName).toBe('sprk-workspace-session-1');
+      expect(bridge2.channelName).toBe('sprk-workspace-session-2');
 
       bridge1.disconnect();
       bridge2.disconnect();
     });
 
-    it("channelIsolation_MessagesOnlyDeliveredToMatchingChannel", () => {
+    it('channelIsolation_MessagesOnlyDeliveredToMatchingChannel', () => {
       // Arrange: two independent channel pairs
-      const producerA = new SprkChatBridge({ context: "channel-a" });
-      const consumerA = new SprkChatBridge({ context: "channel-a" });
-      const producerB = new SprkChatBridge({ context: "channel-b" });
-      const consumerB = new SprkChatBridge({ context: "channel-b" });
+      const producerA = new SprkChatBridge({ context: 'channel-a' });
+      const consumerA = new SprkChatBridge({ context: 'channel-a' });
+      const producerB = new SprkChatBridge({ context: 'channel-b' });
+      const consumerB = new SprkChatBridge({ context: 'channel-b' });
 
       const tokensA: string[] = [];
       const tokensB: string[] = [];
 
-      consumerA.subscribe("document_stream_token", (p) =>
-        tokensA.push(p.token),
-      );
-      consumerB.subscribe("document_stream_token", (p) =>
-        tokensB.push(p.token),
-      );
+      consumerA.subscribe('document_stream_token', p => tokensA.push(p.token));
+      consumerB.subscribe('document_stream_token', p => tokensB.push(p.token));
 
       // Act: interleave tokens on different channels
-      producerA.emit(
-        "document_stream_token",
-        makeStreamToken("op-a", "alpha", 0),
-      );
-      producerB.emit(
-        "document_stream_token",
-        makeStreamToken("op-b", "beta", 0),
-      );
-      producerA.emit(
-        "document_stream_token",
-        makeStreamToken("op-a", "gamma", 1),
-      );
+      producerA.emit('document_stream_token', makeStreamToken('op-a', 'alpha', 0));
+      producerB.emit('document_stream_token', makeStreamToken('op-b', 'beta', 0));
+      producerA.emit('document_stream_token', makeStreamToken('op-a', 'gamma', 1));
 
       // Assert: each channel only receives its own tokens
-      expect(tokensA).toEqual(["alpha", "gamma"]);
-      expect(tokensB).toEqual(["beta"]);
+      expect(tokensA).toEqual(['alpha', 'gamma']);
+      expect(tokensB).toEqual(['beta']);
 
       producerA.disconnect();
       consumerA.disconnect();
@@ -981,10 +837,10 @@ describe("Streaming E2E Integration Tests", () => {
       consumerB.disconnect();
     });
 
-    it("channelNaming_ConsistentBetweenSprkChatAndAW_WithEntityId", () => {
+    it('channelNaming_ConsistentBetweenSprkChatAndAW_WithEntityId', () => {
       // Arrange: simulate real-world usage where both panes use the same
       // entityId/analysisId as the context identifier
-      const analysisId = "matter-12345-analysis-67890";
+      const analysisId = 'matter-12345-analysis-67890';
 
       // SprkChat side pane creates bridge with analysis ID
       const sprkChatBridge = new SprkChatBridge({ context: analysisId });
@@ -997,13 +853,10 @@ describe("Streaming E2E Integration Tests", () => {
 
       // Verify communication works
       let received = false;
-      awBridge.subscribe("document_stream_start", () => {
+      awBridge.subscribe('document_stream_start', () => {
         received = true;
       });
-      sprkChatBridge.emit(
-        "document_stream_start",
-        makeStreamStart("op-entity"),
-      );
+      sprkChatBridge.emit('document_stream_start', makeStreamStart('op-entity'));
       expect(received).toBe(true);
 
       sprkChatBridge.disconnect();
@@ -1015,16 +868,16 @@ describe("Streaming E2E Integration Tests", () => {
   // 6. Latency requirement: <100ms per token
   // -----------------------------------------------------------------------
 
-  describe("latency: tokens appear within 100ms of SSE receipt", () => {
-    it("tokenDelivery_BroadcastChannelTransport_Under100ms", () => {
+  describe('latency: tokens appear within 100ms of SSE receipt', () => {
+    it('tokenDelivery_BroadcastChannelTransport_Under100ms', () => {
       // Arrange
       jest.useRealTimers(); // Need real timers for latency measurement
-      const producerBridge = new SprkChatBridge({ context: "e2e-latency-bc" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-latency-bc" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-latency-bc' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-latency-bc' });
 
       const latencies: number[] = [];
 
-      consumerBridge.subscribe("document_stream_token", () => {
+      consumerBridge.subscribe('document_stream_token', () => {
         const receiptTime = performance.now();
         latencies.push(receiptTime);
       });
@@ -1035,10 +888,7 @@ describe("Streaming E2E Integration Tests", () => {
 
       for (let i = 0; i < TOKEN_COUNT; i++) {
         sendTimes.push(performance.now());
-        producerBridge.emit(
-          "document_stream_token",
-          makeStreamToken("op-latency", `tok-${i}`, i),
-        );
+        producerBridge.emit('document_stream_token', makeStreamToken('op-latency', `tok-${i}`, i));
       }
 
       // Assert: all tokens delivered
@@ -1053,8 +903,7 @@ describe("Streaming E2E Integration Tests", () => {
       // NFR-01: Per-token latency must be under 100ms
       // BroadcastChannel mock is synchronous, so latency should be near-zero
       const maxLatency = Math.max(...perTokenLatencies);
-      const avgLatency =
-        perTokenLatencies.reduce((a, b) => a + b, 0) / perTokenLatencies.length;
+      const avgLatency = perTokenLatencies.reduce((a, b) => a + b, 0) / perTokenLatencies.length;
 
       // All tokens should be delivered well under 100ms
       expect(maxLatency).toBeLessThan(100);
@@ -1067,34 +916,34 @@ describe("Streaming E2E Integration Tests", () => {
       jest.useFakeTimers({ legacyFakeTimers: false });
     });
 
-    it("tokenDelivery_PostMessageFallback_Under100ms", () => {
+    it('tokenDelivery_PostMessageFallback_Under100ms', () => {
       // Arrange: force postMessage transport
       jest.useRealTimers();
       delete (globalThis as Record<string, unknown>).BroadcastChannel;
 
       const consumerBridge = new SprkChatBridge({
-        context: "e2e-latency-pm",
-        transport: "postmessage",
+        context: 'e2e-latency-pm',
+        transport: 'postmessage',
         allowedOrigin: window.location.origin,
       });
 
       const latencies: number[] = [];
-      consumerBridge.subscribe("document_stream_token", () => {
+      consumerBridge.subscribe('document_stream_token', () => {
         latencies.push(performance.now());
       });
 
       // Act: simulate postMessage delivery
       const TOKEN_COUNT = 20;
       const sendTimes: number[] = [];
-      const channelName = "sprk-workspace-e2e-latency-pm";
+      const channelName = 'sprk-workspace-e2e-latency-pm';
 
       for (let i = 0; i < TOKEN_COUNT; i++) {
         sendTimes.push(performance.now());
-        const msgEvent = new MessageEvent("message", {
+        const msgEvent = new MessageEvent('message', {
           data: {
             channel: channelName,
-            event: "document_stream_token" as SprkChatBridgeEventName,
-            payload: makeStreamToken("op-latency-pm", `tok-${i}`, i),
+            event: 'document_stream_token' as SprkChatBridgeEventName,
+            payload: makeStreamToken('op-latency-pm', `tok-${i}`, i),
           },
           origin: window.location.origin,
         });
@@ -1117,31 +966,29 @@ describe("Streaming E2E Integration Tests", () => {
   // 7. Transport selection and fallback
   // -----------------------------------------------------------------------
 
-  describe("transport selection", () => {
-    it("autoTransport_PrefersBroadcastChannel_WhenAvailable", () => {
+  describe('transport selection', () => {
+    it('autoTransport_PrefersBroadcastChannel_WhenAvailable', () => {
       // BroadcastChannel is available (MockBroadcastChannel set in beforeEach)
-      const bridge = new SprkChatBridge({ context: "e2e-transport-auto" });
-      expect(bridge.transportType).toBe("broadcast");
+      const bridge = new SprkChatBridge({ context: 'e2e-transport-auto' });
+      expect(bridge.transportType).toBe('broadcast');
       bridge.disconnect();
     });
 
-    it("autoTransport_FallsBackToPostMessage_WhenBroadcastUnavailable", () => {
+    it('autoTransport_FallsBackToPostMessage_WhenBroadcastUnavailable', () => {
       delete (globalThis as Record<string, unknown>).BroadcastChannel;
-      const bridge = new SprkChatBridge({ context: "e2e-transport-fallback" });
-      expect(bridge.transportType).toBe("postmessage");
+      const bridge = new SprkChatBridge({ context: 'e2e-transport-fallback' });
+      expect(bridge.transportType).toBe('postmessage');
       bridge.disconnect();
     });
 
-    it("broadcastTransport_Throws_WhenForcedAndUnavailable", () => {
+    it('broadcastTransport_Throws_WhenForcedAndUnavailable', () => {
       delete (globalThis as Record<string, unknown>).BroadcastChannel;
       expect(() => {
         new SprkChatBridge({
-          context: "e2e-transport-force-bc",
-          transport: "broadcast",
+          context: 'e2e-transport-force-bc',
+          transport: 'broadcast',
         });
-      }).toThrow(
-        "BroadcastChannel transport requested but BroadcastChannel is not available",
-      );
+      }).toThrow('BroadcastChannel transport requested but BroadcastChannel is not available');
     });
   });
 
@@ -1149,38 +996,32 @@ describe("Streaming E2E Integration Tests", () => {
   // 8. Security: no auth tokens via BroadcastChannel
   // -----------------------------------------------------------------------
 
-  describe("security: auth tokens never in bridge payloads", () => {
-    it("streamStartPayload_DoesNotContainAuthFields", () => {
+  describe('security: auth tokens never in bridge payloads', () => {
+    it('streamStartPayload_DoesNotContainAuthFields', () => {
       // Validate that the bridge event types do not include auth-related fields
-      const payload = makeStreamStart("op-sec");
+      const payload = makeStreamStart('op-sec');
       const keys = Object.keys(payload);
 
       // Assert: no auth-related keys
-      const authKeys = [
-        "token",
-        "accessToken",
-        "authToken",
-        "bearer",
-        "authorization",
-      ];
+      const authKeys = ['token', 'accessToken', 'authToken', 'bearer', 'authorization'];
       for (const key of keys) {
         expect(authKeys).not.toContain(key.toLowerCase());
       }
     });
 
-    it("streamTokenPayload_TokenFieldIsDocumentContent_NotAuthToken", () => {
+    it('streamTokenPayload_TokenFieldIsDocumentContent_NotAuthToken', () => {
       // The "token" field in DocumentStreamTokenPayload is a document text token,
       // NOT an authentication token
-      const payload = makeStreamToken("op-sec", "The analysis", 0);
+      const payload = makeStreamToken('op-sec', 'The analysis', 0);
 
       // Assert: "token" is document content text
-      expect(payload.token).toBe("The analysis");
-      expect(typeof payload.token).toBe("string");
+      expect(payload.token).toBe('The analysis');
+      expect(typeof payload.token).toBe('string');
 
       // Assert: no auth-related data anywhere in the payload
       const serialized = JSON.stringify(payload);
-      expect(serialized).not.toContain("Bearer");
-      expect(serialized).not.toContain("eyJ"); // JWT prefix
+      expect(serialized).not.toContain('Bearer');
+      expect(serialized).not.toContain('eyJ'); // JWT prefix
     });
   });
 
@@ -1188,75 +1029,63 @@ describe("Streaming E2E Integration Tests", () => {
   // 9. Multiple concurrent operations
   // -----------------------------------------------------------------------
 
-  describe("concurrent operations", () => {
-    it("multipleOperations_OperationIdDiscriminates_OnlySameOpTokensDelivered", () => {
+  describe('concurrent operations', () => {
+    it('multipleOperations_OperationIdDiscriminates_OnlySameOpTokensDelivered', () => {
       // Arrange: simulate two concurrent streaming operations
       // (only one should be active at a time, but test operationId filtering)
-      const producerBridge = new SprkChatBridge({ context: "e2e-concurrent" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-concurrent" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-concurrent' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-concurrent' });
 
       const op1Tokens: DocumentStreamTokenPayload[] = [];
       const op2Tokens: DocumentStreamTokenPayload[] = [];
 
-      consumerBridge.subscribe("document_stream_token", (payload) => {
-        if (payload.operationId === "op-1") {
+      consumerBridge.subscribe('document_stream_token', payload => {
+        if (payload.operationId === 'op-1') {
           op1Tokens.push(payload);
-        } else if (payload.operationId === "op-2") {
+        } else if (payload.operationId === 'op-2') {
           op2Tokens.push(payload);
         }
       });
 
       // Act: interleave tokens from two operations
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-1", "alpha ", 0),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-2", "beta ", 0),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-1", "gamma ", 1),
-      );
-      producerBridge.emit(
-        "document_stream_token",
-        makeStreamToken("op-2", "delta ", 1),
-      );
+      producerBridge.emit('document_stream_token', makeStreamToken('op-1', 'alpha ', 0));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-2', 'beta ', 0));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-1', 'gamma ', 1));
+      producerBridge.emit('document_stream_token', makeStreamToken('op-2', 'delta ', 1));
 
       // Assert: each operation receives only its own tokens
-      expect(op1Tokens.map((t) => t.token)).toEqual(["alpha ", "gamma "]);
-      expect(op2Tokens.map((t) => t.token)).toEqual(["beta ", "delta "]);
+      expect(op1Tokens.map(t => t.token)).toEqual(['alpha ', 'gamma ']);
+      expect(op2Tokens.map(t => t.token)).toEqual(['beta ', 'delta ']);
 
       producerBridge.disconnect();
       consumerBridge.disconnect();
     });
 
-    it("sequentialStreams_SecondStreamAfterFirstCompletes_BothSucceed", () => {
+    it('sequentialStreams_SecondStreamAfterFirstCompletes_BothSucceed', () => {
       // Arrange
-      const producerBridge = new SprkChatBridge({ context: "e2e-sequential" });
-      const consumerBridge = new SprkChatBridge({ context: "e2e-sequential" });
+      const producerBridge = new SprkChatBridge({ context: 'e2e-sequential' });
+      const consumerBridge = new SprkChatBridge({ context: 'e2e-sequential' });
 
       const allEvents: Array<{ type: string; opId: string }> = [];
 
-      consumerBridge.subscribe("document_stream_start", (p) => {
-        allEvents.push({ type: "start", opId: p.operationId });
+      consumerBridge.subscribe('document_stream_start', p => {
+        allEvents.push({ type: 'start', opId: p.operationId });
       });
-      consumerBridge.subscribe("document_stream_end", (p) => {
-        allEvents.push({ type: "end", opId: p.operationId });
+      consumerBridge.subscribe('document_stream_end', p => {
+        allEvents.push({ type: 'end', opId: p.operationId });
       });
 
       // Act: first stream
-      emitStreamingSequence(producerBridge, "op-seq-1", ["first ", "stream "]);
+      emitStreamingSequence(producerBridge, 'op-seq-1', ['first ', 'stream ']);
       // Second stream
-      emitStreamingSequence(producerBridge, "op-seq-2", ["second ", "stream "]);
+      emitStreamingSequence(producerBridge, 'op-seq-2', ['second ', 'stream ']);
 
       // Assert: both streams completed in sequence
       expect(allEvents).toEqual([
-        { type: "start", opId: "op-seq-1" },
-        { type: "end", opId: "op-seq-1" },
-        { type: "start", opId: "op-seq-2" },
-        { type: "end", opId: "op-seq-2" },
+        { type: 'start', opId: 'op-seq-1' },
+        { type: 'end', opId: 'op-seq-1' },
+        { type: 'start', opId: 'op-seq-2' },
+        { type: 'end', opId: 'op-seq-2' },
       ]);
 
       producerBridge.disconnect();
@@ -1268,40 +1097,33 @@ describe("Streaming E2E Integration Tests", () => {
   // 10. Full pipeline integration: SprkChat -> Bridge -> Editor mock
   // -----------------------------------------------------------------------
 
-  describe("full pipeline integration", () => {
-    it("fullPipeline_SprkChatEmits_BridgeTransports_EditorReceives", () => {
+  describe('full pipeline integration', () => {
+    it('fullPipeline_SprkChatEmits_BridgeTransports_EditorReceives', () => {
       // Arrange: simulate the complete real-world flow
       // Producer = SprkChat side pane (receives SSE from BFF API)
       const sprkChatBridge = new SprkChatBridge({
-        context: "full-pipeline-session",
+        context: 'full-pipeline-session',
       });
       // Consumer = AnalysisWorkspace Code Page (drives editor via streaming ref)
-      const awBridge = new SprkChatBridge({ context: "full-pipeline-session" });
+      const awBridge = new SprkChatBridge({ context: 'full-pipeline-session' });
 
       const mockEditor = createMockEditorRef();
       let streamActive = false;
       let streamCompleted = false;
 
       // Wire the AW consumer side (simulates useDocumentStreaming + useDocumentStreamConsumer)
-      awBridge.subscribe("document_stream_start", (payload) => {
+      awBridge.subscribe('document_stream_start', payload => {
         mockEditor.pushToUndoStack(); // FR-07: snapshot before write
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
         streamActive = true;
       });
-      awBridge.subscribe("document_stream_token", (payload) => {
+      awBridge.subscribe('document_stream_token', payload => {
         if (streamActive) {
-          mockEditor.editorRef.current.appendStreamToken(
-            mockEditor.getMockHandle(),
-            payload.token,
-          );
+          mockEditor.editorRef.current.appendStreamToken(mockEditor.getMockHandle(), payload.token);
         }
       });
-      awBridge.subscribe("document_stream_end", (payload) => {
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+      awBridge.subscribe('document_stream_end', payload => {
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
         streamActive = false;
         streamCompleted = true;
         mockEditor.pushToUndoStack(); // Snapshot completed content
@@ -1310,23 +1132,19 @@ describe("Streaming E2E Integration Tests", () => {
       // Act: SprkChat receives SSE events from BFF API and relays via bridge
       // (simulates the full path: user message -> LLM -> WorkingDocumentTools -> SSE)
       const documentContent = [
-        "Executive Summary\n\n",
-        "The document analysis identified ",
-        "three critical compliance gaps ",
-        "that require immediate attention.\n\n",
-        "1. Data retention policy alignment\n",
-        "2. Access control mechanisms\n",
-        "3. Encryption standard compliance",
+        'Executive Summary\n\n',
+        'The document analysis identified ',
+        'three critical compliance gaps ',
+        'that require immediate attention.\n\n',
+        '1. Data retention policy alignment\n',
+        '2. Access control mechanisms\n',
+        '3. Encryption standard compliance',
       ];
 
-      emitStreamingSequence(
-        sprkChatBridge,
-        "op-full-pipeline",
-        documentContent,
-      );
+      emitStreamingSequence(sprkChatBridge, 'op-full-pipeline', documentContent);
 
       // Assert: full content appeared in editor
-      const expectedContent = documentContent.join("");
+      const expectedContent = documentContent.join('');
       expect(mockEditor.getHtmlContent()).toBe(expectedContent);
 
       // Assert: stream completed successfully
@@ -1335,74 +1153,67 @@ describe("Streaming E2E Integration Tests", () => {
 
       // Assert: all streaming method calls in correct order
       const calls = mockEditor.getStreamingCalls();
-      expect(calls[0].method).toBe("beginStreamingInsert");
+      expect(calls[0].method).toBe('beginStreamingInsert');
       for (let i = 1; i <= documentContent.length; i++) {
-        expect(calls[i].method).toBe("appendStreamToken");
+        expect(calls[i].method).toBe('appendStreamToken');
       }
-      expect(calls[calls.length - 1].method).toBe("endStreamingInsert");
+      expect(calls[calls.length - 1].method).toBe('endStreamingInsert');
 
       // Assert: undo stack allows reverting
       expect(mockEditor.getUndoStack()).toHaveLength(2);
       mockEditor.undo();
-      expect(mockEditor.getHtmlContent()).toBe(""); // Pre-stream state
+      expect(mockEditor.getHtmlContent()).toBe(''); // Pre-stream state
 
       sprkChatBridge.disconnect();
       awBridge.disconnect();
     });
 
-    it("fullPipeline_CancelAndRedo_EndToEnd", () => {
+    it('fullPipeline_CancelAndRedo_EndToEnd', () => {
       // Arrange
       const sprkChatBridge = new SprkChatBridge({
-        context: "full-pipeline-cancel",
+        context: 'full-pipeline-cancel',
       });
-      const awBridge = new SprkChatBridge({ context: "full-pipeline-cancel" });
+      const awBridge = new SprkChatBridge({ context: 'full-pipeline-cancel' });
       const mockEditor = createMockEditorRef();
       let streamActive = false;
 
-      awBridge.subscribe("document_stream_start", (payload) => {
+      awBridge.subscribe('document_stream_start', payload => {
         mockEditor.pushToUndoStack();
-        mockEditor.editorRef.current.beginStreamingInsert(
-          payload.targetPosition,
-        );
+        mockEditor.editorRef.current.beginStreamingInsert(payload.targetPosition);
         streamActive = true;
       });
-      awBridge.subscribe("document_stream_token", (payload) => {
+      awBridge.subscribe('document_stream_token', payload => {
         if (streamActive) {
-          mockEditor.editorRef.current.appendStreamToken(
-            mockEditor.getMockHandle(),
-            payload.token,
-          );
+          mockEditor.editorRef.current.appendStreamToken(mockEditor.getMockHandle(), payload.token);
         }
       });
-      awBridge.subscribe("document_stream_end", () => {
-        mockEditor.editorRef.current.endStreamingInsert(
-          mockEditor.getMockHandle(),
-        );
+      awBridge.subscribe('document_stream_end', () => {
+        mockEditor.editorRef.current.endStreamingInsert(mockEditor.getMockHandle());
         streamActive = false;
         mockEditor.pushToUndoStack();
       });
 
       const fullTokens = [
-        "Section 1: Introduction\n\n",
-        "This section covers the background.\n\n",
-        "Section 2: Analysis\n\n",
-        "Detailed analysis follows.\n\n",
-        "Section 3: Conclusion\n\n",
-        "Final remarks and recommendations.",
+        'Section 1: Introduction\n\n',
+        'This section covers the background.\n\n',
+        'Section 2: Analysis\n\n',
+        'Detailed analysis follows.\n\n',
+        'Section 3: Conclusion\n\n',
+        'Final remarks and recommendations.',
       ];
 
       // Act: cancel after 3 tokens
-      emitStreamingSequence(sprkChatBridge, "op-cancel-redo", fullTokens, {
+      emitStreamingSequence(sprkChatBridge, 'op-cancel-redo', fullTokens, {
         cancelAfter: 3,
       });
 
       // Assert: partial content (first 3 tokens)
-      const partialContent = fullTokens.slice(0, 3).join("");
+      const partialContent = fullTokens.slice(0, 3).join('');
       expect(mockEditor.getHtmlContent()).toBe(partialContent);
 
       // Act: undo back to empty
       mockEditor.undo();
-      expect(mockEditor.getHtmlContent()).toBe("");
+      expect(mockEditor.getHtmlContent()).toBe('');
 
       // Act: redo brings partial content back
       mockEditor.redo();

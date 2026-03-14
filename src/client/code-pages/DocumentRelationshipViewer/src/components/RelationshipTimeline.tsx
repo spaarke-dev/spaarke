@@ -14,15 +14,9 @@
  *   - Color-coded by relationship type
  */
 
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  useEffect,
-} from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DocumentNode, DocumentNodeData } from "../types/graph";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { DocumentNode, DocumentNodeData } from '../types/graph';
 
 // =============================================
 // Types
@@ -58,8 +52,8 @@ const NO_DATE_STRIP_HEIGHT = 40;
 const NO_DATE_GAP = 20;
 const ZOOM_FACTOR = 0.002;
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  month: "short",
-  year: "2-digit",
+  month: 'short',
+  year: '2-digit',
 };
 
 // Relationship type → color mapping
@@ -97,8 +91,7 @@ function getPointColor(data: DocumentNodeData): { bg: string; border: string } {
       border: tokens.colorBrandStroke1,
     };
   const relType = data.relationshipTypes?.[0]?.type ?? data.relationshipType;
-  if (relType && RELATIONSHIP_COLORS[relType])
-    return RELATIONSHIP_COLORS[relType];
+  if (relType && RELATIONSHIP_COLORS[relType]) return RELATIONSHIP_COLORS[relType];
   return {
     bg: tokens.colorNeutralBackground3,
     border: tokens.colorNeutralStroke1,
@@ -111,36 +104,36 @@ function getPointColor(data: DocumentNodeData): { bg: string; border: string } {
 
 const useStyles = makeStyles({
   container: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
-    width: "100%",
-    height: "100%",
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
   svg: {
-    width: "100%",
-    height: "100%",
+    width: '100%',
+    height: '100%',
   },
   centerMessage: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   legend: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalS,
     left: tokens.spacingHorizontalS,
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -150,18 +143,18 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
   },
   legendItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   legendLabel: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
   tooltip: {
-    position: "absolute",
-    pointerEvents: "none",
+    position: 'absolute',
+    pointerEvents: 'none',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -171,15 +164,15 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow8,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     zIndex: 20,
-    maxWidth: "260px",
+    maxWidth: '260px',
   },
   tooltipName: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   tooltipDetail: {
     fontSize: tokens.fontSizeBase100,
@@ -192,14 +185,14 @@ const useStyles = makeStyles({
 // =============================================
 
 function formatTickLabel(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString("en-US", DATE_FORMAT_OPTIONS);
+  return new Date(timestamp).toLocaleDateString('en-US', DATE_FORMAT_OPTIONS);
 }
 
 function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
   });
 }
 
@@ -207,10 +200,7 @@ function formatDate(date: Date): string {
 // Component
 // =============================================
 
-export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
-  nodes: inputNodes,
-  onNodeClick,
-}) => {
+export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({ nodes: inputNodes, onNodeClick }) => {
   const styles = useStyles();
 
   // ─── Container sizing ───
@@ -219,8 +209,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (containerRef.current) {
-      const obs = (containerRef.current as unknown as { __ro?: ResizeObserver })
-        .__ro;
+      const obs = (containerRef.current as unknown as { __ro?: ResizeObserver }).__ro;
       obs?.disconnect();
       containerRef.current = null;
     }
@@ -228,7 +217,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
       containerRef.current = node;
       const rect = node.getBoundingClientRect();
       setDimensions({ width: rect.width, height: rect.height });
-      const observer = new ResizeObserver((entries) => {
+      const observer = new ResizeObserver(entries => {
         for (const entry of entries) {
           setDimensions({
             width: entry.contentRect.width,
@@ -244,8 +233,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
   useEffect(() => {
     return () => {
       const node = containerRef.current;
-      if (node)
-        (node as unknown as { __ro?: ResizeObserver }).__ro?.disconnect();
+      if (node) (node as unknown as { __ro?: ResizeObserver }).__ro?.disconnect();
     };
   }, []);
 
@@ -258,24 +246,14 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
       const d = n.data;
       const nodeType = d.nodeType;
       // Filter hub nodes
-      if (
-        nodeType === "matter" ||
-        nodeType === "project" ||
-        nodeType === "invoice" ||
-        nodeType === "email"
-      )
-        continue;
+      if (nodeType === 'matter' || nodeType === 'project' || nodeType === 'invoice' || nodeType === 'email') continue;
 
       const colors = getPointColor(d);
       const sim = d.similarity ?? 0;
       const point: TimelinePoint = {
         id: n.id,
         name: d.name,
-        date: d.modifiedOn
-          ? new Date(d.modifiedOn)
-          : d.createdOn
-            ? new Date(d.createdOn)
-            : null,
+        date: d.modifiedOn ? new Date(d.modifiedOn) : d.createdOn ? new Date(d.createdOn) : null,
         similarity: d.isSource ? 1.0 : sim,
         radius: d.isSource ? 12 : 6 + sim * 8,
         color: colors.bg,
@@ -330,10 +308,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
   const hasUndated = undated.length > 0;
   const chartHeight = Math.max(
     0,
-    dimensions.height -
-      MARGIN.top -
-      MARGIN.bottom -
-      (hasUndated ? NO_DATE_STRIP_HEIGHT + NO_DATE_GAP : 0),
+    dimensions.height - MARGIN.top - MARGIN.bottom - (hasUndated ? NO_DATE_STRIP_HEIGHT + NO_DATE_GAP : 0)
   );
 
   // ─── Scale functions ───
@@ -344,29 +319,26 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
       if (range === 0) return MARGIN.left + chartWidth / 2;
       return MARGIN.left + ((timestamp - domMin) / range) * chartWidth;
     },
-    [activeXDomain, chartWidth],
+    [activeXDomain, chartWidth]
   );
 
   const scaleY = useCallback(
     (score: number): number => {
       return MARGIN.top + chartHeight * (1 - score);
     },
-    [chartHeight],
+    [chartHeight]
   );
 
   // ─── Visible dated points ───
   const visibleDated = useMemo(() => {
     const [domMin, domMax] = activeXDomain;
     return dated
-      .filter((p) => p.date!.getTime() >= domMin && p.date!.getTime() <= domMax)
-      .map((p) => ({ ...p, x: scaleX(p.date!.getTime()) }));
+      .filter(p => p.date!.getTime() >= domMin && p.date!.getTime() <= domMax)
+      .map(p => ({ ...p, x: scaleX(p.date!.getTime()) }));
   }, [dated, activeXDomain, scaleX]);
 
   // ─── Axis labels ───
-  const yAxisLabels = useMemo(
-    () => [0, 25, 50, 75, 100].map((pct) => ({ pct, y: scaleY(pct / 100) })),
-    [scaleY],
-  );
+  const yAxisLabels = useMemo(() => [0, 25, 50, 75, 100].map(pct => ({ pct, y: scaleY(pct / 100) })), [scaleY]);
 
   const xAxisTicks = useMemo(() => {
     const [domMin, domMax] = activeXDomain;
@@ -397,20 +369,12 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
 
       const delta = e.deltaY * ZOOM_FACTOR;
       const factor = 1 + delta;
-      const originalRange = xDomain
-        ? (xDomain[1] - xDomain[0]) * 1.5
-        : range * 2;
-      const newRange = Math.max(
-        1000 * 60 * 60 * 24 * 7,
-        Math.min(originalRange, range * factor),
-      );
+      const originalRange = xDomain ? (xDomain[1] - xDomain[0]) * 1.5 : range * 2;
+      const newRange = Math.max(1000 * 60 * 60 * 24 * 7, Math.min(originalRange, range * factor));
 
-      setZoomDomain([
-        cursorTime - cursorFraction * newRange,
-        cursorTime + (1 - cursorFraction) * newRange,
-      ]);
+      setZoomDomain([cursorTime - cursorFraction * newRange, cursorTime + (1 - cursorFraction) * newRange]);
     },
-    [activeXDomain, chartWidth, xDomain],
+    [activeXDomain, chartWidth, xDomain]
   );
 
   const handleDoubleClick = useCallback(() => {
@@ -418,21 +382,18 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
   }, []);
 
   // ─── Point events ───
-  const handlePointMouseEnter = useCallback(
-    (e: React.MouseEvent, point: TimelinePoint) => {
-      setHoveredId(point.id);
-      const rect = e.currentTarget.closest("svg")?.getBoundingClientRect();
-      if (rect)
-        setTooltipPos({
-          x: e.clientX - rect.left + 12,
-          y: e.clientY - rect.top + 12,
-        });
-    },
-    [],
-  );
+  const handlePointMouseEnter = useCallback((e: React.MouseEvent, point: TimelinePoint) => {
+    setHoveredId(point.id);
+    const rect = e.currentTarget.closest('svg')?.getBoundingClientRect();
+    if (rect)
+      setTooltipPos({
+        x: e.clientX - rect.left + 12,
+        y: e.clientY - rect.top + 12,
+      });
+  }, []);
 
   const handlePointMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = e.currentTarget.closest("svg")?.getBoundingClientRect();
+    const rect = e.currentTarget.closest('svg')?.getBoundingClientRect();
     if (rect)
       setTooltipPos({
         x: e.clientX - rect.left + 12,
@@ -447,47 +408,42 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
   const handlePointClick = useCallback(
     (e: React.MouseEvent, point: TimelinePoint) => {
       e.stopPropagation();
-      if (point.data.documentId)
-        onNodeClick?.(point.data.documentId, point.name);
+      if (point.data.documentId) onNodeClick?.(point.data.documentId, point.name);
     },
-    [onNodeClick],
+    [onNodeClick]
   );
 
   // ─── Legend ───
   const legendEntries = useMemo(
     () => [
       {
-        key: "Source",
+        key: 'Source',
         bg: tokens.colorBrandBackground,
         border: tokens.colorBrandStroke1,
       },
       {
-        key: "Semantic",
+        key: 'Semantic',
         bg: tokens.colorBrandBackground2,
         border: tokens.colorBrandStroke1,
       },
       {
-        key: "Same Matter",
+        key: 'Same Matter',
         bg: tokens.colorPaletteGreenBackground2,
         border: tokens.colorPaletteGreenBorder2,
       },
       {
-        key: "Same Email",
+        key: 'Same Email',
         bg: tokens.colorPaletteYellowBackground2,
         border: tokens.colorPaletteYellowBorder2,
       },
     ],
-    [],
+    []
   );
 
   // ─── Hovered point ───
   const hoveredPoint = useMemo<TimelinePoint | null>(() => {
     if (!hoveredId) return null;
-    return (
-      visibleDated.find((p) => p.id === hoveredId) ??
-      undated.find((p) => p.id === hoveredId) ??
-      null
-    );
+    return visibleDated.find(p => p.id === hoveredId) ?? undated.find(p => p.id === hoveredId) ?? null;
   }, [hoveredId, visibleDated, undated]);
 
   const noDateStripY = MARGIN.top + chartHeight + NO_DATE_GAP;
@@ -500,9 +456,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
           <Text size={400} weight="semibold">
             No documents to visualize
           </Text>
-          <Text size={200}>
-            Load a document with AI embeddings to see the timeline
-          </Text>
+          <Text size={200}>Load a document with AI embeddings to see the timeline</Text>
         </div>
       </div>
     );
@@ -571,7 +525,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
         />
 
         {/* Y-Axis labels + grid */}
-        {yAxisLabels.map((label) => (
+        {yAxisLabels.map(label => (
           <g key={`y-${label.pct}`}>
             <line
               x1={MARGIN.left - 4}
@@ -617,7 +571,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
         </text>
 
         {/* Dated points */}
-        {visibleDated.map((point) => {
+        {visibleDated.map(point => {
           const isHovered = hoveredId === point.id;
           const cy = scaleY(point.similarity);
           return (
@@ -630,14 +584,14 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
               stroke={point.borderColor}
               strokeWidth={isHovered ? 2 : 1}
               style={{
-                cursor: "pointer",
+                cursor: 'pointer',
                 opacity: hoveredId && !isHovered ? 0.4 : 1,
-                transition: "r 0.15s ease, opacity 0.15s ease",
+                transition: 'r 0.15s ease, opacity 0.15s ease',
               }}
-              onMouseEnter={(e) => handlePointMouseEnter(e, point)}
+              onMouseEnter={e => handlePointMouseEnter(e, point)}
               onMouseMove={handlePointMouseMove}
               onMouseLeave={handlePointMouseLeave}
-              onClick={(e) => handlePointClick(e, point)}
+              onClick={e => handlePointClick(e, point)}
             />
           );
         })}
@@ -666,10 +620,7 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
             </text>
             {undated.map((point, idx) => {
               const isHovered = hoveredId === point.id;
-              const spacing = Math.min(
-                30,
-                chartWidth / Math.max(1, undated.length + 1),
-              );
+              const spacing = Math.min(30, chartWidth / Math.max(1, undated.length + 1));
               const cx = MARGIN.left + spacing * (idx + 1);
               const cy = noDateStripY + NO_DATE_STRIP_HEIGHT / 2;
               return (
@@ -682,14 +633,14 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
                   stroke={point.borderColor}
                   strokeWidth={isHovered ? 2 : 1}
                   style={{
-                    cursor: "pointer",
+                    cursor: 'pointer',
                     opacity: hoveredId && !isHovered ? 0.4 : 1,
-                    transition: "r 0.15s ease, opacity 0.15s ease",
+                    transition: 'r 0.15s ease, opacity 0.15s ease',
                   }}
-                  onMouseEnter={(e) => handlePointMouseEnter(e, point)}
+                  onMouseEnter={e => handlePointMouseEnter(e, point)}
                   onMouseMove={handlePointMouseMove}
                   onMouseLeave={handlePointMouseLeave}
-                  onClick={(e) => handlePointClick(e, point)}
+                  onClick={e => handlePointClick(e, point)}
                 />
               );
             })}
@@ -699,17 +650,10 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
 
       {/* Legend */}
       <div className={styles.legend}>
-        {legendEntries.map((entry) => (
+        {legendEntries.map(entry => (
           <div key={entry.key} className={styles.legendItem}>
             <svg width="10" height="10">
-              <circle
-                cx={5}
-                cy={5}
-                r={4}
-                fill={entry.bg}
-                stroke={entry.border}
-                strokeWidth={1}
-              />
+              <circle cx={5} cy={5} r={4} fill={entry.bg} stroke={entry.border} strokeWidth={1} />
             </svg>
             <span className={styles.legendLabel}>{entry.key}</span>
           </div>
@@ -718,36 +662,20 @@ export const RelationshipTimeline: React.FC<RelationshipTimelineProps> = ({
 
       {/* Tooltip */}
       {hoveredPoint && (
-        <div
-          className={styles.tooltip}
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
-        >
+        <div className={styles.tooltip} style={{ left: tooltipPos.x, top: tooltipPos.y }}>
           <div className={styles.tooltipName}>{hoveredPoint.name}</div>
-          {hoveredPoint.date && (
-            <div className={styles.tooltipDetail}>
-              Date: {formatDate(hoveredPoint.date)}
-            </div>
-          )}
+          {hoveredPoint.date && <div className={styles.tooltipDetail}>Date: {formatDate(hoveredPoint.date)}</div>}
           {!hoveredPoint.data.isSource && (
-            <div className={styles.tooltipDetail}>
-              Similarity: {Math.round(hoveredPoint.similarity * 100)}%
-            </div>
+            <div className={styles.tooltipDetail}>Similarity: {Math.round(hoveredPoint.similarity * 100)}%</div>
           )}
           {hoveredPoint.data.documentType && (
-            <div className={styles.tooltipDetail}>
-              Type: {hoveredPoint.data.documentType}
-            </div>
+            <div className={styles.tooltipDetail}>Type: {hoveredPoint.data.documentType}</div>
           )}
           {hoveredPoint.data.relationshipLabel && (
-            <div className={styles.tooltipDetail}>
-              Relationship: {hoveredPoint.data.relationshipLabel}
-            </div>
+            <div className={styles.tooltipDetail}>Relationship: {hoveredPoint.data.relationshipLabel}</div>
           )}
           {hoveredPoint.data.isSource && (
-            <div
-              className={styles.tooltipDetail}
-              style={{ fontStyle: "italic" }}
-            >
+            <div className={styles.tooltipDetail} style={{ fontStyle: 'italic' }}>
               Source document
             </div>
           )}

@@ -8,11 +8,7 @@
  * @see Spaarke.UI.Components/src/types/DatasetTypes.ts — target type
  */
 
-import type {
-  DocumentSearchResult,
-  RecordSearchResult,
-  SearchDomain,
-} from "../types";
+import type { DocumentSearchResult, RecordSearchResult, SearchDomain } from '../types';
 
 /** Shape compatible with IDatasetRecord from @spaarke/ui-components. */
 export interface IDatasetRecord {
@@ -22,12 +18,10 @@ export interface IDatasetRecord {
 }
 
 /** Map a document search result to IDatasetRecord. */
-export function mapDocumentResult(
-  result: DocumentSearchResult,
-): IDatasetRecord {
+export function mapDocumentResult(result: DocumentSearchResult): IDatasetRecord {
   return {
-    id: result.documentId ?? "",
-    entityName: "sprk_document",
+    id: result.documentId ?? '',
+    entityName: 'sprk_document',
     name: result.name,
     combinedScore: result.combinedScore,
     documentType: result.documentType,
@@ -65,24 +59,24 @@ export function mapRecordResult(result: RecordSearchResult): IDatasetRecord {
 /** Map an array of search results based on the active domain. */
 export function mapSearchResults(
   results: (DocumentSearchResult | RecordSearchResult)[],
-  domain: SearchDomain,
+  domain: SearchDomain
 ): IDatasetRecord[] {
-  if (domain === "documents") {
-    return results.map((r) => mapDocumentResult(r as DocumentSearchResult));
+  if (domain === 'documents') {
+    return results.map(r => mapDocumentResult(r as DocumentSearchResult));
   }
-  return results.map((r) => mapRecordResult(r as RecordSearchResult));
+  return results.map(r => mapRecordResult(r as RecordSearchResult));
 }
 
 /** Map search domain to Dataverse entity logical name. */
 export function domainToEntityName(domain: SearchDomain): string {
   switch (domain) {
-    case "documents":
-      return "sprk_document";
-    case "matters":
-      return "sprk_matter";
-    case "projects":
-      return "sprk_project";
-    case "invoices":
-      return "sprk_invoice";
+    case 'documents':
+      return 'sprk_document';
+    case 'matters':
+      return 'sprk_matter';
+    case 'projects':
+      return 'sprk_project';
+    case 'invoices':
+      return 'sprk_invoice';
   }
 }

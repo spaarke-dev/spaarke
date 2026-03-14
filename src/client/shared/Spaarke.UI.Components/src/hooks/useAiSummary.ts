@@ -8,8 +8,8 @@
  * @version 2.0.0.0
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { SseStreamStatus } from "./useSseStream";
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { SseStreamStatus } from './useSseStream';
 
 /**
  * Extracted entities from document analysis
@@ -50,13 +50,7 @@ export interface DocumentAnalysisResult {
 /**
  * Summary status types
  */
-export type SummaryStatus =
-  | "pending"
-  | "streaming"
-  | "complete"
-  | "error"
-  | "skipped"
-  | "not-supported";
+export type SummaryStatus = 'pending' | 'streaming' | 'complete' | 'error' | 'skipped' | 'not-supported';
 
 /**
  * Document summary state for tracking and display
@@ -124,10 +118,7 @@ export interface UseAiSummaryOptions {
   autoStart?: boolean;
 
   /** Callback when analysis completes successfully */
-  onAnalysisComplete?: (
-    documentId: string,
-    result: DocumentAnalysisResult,
-  ) => void;
+  onAnalysisComplete?: (documentId: string, result: DocumentAnalysisResult) => void;
 
   /** @deprecated Use onAnalysisComplete instead */
   onSummaryComplete?: (documentId: string, summary: string) => void;
@@ -205,11 +196,11 @@ interface SseChunk {
  */
 const parseSseLine = (line: string): SseChunk | null => {
   const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith(":")) return null;
+  if (!trimmed || trimmed.startsWith(':')) return null;
 
-  if (trimmed.startsWith("data:")) {
+  if (trimmed.startsWith('data:')) {
     const jsonStr = trimmed.slice(5).trim();
-    if (!jsonStr || jsonStr === "[DONE]") {
+    if (!jsonStr || jsonStr === '[DONE]') {
       return { done: true };
     }
     try {
@@ -227,17 +218,8 @@ const parseSseLine = (line: string): SseChunk | null => {
  * Orchestrates AI document analysis for multiple documents with
  * concurrent streaming and status management.
  */
-export const useAiSummary = (
-  options: UseAiSummaryOptions,
-): UseAiSummaryResult => {
-  const {
-    apiBaseUrl,
-    getToken,
-    maxConcurrent = 3,
-    autoStart = true,
-    onAnalysisComplete,
-    onSummaryComplete,
-  } = options;
+export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult => {
+  const { apiBaseUrl, getToken, maxConcurrent = 3, autoStart = true, onAnalysisComplete, onSummaryComplete } = options;
 
   const [documents, setDocuments] = useState<DocumentSummaryState[]>([]);
   const activeStreamsRef = useRef<Map<string, StreamState>>(new Map());
@@ -247,16 +229,9 @@ export const useAiSummary = (
   /**
    * Update a single document's state
    */
-  const updateDocument = useCallback(
-    (documentId: string, updates: Partial<DocumentSummaryState>) => {
-      setDocuments((prev) =>
-        prev.map((doc) =>
-          doc.documentId === documentId ? { ...doc, ...updates } : doc,
-        ),
-      );
-    },
-    [],
-  );
+  const updateDocument = useCallback((documentId: string, updates: Partial<DocumentSummaryState>) => {
+    setDocuments(prev => prev.map(doc => (doc.documentId === documentId ? { ...doc, ...updates } : doc)));
+  }, []);
 
   /**
    * Stream document analysis for a single document
@@ -265,7 +240,7 @@ export const useAiSummary = (
     async (doc: SummaryDocument) => {
       const { documentId, driveId, itemId } = doc;
 
-      console.log("[useAiSummary] Starting stream for document:", {
+      console.log('[useAiSummary] Starting stream for document:', {
         documentId,
         driveId,
         itemId,
@@ -274,7 +249,7 @@ export const useAiSummary = (
 
       // Check if already streaming
       if (activeStreamsRef.current.has(documentId)) {
-        console.log("[useAiSummary] Already streaming, skipping:", documentId);
+        console.log('[useAiSummary] Already streaming, skipping:', documentId);
         return;
       }
 
@@ -284,23 +259,23 @@ export const useAiSummary = (
 
       // Update status to streaming
       updateDocument(documentId, {
-        status: "streaming",
-        summary: "",
+        status: 'streaming',
+        summary: '',
         error: undefined,
       });
 
-      let accumulatedSummary = "";
+      let accumulatedSummary = '';
 
       // Helper function to get token headers
       const getAuthHeaders = async (): Promise<Record<string, string>> => {
         if (!getToken) return {};
         try {
           const token = await getToken();
-          console.log("[useAiSummary] Token acquired successfully");
+          console.log('[useAiSummary] Token acquired successfully');
           return { Authorization: `Bearer ${token}` };
         } catch (tokenError) {
-          console.error("[useAiSummary] Failed to acquire token:", tokenError);
-          throw new Error("Failed to acquire authentication token");
+          console.error('[useAiSummary] Failed to acquire token:', tokenError);
+          throw new Error('Failed to acquire authentication token');
         }
       };
 
@@ -311,45 +286,37 @@ export const useAiSummary = (
           const playbookUrl = `${apiBaseUrl}/ai/playbooks/by-name/Document%20Profile`;
           const authHeaders = await getAuthHeaders();
           const playbookResponse = await fetch(playbookUrl, {
-            method: "GET",
+            method: 'GET',
             headers: {
-              Accept: "application/json",
+              Accept: 'application/json',
               ...authHeaders,
             },
             signal: abortController.signal,
           });
 
           if (!playbookResponse.ok) {
-            throw new Error(
-              `Failed to resolve playbook: HTTP ${playbookResponse.status}`,
-            );
+            throw new Error(`Failed to resolve playbook: HTTP ${playbookResponse.status}`);
           }
 
           const playbook = await playbookResponse.json();
           playbookId = playbook.playbookId || playbook.id;
-          console.log(
-            "[useAiSummary] Resolved Document Profile playbook:",
-            playbookId,
-          );
+          console.log('[useAiSummary] Resolved Document Profile playbook:', playbookId);
         } catch (playbookError) {
-          console.error(
-            "[useAiSummary] Failed to resolve playbook:",
-            playbookError,
-          );
-          throw new Error("Failed to resolve Document Profile playbook");
+          console.error('[useAiSummary] Failed to resolve playbook:', playbookError);
+          throw new Error('Failed to resolve Document Profile playbook');
         }
 
         // Step 2: Execute analysis with new unified endpoint
         const streamUrl = `${apiBaseUrl}/ai/analysis/execute`;
-        console.log("[useAiSummary] Fetching:", streamUrl);
+        console.log('[useAiSummary] Fetching:', streamUrl);
 
         const authHeaders = await getAuthHeaders();
 
         const response = await fetch(streamUrl, {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
             ...authHeaders,
           },
           body: JSON.stringify({
@@ -367,19 +334,19 @@ export const useAiSummary = (
         }
 
         if (!response.body) {
-          throw new Error("Response body not readable");
+          throw new Error('Response body not readable');
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = "";
+        let buffer = '';
 
         while (true) {
           const { done, value } = await reader.read();
 
           if (done) {
             // Stream ended without complete event - mark as complete with accumulated data
-            updateDocument(documentId, { status: "complete" });
+            updateDocument(documentId, { status: 'complete' });
             if (onSummaryComplete && accumulatedSummary) {
               onSummaryComplete(documentId, accumulatedSummary);
             }
@@ -387,36 +354,33 @@ export const useAiSummary = (
           }
 
           buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split("\n\n");
-          buffer = events.pop() || "";
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
 
           for (const event of events) {
-            for (const line of event.split("\n")) {
+            for (const line of event.split('\n')) {
               const chunk = parseSseLine(line);
               if (chunk) {
                 // Handle error event
-                if (chunk.type === "error" || chunk.error) {
-                  throw new Error(chunk.error || "Unknown error");
+                if (chunk.type === 'error' || chunk.error) {
+                  throw new Error(chunk.error || 'Unknown error');
                 }
 
                 // Handle metadata event (analysisId, documentName)
-                if (chunk.type === "metadata") {
+                if (chunk.type === 'metadata') {
                   if (chunk.analysisId) {
                     updateDocument(documentId, {
                       analysisId: chunk.analysisId,
                     });
-                    console.log(
-                      "[useAiSummary] Analysis ID:",
-                      chunk.analysisId,
-                    );
+                    console.log('[useAiSummary] Analysis ID:', chunk.analysisId);
                   }
                   continue;
                 }
 
                 // Handle done event (analysis complete)
-                if (chunk.type === "done" || chunk.done) {
+                if (chunk.type === 'done' || chunk.done) {
                   const updates: Partial<DocumentSummaryState> = {
-                    status: "complete",
+                    status: 'complete',
                     summary: accumulatedSummary,
                   };
 
@@ -440,7 +404,7 @@ export const useAiSummary = (
 
                   updateDocument(documentId, updates);
                   activeStreamsRef.current.delete(documentId);
-                  console.log("[useAiSummary] Analysis complete:", {
+                  console.log('[useAiSummary] Analysis complete:', {
                     analysisId: chunk.analysisId,
                     partialStorage: chunk.partialStorage,
                     storageMessage: chunk.storageMessage,
@@ -449,8 +413,8 @@ export const useAiSummary = (
                 }
 
                 // Handle streaming text content (type="chunk")
-                if (chunk.type === "chunk" || chunk.content) {
-                  accumulatedSummary += chunk.content || "";
+                if (chunk.type === 'chunk' || chunk.content) {
+                  accumulatedSummary += chunk.content || '';
                   updateDocument(documentId, { summary: accumulatedSummary });
                 }
               }
@@ -458,14 +422,14 @@ export const useAiSummary = (
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (err instanceof Error && err.name === 'AbortError') {
           // Aborted - don't update to error
           return;
         }
 
         updateDocument(documentId, {
-          status: "error",
-          error: err instanceof Error ? err.message : "Unknown error",
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Unknown error',
         });
       } finally {
         activeStreamsRef.current.delete(documentId);
@@ -473,13 +437,7 @@ export const useAiSummary = (
         processQueue();
       }
     },
-    [
-      apiBaseUrl,
-      getToken,
-      updateDocument,
-      onAnalysisComplete,
-      onSummaryComplete,
-    ],
+    [apiBaseUrl, getToken, updateDocument, onAnalysisComplete, onSummaryComplete]
   );
 
   /**
@@ -494,7 +452,7 @@ export const useAiSummary = (
     }
 
     const toProcess = pendingQueueRef.current.splice(0, availableSlots);
-    toProcess.forEach((doc) => streamDocument(doc));
+    toProcess.forEach(doc => streamDocument(doc));
   }, [maxConcurrent, streamDocument]);
 
   /**
@@ -502,21 +460,16 @@ export const useAiSummary = (
    */
   const addDocuments = useCallback(
     (docs: SummaryDocument[]) => {
-      console.log(
-        "[useAiSummary] addDocuments called with:",
-        docs.length,
-        "documents",
-        docs,
-      );
+      console.log('[useAiSummary] addDocuments called with:', docs.length, 'documents', docs);
 
       // Add to document map
-      docs.forEach((doc) => documentMapRef.current.set(doc.documentId, doc));
+      docs.forEach(doc => documentMapRef.current.set(doc.documentId, doc));
 
       // Create initial states
-      const newStates: DocumentSummaryState[] = docs.map((doc) => ({
+      const newStates: DocumentSummaryState[] = docs.map(doc => ({
         documentId: doc.documentId,
         fileName: doc.fileName,
-        status: "pending" as SummaryStatus,
+        status: 'pending' as SummaryStatus,
         summary: undefined,
         error: undefined,
         tldr: undefined,
@@ -529,7 +482,7 @@ export const useAiSummary = (
         storageMessage: undefined,
       }));
 
-      setDocuments((prev) => [...prev, ...newStates]);
+      setDocuments(prev => [...prev, ...newStates]);
 
       // Add to pending queue
       pendingQueueRef.current.push(...docs);
@@ -540,7 +493,7 @@ export const useAiSummary = (
         setTimeout(() => processQueue(), 0);
       }
     },
-    [autoStart, processQueue],
+    [autoStart, processQueue]
   );
 
   /**
@@ -560,7 +513,7 @@ export const useAiSummary = (
 
       // Reset status to pending and clear all fields
       updateDocument(documentId, {
-        status: "pending",
+        status: 'pending',
         summary: undefined,
         error: undefined,
         tldr: undefined,
@@ -577,7 +530,7 @@ export const useAiSummary = (
       pendingQueueRef.current.push(doc);
       processQueue();
     },
-    [updateDocument, processQueue],
+    [updateDocument, processQueue]
   );
 
   /**
@@ -587,7 +540,7 @@ export const useAiSummary = (
    */
   const enqueueIncomplete = useCallback(async () => {
     console.warn(
-      "[useAiSummary] enqueueIncomplete is deprecated. Background AI analysis has been removed. Users must trigger analysis manually.",
+      '[useAiSummary] enqueueIncomplete is deprecated. Background AI analysis has been removed. Users must trigger analysis manually.'
     );
     // No-op: Background job processing has been removed per ARCHITECTURE-CHANGES.md
     // The DocumentIntelligenceService and enqueue-batch endpoint no longer exist
@@ -622,18 +575,11 @@ export const useAiSummary = (
   }, []);
 
   // Computed values
-  const isProcessing = documents.some(
-    (d) => d.status === "streaming" || d.status === "pending",
-  );
-  const completedCount = documents.filter(
-    (d) => d.status === "complete",
-  ).length;
-  const errorCount = documents.filter((d) => d.status === "error").length;
+  const isProcessing = documents.some(d => d.status === 'streaming' || d.status === 'pending');
+  const completedCount = documents.filter(d => d.status === 'complete').length;
+  const errorCount = documents.filter(d => d.status === 'error').length;
   const hasIncomplete = documents.some(
-    (d) =>
-      d.status !== "complete" &&
-      d.status !== "skipped" &&
-      d.status !== "not-supported",
+    d => d.status !== 'complete' && d.status !== 'skipped' && d.status !== 'not-supported'
   );
 
   return {

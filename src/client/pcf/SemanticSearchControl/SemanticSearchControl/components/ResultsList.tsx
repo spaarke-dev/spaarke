@@ -8,8 +8,8 @@
  * @see spec.md for DOM cap and infinite scroll rules
  */
 
-import * as React from "react";
-import { useCallback, useMemo, useState } from "react";
+import * as React from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,23 +21,23 @@ import {
   PopoverTrigger,
   PopoverSurface,
   Tooltip,
-} from "@fluentui/react-components";
-import { ArrowClockwise20Regular, Info20Regular } from "@fluentui/react-icons";
-import { IResultsListProps, SearchResult } from "../types";
-import { ResultCard } from "./ResultCard";
-import { useInfiniteScroll } from "../hooks";
+} from '@fluentui/react-components';
+import { ArrowClockwise20Regular, Info20Regular } from '@fluentui/react-icons';
+import { IResultsListProps, SearchResult } from '../types';
+import { ResultCard } from './ResultCard';
+import { useInfiniteScroll } from '../hooks';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    overflow: 'hidden',
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: tokens.spacingHorizontalM,
     paddingBottom: tokens.spacingVerticalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -48,44 +48,44 @@ const useStyles = makeStyles({
   },
   scrollContainer: {
     flex: 1,
-    overflowY: "auto",
+    overflowY: 'auto',
     padding: tokens.spacingHorizontalM,
   },
   resultsList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   sentinel: {
-    height: "1px",
-    width: "100%",
+    height: '1px',
+    width: '100%',
   },
   loadingMore: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: tokens.spacingVerticalM,
     gap: tokens.spacingHorizontalS,
   },
   showMoreLink: {
-    display: "flex",
-    justifyContent: "center",
+    display: 'flex',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalM,
   },
   domCapMessage: {
     padding: tokens.spacingVerticalM,
-    textAlign: "center" as const,
+    textAlign: 'center' as const,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
   },
   infoButton: {
-    minWidth: "auto",
-    padding: "0px",
+    minWidth: 'auto',
+    padding: '0px',
   },
   infoPopover: {
-    maxWidth: "320px",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '320px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   infoHeading: {
@@ -150,7 +150,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
   const thresholdDecimal = threshold / 100;
   const filteredResults = useMemo(() => {
     if (threshold <= 0) return results;
-    return results.filter((r) => r.combinedScore >= thresholdDecimal);
+    return results.filter(r => r.combinedScore >= thresholdDecimal);
   }, [results, threshold, thresholdDecimal]);
 
   // Check if DOM cap reached
@@ -163,7 +163,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
     hasMore: infiniteScrollEnabled && hasMore && !isDomCapReached,
     isLoading: isLoading || isLoadingMore,
     threshold: 0.1,
-    rootMargin: "100px",
+    rootMargin: '100px',
   });
 
   // Handle "Show more" click — load next page and enable infinite scroll
@@ -177,8 +177,8 @@ export const ResultsList: React.FC<IResultsListProps> = ({
 
   // Format result count message
   const getResultCountMessage = () => {
-    if (isLoading) return "Searching...";
-    if (totalCount === 0) return "No results";
+    if (isLoading) return 'Searching...';
+    if (totalCount === 0) return 'No results';
     if (hiddenByThreshold > 0) {
       return `${filteredResults.length} of ${totalCount} results (${hiddenByThreshold} below ${threshold}% threshold)`;
     }
@@ -186,63 +186,40 @@ export const ResultsList: React.FC<IResultsListProps> = ({
       return `Showing ${displayedCount} of ${totalCount} results`;
     }
     if (filteredResults.length === totalCount) {
-      return `${totalCount} result${totalCount === 1 ? "" : "s"}`;
+      return `${totalCount} result${totalCount === 1 ? '' : 's'}`;
     }
     return `Showing ${filteredResults.length} of ${totalCount} results`;
   };
 
   // Create stable callbacks for result card
-  const handleResultClick = useCallback(
-    (result: SearchResult) => () => onResultClick(result),
-    [onResultClick],
-  );
+  const handleResultClick = useCallback((result: SearchResult) => () => onResultClick(result), [onResultClick]);
 
   const handleOpenFile = useCallback(
-    (result: SearchResult) => (mode: "web" | "desktop") =>
-      onOpenFile(result, mode),
-    [onOpenFile],
+    (result: SearchResult) => (mode: 'web' | 'desktop') => onOpenFile(result, mode),
+    [onOpenFile]
   );
 
   const handleOpenRecord = useCallback(
-    (result: SearchResult) => (inModal: boolean) =>
-      onOpenRecord(result, inModal),
-    [onOpenRecord],
+    (result: SearchResult) => (inModal: boolean) => onOpenRecord(result, inModal),
+    [onOpenRecord]
   );
 
-  const handleFindSimilar = useCallback(
-    (result: SearchResult) => () => onFindSimilar(result),
-    [onFindSimilar],
-  );
+  const handleFindSimilar = useCallback((result: SearchResult) => () => onFindSimilar(result), [onFindSimilar]);
 
-  const handlePreview = useCallback(
-    (result: SearchResult) => () => onPreview(result),
-    [onPreview],
-  );
+  const handlePreview = useCallback((result: SearchResult) => () => onPreview(result), [onPreview]);
 
-  const handleSummary = useCallback(
-    (result: SearchResult) => () => onSummary(result),
-    [onSummary],
-  );
+  const handleSummary = useCallback((result: SearchResult) => () => onSummary(result), [onSummary]);
 
-  const handleEmailDocument = useCallback(
-    (result: SearchResult) => () => onEmailDocument(result),
-    [onEmailDocument],
-  );
+  const handleEmailDocument = useCallback((result: SearchResult) => () => onEmailDocument(result), [onEmailDocument]);
 
-  const handleCopyLink = useCallback(
-    (result: SearchResult) => () => onCopyLink(result),
-    [onCopyLink],
-  );
+  const handleCopyLink = useCallback((result: SearchResult) => () => onCopyLink(result), [onCopyLink]);
 
   const handleToggleWorkspace = useCallback(
     (result: SearchResult) => () => onToggleWorkspace(result),
-    [onToggleWorkspace],
+    [onToggleWorkspace]
   );
 
-  const getIsInWorkspace = useCallback(
-    (result: SearchResult) => isInWorkspace(result),
-    [isInWorkspace],
-  );
+  const getIsInWorkspace = useCallback((result: SearchResult) => isInWorkspace(result), [isInWorkspace]);
 
   return (
     <div className={styles.container}>
@@ -251,8 +228,8 @@ export const ResultsList: React.FC<IResultsListProps> = ({
         <Text className={styles.resultCount}>{getResultCountMessage()}</Text>
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
+            display: 'flex',
+            alignItems: 'center',
             gap: tokens.spacingHorizontalS,
           }}
         >
@@ -284,37 +261,28 @@ export const ResultsList: React.FC<IResultsListProps> = ({
               </Tooltip>
             </PopoverTrigger>
             <PopoverSurface className={styles.infoPopover}>
-              <Text className={styles.infoHeading}>
-                How Semantic Search Works
-              </Text>
+              <Text className={styles.infoHeading}>How Semantic Search Works</Text>
               <Text className={styles.infoText}>
-                Semantic search finds documents by <strong>meaning</strong>, not
-                just keywords. Your query is converted to a mathematical
-                representation of its concept, then matched against document
-                content.
+                Semantic search finds documents by <strong>meaning</strong>, not just keywords. Your query is converted
+                to a mathematical representation of its concept, then matched against document content.
               </Text>
               <Text className={styles.infoHeading}>Highlighted Text</Text>
               <Text className={styles.infoText}>
-                The yellow highlighted passages show the most{" "}
-                <strong>semantically relevant</strong> section of each document.
-                These may not contain your exact search words — they represent
-                passages the AI identified as most related to your query{"'"}s
-                meaning.
+                The yellow highlighted passages show the most <strong>semantically relevant</strong> section of each
+                document. These may not contain your exact search words — they represent passages the AI identified as
+                most related to your query{"'"}s meaning.
               </Text>
               <Text className={styles.infoHeading}>Similarity Score</Text>
               <Text className={styles.infoText}>
-                The percentage badge (e.g., 45%) indicates how closely a
-                document{"'"}s content matches your query{"'"}s meaning. Higher
-                = more relevant. Use the <strong>Threshold</strong> slider to
-                hide low-scoring results.
+                The percentage badge (e.g., 45%) indicates how closely a document{"'"}s content matches your query{"'"}s
+                meaning. Higher = more relevant. Use the <strong>Threshold</strong> slider to hide low-scoring results.
               </Text>
               <Text className={styles.infoHeading}>Search Modes</Text>
               <Text className={styles.infoText}>
-                <strong>Hybrid</strong> (default): Combines meaning-based and
-                keyword search for best overall results.{" "}
-                <strong>Concept Only</strong>: Pure meaning-based search — good
-                for abstract queries. <strong>Keyword Only</strong>: Traditional
-                exact-word matching — good for specific terms or clause numbers.
+                <strong>Hybrid</strong> (default): Combines meaning-based and keyword search for best overall results.{' '}
+                <strong>Concept Only</strong>: Pure meaning-based search — good for abstract queries.{' '}
+                <strong>Keyword Only</strong>: Traditional exact-word matching — good for specific terms or clause
+                numbers.
               </Text>
             </PopoverSurface>
           </Popover>
@@ -347,8 +315,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
           {isDomCapReached && totalCount > DOM_CAP && (
             <div className={styles.domCapMessage}>
               <Text size={200}>
-                Showing first {DOM_CAP} of {totalCount} results.{" "}
-                <Link onClick={onViewAll}>View all →</Link>
+                Showing first {DOM_CAP} of {totalCount} results. <Link onClick={onViewAll}>View all →</Link>
               </Text>
             </div>
           )}
@@ -362,24 +329,18 @@ export const ResultsList: React.FC<IResultsListProps> = ({
           )}
 
           {/* Show more link (before infinite scroll is enabled) */}
-          {hasMore &&
-            !isDomCapReached &&
-            !isLoadingMore &&
-            !infiniteScrollEnabled && (
-              <div className={styles.showMoreLink}>
-                <Link onClick={handleShowMore}>
-                  Show more results ({filteredResults.length} of {totalCount})
-                </Link>
-              </div>
-            )}
+          {hasMore && !isDomCapReached && !isLoadingMore && !infiniteScrollEnabled && (
+            <div className={styles.showMoreLink}>
+              <Link onClick={handleShowMore}>
+                Show more results ({filteredResults.length} of {totalCount})
+              </Link>
+            </div>
+          )}
 
           {/* Sentinel element for intersection observer (after Show more clicked) */}
-          {hasMore &&
-            !isDomCapReached &&
-            !isLoadingMore &&
-            infiniteScrollEnabled && (
-              <div ref={sentinelRef} className={styles.sentinel} />
-            )}
+          {hasMore && !isDomCapReached && !isLoadingMore && infiniteScrollEnabled && (
+            <div ref={sentinelRef} className={styles.sentinel} />
+          )}
         </div>
       </div>
     </div>

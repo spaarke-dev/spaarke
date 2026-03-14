@@ -11,23 +11,10 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Input,
-  Label,
-  Textarea,
-  Dropdown,
-  Option,
-} from "@fluentui/react-components";
-import type {
-  DropdownProps,
-  OptionOnSelectData,
-  SelectionEvents,
-} from "@fluentui/react-components";
-import type { NodeFormProps } from "../../types/forms";
+import { useCallback, useMemo, memo } from 'react';
+import { makeStyles, tokens, Text, Input, Label, Textarea, Dropdown, Option } from '@fluentui/react-components';
+import type { DropdownProps, OptionOnSelectData, SelectionEvents } from '@fluentui/react-components';
+import type { NodeFormProps } from '../../types/forms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -35,13 +22,13 @@ import type { NodeFormProps } from "../../types/forms";
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -49,7 +36,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   bodyArea: {
-    minHeight: "140px",
+    minHeight: '140px',
   },
 });
 
@@ -57,7 +44,7 @@ const useStyles = makeStyles({
 // Config shape
 // ---------------------------------------------------------------------------
 
-const IMPORTANCE_LEVELS = ["Low", "Normal", "High"] as const;
+const IMPORTANCE_LEVELS = ['Low', 'Normal', 'High'] as const;
 type ImportanceLevel = (typeof IMPORTANCE_LEVELS)[number];
 
 interface SendEmailConfig {
@@ -69,11 +56,11 @@ interface SendEmailConfig {
 }
 
 const DEFAULT_CONFIG: SendEmailConfig = {
-  to: "",
-  cc: "",
-  subject: "",
-  body: "",
-  importance: "Normal",
+  to: '',
+  cc: '',
+  subject: '',
+  body: '',
+  importance: 'Normal',
 };
 
 // ---------------------------------------------------------------------------
@@ -84,16 +71,11 @@ function parseConfig(json: string): SendEmailConfig {
   try {
     const parsed = JSON.parse(json) as Partial<SendEmailConfig>;
     return {
-      to: typeof parsed.to === "string" ? parsed.to : DEFAULT_CONFIG.to,
-      cc: typeof parsed.cc === "string" ? parsed.cc : DEFAULT_CONFIG.cc,
-      subject:
-        typeof parsed.subject === "string"
-          ? parsed.subject
-          : DEFAULT_CONFIG.subject,
-      body: typeof parsed.body === "string" ? parsed.body : DEFAULT_CONFIG.body,
-      importance: IMPORTANCE_LEVELS.includes(
-        parsed.importance as ImportanceLevel,
-      )
+      to: typeof parsed.to === 'string' ? parsed.to : DEFAULT_CONFIG.to,
+      cc: typeof parsed.cc === 'string' ? parsed.cc : DEFAULT_CONFIG.cc,
+      subject: typeof parsed.subject === 'string' ? parsed.subject : DEFAULT_CONFIG.subject,
+      body: typeof parsed.body === 'string' ? parsed.body : DEFAULT_CONFIG.body,
+      importance: IMPORTANCE_LEVELS.includes(parsed.importance as ImportanceLevel)
         ? (parsed.importance as ImportanceLevel)
         : DEFAULT_CONFIG.importance,
     };
@@ -110,11 +92,7 @@ function serializeConfig(config: SendEmailConfig): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export const SendEmailForm = memo(function SendEmailForm({
-  nodeId,
-  configJson,
-  onConfigChange,
-}: NodeFormProps) {
+export const SendEmailForm = memo(function SendEmailForm({ nodeId, configJson, onConfigChange }: NodeFormProps) {
   const styles = useStyles();
   const config = useMemo(() => parseConfig(configJson), [configJson]);
 
@@ -122,7 +100,7 @@ export const SendEmailForm = memo(function SendEmailForm({
     (patch: Partial<SendEmailConfig>) => {
       onConfigChange(serializeConfig({ ...config, ...patch }));
     },
-    [config, onConfigChange],
+    [config, onConfigChange]
   );
 
   // -- Handlers --
@@ -131,37 +109,37 @@ export const SendEmailForm = memo(function SendEmailForm({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ to: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleCcChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ cc: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleSubjectChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ subject: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleBodyChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       update({ body: e.target.value });
     },
-    [update],
+    [update]
   );
 
-  const handleImportanceChange: DropdownProps["onOptionSelect"] = useCallback(
+  const handleImportanceChange: DropdownProps['onOptionSelect'] = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       if (data.optionValue) {
         update({ importance: data.optionValue as ImportanceLevel });
       }
     },
-    [update],
+    [update]
   );
 
   // -- Render --
@@ -180,9 +158,7 @@ export const SendEmailForm = memo(function SendEmailForm({
           onChange={handleToChange}
           placeholder="recipient@example.com or {{node.output.email}}"
         />
-        <Text className={styles.fieldHint}>
-          Supports template variables: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.fieldHint}>Supports template variables: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* CC */}
@@ -197,9 +173,7 @@ export const SendEmailForm = memo(function SendEmailForm({
           onChange={handleCcChange}
           placeholder="cc@example.com (optional)"
         />
-        <Text className={styles.fieldHint}>
-          Optional. Separate multiple addresses with semicolons.
-        </Text>
+        <Text className={styles.fieldHint}>Optional. Separate multiple addresses with semicolons.</Text>
       </div>
 
       {/* Subject */}
@@ -214,9 +188,7 @@ export const SendEmailForm = memo(function SendEmailForm({
           onChange={handleSubjectChange}
           placeholder="e.g., Report: {{analysis.output.title}}"
         />
-        <Text className={styles.fieldHint}>
-          Supports template variables: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.fieldHint}>Supports template variables: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* Body */}
@@ -230,14 +202,10 @@ export const SendEmailForm = memo(function SendEmailForm({
           className={styles.bodyArea}
           value={config.body}
           onChange={handleBodyChange}
-          placeholder={
-            "Hello,\n\nPlease find the results below:\n{{completion.output.result}}\n\nRegards"
-          }
+          placeholder={'Hello,\n\nPlease find the results below:\n{{completion.output.result}}\n\nRegards'}
           resize="vertical"
         />
-        <Text className={styles.fieldHint}>
-          Supports template variables: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.fieldHint}>Supports template variables: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* Importance */}
@@ -252,7 +220,7 @@ export const SendEmailForm = memo(function SendEmailForm({
           selectedOptions={[config.importance]}
           onOptionSelect={handleImportanceChange}
         >
-          {IMPORTANCE_LEVELS.map((level) => (
+          {IMPORTANCE_LEVELS.map(level => (
             <Option key={level} value={level}>
               {level}
             </Option>

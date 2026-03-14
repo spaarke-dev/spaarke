@@ -7,7 +7,7 @@
  * @version 2.7.0
  */
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -59,10 +59,7 @@ interface TemplateState {
   // Actions
   setApiBaseUrl: (url: string) => void;
   fetchTemplates: (page?: number, nameFilter?: string) => Promise<void>;
-  clonePlaybook: (
-    templateId: string,
-    newName?: string,
-  ) => Promise<ClonedPlaybook>;
+  clonePlaybook: (templateId: string, newName?: string) => Promise<ClonedPlaybook>;
   clearError: () => void;
 }
 
@@ -70,26 +67,21 @@ interface TemplateState {
 // API Client Helper
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchWithAuth(
-  url: string,
-  options: RequestInit = {},
-): Promise<Response> {
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   // Get token from MSAL if available (for authenticated API calls)
   // For now, use cookie-based auth which is handled automatically
   const response = await fetch(url, {
     ...options,
-    credentials: "include",
+    credentials: 'include',
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       ...options.headers,
     },
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      errorText || `HTTP ${response.status}: ${response.statusText}`,
-    );
+    throw new Error(errorText || `HTTP ${response.status}: ${response.statusText}`);
   }
 
   return response;
@@ -111,11 +103,11 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   isCloning: false,
   cloneError: null,
 
-  apiBaseUrl: "",
+  apiBaseUrl: '',
 
   // Set the API base URL (called from PCF context)
   setApiBaseUrl: (url: string) => {
-    set({ apiBaseUrl: url.replace(/\/$/, "") }); // Remove trailing slash
+    set({ apiBaseUrl: url.replace(/\/$/, '') }); // Remove trailing slash
   },
 
   // Fetch templates from the API
@@ -123,8 +115,8 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const { apiBaseUrl, pageSize } = get();
 
     if (!apiBaseUrl) {
-      console.warn("[TemplateStore] API base URL not set");
-      set({ error: "API configuration error" });
+      console.warn('[TemplateStore] API base URL not set');
+      set({ error: 'API configuration error' });
       return;
     }
 
@@ -136,12 +128,12 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         url += `&nameFilter=${encodeURIComponent(nameFilter)}`;
       }
 
-      console.info("[TemplateStore] Fetching templates", { url });
+      console.info('[TemplateStore] Fetching templates', { url });
 
       const response = await fetchWithAuth(url);
       const data: TemplateListResponse = await response.json();
 
-      console.info("[TemplateStore] Templates loaded", {
+      console.info('[TemplateStore] Templates loaded', {
         count: data.items.length,
         totalCount: data.totalCount,
       });
@@ -153,42 +145,38 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         isLoading: false,
       });
     } catch (error) {
-      console.error("[TemplateStore] Failed to fetch templates", error);
+      console.error('[TemplateStore] Failed to fetch templates', error);
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to load templates",
+        error: error instanceof Error ? error.message : 'Failed to load templates',
         isLoading: false,
       });
     }
   },
 
   // Clone a playbook template
-  clonePlaybook: async (
-    templateId: string,
-    newName?: string,
-  ): Promise<ClonedPlaybook> => {
+  clonePlaybook: async (templateId: string, newName?: string): Promise<ClonedPlaybook> => {
     const { apiBaseUrl } = get();
 
     if (!apiBaseUrl) {
-      throw new Error("API configuration error");
+      throw new Error('API configuration error');
     }
 
     set({ isCloning: true, cloneError: null });
 
     try {
       const url = `${apiBaseUrl}/api/ai/playbooks/${templateId}/clone`;
-      const body = newName ? JSON.stringify({ newName }) : "{}";
+      const body = newName ? JSON.stringify({ newName }) : '{}';
 
-      console.info("[TemplateStore] Cloning playbook", { templateId, newName });
+      console.info('[TemplateStore] Cloning playbook', { templateId, newName });
 
       const response = await fetchWithAuth(url, {
-        method: "POST",
+        method: 'POST',
         body,
       });
 
       const clonedPlaybook = await response.json();
 
-      console.info("[TemplateStore] Playbook cloned", {
+      console.info('[TemplateStore] Playbook cloned', {
         originalId: templateId,
         clonedId: clonedPlaybook.id,
         clonedName: clonedPlaybook.name,
@@ -202,9 +190,8 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         description: clonedPlaybook.description,
       };
     } catch (error) {
-      console.error("[TemplateStore] Failed to clone playbook", error);
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to clone playbook";
+      console.error('[TemplateStore] Failed to clone playbook', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to clone playbook';
       set({ cloneError: errorMessage, isCloning: false });
       throw new Error(errorMessage);
     }

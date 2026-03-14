@@ -1,5 +1,5 @@
-import { DriveItem, UploadSession } from "../types";
-import { TokenProvider } from "../auth/TokenProvider";
+import { DriveItem, UploadSession } from '../types';
+import { TokenProvider } from '../auth/TokenProvider';
 
 export class UploadOperation {
   private static readonly CHUNK_SIZE = 320 * 1024; // 320 KB (Microsoft recommended)
@@ -7,7 +7,7 @@ export class UploadOperation {
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
-    private readonly tokenProvider: TokenProvider,
+    private readonly tokenProvider: TokenProvider
   ) {}
 
   /**
@@ -16,7 +16,7 @@ export class UploadOperation {
   public async uploadSmall(
     containerId: string,
     file: File,
-    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal },
+    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal }
   ): Promise<DriveItem> {
     const token = await this.tokenProvider.getToken();
 
@@ -26,15 +26,15 @@ export class UploadOperation {
     const response = await fetch(
       `${this.baseUrl}/api/obo/containers/${containerId}/files/${encodeURIComponent(file.name)}`,
       {
-        method: "PUT",
+        method: 'PUT',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          "Content-Type": "application/octet-stream",
-          "Content-Length": file.size.toString(),
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': file.size.toString(),
         },
         body: file,
         signal: options?.signal ?? AbortSignal.timeout(this.timeout),
-      },
+      }
     );
 
     if (!response.ok) {
@@ -56,7 +56,7 @@ export class UploadOperation {
   public async uploadChunked(
     containerId: string,
     file: File,
-    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal },
+    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal }
   ): Promise<DriveItem> {
     // Step 1: Create upload session
     const session = await this.createUploadSession(containerId, file.name);
@@ -67,23 +67,14 @@ export class UploadOperation {
     while (uploadedBytes < file.size) {
       // Check for cancellation
       if (options?.signal?.aborted) {
-        throw new Error("Upload cancelled");
+        throw new Error('Upload cancelled');
       }
 
       const chunkStart = uploadedBytes;
-      const chunkEnd = Math.min(
-        chunkStart + UploadOperation.CHUNK_SIZE,
-        file.size,
-      );
+      const chunkEnd = Math.min(chunkStart + UploadOperation.CHUNK_SIZE, file.size);
       const chunk = file.slice(chunkStart, chunkEnd);
 
-      const result = await this.uploadChunk(
-        session,
-        chunk,
-        chunkStart,
-        chunkEnd,
-        file.size,
-      );
+      const result = await this.uploadChunk(session, chunk, chunkStart, chunkEnd, file.size);
 
       uploadedBytes = chunkEnd;
 
@@ -97,25 +88,19 @@ export class UploadOperation {
       }
     }
 
-    throw new Error("Upload completed but no item returned");
+    throw new Error('Upload completed but no item returned');
   }
 
-  private async createUploadSession(
-    containerId: string,
-    fileName: string,
-  ): Promise<UploadSession> {
+  private async createUploadSession(containerId: string, fileName: string): Promise<UploadSession> {
     const token = await this.tokenProvider.getToken();
 
     // Get drive ID first
-    const driveResponse = await fetch(
-      `${this.baseUrl}/api/obo/containers/${containerId}/drive`,
-      {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      },
-    );
+    const driveResponse = await fetch(`${this.baseUrl}/api/obo/containers/${containerId}/drive`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
 
     if (!driveResponse.ok) {
-      throw new Error("Failed to get container drive");
+      throw new Error('Failed to get container drive');
     }
 
     const drive = await driveResponse.json();
@@ -124,13 +109,13 @@ export class UploadOperation {
     const response = await fetch(
       `${this.baseUrl}/api/obo/drives/${drive.id}/upload-session?path=/${encodeURIComponent(fileName)}&conflictBehavior=rename`,
       {
-        method: "POST",
+        method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
-      },
+      }
     );
 
     if (!response.ok) {
-      throw new Error("Failed to create upload session");
+      throw new Error('Failed to create upload session');
     }
 
     return await response.json();
@@ -141,13 +126,13 @@ export class UploadOperation {
     chunk: Blob,
     start: number,
     end: number,
-    totalSize: number,
+    totalSize: number
   ): Promise<{ completedItem?: DriveItem }> {
     const response = await fetch(session.uploadUrl, {
-      method: "PUT",
+      method: 'PUT',
       headers: {
-        "Content-Range": `bytes ${start}-${end - 1}/${totalSize}`,
-        "Content-Length": chunk.size.toString(),
+        'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
+        'Content-Length': chunk.size.toString(),
       },
       body: chunk,
     });

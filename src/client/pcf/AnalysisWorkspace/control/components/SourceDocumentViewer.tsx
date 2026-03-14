@@ -7,23 +7,15 @@
  * Task 055: Integrate SpeFileViewer for Source Preview
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Spinner,
-  Text,
-  MessageBar,
-  MessageBarBody,
-  Button,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, Spinner, Text, MessageBar, MessageBarBody, Button } from '@fluentui/react-components';
 import {
   DocumentRegular,
   ArrowClockwiseRegular,
   OpenRegular,
   FullScreenMaximize24Regular,
-} from "@fluentui/react-icons";
-import { logInfo, logError } from "../utils/logger";
+} from '@fluentui/react-icons';
+import { logInfo, logError } from '../utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -56,81 +48,81 @@ interface IDocumentInfo {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
   },
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     padding: tokens.spacingHorizontalL,
     gap: tokens.spacingVerticalM,
   },
   emptyContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
     gap: tokens.spacingVerticalM,
   },
   emptyIcon: {
-    fontSize: "48px",
+    fontSize: '48px',
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground2,
   },
   toolbarInfo: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   toolbarFileName: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap" as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
   },
   toolbarActions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   iframeContainer: {
     flex: 1,
-    position: "relative" as const,
-    overflow: "hidden",
+    position: 'relative' as const,
+    overflow: 'hidden',
   },
   iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
+    width: '100%',
+    height: '100%',
+    border: 'none',
   },
   iframeLoading: {
-    position: "absolute" as const,
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
+    position: 'absolute' as const,
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
   },
 });
 
@@ -159,9 +151,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
   const [isIframeLoading, setIsIframeLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
-  const [documentInfo, setDocumentInfo] = React.useState<IDocumentInfo | null>(
-    null,
-  );
+  const [documentInfo, setDocumentInfo] = React.useState<IDocumentInfo | null>(null);
 
   // Refs
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -193,7 +183,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
    */
   const loadPreview = async () => {
     if (!documentId) {
-      setError("No document ID provided");
+      setError('No document ID provided');
       return;
     }
 
@@ -201,10 +191,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     setError(null);
     setPreviewUrl(null);
 
-    logInfo(
-      "SourceDocumentViewer",
-      `Loading preview for document: ${documentId}`,
-    );
+    logInfo('SourceDocumentViewer', `Loading preview for document: ${documentId}`);
 
     try {
       // Get access token if auth function provided
@@ -213,47 +200,36 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         try {
           const token = await getAccessToken();
           authHeaders = { Authorization: `Bearer ${token}` };
-          logInfo("SourceDocumentViewer", "Auth token acquired for preview");
+          logInfo('SourceDocumentViewer', 'Auth token acquired for preview');
         } catch (authErr) {
-          logError(
-            "SourceDocumentViewer",
-            "Failed to acquire auth token",
-            authErr,
-          );
-          throw new Error(
-            "Authentication failed. Please refresh and try again.",
-          );
+          logError('SourceDocumentViewer', 'Failed to acquire auth token', authErr);
+          throw new Error('Authentication failed. Please refresh and try again.');
         }
       }
 
       // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
-      const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+      const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, '');
 
       // Call BFF API to get preview URL
-      const response = await fetch(
-        `${normalizedBaseUrl}/api/documents/${documentId}/preview-url`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            ...authHeaders,
-          },
+      const response = await fetch(`${normalizedBaseUrl}/api/documents/${documentId}/preview-url`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...authHeaders,
         },
-      );
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.detail || `HTTP ${response.status}: ${response.statusText}`,
-        );
+        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
 
       setPreviewUrl(data.previewUrl);
       setDocumentInfo({
-        name: data.documentInfo?.name || "Document",
+        name: data.documentInfo?.name || 'Document',
         fileExtension: data.documentInfo?.fileExtension,
         size: data.documentInfo?.size,
       });
@@ -261,18 +237,15 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
 
       // Start timeout for iframe loading
       timeoutRef.current = setTimeout(() => {
-        logError("SourceDocumentViewer", "Iframe load timeout");
+        logError('SourceDocumentViewer', 'Iframe load timeout');
         setIsIframeLoading(false);
-        setError("Document preview timed out. Please try again.");
+        setError('Document preview timed out. Please try again.');
       }, IFRAME_LOAD_TIMEOUT_MS);
 
-      logInfo(
-        "SourceDocumentViewer",
-        `Preview URL received for: ${data.documentInfo?.name}`,
-      );
+      logInfo('SourceDocumentViewer', `Preview URL received for: ${data.documentInfo?.name}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      logError("SourceDocumentViewer", "Failed to load preview", err);
+      logError('SourceDocumentViewer', 'Failed to load preview', err);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -288,7 +261,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
       timeoutRef.current = null;
     }
     setIsIframeLoading(false);
-    logInfo("SourceDocumentViewer", "Iframe loaded successfully");
+    logInfo('SourceDocumentViewer', 'Iframe loaded successfully');
   };
 
   /**
@@ -300,8 +273,8 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
       timeoutRef.current = null;
     }
     setIsIframeLoading(false);
-    setError("Failed to load document preview");
-    logError("SourceDocumentViewer", "Iframe failed to load");
+    setError('Failed to load document preview');
+    logError('SourceDocumentViewer', 'Iframe failed to load');
   };
 
   /**
@@ -316,7 +289,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
    */
   const handleOpenInNewTab = () => {
     if (previewUrl) {
-      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -324,7 +297,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
    * Format file size
    */
   const formatFileSize = (bytes?: number): string => {
-    if (!bytes) return "";
+    if (!bytes) return '';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -385,10 +358,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
               {documentInfo.name}
             </Text>
             {documentInfo.size && (
-              <Text
-                size={200}
-                style={{ color: tokens.colorNeutralForeground3 }}
-              >
+              <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                 ({formatFileSize(documentInfo.size)})
               </Text>
             )}
@@ -435,7 +405,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         {previewUrl && (
           <iframe
             className={styles.iframe}
-            style={{ visibility: isIframeLoading ? "hidden" : "visible" }}
+            style={{ visibility: isIframeLoading ? 'hidden' : 'visible' }}
             src={previewUrl}
             title="Document Preview"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"

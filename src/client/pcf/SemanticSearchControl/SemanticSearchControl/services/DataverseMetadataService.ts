@@ -7,7 +7,7 @@
  * @see spec.md for filter requirements
  */
 
-import { FilterOption } from "../types";
+import { FilterOption } from '../types';
 
 /**
  * Xrm.WebApi response types
@@ -42,16 +42,16 @@ const CACHE_DURATION_MS = 5 * 60 * 1000;
  * Static file type options (common document types)
  */
 const STATIC_FILE_TYPES: FilterOption[] = [
-  { key: "pdf", label: "PDF" },
-  { key: "doc", label: "Word (DOC)" },
-  { key: "docx", label: "Word (DOCX)" },
-  { key: "xls", label: "Excel (XLS)" },
-  { key: "xlsx", label: "Excel (XLSX)" },
-  { key: "ppt", label: "PowerPoint (PPT)" },
-  { key: "pptx", label: "PowerPoint (PPTX)" },
-  { key: "txt", label: "Text (TXT)" },
-  { key: "msg", label: "Email (MSG)" },
-  { key: "eml", label: "Email (EML)" },
+  { key: 'pdf', label: 'PDF' },
+  { key: 'doc', label: 'Word (DOC)' },
+  { key: 'docx', label: 'Word (DOCX)' },
+  { key: 'xls', label: 'Excel (XLS)' },
+  { key: 'xlsx', label: 'Excel (XLSX)' },
+  { key: 'ppt', label: 'PowerPoint (PPT)' },
+  { key: 'pptx', label: 'PowerPoint (PPTX)' },
+  { key: 'txt', label: 'Text (TXT)' },
+  { key: 'msg', label: 'Email (MSG)' },
+  { key: 'eml', label: 'Email (EML)' },
 ];
 
 /**
@@ -66,8 +66,8 @@ export class DataverseMetadataService {
    * @param attributeName - Attribute logical name (default: sprk_documenttype)
    */
   async getDocumentTypeOptions(
-    entityName = "sprk_document",
-    attributeName = "sprk_documenttype",
+    entityName = 'sprk_document',
+    attributeName = 'sprk_documenttype'
   ): Promise<FilterOption[]> {
     return this.getOptionSetValues(entityName, attributeName);
   }
@@ -79,8 +79,8 @@ export class DataverseMetadataService {
    * @param nameAttribute - Attribute containing the display name (default: sprk_mattertypename)
    */
   async getMatterTypeOptions(
-    entitySetName = "sprk_mattertype_refs",
-    nameAttribute = "sprk_mattertypename",
+    entitySetName = 'sprk_mattertype_refs',
+    nameAttribute = 'sprk_mattertypename'
   ): Promise<FilterOption[]> {
     return this.getLookupOptions(entitySetName, nameAttribute);
   }
@@ -96,10 +96,7 @@ export class DataverseMetadataService {
   /**
    * Fetch optionset values from Dataverse
    */
-  private async getOptionSetValues(
-    entityName: string,
-    attributeName: string,
-  ): Promise<FilterOption[]> {
+  private async getOptionSetValues(entityName: string, attributeName: string): Promise<FilterOption[]> {
     const cacheKey = `${entityName}.${attributeName}`;
 
     // Check cache
@@ -110,19 +107,16 @@ export class DataverseMetadataService {
 
     try {
       // Check if Xrm is available
-      if (typeof Xrm === "undefined" || !Xrm.WebApi) {
-        console.warn("Xrm.WebApi not available, returning empty options");
+      if (typeof Xrm === 'undefined' || !Xrm.WebApi) {
+        console.warn('Xrm.WebApi not available, returning empty options');
         return [];
       }
 
       // Fetch optionset metadata
-      const metadata = await this.fetchOptionSetMetadata(
-        entityName,
-        attributeName,
-      );
+      const metadata = await this.fetchOptionSetMetadata(entityName, attributeName);
 
       // Map to FilterOption format
-      const options: FilterOption[] = metadata.Options.map((opt) => ({
+      const options: FilterOption[] = metadata.Options.map(opt => ({
         key: opt.Value.toString(),
         label: opt.Label.UserLocalizedLabel?.Label ?? `Value ${opt.Value}`,
       }));
@@ -138,10 +132,7 @@ export class DataverseMetadataService {
 
       return options;
     } catch (error) {
-      console.error(
-        `Failed to fetch optionset ${entityName}.${attributeName}:`,
-        error,
-      );
+      console.error(`Failed to fetch optionset ${entityName}.${attributeName}:`, error);
 
       // Return cached value if available (even if stale)
       if (cached) {
@@ -157,10 +148,7 @@ export class DataverseMetadataService {
    * Fetch lookup entity records from Dataverse
    * Used for lookup fields where options come from another entity's records.
    */
-  private async getLookupOptions(
-    entitySetName: string,
-    nameAttribute: string,
-  ): Promise<FilterOption[]> {
+  private async getLookupOptions(entitySetName: string, nameAttribute: string): Promise<FilterOption[]> {
     const cacheKey = `lookup:${entitySetName}`;
 
     // Check cache
@@ -174,18 +162,16 @@ export class DataverseMetadataService {
 
       // Query the lookup target entity for all active records
       // Assumes primary key follows pattern: {entitylogicalname}id
-      const entityLogicalName = entitySetName.endsWith("s")
-        ? entitySetName.slice(0, -1)
-        : entitySetName;
+      const entityLogicalName = entitySetName.endsWith('s') ? entitySetName.slice(0, -1) : entitySetName;
       const primaryKey = `${entityLogicalName}id`;
 
       const queryUrl = `${clientUrl}/api/data/v9.2/${entitySetName}?$select=${primaryKey},${nameAttribute}&$filter=statecode eq 0&$orderby=${nameAttribute} asc`;
 
       const response = await fetch(queryUrl, {
         headers: {
-          Accept: "application/json",
-          "OData-MaxVersion": "4.0",
-          "OData-Version": "4.0",
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
         },
       });
 
@@ -203,16 +189,14 @@ export class DataverseMetadataService {
 
       // Map records to FilterOption format
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const options: FilterOption[] = (data.value || []).map(
-        (record: Record<string, any>) => {
-          const keyValue = record[primaryKey];
-          const nameValue = record[nameAttribute];
-          return {
-            key: typeof keyValue === "string" ? keyValue : "",
-            label: typeof nameValue === "string" ? nameValue : "Unknown",
-          };
-        },
-      );
+      const options: FilterOption[] = (data.value || []).map((record: Record<string, any>) => {
+        const keyValue = record[primaryKey];
+        const nameValue = record[nameAttribute];
+        return {
+          key: typeof keyValue === 'string' ? keyValue : '',
+          label: typeof nameValue === 'string' ? nameValue : 'Unknown',
+        };
+      });
 
       // Cache the result
       this.cache.set(cacheKey, {
@@ -222,10 +206,7 @@ export class DataverseMetadataService {
 
       return options;
     } catch (error) {
-      console.error(
-        `Failed to fetch lookup options from ${entitySetName}:`,
-        error,
-      );
+      console.error(`Failed to fetch lookup options from ${entitySetName}:`, error);
 
       // Return cached value if available (even if stale)
       if (cached) {
@@ -241,10 +222,7 @@ export class DataverseMetadataService {
    * Uses direct fetch to the metadata API since Xrm.WebApi.retrieveMultipleRecords
    * doesn't work with metadata entities like EntityDefinitions.
    */
-  private async fetchOptionSetMetadata(
-    entityName: string,
-    attributeName: string,
-  ): Promise<OptionSetMetadataResponse> {
+  private async fetchOptionSetMetadata(entityName: string, attributeName: string): Promise<OptionSetMetadataResponse> {
     // Go directly to metadata API - Xrm.WebApi doesn't support metadata entities
     return this.fetchMetadataDirectly(entityName, attributeName);
   }
@@ -252,10 +230,7 @@ export class DataverseMetadataService {
   /**
    * Direct fetch of optionset metadata
    */
-  private async fetchMetadataDirectly(
-    entityName: string,
-    attributeName: string,
-  ): Promise<OptionSetMetadataResponse> {
+  private async fetchMetadataDirectly(entityName: string, attributeName: string): Promise<OptionSetMetadataResponse> {
     // Use the Xrm.Utility.getGlobalContext for client URL
     const clientUrl = this.getClientUrl();
 
@@ -263,17 +238,15 @@ export class DataverseMetadataService {
 
     const response = await fetch(metadataUrl, {
       headers: {
-        Accept: "application/json",
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
       },
     });
 
     // Handle 404 gracefully - entity or attribute doesn't exist yet
     if (response.status === 404) {
-      console.info(
-        `Optionset ${entityName}.${attributeName} not found (entity or attribute may not exist yet)`,
-      );
+      console.info(`Optionset ${entityName}.${attributeName} not found (entity or attribute may not exist yet)`);
       return { Options: [] };
     }
 
@@ -301,7 +274,7 @@ export class DataverseMetadataService {
    * Get the Dataverse client URL
    */
   private getClientUrl(): string {
-    if (typeof Xrm !== "undefined" && Xrm.Utility?.getGlobalContext) {
+    if (typeof Xrm !== 'undefined' && Xrm.Utility?.getGlobalContext) {
       return Xrm.Utility.getGlobalContext().getClientUrl();
     }
 

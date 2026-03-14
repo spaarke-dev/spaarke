@@ -14,10 +14,10 @@
  * Task 054: Integrate Monaco Editor for Working Document
  */
 
-import * as React from "react";
-import Editor, { OnMount, OnChange } from "@monaco-editor/react";
-import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
-import { logInfo } from "../utils/logger";
+import * as React from 'react';
+import Editor, { OnMount, OnChange } from '@monaco-editor/react';
+import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
+import { logInfo } from '../utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -44,26 +44,26 @@ export interface IMonacoEditorProps {
 
 const useStyles = makeStyles({
   container: {
-    width: "100%",
-    height: "100%",
-    position: "relative" as const,
+    width: '100%',
+    height: '100%',
+    position: 'relative' as const,
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   placeholder: {
-    position: "absolute" as const,
-    top: "12px",
-    left: "64px", // Account for line numbers
+    position: 'absolute' as const,
+    top: '12px',
+    left: '64px', // Account for line numbers
     color: tokens.colorNeutralForeground3,
-    pointerEvents: "none" as const,
+    pointerEvents: 'none' as const,
     zIndex: 1,
     fontFamily: "Consolas, 'Courier New', monospace",
-    fontSize: "14px",
+    fontSize: '14px',
   },
 });
 
@@ -74,10 +74,10 @@ const useStyles = makeStyles({
 export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
   value,
   onChange,
-  language = "markdown",
+  language = 'markdown',
   readOnly = false,
   isDarkMode = false,
-  placeholder = "Start typing...",
+  placeholder = 'Start typing...',
 }) => {
   const styles = useStyles();
   const [isLoading, setIsLoading] = React.useState(true);
@@ -87,17 +87,16 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     setIsLoading(false);
-    logInfo("MonacoEditor", "Editor mounted");
+    logInfo('MonacoEditor', 'Editor mounted');
 
     // Configure markdown-specific settings
-    monaco.languages.setLanguageConfiguration("markdown", {
-      wordPattern:
-        /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
+    monaco.languages.setLanguageConfiguration('markdown', {
+      wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
     });
 
     // Add custom keyboard shortcuts
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      logInfo("MonacoEditor", "Save shortcut triggered");
+      logInfo('MonacoEditor', 'Save shortcut triggered');
       // Save is handled by parent via auto-save
     });
 
@@ -106,12 +105,12 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
   };
 
   // Handle content changes
-  const handleChange: OnChange = (newValue) => {
-    onChange(newValue || "");
+  const handleChange: OnChange = newValue => {
+    onChange(newValue || '');
   };
 
   // Determine theme
-  const theme = isDarkMode ? "vs-dark" : "vs-light";
+  const theme = isDarkMode ? 'vs-dark' : 'vs-light';
 
   return (
     <div className={styles.container}>
@@ -123,9 +122,7 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
       )}
 
       {/* Placeholder text */}
-      {!isLoading && !value && (
-        <div className={styles.placeholder}>{placeholder}</div>
-      )}
+      {!isLoading && !value && <div className={styles.placeholder}>{placeholder}</div>}
 
       {/* Monaco Editor */}
       <Editor
@@ -143,14 +140,14 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
           automaticLayout: true,
 
           // Text
-          wordWrap: "on",
-          wrappingIndent: "same",
+          wordWrap: 'on',
+          wrappingIndent: 'same',
           fontSize: 14,
           fontFamily: "Consolas, 'Courier New', monospace",
           lineHeight: 1.6,
 
           // Line numbers
-          lineNumbers: "on",
+          lineNumbers: 'on',
           lineNumbersMinChars: 3,
           glyphMargin: false,
           folding: true,
@@ -159,32 +156,32 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
           readOnly: readOnly,
           quickSuggestions: false,
           suggestOnTriggerCharacters: false,
-          acceptSuggestionOnEnter: "off",
+          acceptSuggestionOnEnter: 'off',
           tabSize: 2,
           insertSpaces: true,
 
           // Scrolling
           scrollbar: {
-            vertical: "auto",
-            horizontal: "hidden",
+            vertical: 'auto',
+            horizontal: 'hidden',
             verticalScrollbarSize: 10,
           },
 
           // Selection
           selectionHighlight: true,
-          occurrencesHighlight: "off",
-          renderLineHighlight: "line",
+          occurrencesHighlight: 'off',
+          renderLineHighlight: 'line',
 
           // Formatting
           formatOnPaste: false,
           formatOnType: false,
 
           // Accessibility
-          accessibilitySupport: "auto",
+          accessibilitySupport: 'auto',
 
           // Cursor
-          cursorBlinking: "smooth",
-          cursorSmoothCaretAnimation: "on",
+          cursorBlinking: 'smooth',
+          cursorSmoothCaretAnimation: 'on',
 
           // Padding
           padding: { top: 12, bottom: 12 },

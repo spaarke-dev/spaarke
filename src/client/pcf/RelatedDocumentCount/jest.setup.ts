@@ -3,7 +3,7 @@
  *
  * Extends Jest matchers and sets up global mocks for Dataverse runtime.
  */
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom';
 
 // Mock Xrm global object (Dataverse runtime)
 const mockXrm = {
@@ -12,8 +12,8 @@ const mockXrm = {
   },
   Utility: {
     getGlobalContext: jest.fn().mockReturnValue({
-      getClientUrl: () => "https://test.crm.dynamics.com",
-      getCurrentAppUrl: () => "https://test.crm.dynamics.com/main.aspx",
+      getClientUrl: () => 'https://test.crm.dynamics.com',
+      getCurrentAppUrl: () => 'https://test.crm.dynamics.com/main.aspx',
       authenticateToken: jest.fn().mockResolvedValue(null),
     }),
   },

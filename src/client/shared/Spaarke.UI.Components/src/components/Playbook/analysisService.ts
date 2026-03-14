@@ -9,7 +9,7 @@
 // Global Xrm type declaration — available in Dataverse code page context
 declare const Xrm: any;
 
-import { IAnalysisConfig, ENTITY_NAMES, RELATIONSHIP_NAMES } from "./types";
+import { IAnalysisConfig, ENTITY_NAMES, RELATIONSHIP_NAMES } from './types';
 
 // ---------------------------------------------------------------------------
 // createAnalysis
@@ -22,28 +22,21 @@ import { IAnalysisConfig, ENTITY_NAMES, RELATIONSHIP_NAMES } from "./types";
  * @param config - Analysis configuration containing document, action, playbook, and scope IDs
  * @returns The GUID of the newly created sprk_analysis record
  */
-export async function createAnalysis(
-  webApi: any,
-  config: IAnalysisConfig,
-): Promise<string> {
+export async function createAnalysis(webApi: any, config: IAnalysisConfig): Promise<string> {
   const { documentId, documentName, actionId, playbookId } = config;
 
   const analysisRecord: Record<string, unknown> = {
-    sprk_name: `Analysis - ${documentName || "Document"}`,
-    "sprk_documentid@odata.bind": `/sprk_documents(${documentId})`,
-    "sprk_actionid@odata.bind": `/sprk_analysisactions(${actionId})`,
+    sprk_name: `Analysis - ${documentName || 'Document'}`,
+    'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
+    'sprk_actionid@odata.bind': `/sprk_analysisactions(${actionId})`,
   };
 
   // Playbook lookup is optional
   if (playbookId) {
-    analysisRecord["sprk_Playbook@odata.bind"] =
-      `/sprk_analysisplaybooks(${playbookId})`;
+    analysisRecord['sprk_Playbook@odata.bind'] = `/sprk_analysisplaybooks(${playbookId})`;
   }
 
-  const result = await webApi.createRecord(
-    ENTITY_NAMES.analysis,
-    analysisRecord,
-  );
+  const result = await webApi.createRecord(ENTITY_NAMES.analysis, analysisRecord);
   return result.id as string;
 }
 
@@ -68,30 +61,24 @@ export async function associateScopes(
   analysisId: string,
   skillIds: string[],
   knowledgeIds: string[],
-  toolIds: string[],
+  toolIds: string[]
 ): Promise<void> {
   const errors: string[] = [];
 
   // Resolve the execute function — webApi.online.execute or webApi.execute
   const executeFn = webApi?.online?.execute ?? webApi?.execute;
   if (!executeFn) {
-    throw new Error(
-      "Xrm.WebApi.online.execute is not available. Cannot create N:N associations.",
-    );
+    throw new Error('Xrm.WebApi.online.execute is not available. Cannot create N:N associations.');
   }
 
   // Helper that performs a single N:N associate call
-  async function associate(
-    entityType: string,
-    entityId: string,
-    relationship: string,
-  ): Promise<void> {
+  async function associate(entityType: string, entityId: string, relationship: string): Promise<void> {
     await executeFn.call(webApi.online ?? webApi, {
       getMetadata: () => ({
         boundParameter: undefined,
         parameterTypes: {},
         operationType: 2, // Associate
-        operationName: "Associate",
+        operationName: 'Associate',
       }),
       target: { entityType: ENTITY_NAMES.analysis, id: analysisId },
       relatedEntities: [{ entityType, id: entityId }],
@@ -102,11 +89,7 @@ export async function associateScopes(
   // Skills (N:N: sprk_analysis_skill)
   for (const skillId of skillIds) {
     try {
-      await associate(
-        ENTITY_NAMES.skill,
-        skillId,
-        RELATIONSHIP_NAMES.analysisSkill,
-      );
+      await associate(ENTITY_NAMES.skill, skillId, RELATIONSHIP_NAMES.analysisSkill);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`skill ${skillId}: ${msg}`);
@@ -116,11 +99,7 @@ export async function associateScopes(
   // Knowledge (N:N: sprk_analysis_knowledge)
   for (const knowledgeId of knowledgeIds) {
     try {
-      await associate(
-        ENTITY_NAMES.knowledge,
-        knowledgeId,
-        RELATIONSHIP_NAMES.analysisKnowledge,
-      );
+      await associate(ENTITY_NAMES.knowledge, knowledgeId, RELATIONSHIP_NAMES.analysisKnowledge);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`knowledge ${knowledgeId}: ${msg}`);
@@ -130,11 +109,7 @@ export async function associateScopes(
   // Tools (N:N: sprk_analysis_tool)
   for (const toolId of toolIds) {
     try {
-      await associate(
-        ENTITY_NAMES.tool,
-        toolId,
-        RELATIONSHIP_NAMES.analysisTool,
-      );
+      await associate(ENTITY_NAMES.tool, toolId, RELATIONSHIP_NAMES.analysisTool);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`tool ${toolId}: ${msg}`);
@@ -142,7 +117,7 @@ export async function associateScopes(
   }
 
   if (errors.length > 0) {
-    throw new Error(`Failed to associate scope items:\n${errors.join("\n")}`);
+    throw new Error(`Failed to associate scope items:\n${errors.join('\n')}`);
   }
 }
 
@@ -161,19 +136,10 @@ export async function associateScopes(
  * @param config - Full analysis configuration including scope IDs
  * @returns The GUID of the newly created sprk_analysis record
  */
-export async function createAndAssociate(
-  webApi: any,
-  config: IAnalysisConfig,
-): Promise<string> {
+export async function createAndAssociate(webApi: any, config: IAnalysisConfig): Promise<string> {
   const analysisId = await createAnalysis(webApi, config);
 
-  await associateScopes(
-    webApi,
-    analysisId,
-    config.skillIds,
-    config.knowledgeIds,
-    config.toolIds,
-  );
+  await associateScopes(webApi, analysisId, config.skillIds, config.knowledgeIds, config.toolIds);
 
   return analysisId;
 }

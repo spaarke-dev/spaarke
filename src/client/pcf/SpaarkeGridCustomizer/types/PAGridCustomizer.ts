@@ -7,7 +7,7 @@
  * Based on: https://learn.microsoft.com/en-us/power-apps/developer/component-framework/customize-editable-grid-control
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 /**
  * Column information provided to cell renderers
@@ -57,24 +57,18 @@ export interface GetRendererParams {
  * Function type for custom cell renderers
  * Returns a React element or null to use default rendering
  */
-export type GetRendererFunction = (
-  params: GetRendererParams,
-) => React.ReactElement | null;
+export type GetRendererFunction = (params: GetRendererParams) => React.ReactElement | null;
 
 /**
  * Cell renderer overrides by data type
  * Keys are Dataverse column data types: "Text", "Lookup", "OptionSet", etc.
  */
-export interface CellRendererOverrides {
-  [dataType: string]: GetRendererFunction;
-}
+export type CellRendererOverrides = Record<string, GetRendererFunction>;
 
 /**
  * Cell editor overrides by data type (for inline editing)
  */
-export interface CellEditorOverrides {
-  [dataType: string]: GetRendererFunction;
-}
+export type CellEditorOverrides = Record<string, GetRendererFunction>;
 
 /**
  * The main interface that grid customizers must implement

@@ -13,8 +13,8 @@
  * Task 056: Implement SSE Client for Chat Streaming
  */
 
-import * as React from "react";
-import { logInfo, logError, logWarn } from "../utils/logger";
+import * as React from 'react';
+import { logInfo, logError, logWarn } from '../utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -48,10 +48,7 @@ export interface ISseStreamState {
 
 export interface ISseStreamActions {
   /** Start streaming a chat message */
-  sendMessage: (
-    message: string,
-    chatHistory?: Array<{ role: string; content: string }>,
-  ) => Promise<void>;
+  sendMessage: (message: string, chatHistory?: { role: string; content: string }[]) => Promise<void>;
   /** Abort the current stream */
   abort: () => void;
   /** Reset state */
@@ -69,22 +66,12 @@ const RETRY_DELAY_MS = 1000;
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function useSseStream(
-  options: ISseStreamOptions,
-): [ISseStreamState, ISseStreamActions] {
-  const {
-    apiBaseUrl,
-    analysisId,
-    onToken,
-    onComplete,
-    onError,
-    getAccessToken,
-    headers,
-  } = options;
+export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISseStreamActions] {
+  const { apiBaseUrl, analysisId, onToken, onComplete, onError, getAccessToken, headers } = options;
 
   // State
   const [isStreaming, setIsStreaming] = React.useState(false);
-  const [responseText, setResponseText] = React.useState("");
+  const [responseText, setResponseText] = React.useState('');
   const [error, setError] = React.useState<Error | null>(null);
 
   // Refs for cleanup
@@ -104,10 +91,7 @@ export function useSseStream(
    * Send a message and stream the response
    */
   const sendMessage = React.useCallback(
-    async (
-      message: string,
-      chatHistory?: Array<{ role: string; content: string }>,
-    ): Promise<void> => {
+    async (message: string, chatHistory?: { role: string; content: string }[]): Promise<void> => {
       // Abort any existing stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -119,11 +103,11 @@ export function useSseStream(
 
       // Reset state
       setIsStreaming(true);
-      setResponseText("");
+      setResponseText('');
       setError(null);
       retryCountRef.current = 0;
 
-      logInfo("useSseStream", `Starting stream for analysis: ${analysisId}`);
+      logInfo('useSseStream', `Starting stream for analysis: ${analysisId}`);
 
       try {
         // Get access token if auth function provided
@@ -132,12 +116,10 @@ export function useSseStream(
           try {
             const token = await getAccessToken();
             authHeaders = { Authorization: `Bearer ${token}` };
-            logInfo("useSseStream", "Auth token acquired successfully");
+            logInfo('useSseStream', 'Auth token acquired successfully');
           } catch (authErr) {
-            logError("useSseStream", "Failed to acquire auth token", authErr);
-            throw new Error(
-              "Authentication failed. Please refresh and try again.",
-            );
+            logError('useSseStream', 'Failed to acquire auth token', authErr);
+            throw new Error('Authentication failed. Please refresh and try again.');
           }
         }
 
@@ -147,23 +129,20 @@ export function useSseStream(
         };
 
         // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
-        const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+        const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, '');
 
         // Make fetch request to BFF API continue endpoint
-        const response = await fetch(
-          `${normalizedBaseUrl}/api/ai/analysis/${analysisId}/continue`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "text/event-stream",
-              ...authHeaders,
-              ...headers,
-            },
-            body: JSON.stringify(requestBody),
-            signal,
+        const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            ...authHeaders,
+            ...headers,
           },
-        );
+          body: JSON.stringify(requestBody),
+          signal,
+        });
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -172,19 +151,19 @@ export function useSseStream(
         // Get reader for streaming
         const reader = response.body?.getReader();
         if (!reader) {
-          throw new Error("Response body is not readable");
+          throw new Error('Response body is not readable');
         }
 
         const decoder = new TextDecoder();
-        let accumulatedText = "";
-        let buffer = "";
+        let accumulatedText = '';
+        let buffer = '';
 
         // Read stream
         while (true) {
           const { done, value } = await reader.read();
 
           if (done) {
-            logInfo("useSseStream", "Stream completed");
+            logInfo('useSseStream', 'Stream completed');
             break;
           }
 
@@ -192,15 +171,15 @@ export function useSseStream(
           buffer += decoder.decode(value, { stream: true });
 
           // Process SSE events (format: "data: {json}\n\n")
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
           for (const line of lines) {
-            if (line.startsWith("data: ")) {
+            if (line.startsWith('data: ')) {
               const data = line.slice(6).trim();
 
               // Check for stream end marker (legacy format)
-              if (data === "[DONE]") {
+              if (data === '[DONE]') {
                 continue;
               }
 
@@ -209,7 +188,7 @@ export function useSseStream(
 
                 // BFF API AnalysisStreamChunk format:
                 // { type: "chunk"|"done"|"error"|"metadata", content, done, error }
-                if (parsed.type === "chunk" && parsed.content) {
+                if (parsed.type === 'chunk' && parsed.content) {
                   accumulatedText += parsed.content;
                   setResponseText(accumulatedText);
                   onToken(parsed.content);
@@ -222,24 +201,21 @@ export function useSseStream(
                   onToken(parsed.token);
                 }
 
-                if (parsed.type === "error" || parsed.error) {
-                  throw new Error(parsed.error || "Unknown error");
+                if (parsed.type === 'error' || parsed.error) {
+                  throw new Error(parsed.error || 'Unknown error');
                 }
 
                 // Check for stream completion
-                if (parsed.done === true || parsed.type === "done") {
-                  logInfo("useSseStream", "Received done signal from server");
+                if (parsed.done === true || parsed.type === 'done') {
+                  logInfo('useSseStream', 'Received done signal from server');
                 }
               } catch (parseError) {
                 // If parse error is from our thrown error, re-throw it
-                if (
-                  parseError instanceof Error &&
-                  parseError.message !== "Unexpected token"
-                ) {
+                if (parseError instanceof Error && parseError.message !== 'Unexpected token') {
                   throw parseError;
                 }
                 // If it's not JSON, treat as raw token
-                if (data && data !== "[DONE]") {
+                if (data && data !== '[DONE]') {
                   accumulatedText += data;
                   setResponseText(accumulatedText);
                   onToken(data);
@@ -252,31 +228,25 @@ export function useSseStream(
         // Stream completed successfully
         setIsStreaming(false);
         onComplete(accumulatedText);
-        logInfo(
-          "useSseStream",
-          `Stream completed with ${accumulatedText.length} chars`,
-        );
+        logInfo('useSseStream', `Stream completed with ${accumulatedText.length} chars`);
       } catch (err) {
         // Handle abort
-        if (err instanceof Error && err.name === "AbortError") {
-          logInfo("useSseStream", "Stream aborted by user");
+        if (err instanceof Error && err.name === 'AbortError') {
+          logInfo('useSseStream', 'Stream aborted by user');
           setIsStreaming(false);
           return;
         }
 
         // Handle error
         const streamError = err instanceof Error ? err : new Error(String(err));
-        logError("useSseStream", "Stream error", streamError);
+        logError('useSseStream', 'Stream error', streamError);
 
         // Retry logic
         if (retryCountRef.current < MAX_RETRIES) {
           retryCountRef.current++;
-          logWarn(
-            "useSseStream",
-            `Retrying (${retryCountRef.current}/${MAX_RETRIES})...`,
-          );
+          logWarn('useSseStream', `Retrying (${retryCountRef.current}/${MAX_RETRIES})...`);
 
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
 
           // Retry
           return sendMessage(message, chatHistory);
@@ -288,15 +258,7 @@ export function useSseStream(
         onError(streamError);
       }
     },
-    [
-      apiBaseUrl,
-      analysisId,
-      getAccessToken,
-      headers,
-      onToken,
-      onComplete,
-      onError,
-    ],
+    [apiBaseUrl, analysisId, getAccessToken, headers, onToken, onComplete, onError]
   );
 
   /**
@@ -308,7 +270,7 @@ export function useSseStream(
       abortControllerRef.current = null;
     }
     setIsStreaming(false);
-    logInfo("useSseStream", "Stream aborted");
+    logInfo('useSseStream', 'Stream aborted');
   }, []);
 
   /**
@@ -316,7 +278,7 @@ export function useSseStream(
    */
   const reset = React.useCallback(() => {
     abort();
-    setResponseText("");
+    setResponseText('');
     setError(null);
   }, [abort]);
 

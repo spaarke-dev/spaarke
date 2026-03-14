@@ -7,7 +7,7 @@
  * Columns: Document, Relationship, Similarity, Type, Parent, Modified
  */
 
-import React, { useMemo, useCallback, useEffect } from "react";
+import React, { useMemo, useCallback, useEffect } from 'react';
 import {
   makeStyles,
   tokens,
@@ -23,7 +23,7 @@ import {
   Badge,
   Text,
   TableCellLayout,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Document20Regular,
   DocumentPdf20Regular,
@@ -36,8 +36,8 @@ import {
   FolderZip20Regular,
   DocumentQuestionMark20Regular,
   Eye20Regular,
-} from "@fluentui/react-icons";
-import type { DocumentNode, DocumentNodeData } from "../types/graph";
+} from '@fluentui/react-icons';
+import type { DocumentNode, DocumentNodeData } from '../types/graph';
 
 export interface GridRow {
   id: string;
@@ -61,42 +61,42 @@ export interface RelationshipGridProps {
 
 const useStyles = makeStyles({
   container: {
-    width: "100%",
-    height: "100%",
-    overflow: "auto",
+    width: '100%',
+    height: '100%',
+    overflow: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
-    scrollbarWidth: "none",
-    "&::-webkit-scrollbar": { display: "none" },
+    scrollbarWidth: 'none',
+    '&::-webkit-scrollbar': { display: 'none' },
   },
   grid: {
-    width: "100%",
-    "& th, & td": {
-      paddingRight: "10px",
+    width: '100%',
+    '& th, & td': {
+      paddingRight: '10px',
     },
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '200px',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   nameCell: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   nameIcon: {
     flexShrink: 0,
     color: tokens.colorBrandForeground1,
   },
   nameText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   sourceBadge: {
     flexShrink: 0,
@@ -112,13 +112,13 @@ const useStyles = makeStyles({
   similarityLow: { color: tokens.colorStatusWarningForeground1 },
   similarityNone: { color: tokens.colorNeutralForeground3 },
   badgeContainer: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalXXS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   clickableRow: {
-    cursor: "pointer",
-    ":hover": {
+    cursor: 'pointer',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -127,37 +127,37 @@ const useStyles = makeStyles({
 const getFileIcon = (fileType: string): React.ReactElement => {
   const type = fileType.toLowerCase();
   switch (type) {
-    case "pdf":
+    case 'pdf':
       return <DocumentPdf20Regular />;
-    case "docx":
-    case "doc":
-    case "txt":
+    case 'docx':
+    case 'doc':
+    case 'txt':
       return <DocumentText20Regular />;
-    case "xlsx":
-    case "xls":
-    case "csv":
+    case 'xlsx':
+    case 'xls':
+    case 'csv':
       return <Table20Regular />;
-    case "pptx":
-    case "ppt":
+    case 'pptx':
+    case 'ppt':
       return <SlideText20Regular />;
-    case "msg":
-    case "eml":
+    case 'msg':
+    case 'eml':
       return <Mail20Regular />;
-    case "jpg":
-    case "jpeg":
-    case "png":
-    case "gif":
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
       return <Image20Regular />;
-    case "html":
-    case "htm":
-    case "xml":
-    case "json":
+    case 'html':
+    case 'htm':
+    case 'xml':
+    case 'json':
       return <Code20Regular />;
-    case "zip":
-    case "rar":
+    case 'zip':
+    case 'rar':
       return <FolderZip20Regular />;
-    case "file":
-    case "unknown":
+    case 'file':
+    case 'unknown':
       return <DocumentQuestionMark20Regular />;
     default:
       return <Document20Regular />;
@@ -165,32 +165,30 @@ const getFileIcon = (fileType: string): React.ReactElement => {
 };
 
 const formatDate = (isoDate: string | undefined): string => {
-  if (!isoDate) return "—";
+  if (!isoDate) return '—';
   try {
     return new Date(isoDate).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
     });
   } catch {
-    return "—";
+    return '—';
   }
 };
 
-const getRelationshipBadgeColor = (
-  type: string,
-): "brand" | "success" | "warning" | "informative" => {
+const getRelationshipBadgeColor = (type: string): 'brand' | 'success' | 'warning' | 'informative' => {
   switch (type) {
-    case "semantic":
-      return "brand";
-    case "same_matter":
-    case "same_project":
-      return "success";
-    case "same_email":
-    case "same_thread":
-      return "warning";
+    case 'semantic':
+      return 'brand';
+    case 'same_matter':
+    case 'same_project':
+      return 'success';
+    case 'same_email':
+    case 'same_thread':
+      return 'warning';
     default:
-      return "informative";
+      return 'informative';
   }
 };
 
@@ -206,23 +204,18 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
   // Filter out hub nodes (matter/project/invoice/email) — show only documents
   const allRows = useMemo((): GridRow[] => {
     return nodes
-      .filter((n) => {
+      .filter(n => {
         const nodeType = n.data.nodeType;
-        return (
-          nodeType !== "matter" &&
-          nodeType !== "project" &&
-          nodeType !== "invoice" &&
-          nodeType !== "email"
-        );
+        return nodeType !== 'matter' && nodeType !== 'project' && nodeType !== 'invoice' && nodeType !== 'email';
       })
-      .map((n) => ({ id: n.id, data: n.data }));
+      .map(n => ({ id: n.id, data: n.data }));
   }, [nodes]);
 
   // Apply search filter (case-insensitive document name match)
   const rows = useMemo((): GridRow[] => {
-    if (!searchQuery || searchQuery.trim() === "") return allRows;
+    if (!searchQuery || searchQuery.trim() === '') return allRows;
     const query = searchQuery.toLowerCase();
-    return allRows.filter((row) => row.data.name.toLowerCase().includes(query));
+    return allRows.filter(row => row.data.name.toLowerCase().includes(query));
   }, [allRows, searchQuery]);
 
   // Notify parent of filtered rows for CSV export
@@ -236,7 +229,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         onRowClick(row.data.documentId, row.data.name);
       }
     },
-    [onRowClick],
+    [onRowClick]
   );
 
   const handleRowHoverInternal = useCallback(
@@ -245,31 +238,24 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         onRowHover(row.data.documentId);
       }
     },
-    [onRowHover],
+    [onRowHover]
   );
 
   const columns: TableColumnDefinition<GridRow>[] = useMemo(
     () => [
       createTableColumn<GridRow>({
-        columnId: "name",
+        columnId: 'name',
         compare: (a, b) => a.data.name.localeCompare(b.data.name),
-        renderHeaderCell: () => "Document",
-        renderCell: (row) => (
+        renderHeaderCell: () => 'Document',
+        renderCell: row => (
           <TableCellLayout>
             <div className={styles.nameCell}>
-              <span className={styles.nameIcon}>
-                {getFileIcon(row.data.fileType ?? "file")}
-              </span>
+              <span className={styles.nameIcon}>{getFileIcon(row.data.fileType ?? 'file')}</span>
               <Text className={styles.nameText} title={row.data.name}>
                 {row.data.name}
               </Text>
               {row.data.isSource && (
-                <Badge
-                  className={styles.sourceBadge}
-                  appearance="filled"
-                  color="brand"
-                  size="small"
-                >
+                <Badge className={styles.sourceBadge} appearance="filled" color="brand" size="small">
                   Source
                 </Badge>
               )}
@@ -278,13 +264,10 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         ),
       }),
       createTableColumn<GridRow>({
-        columnId: "relationship",
-        compare: (a, b) =>
-          (a.data.relationshipLabel ?? "").localeCompare(
-            b.data.relationshipLabel ?? "",
-          ),
-        renderHeaderCell: () => "Relationship",
-        renderCell: (row) => (
+        columnId: 'relationship',
+        compare: (a, b) => (a.data.relationshipLabel ?? '').localeCompare(b.data.relationshipLabel ?? ''),
+        renderHeaderCell: () => 'Relationship',
+        renderCell: row => (
           <TableCellLayout>
             {row.data.isSource ? (
               <Badge appearance="outline" color="brand" size="small">
@@ -294,16 +277,10 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
               <Badge appearance="outline" color="warning" size="small">
                 File only
               </Badge>
-            ) : row.data.relationshipTypes &&
-              row.data.relationshipTypes.length > 0 ? (
+            ) : row.data.relationshipTypes && row.data.relationshipTypes.length > 0 ? (
               <div className={styles.badgeContainer}>
-                {row.data.relationshipTypes.map((rel) => (
-                  <Badge
-                    key={rel.type}
-                    appearance="outline"
-                    color={getRelationshipBadgeColor(rel.type)}
-                    size="small"
-                  >
+                {row.data.relationshipTypes.map(rel => (
+                  <Badge key={rel.type} appearance="outline" color={getRelationshipBadgeColor(rel.type)} size="small">
                     {rel.label}
                   </Badge>
                 ))}
@@ -319,10 +296,10 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         ),
       }),
       createTableColumn<GridRow>({
-        columnId: "similarity",
+        columnId: 'similarity',
         compare: (a, b) => (b.data.similarity ?? 0) - (a.data.similarity ?? 0),
-        renderHeaderCell: () => "Similarity",
-        renderCell: (row) => {
+        renderHeaderCell: () => 'Similarity',
+        renderCell: row => {
           if (row.data.isSource)
             return (
               <TableCellLayout>
@@ -347,52 +324,45 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         },
       }),
       createTableColumn<GridRow>({
-        columnId: "type",
-        compare: (a, b) =>
-          (a.data.documentType ?? "").localeCompare(b.data.documentType ?? ""),
-        renderHeaderCell: () => "Type",
-        renderCell: (row) => (
+        columnId: 'type',
+        compare: (a, b) => (a.data.documentType ?? '').localeCompare(b.data.documentType ?? ''),
+        renderHeaderCell: () => 'Type',
+        renderCell: row => (
           <TableCellLayout>
-            <Text>
-              {row.data.documentType ?? row.data.fileType?.toUpperCase() ?? "—"}
-            </Text>
+            <Text>{row.data.documentType ?? row.data.fileType?.toUpperCase() ?? '—'}</Text>
           </TableCellLayout>
         ),
       }),
       createTableColumn<GridRow>({
-        columnId: "parent",
-        compare: (a, b) =>
-          (a.data.parentEntityName ?? "").localeCompare(
-            b.data.parentEntityName ?? "",
-          ),
-        renderHeaderCell: () => "Parent Entity",
-        renderCell: (row) => (
+        columnId: 'parent',
+        compare: (a, b) => (a.data.parentEntityName ?? '').localeCompare(b.data.parentEntityName ?? ''),
+        renderHeaderCell: () => 'Parent Entity',
+        renderCell: row => (
           <TableCellLayout>
-            <Text>{row.data.parentEntityName ?? "—"}</Text>
+            <Text>{row.data.parentEntityName ?? '—'}</Text>
           </TableCellLayout>
         ),
       }),
       createTableColumn<GridRow>({
-        columnId: "modified",
-        compare: (a, b) =>
-          (a.data.modifiedOn ?? "").localeCompare(b.data.modifiedOn ?? ""),
-        renderHeaderCell: () => "Modified",
-        renderCell: (row) => (
+        columnId: 'modified',
+        compare: (a, b) => (a.data.modifiedOn ?? '').localeCompare(b.data.modifiedOn ?? ''),
+        renderHeaderCell: () => 'Modified',
+        renderCell: row => (
           <TableCellLayout>
             <Text>{formatDate(row.data.modifiedOn)}</Text>
           </TableCellLayout>
         ),
       }),
       createTableColumn<GridRow>({
-        columnId: "preview",
-        renderHeaderCell: () => "Preview",
-        renderCell: (row) => (
+        columnId: 'preview',
+        renderHeaderCell: () => 'Preview',
+        renderCell: row => (
           <TableCellLayout>
             {row.data.documentId && (
               <Eye20Regular
                 style={{
                   color: tokens.colorBrandForeground1,
-                  cursor: "pointer",
+                  cursor: 'pointer',
                 }}
               />
             )}
@@ -400,7 +370,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         ),
       }),
     ],
-    [styles, handleRowClickInternal],
+    [styles, handleRowClickInternal]
   );
 
   const columnSizingOptions: TableColumnSizingOptions = useMemo(
@@ -413,7 +383,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
       modified: { defaultWidth: 130, minWidth: 100, idealWidth: 130 },
       preview: { defaultWidth: 60, minWidth: 50, idealWidth: 60 },
     }),
-    [],
+    []
   );
 
   if (rows.length === 0) {
@@ -421,9 +391,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
       <div className={styles.container}>
         <div className={styles.emptyState}>
           <Text size={400}>No documents to display</Text>
-          <Text size={200}>
-            Load a document with AI embeddings to see related documents
-          </Text>
+          <Text size={200}>Load a document with AI embeddings to see related documents</Text>
         </div>
       </div>
     );
@@ -438,14 +406,12 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
         sortable
         resizableColumns
         columnSizingOptions={columnSizingOptions}
-        getRowId={(row) => row.id}
+        getRowId={row => row.id}
         focusMode="composite"
       >
         <DataGridHeader>
           <DataGridRow>
-            {({ renderHeaderCell }) => (
-              <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-            )}
+            {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
           </DataGridRow>
         </DataGridHeader>
         <DataGridBody<GridRow>>
@@ -456,9 +422,7 @@ export const RelationshipGrid: React.FC<RelationshipGridProps> = ({
               onClick={() => handleRowClickInternal(item)}
               onMouseEnter={() => handleRowHoverInternal(item)}
             >
-              {({ renderCell }) => (
-                <DataGridCell>{renderCell(item)}</DataGridCell>
-              )}
+              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
           )}
         </DataGridBody>

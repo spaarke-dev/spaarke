@@ -13,17 +13,17 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import { screen, waitFor, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { SprkChat } from "../SprkChat";
-import { renderWithProviders } from "../../../__mocks__/pcfMocks";
+import * as React from 'react';
+import { screen, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { SprkChat } from '../SprkChat';
+import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 
 // ---------------------------------------------------------------------------
 // Polyfills for jsdom (TextEncoder, TextDecoder, ReadableStream)
 // ---------------------------------------------------------------------------
 
-import { TextEncoder, TextDecoder } from "util";
+import { TextEncoder, TextDecoder } from 'util';
 (global as any).TextEncoder = TextEncoder;
 (global as any).TextDecoder = TextDecoder;
 
@@ -37,7 +37,7 @@ import { TextEncoder, TextDecoder } from "util";
  * `setContent` and `setIsStreaming(false)` together, causing the
  * `isStreaming && streamedContent` guard in the effect to never be true.
  */
-if (typeof globalThis.ReadableStream === "undefined") {
+if (typeof globalThis.ReadableStream === 'undefined') {
   (globalThis as any).ReadableStream = class ReadableStream {
     private _source: any;
     constructor(source: any) {
@@ -59,7 +59,7 @@ if (typeof globalThis.ReadableStream === "undefined") {
           if (index < chunks.length) {
             // Small async delay between chunks to allow React state batching
             if (index > 0) {
-              await new Promise((r) => setTimeout(r, 5));
+              await new Promise(r => setTimeout(r, 5));
             }
             return { done: false, value: chunks[index++] };
           }
@@ -97,26 +97,17 @@ function createFetchResponse(body: unknown, status = 200): Response {
  * and streamedContent is set, so the SprkChat effect can propagate content
  * to the message list via updateLastMessage.
  */
-function createSseStreamResponse(
-  events: Array<Record<string, unknown>>,
-  status = 200,
-): Response {
+function createSseStreamResponse(events: Array<Record<string, unknown>>, status = 200): Response {
   const encoder = new TextEncoder();
 
   // Split events into tokens vs rest (citations, suggestions, done)
-  const tokenEvents = events.filter((e) => e.type === "token");
-  const otherEvents = events.filter((e) => e.type !== "token");
+  const tokenEvents = events.filter(e => e.type === 'token');
+  const otherEvents = events.filter(e => e.type !== 'token');
 
-  const tokenChunk = encoder.encode(
-    tokenEvents.map((evt) => `data: ${JSON.stringify(evt)}\n\n`).join(""),
-  );
-  const otherChunk = encoder.encode(
-    otherEvents.map((evt) => `data: ${JSON.stringify(evt)}\n\n`).join(""),
-  );
+  const tokenChunk = encoder.encode(tokenEvents.map(evt => `data: ${JSON.stringify(evt)}\n\n`).join(''));
+  const otherChunk = encoder.encode(otherEvents.map(evt => `data: ${JSON.stringify(evt)}\n\n`).join(''));
 
-  const fullText = events
-    .map((evt) => `data: ${JSON.stringify(evt)}\n\n`)
-    .join("");
+  const fullText = events.map(evt => `data: ${JSON.stringify(evt)}\n\n`).join('');
 
   const stream = new (globalThis as any).ReadableStream({
     start(controller: any) {
@@ -141,16 +132,16 @@ function createSseStreamResponse(
 }
 
 const SESSION_RESPONSE = {
-  sessionId: "session-123",
-  createdAt: "2026-02-23T10:00:00Z",
+  sessionId: 'session-123',
+  createdAt: '2026-02-23T10:00:00Z',
 };
 
 const PLAYBOOKS_RESPONSE = { playbooks: [] };
 
 const defaultProps = {
-  playbookId: "test-playbook-id",
-  apiBaseUrl: "https://api.example.com",
-  accessToken: "test-access-token",
+  playbookId: 'test-playbook-id',
+  apiBaseUrl: 'https://api.example.com',
+  accessToken: 'test-access-token',
 };
 
 // ---------------------------------------------------------------------------
@@ -162,26 +153,20 @@ let pendingSseResponses: Response[] = [];
 function setupFetchRouter() {
   pendingSseResponses = [];
   mockFetch.mockImplementation((url: string, _options?: any) => {
-    if (typeof url === "string" && url.includes("/playbooks")) {
+    if (typeof url === 'string' && url.includes('/playbooks')) {
       return Promise.resolve(createFetchResponse(PLAYBOOKS_RESPONSE));
     }
-    if (
-      typeof url === "string" &&
-      url.includes("/sessions") &&
-      !url.includes("/messages")
-    ) {
+    if (typeof url === 'string' && url.includes('/sessions') && !url.includes('/messages')) {
       return Promise.resolve(createFetchResponse(SESSION_RESPONSE));
     }
-    if (typeof url === "string" && url.includes("/messages")) {
+    if (typeof url === 'string' && url.includes('/messages')) {
       const response = pendingSseResponses.shift();
       if (response) {
         return Promise.resolve(response);
       }
-      return Promise.resolve(
-        createFetchResponse({ error: "No mock SSE response queued" }, 500),
-      );
+      return Promise.resolve(createFetchResponse({ error: 'No mock SSE response queued' }, 500));
     }
-    return Promise.resolve(createFetchResponse({ error: "Unmocked URL" }, 404));
+    return Promise.resolve(createFetchResponse({ error: 'Unmocked URL' }, 404));
   });
 }
 
@@ -189,7 +174,7 @@ function setupFetchRouter() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("SprkChat - Citations Integration", () => {
+describe('SprkChat - Citations Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     setupFetchRouter();
@@ -215,8 +200,8 @@ describe("SprkChat - Citations Integration", () => {
 
     // Wait for session to be created - textarea disabled reflects: isStreaming || !session || isSessionLoading
     await waitFor(() => {
-      const textarea = screen.getByTestId("chat-input-textarea");
-      const nativeTextarea = textarea.querySelector("textarea") || textarea;
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
       expect(nativeTextarea).not.toBeDisabled();
     });
 
@@ -229,178 +214,172 @@ describe("SprkChat - Citations Integration", () => {
   async function sendMessageAndStream(
     user: ReturnType<typeof userEvent.setup>,
     messageText: string,
-    sseEvents: Array<Record<string, unknown>>,
+    sseEvents: Array<Record<string, unknown>>
   ) {
     pendingSseResponses.push(createSseStreamResponse(sseEvents));
 
-    const textarea = screen.getByTestId("chat-input-textarea");
-    const nativeTextarea = textarea.querySelector("textarea") || textarea;
+    const textarea = screen.getByTestId('chat-input-textarea');
+    const nativeTextarea = textarea.querySelector('textarea') || textarea;
     await user.type(nativeTextarea, messageText);
-    await user.click(screen.getByTestId("chat-send-button"));
+    await user.click(screen.getByTestId('chat-send-button'));
   }
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 1: sseFlow_CitationsEvent_RendersClickableMarkers
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_CitationsEvent_RendersClickableMarkers", async () => {
+  it('sseFlow_CitationsEvent_RendersClickableMarkers', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
       {
-        type: "token",
-        content: "The policy states [1] and the memo confirms [2].",
+        type: 'token',
+        content: 'The policy states [1] and the memo confirms [2].',
       },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Policy Handbook",
+              sourceName: 'Policy Handbook',
               page: 42,
-              excerpt: "Employees must comply",
-              chunkId: "c-1",
+              excerpt: 'Employees must comply',
+              chunkId: 'c-1',
             },
             {
               id: 2,
-              sourceName: "Internal Memo",
+              sourceName: 'Internal Memo',
               page: 3,
-              excerpt: "As confirmed by management",
-              chunkId: "c-2",
+              excerpt: 'As confirmed by management',
+              chunkId: 'c-2',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "What does the policy say?", sseEvents);
+    await sendMessageAndStream(user, 'What does the policy say?', sseEvents);
 
     // Wait for citation markers to be rendered
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
-    expect(screen.getByTestId("citation-marker-2")).toBeInTheDocument();
+    expect(screen.getByTestId('citation-marker-2')).toBeInTheDocument();
 
     // Markers should display [N] text
-    expect(screen.getByTestId("citation-marker-1").textContent).toContain(
-      "[1]",
-    );
-    expect(screen.getByTestId("citation-marker-2").textContent).toContain(
-      "[2]",
-    );
+    expect(screen.getByTestId('citation-marker-1').textContent).toContain('[1]');
+    expect(screen.getByTestId('citation-marker-2').textContent).toContain('[2]');
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 2: sseFlow_CitationClick_OpensPopover
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_CitationClick_OpensPopover", async () => {
+  it('sseFlow_CitationClick_OpensPopover', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "According to [1], the rule applies." },
+      { type: 'token', content: 'According to [1], the rule applies.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Company Rules",
+              sourceName: 'Company Rules',
               page: 10,
-              excerpt: "All employees must follow rule 5.",
-              chunkId: "cr-1",
+              excerpt: 'All employees must follow rule 5.',
+              chunkId: 'cr-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Tell me about the rules", sseEvents);
+    await sendMessageAndStream(user, 'Tell me about the rules', sseEvents);
 
     // Wait for citation marker
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // Click the citation marker to open the popover
-    await user.click(screen.getByTestId("citation-marker-1"));
+    await user.click(screen.getByTestId('citation-marker-1'));
 
     // Popover should open with citation details
     await waitFor(() => {
-      expect(screen.getByTestId("citation-popover-1")).toBeInTheDocument();
+      expect(screen.getByTestId('citation-popover-1')).toBeInTheDocument();
     });
 
     // Verify popover content
-    expect(screen.getByText("Company Rules")).toBeInTheDocument();
-    expect(screen.getByText("Page 10")).toBeInTheDocument();
-    expect(
-      screen.getByText("All employees must follow rule 5."),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Company Rules')).toBeInTheDocument();
+    expect(screen.getByText('Page 10')).toBeInTheDocument();
+    expect(screen.getByText('All employees must follow rule 5.')).toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: sseFlow_MultipleCitations_AllRendered
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_MultipleCitations_AllRendered", async () => {
+  it('sseFlow_MultipleCitations_AllRendered', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "Sources [1], [2], and [3] all confirm this." },
+      { type: 'token', content: 'Sources [1], [2], and [3] all confirm this.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Doc A",
+              sourceName: 'Doc A',
               page: 1,
-              excerpt: "Excerpt A",
-              chunkId: "a-1",
+              excerpt: 'Excerpt A',
+              chunkId: 'a-1',
             },
             {
               id: 2,
-              sourceName: "Doc B",
+              sourceName: 'Doc B',
               page: 2,
-              excerpt: "Excerpt B",
-              chunkId: "b-1",
+              excerpt: 'Excerpt B',
+              chunkId: 'b-1',
             },
             {
               id: 3,
-              sourceName: "Doc C",
+              sourceName: 'Doc C',
               page: 3,
-              excerpt: "Excerpt C",
-              chunkId: "c-1",
+              excerpt: 'Excerpt C',
+              chunkId: 'c-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Show multiple sources", sseEvents);
+    await sendMessageAndStream(user, 'Show multiple sources', sseEvents);
 
     // Wait for all citation markers
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
-        expect(screen.getByTestId("citation-marker-2")).toBeInTheDocument();
-        expect(screen.getByTestId("citation-marker-3")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-2')).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-3')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
   });
 
@@ -408,179 +387,170 @@ describe("SprkChat - Citations Integration", () => {
   // Test 4: sseFlow_UnmatchedMarkers_LeftAsPlainText
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_UnmatchedMarkers_LeftAsPlainText", async () => {
+  it('sseFlow_UnmatchedMarkers_LeftAsPlainText', async () => {
     const user = await renderChatWithSession();
 
     // Response contains [1] and [5], but only citation [1] is provided
     const sseEvents = [
-      { type: "token", content: "See [1] and also [5] for details." },
+      { type: 'token', content: 'See [1] and also [5] for details.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Known Doc",
+              sourceName: 'Known Doc',
               page: 1,
-              excerpt: "Known excerpt",
-              chunkId: "k-1",
+              excerpt: 'Known excerpt',
+              chunkId: 'k-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Reference test", sseEvents);
+    await sendMessageAndStream(user, 'Reference test', sseEvents);
 
     // Wait for citation marker [1]
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // [5] should NOT be rendered as a CitationMarker (no matching citation data)
-    expect(screen.queryByTestId("citation-marker-5")).not.toBeInTheDocument();
+    expect(screen.queryByTestId('citation-marker-5')).not.toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 5: sseFlow_NoCitations_NoMarkersRendered
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_NoCitations_NoMarkersRendered", async () => {
+  it('sseFlow_NoCitations_NoMarkersRendered', async () => {
     const user = await renderChatWithSession();
 
     // Response with [1] in text but no citations event
     const sseEvents = [
       {
-        type: "token",
-        content: "Something with [1] in text but no citations.",
+        type: 'token',
+        content: 'Something with [1] in text but no citations.',
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "No citations test", sseEvents);
+    await sendMessageAndStream(user, 'No citations test', sseEvents);
 
     // Wait for message to render
     await waitFor(
       () => {
-        expect(
-          screen.getByText("Something with [1] in text but no citations."),
-        ).toBeInTheDocument();
+        expect(screen.getByText('Something with [1] in text but no citations.')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // No citation markers should be rendered
-    expect(screen.queryByTestId("citation-marker-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId('citation-marker-1')).not.toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 6: sseFlow_PopoverShowsSourceAndExcerpt
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_PopoverShowsSourceAndExcerpt", async () => {
+  it('sseFlow_PopoverShowsSourceAndExcerpt', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "Reference [1] here." },
+      { type: 'token', content: 'Reference [1] here.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Annual Financial Report 2025",
+              sourceName: 'Annual Financial Report 2025',
               page: 15,
-              excerpt:
-                "Revenue increased by 12% year-over-year driven by strong sales.",
-              chunkId: "fin-1",
+              excerpt: 'Revenue increased by 12% year-over-year driven by strong sales.',
+              chunkId: 'fin-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Financial data", sseEvents);
+    await sendMessageAndStream(user, 'Financial data', sseEvents);
 
     // Wait for marker
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // Click to open popover
-    await user.click(screen.getByTestId("citation-marker-1"));
+    await user.click(screen.getByTestId('citation-marker-1'));
 
     await waitFor(() => {
-      expect(screen.getByTestId("citation-popover-1")).toBeInTheDocument();
+      expect(screen.getByTestId('citation-popover-1')).toBeInTheDocument();
     });
 
     // Verify all popover fields
-    expect(
-      screen.getByText("Annual Financial Report 2025"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Page 15")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Revenue increased by 12% year-over-year driven by strong sales.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Annual Financial Report 2025')).toBeInTheDocument();
+    expect(screen.getByText('Page 15')).toBeInTheDocument();
+    expect(screen.getByText('Revenue increased by 12% year-over-year driven by strong sales.')).toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 7: sseFlow_CitationWithoutPage_NoPageShown
   // ─────────────────────────────────────────────────────────────────────
 
-  it("sseFlow_CitationWithoutPage_NoPageShown", async () => {
+  it('sseFlow_CitationWithoutPage_NoPageShown', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "See [1] for details." },
+      { type: 'token', content: 'See [1] for details.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Web Article",
+              sourceName: 'Web Article',
               page: null,
-              excerpt: "Online content excerpt",
-              chunkId: "web-1",
+              excerpt: 'Online content excerpt',
+              chunkId: 'web-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Web source test", sseEvents);
+    await sendMessageAndStream(user, 'Web source test', sseEvents);
 
     // Wait for marker
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // Click to open popover
-    await user.click(screen.getByTestId("citation-marker-1"));
+    await user.click(screen.getByTestId('citation-marker-1'));
 
     await waitFor(() => {
-      expect(screen.getByTestId("citation-popover-1")).toBeInTheDocument();
+      expect(screen.getByTestId('citation-popover-1')).toBeInTheDocument();
     });
 
     // Source should appear, page should NOT
-    expect(screen.getByText("Web Article")).toBeInTheDocument();
+    expect(screen.getByText('Web Article')).toBeInTheDocument();
     expect(screen.queryByText(/^Page\s/)).not.toBeInTheDocument();
   });
 });
@@ -589,7 +559,7 @@ describe("SprkChat - Citations Integration", () => {
 // Combined Flow Tests
 // ---------------------------------------------------------------------------
 
-describe("SprkChat - Combined Suggestions and Citations Flow", () => {
+describe('SprkChat - Combined Suggestions and Citations Flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     setupFetchRouter();
@@ -611,8 +581,8 @@ describe("SprkChat - Combined Suggestions and Citations Flow", () => {
 
     // Wait for session to be created - textarea disabled reflects: isStreaming || !session || isSessionLoading
     await waitFor(() => {
-      const textarea = screen.getByTestId("chat-input-textarea");
-      const nativeTextarea = textarea.querySelector("textarea") || textarea;
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
       expect(nativeTextarea).not.toBeDisabled();
     });
 
@@ -625,146 +595,140 @@ describe("SprkChat - Combined Suggestions and Citations Flow", () => {
   async function sendMessageAndStream(
     user: ReturnType<typeof userEvent.setup>,
     messageText: string,
-    sseEvents: Array<Record<string, unknown>>,
+    sseEvents: Array<Record<string, unknown>>
   ) {
     pendingSseResponses.push(createSseStreamResponse(sseEvents));
 
-    const textarea = screen.getByTestId("chat-input-textarea");
-    const nativeTextarea = textarea.querySelector("textarea") || textarea;
+    const textarea = screen.getByTestId('chat-input-textarea');
+    const nativeTextarea = textarea.querySelector('textarea') || textarea;
     await user.type(nativeTextarea, messageText);
-    await user.click(screen.getByTestId("chat-send-button"));
+    await user.click(screen.getByTestId('chat-send-button'));
   }
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 1: combinedFlow_BothEventsPresent_BothFeaturesWork
   // ─────────────────────────────────────────────────────────────────────
 
-  it("combinedFlow_BothEventsPresent_BothFeaturesWork", async () => {
+  it('combinedFlow_BothEventsPresent_BothFeaturesWork', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "The document [1] states the policy." },
+      { type: 'token', content: 'The document [1] states the policy.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Policy Guide",
+              sourceName: 'Policy Guide',
               page: 5,
-              excerpt: "Policy excerpt",
-              chunkId: "pg-1",
+              excerpt: 'Policy excerpt',
+              chunkId: 'pg-1',
             },
           ],
         },
       },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Explain the policy", "Show related documents"] },
+        data: { suggestions: ['Explain the policy', 'Show related documents'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Tell me about the policy", sseEvents);
+    await sendMessageAndStream(user, 'Tell me about the policy', sseEvents);
 
     // Both citations and suggestions should be present
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
-        expect(screen.getByTestId("sprkchat-suggestions")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+        expect(screen.getByTestId('sprkchat-suggestions')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // Verify citations
-    expect(screen.getByTestId("citation-marker-1").textContent).toContain(
-      "[1]",
-    );
+    expect(screen.getByTestId('citation-marker-1').textContent).toContain('[1]');
 
     // Verify suggestions
-    expect(screen.getByTestId("suggestion-chip-0")).toBeInTheDocument();
-    expect(screen.getByTestId("suggestion-chip-1")).toBeInTheDocument();
+    expect(screen.getByTestId('suggestion-chip-0')).toBeInTheDocument();
+    expect(screen.getByTestId('suggestion-chip-1')).toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 2: combinedFlow_SuggestionsOnly_NoCitationsRendered
   // ─────────────────────────────────────────────────────────────────────
 
-  it("combinedFlow_SuggestionsOnly_NoCitationsRendered", async () => {
+  it('combinedFlow_SuggestionsOnly_NoCitationsRendered', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "Here is a general answer." },
+      { type: 'token', content: 'Here is a general answer.' },
       {
-        type: "suggestions",
+        type: 'suggestions',
         content: null,
-        data: { suggestions: ["Tell me more", "What else?"] },
+        data: { suggestions: ['Tell me more', 'What else?'] },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "General question", sseEvents);
+    await sendMessageAndStream(user, 'General question', sseEvents);
 
     await waitFor(
       () => {
-        expect(screen.getByTestId("sprkchat-suggestions")).toBeInTheDocument();
+        expect(screen.getByTestId('sprkchat-suggestions')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // No citation markers
-    expect(screen.queryByTestId("citation-marker-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId('citation-marker-1')).not.toBeInTheDocument();
 
     // Suggestions should work
-    expect(screen.getByTestId("suggestion-chip-0")).toBeInTheDocument();
+    expect(screen.getByTestId('suggestion-chip-0')).toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: combinedFlow_CitationsOnly_NoSuggestionsShown
   // ─────────────────────────────────────────────────────────────────────
 
-  it("combinedFlow_CitationsOnly_NoSuggestionsShown", async () => {
+  it('combinedFlow_CitationsOnly_NoSuggestionsShown', async () => {
     const user = await renderChatWithSession();
 
     const sseEvents = [
-      { type: "token", content: "The data from [1] shows this." },
+      { type: 'token', content: 'The data from [1] shows this.' },
       {
-        type: "citations",
+        type: 'citations',
         content: null,
         data: {
           citations: [
             {
               id: 1,
-              sourceName: "Data Report",
+              sourceName: 'Data Report',
               page: 22,
-              excerpt: "Statistical analysis",
-              chunkId: "dr-1",
+              excerpt: 'Statistical analysis',
+              chunkId: 'dr-1',
             },
           ],
         },
       },
-      { type: "done", content: null },
+      { type: 'done', content: null },
     ];
 
-    await sendMessageAndStream(user, "Show me data", sseEvents);
+    await sendMessageAndStream(user, 'Show me data', sseEvents);
 
     await waitFor(
       () => {
-        expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     );
 
     // No suggestions
-    expect(
-      screen.queryByTestId("sprkchat-suggestions"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sprkchat-suggestions')).not.toBeInTheDocument();
 
     // Citation should work
-    expect(screen.getByTestId("citation-marker-1").textContent).toContain(
-      "[1]",
-    );
+    expect(screen.getByTestId('citation-marker-1').textContent).toContain('[1]');
   });
 });

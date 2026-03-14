@@ -16,7 +16,7 @@
  * @see FileAccessEndpoints.cs — preview-url endpoint
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -26,16 +26,11 @@ import {
   Toolbar,
   ToolbarButton,
   ToolbarDivider,
-} from "@fluentui/react-components";
-import {
-  Dismiss24Regular,
-  Open20Regular,
-  DocumentRegular,
-  SearchRegular,
-} from "@fluentui/react-icons";
-import type { DocumentSearchResult } from "../types";
-import { BFF_API_BASE_URL, buildAuthHeaders } from "../services/apiBase";
-import { openEntityRecord } from "./EntityRecordDialog";
+} from '@fluentui/react-components';
+import { Dismiss24Regular, Open20Regular, DocumentRegular, SearchRegular } from '@fluentui/react-icons';
+import type { DocumentSearchResult } from '../types';
+import { BFF_API_BASE_URL, buildAuthHeaders } from '../services/apiBase';
+import { openEntityRecord } from './EntityRecordDialog';
 
 // =============================================
 // Props
@@ -69,30 +64,30 @@ const VIEWPORT_MARGIN = 8;
 
 const useStyles = makeStyles({
   backdrop: {
-    position: "fixed",
+    position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
     zIndex: 1000,
   },
   panel: {
-    position: "fixed",
+    position: 'fixed',
     width: `${PANEL_WIDTH}px`,
     height: `${PANEL_HEIGHT_VH}vh`,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusXLarge,
     boxShadow: tokens.shadow64,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
     zIndex: 1001,
   },
   titleBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
@@ -101,9 +96,9 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   titleText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     flex: 1,
     marginRight: tokens.spacingHorizontalS,
   },
@@ -115,20 +110,20 @@ const useStyles = makeStyles({
   },
   previewContainer: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
+    width: '100%',
+    height: '100%',
+    border: 'none',
   },
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalM,
   },
 });
@@ -146,14 +141,9 @@ interface PreviewUrlResponse {
   };
 }
 
-async function fetchPreviewUrl(
-  documentId: string,
-): Promise<PreviewUrlResponse> {
+async function fetchPreviewUrl(documentId: string): Promise<PreviewUrlResponse> {
   const headers = await buildAuthHeaders();
-  const response = await fetch(
-    `${BFF_API_BASE_URL}/api/documents/${documentId}/preview-url`,
-    { headers },
-  );
+  const response = await fetch(`${BFF_API_BASE_URL}/api/documents/${documentId}/preview-url`, { headers });
 
   if (!response.ok) {
     throw new Error(`Failed to load preview: ${response.status}`);
@@ -166,9 +156,10 @@ async function fetchPreviewUrl(
 // Positioning helper
 // =============================================
 
-function computePanelPosition(
-  anchorPosition: { x: number; y: number } | null | undefined,
-): { left: number; top: number } {
+function computePanelPosition(anchorPosition: { x: number; y: number } | null | undefined): {
+  left: number;
+  top: number;
+} {
   const vpWidth = window.innerWidth;
   const vpHeight = window.innerHeight;
   const panelH = vpHeight * (PANEL_HEIGHT_VH / 100);
@@ -190,17 +181,11 @@ function computePanelPosition(
     left = x - ANCHOR_OFFSET - PANEL_WIDTH;
   }
   // Clamp horizontally
-  left = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(left, vpWidth - PANEL_WIDTH - VIEWPORT_MARGIN),
-  );
+  left = Math.max(VIEWPORT_MARGIN, Math.min(left, vpWidth - PANEL_WIDTH - VIEWPORT_MARGIN));
 
   // Vertically center on click point, clamped to viewport
   let top = y - panelH / 2;
-  top = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(top, vpHeight - panelH - VIEWPORT_MARGIN),
-  );
+  top = Math.max(VIEWPORT_MARGIN, Math.min(top, vpHeight - panelH - VIEWPORT_MARGIN));
 
   return { left, top };
 }
@@ -222,13 +207,10 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const documentId = result?.documentId ?? null;
-  const documentName = result?.name ?? "Document";
+  const documentName = result?.name ?? 'Document';
 
   // --- Panel position ---
-  const panelPosition = useMemo(
-    () => computePanelPosition(anchorPosition),
-    [anchorPosition],
-  );
+  const panelPosition = useMemo(() => computePanelPosition(anchorPosition), [anchorPosition]);
 
   // --- Fetch preview URL when panel opens ---
   useEffect(() => {
@@ -243,16 +225,14 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
     setPreviewError(null);
 
     fetchPreviewUrl(documentId)
-      .then((data) => {
+      .then(data => {
         if (!cancelled) {
           setPreviewUrl(data.previewUrl);
         }
       })
-      .catch((err) => {
+      .catch(err => {
         if (!cancelled) {
-          setPreviewError(
-            err instanceof Error ? err.message : "Failed to load preview",
-          );
+          setPreviewError(err instanceof Error ? err.message : 'Failed to load preview');
         }
       })
       .finally(() => {
@@ -270,10 +250,10 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === 'Escape') onClose();
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
   // --- Action handlers ---
@@ -281,16 +261,16 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
   const handleOpenFile = useCallback(() => {
     if (documentId) {
       if (result?.fileUrl) {
-        window.open(result.fileUrl, "_blank");
+        window.open(result.fileUrl, '_blank');
       } else if (previewUrl) {
-        window.open(previewUrl, "_blank");
+        window.open(previewUrl, '_blank');
       }
     }
   }, [documentId, result?.fileUrl, previewUrl]);
 
   const handleOpenRecord = useCallback(() => {
     if (documentId) {
-      openEntityRecord(documentId, "documents");
+      openEntityRecord(documentId, 'documents');
     }
   }, [documentId]);
 
@@ -319,36 +299,19 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
           <Text weight="semibold" size={400} className={styles.titleText}>
             {documentName}
           </Text>
-          <Button
-            appearance="subtle"
-            icon={<Dismiss24Regular />}
-            onClick={onClose}
-            aria-label="Close"
-          />
+          <Button appearance="subtle" icon={<Dismiss24Regular />} onClick={onClose} aria-label="Close" />
         </div>
 
         {/* Toolbar: Open File | Open Record | Find Similar */}
         <Toolbar className={styles.toolbar} size="small">
-          <ToolbarButton
-            icon={<Open20Regular />}
-            onClick={handleOpenFile}
-            disabled={!documentId}
-          >
+          <ToolbarButton icon={<Open20Regular />} onClick={handleOpenFile} disabled={!documentId}>
             Open File
           </ToolbarButton>
-          <ToolbarButton
-            icon={<DocumentRegular />}
-            onClick={handleOpenRecord}
-            disabled={!documentId}
-          >
+          <ToolbarButton icon={<DocumentRegular />} onClick={handleOpenRecord} disabled={!documentId}>
             Open Record
           </ToolbarButton>
           <ToolbarDivider />
-          <ToolbarButton
-            icon={<SearchRegular />}
-            onClick={handleFindSimilar}
-            disabled={!documentId || !onFindSimilar}
-          >
+          <ToolbarButton icon={<SearchRegular />} onClick={handleFindSimilar} disabled={!documentId || !onFindSimilar}>
             Find Similar
           </ToolbarButton>
         </Toolbar>

@@ -19,17 +19,12 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/006-implement-filter-output-json.poml
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Button,
-} from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
-import { IInputs } from "../generated/ManifestTypes";
-import { CalendarStack, IEventDateInfo } from "./CalendarStack";
-import { CalendarFilterOutput } from "../types/CalendarFilter";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, Button } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
+import { IInputs } from '../generated/ManifestTypes';
+import { CalendarStack, IEventDateInfo } from './CalendarStack';
+import { CalendarFilterOutput } from '../types/CalendarFilter';
 import {
   toIsoDateString,
   parseIsoDate,
@@ -37,30 +32,30 @@ import {
   formatRangeFilter,
   formatClearFilter,
   formatFilterOutputToJson,
-} from "../utils/formatFilter";
+} from '../utils/formatFilter';
 
-const CONTROL_VERSION = "1.0.4";
+const CONTROL_VERSION = '1.0.4';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    boxSizing: "border-box",
-    overflow: "hidden",
+    boxSizing: 'border-box',
+    overflow: 'hidden',
   },
   calendarWrapper: {
     flex: 1,
     minHeight: 0, // Allow flexbox to shrink content
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -71,7 +66,7 @@ const useStyles = makeStyles({
    */
   clearButton: {
     fontSize: tokens.fontSizeBase200,
-    minWidth: "auto",
+    minWidth: 'auto',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
@@ -96,7 +91,7 @@ export interface IEventCalendarFilterRootProps {
    */
   eventDates?: string[];
   /** Display mode: single month or multi-month stack */
-  displayMode: "month" | "multiMonth";
+  displayMode: 'month' | 'multiMonth';
   /** Callback when filter output changes (JSON string for grid filtering) */
   onFilterOutputChange: (filterJson: string) => void;
   /** Callback when selected date changes (ISO date string) */
@@ -110,7 +105,7 @@ export interface IEventCalendarFilterRootProps {
  * 2. Simple array of strings: ["2026-02-15", "2026-02-16", ...] (count defaults to 1)
  */
 const parseEventDatesJson = (json: string | undefined): IEventDateInfo[] => {
-  if (!json || json.trim() === "") {
+  if (!json || json.trim() === '') {
     return [];
   }
 
@@ -123,14 +118,14 @@ const parseEventDatesJson = (json: string | undefined): IEventDateInfo[] => {
 
     return parsed
       .map((item: string | { date: string; count?: number }) => {
-        if (typeof item === "string") {
+        if (typeof item === 'string') {
           // Simple string format - count defaults to 1
           return { date: item, count: 1 };
-        } else if (item && typeof item.date === "string") {
+        } else if (item && typeof item.date === 'string') {
           // Object format with date and optional count
           return {
             date: item.date,
-            count: typeof item.count === "number" ? item.count : 1,
+            count: typeof item.count === 'number' ? item.count : 1,
           };
         }
         return null;
@@ -162,9 +157,7 @@ const parseEventDatesJson = (json: string | undefined): IEventDateInfo[] => {
  * - Event count indicators (dots for single, badges for multiple)
  * - Supports eventDatesJson with count per date
  */
-export const EventCalendarFilterRoot: React.FC<
-  IEventCalendarFilterRootProps
-> = ({
+export const EventCalendarFilterRoot: React.FC<IEventCalendarFilterRootProps> = ({
   context,
   eventDatesJson,
   eventDates = [],
@@ -188,10 +181,7 @@ export const EventCalendarFilterRoot: React.FC<
   const [rangeEnd, setRangeEnd] = React.useState<string | null>(null);
 
   // Parse eventDatesJson to IEventDateInfo array (memoized)
-  const eventDateInfos = React.useMemo(
-    () => parseEventDatesJson(eventDatesJson),
-    [eventDatesJson],
-  );
+  const eventDateInfos = React.useMemo(() => parseEventDatesJson(eventDatesJson), [eventDatesJson]);
 
   // Get container dimensions for responsive layout
   const width = context.mode.allocatedWidth || 300;
@@ -217,7 +207,7 @@ export const EventCalendarFilterRoot: React.FC<
     // Task 006: Use standardized filter format
     const filterOutput: CalendarFilterOutput = formatClearFilter();
     onFilterOutputChange(formatFilterOutputToJson(filterOutput));
-    onSelectedDateChange("");
+    onSelectedDateChange('');
   }, [onFilterOutputChange, onSelectedDateChange]);
 
   /**
@@ -232,11 +222,7 @@ export const EventCalendarFilterRoot: React.FC<
       setRangeEnd(null);
 
       // Check if clicking the same date (toggle off)
-      if (
-        anchorDate === dateStr &&
-        rangeStart === dateStr &&
-        rangeEnd === null
-      ) {
+      if (anchorDate === dateStr && rangeStart === dateStr && rangeEnd === null) {
         // Deselect - clear filter
         handleClearSelection();
         return;
@@ -248,19 +234,11 @@ export const EventCalendarFilterRoot: React.FC<
       setSelectedDates([dateStr]);
 
       // Task 006: Use standardized filter format for single date
-      const filterOutput: CalendarFilterOutput =
-        formatSingleDateFilter(dateStr);
+      const filterOutput: CalendarFilterOutput = formatSingleDateFilter(dateStr);
       onFilterOutputChange(formatFilterOutputToJson(filterOutput));
       onSelectedDateChange(dateStr);
     },
-    [
-      anchorDate,
-      rangeStart,
-      rangeEnd,
-      handleClearSelection,
-      onFilterOutputChange,
-      onSelectedDateChange,
-    ],
+    [anchorDate, rangeStart, rangeEnd, handleClearSelection, onFilterOutputChange, onSelectedDateChange]
   );
 
   /**
@@ -304,7 +282,7 @@ export const EventCalendarFilterRoot: React.FC<
       onFilterOutputChange(formatFilterOutputToJson(filterOutput));
       onSelectedDateChange(`${start} - ${end}`);
     },
-    [anchorDate, handleDateClick, onFilterOutputChange, onSelectedDateChange],
+    [anchorDate, handleDateClick, onFilterOutputChange, onSelectedDateChange]
   );
 
   /**
@@ -322,7 +300,7 @@ export const EventCalendarFilterRoot: React.FC<
       if (dates.length === 0) {
         filterOutput = formatClearFilter();
         onFilterOutputChange(formatFilterOutputToJson(filterOutput));
-        onSelectedDateChange("");
+        onSelectedDateChange('');
       } else if (dates.length === 1) {
         filterOutput = formatSingleDateFilter(dateStrs[0]);
         onFilterOutputChange(formatFilterOutputToJson(filterOutput));
@@ -337,7 +315,7 @@ export const EventCalendarFilterRoot: React.FC<
         onSelectedDateChange(`${startDate} - ${endDate}`);
       }
     },
-    [onFilterOutputChange, onSelectedDateChange],
+    [onFilterOutputChange, onSelectedDateChange]
   );
 
   // Calculate calendar height (container minus footer)
@@ -347,7 +325,7 @@ export const EventCalendarFilterRoot: React.FC<
     <div className={styles.container} style={{ width, height }}>
       <div className={styles.calendarWrapper}>
         <CalendarStack
-          monthsToShow={displayMode === "multiMonth" ? 3 : 1}
+          monthsToShow={displayMode === 'multiMonth' ? 3 : 1}
           eventDateInfos={eventDateInfos}
           eventDates={eventDates}
           selectedDates={selectedDates}

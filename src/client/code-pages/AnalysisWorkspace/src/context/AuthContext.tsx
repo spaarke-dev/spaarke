@@ -21,20 +21,8 @@
  * @see services/authService.ts - Token acquisition and caching
  */
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  type ReactNode,
-} from "react";
-import {
-  getAccessToken,
-  initializeAuth,
-  clearTokenCache,
-  AuthError,
-} from "../services/authInit";
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { getAccessToken, initializeAuth, clearTokenCache, AuthError } from '../services/authInit';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -51,7 +39,7 @@ const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 // Auth State
 // ---------------------------------------------------------------------------
 
-export type AuthStatus = "authenticating" | "authenticated" | "error";
+export type AuthStatus = 'authenticating' | 'authenticated' | 'error';
 
 export interface AuthContextValue {
   /** Current auth status */
@@ -95,7 +83,7 @@ export interface AuthProviderProps {
  *   3. Provides token + status to all children via context
  */
 export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
-  const [status, setStatus] = useState<AuthStatus>("authenticating");
+  const [status, setStatus] = useState<AuthStatus>('authenticating');
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<AuthError | Error | null>(null);
   const [isXrmUnavailable, setIsXrmUnavailable] = useState(false);
@@ -104,32 +92,27 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
    * Initialize authentication -- acquire the first token.
    */
   const initAuth = useCallback(async () => {
-    setStatus("authenticating");
+    setStatus('authenticating');
     setError(null);
     setIsXrmUnavailable(false);
 
     try {
       const initialToken = await initializeAuth();
       setToken(initialToken);
-      setStatus("authenticated");
+      setStatus('authenticated');
     } catch (err) {
       const authErr =
         err instanceof AuthError
           ? err
-          : new AuthError(
-              err instanceof Error ? err.message : "Authentication failed",
-              { isRetryable: true, cause: err },
-            );
+          : new AuthError(err instanceof Error ? err.message : 'Authentication failed', {
+              isRetryable: true,
+              cause: err,
+            });
       setError(authErr);
-      setIsXrmUnavailable(
-        authErr instanceof AuthError && authErr.isXrmUnavailable,
-      );
-      setStatus("error");
+      setIsXrmUnavailable(authErr instanceof AuthError && authErr.isXrmUnavailable);
+      setStatus('error');
       // Log without exposing the token itself
-      console.error(
-        "[AnalysisWorkspace:Auth] Authentication failed:",
-        authErr.message,
-      );
+      console.error('[AnalysisWorkspace:Auth] Authentication failed:', authErr.message);
     }
   }, []);
 
@@ -144,17 +127,14 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
    * the existing token (it may still be valid until actual expiration).
    */
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== 'authenticated') return;
 
     const intervalId = setInterval(async () => {
       try {
         const freshToken = await getAccessToken();
         setToken(freshToken);
       } catch (err) {
-        console.warn(
-          "[AnalysisWorkspace:Auth] Token refresh failed, will retry:",
-          err,
-        );
+        console.warn('[AnalysisWorkspace:Auth] Token refresh failed, will retry:', err);
         // Don't set error state -- existing token may still work.
         // The next API call will surface the real error if needed.
       }
@@ -180,20 +160,17 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
       clearTokenCache();
       const freshToken = await getAccessToken();
       setToken(freshToken);
-      setStatus("authenticated");
+      setStatus('authenticated');
       return freshToken;
     } catch (err) {
-      console.warn(
-        "[AnalysisWorkspace:Auth] Manual token refresh failed:",
-        err,
-      );
+      console.warn('[AnalysisWorkspace:Auth] Manual token refresh failed:', err);
       // On refresh failure mid-session, don't immediately switch to error state.
       // The user can continue with the existing token until it truly expires.
       // If it's a hard failure (Xrm unavailable), switch to error.
       if (err instanceof AuthError && err.isXrmUnavailable) {
         setError(err);
         setIsXrmUnavailable(true);
-        setStatus("error");
+        setStatus('error');
       }
       return null;
     }
@@ -204,8 +181,8 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
     token,
     error,
     isXrmUnavailable,
-    isAuthenticated: status === "authenticated",
-    isAuthenticating: status === "authenticating",
+    isAuthenticated: status === 'authenticated',
+    isAuthenticating: status === 'authenticating',
     retryAuth,
     refreshToken,
   };
@@ -227,8 +204,7 @@ export function useAuthContext(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error(
-      "useAuthContext must be used within an AuthProvider. " +
-        "Wrap your component tree with <AuthProvider>.",
+      'useAuthContext must be used within an AuthProvider. ' + 'Wrap your component tree with <AuthProvider>.'
     );
   }
   return context;

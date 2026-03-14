@@ -35,20 +35,13 @@ export interface CanvasEdge {
 
 /** PCF WebAPI interface (subset of ComponentFramework.WebApi) */
 interface PcfWebApi {
-  createRecord(
-    entityName: string,
-    data: Record<string, unknown>,
-  ): Promise<{ id: string }>;
-  updateRecord(
-    entityName: string,
-    id: string,
-    data: Record<string, unknown>,
-  ): Promise<unknown>;
+  createRecord(entityName: string, data: Record<string, unknown>): Promise<{ id: string }>;
+  updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<unknown>;
   deleteRecord(entityName: string, id: string): Promise<unknown>;
   retrieveMultipleRecords(
     entityName: string,
     options?: string,
-    maxPageSize?: number,
+    maxPageSize?: number
   ): Promise<{ entities: Record<string, unknown>[] }>;
 }
 
@@ -62,8 +55,8 @@ interface ExistingNode {
 // Constants
 // ---------------------------------------------------------------------------
 
-const ENTITY_NAME = "sprk_playbooknode";
-const LOG_PREFIX = "[PlaybookNodeSync]";
+const ENTITY_NAME = 'sprk_playbooknode';
+const LOG_PREFIX = '[PlaybookNodeSync]';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -81,18 +74,16 @@ export async function syncCanvasToNodes(
   webApi: PcfWebApi,
   playbookId: string,
   nodes: CanvasNode[],
-  edges: CanvasEdge[],
+  edges: CanvasEdge[]
 ): Promise<void> {
-  console.info(
-    `${LOG_PREFIX} Syncing ${nodes.length} nodes, ${edges.length} edges for playbook ${playbookId}`,
-  );
+  console.info(`${LOG_PREFIX} Syncing ${nodes.length} nodes, ${edges.length} edges for playbook ${playbookId}`);
 
   // Step 1: Load existing node records
   const existing = await getExistingNodes(webApi, playbookId);
   const existingByCanvasId = buildCanvasIdMap(existing);
 
   console.info(
-    `${LOG_PREFIX} Found ${existing.length} existing records, ${existingByCanvasId.size} mapped by canvas ID`,
+    `${LOG_PREFIX} Found ${existing.length} existing records, ${existingByCanvasId.size} mapped by canvas ID`
   );
 
   // Step 2: Compute execution order (Kahn's topological sort)
@@ -132,20 +123,16 @@ export async function syncCanvasToNodes(
     if (!nodeId) continue;
 
     const dependsOnIds = (incomingEdges.get(node.id) ?? [])
-      .filter((srcId) => canvasIdToNodeId.has(srcId))
-      .map((srcId) => canvasIdToNodeId.get(srcId)!);
+      .filter(srcId => canvasIdToNodeId.has(srcId))
+      .map(srcId => canvasIdToNodeId.get(srcId)!);
 
     try {
-      const dependsOnJson =
-        dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
+      const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
       await webApi.updateRecord(ENTITY_NAME, nodeId, {
         sprk_dependsonjson: dependsOnJson,
       });
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to update dependsOn for node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to update dependsOn for node ${nodeId}:`, err);
     }
   }
 
@@ -159,16 +146,13 @@ export async function syncCanvasToNodes(
       await webApi.deleteRecord(ENTITY_NAME, record.id);
       deletedCount++;
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to delete orphaned node ${record.id}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to delete orphaned node ${record.id}:`, err);
     }
   }
 
   console.info(
     `${LOG_PREFIX} Sync complete: ${nodes.length - existingByCanvasId.size} created, ` +
-      `${Math.min(nodes.length, existingByCanvasId.size)} updated, ${deletedCount} deleted`,
+      `${Math.min(nodes.length, existingByCanvasId.size)} updated, ${deletedCount} deleted`
   );
 }
 
@@ -176,22 +160,15 @@ export async function syncCanvasToNodes(
 // Dataverse CRUD
 // ---------------------------------------------------------------------------
 
-async function getExistingNodes(
-  webApi: PcfWebApi,
-  playbookId: string,
-): Promise<ExistingNode[]> {
-  const select = "sprk_playbooknodeid,sprk_configjson";
+async function getExistingNodes(webApi: PcfWebApi, playbookId: string): Promise<ExistingNode[]> {
+  const select = 'sprk_playbooknodeid,sprk_configjson';
   const filter = `_sprk_playbookid_value eq ${playbookId}`;
   const options = `?$select=${select}&$filter=${filter}`;
 
-  const result = await webApi.retrieveMultipleRecords(
-    ENTITY_NAME,
-    options,
-    500,
-  );
-  return (result.entities ?? []).map((e) => ({
-    id: (e["sprk_playbooknodeid"] as string) ?? "",
-    configJson: (e["sprk_configjson"] as string) ?? null,
+  const result = await webApi.retrieveMultipleRecords(ENTITY_NAME, options, 500);
+  return (result.entities ?? []).map(e => ({
+    id: (e['sprk_playbooknodeid'] as string) ?? '',
+    configJson: (e['sprk_configjson'] as string) ?? null,
   }));
 }
 
@@ -199,12 +176,11 @@ async function createNode(
   webApi: PcfWebApi,
   playbookId: string,
   node: CanvasNode,
-  executionOrder: number,
+  executionOrder: number
 ): Promise<string> {
   const data = node.data;
-  const name = asString(data["label"]) ?? asString(data["name"]) ?? node.type;
-  const outputVariable =
-    asString(data["outputVariable"]) ?? `output_${node.id}`;
+  const name = asString(data['label']) ?? asString(data['name']) ?? node.type;
+  const outputVariable = asString(data['outputVariable']) ?? `output_${node.id}`;
   const configJson = JSON.stringify({
     __canvasNodeId: node.id,
     ...stripKnownFields(data),
@@ -212,51 +188,41 @@ async function createNode(
 
   const payload: Record<string, unknown> = {
     sprk_name: name,
-    "sprk_playbookid@odata.bind": `/sprk_analysisplaybooks(${playbookId})`,
+    'sprk_playbookid@odata.bind': `/sprk_analysisplaybooks(${playbookId})`,
     sprk_executionorder: executionOrder,
     sprk_outputvariable: outputVariable,
     sprk_configjson: configJson,
     sprk_position_x: Math.round(node.position.x),
     sprk_position_y: Math.round(node.position.y),
-    sprk_isactive: asBool(data["isActive"]) ?? true,
+    sprk_isactive: asBool(data['isActive']) ?? true,
   };
 
   // Optional lookup bindings
-  const actionId = asString(data["actionId"]);
-  if (actionId)
-    payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+  const actionId = asString(data['actionId']);
+  if (actionId) payload['sprk_actionid@odata.bind'] = `/sprk_analysisactions(${actionId})`;
 
-  const toolId = asString(data["toolId"]);
-  if (toolId)
-    payload["sprk_toolid@odata.bind"] = `/sprk_analysistools(${toolId})`;
+  const toolId = asString(data['toolId']);
+  if (toolId) payload['sprk_toolid@odata.bind'] = `/sprk_analysistools(${toolId})`;
 
-  const modelDeploymentId = asString(data["modelDeploymentId"]);
+  const modelDeploymentId = asString(data['modelDeploymentId']);
   if (modelDeploymentId)
-    payload["sprk_modeldeploymentid@odata.bind"] =
-      `/sprk_aimodeldeployments(${modelDeploymentId})`;
+    payload['sprk_modeldeploymentid@odata.bind'] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
-  const timeoutSeconds = asNumber(data["timeoutSeconds"]);
-  if (timeoutSeconds != null) payload["sprk_timeoutseconds"] = timeoutSeconds;
+  const timeoutSeconds = asNumber(data['timeoutSeconds']);
+  if (timeoutSeconds != null) payload['sprk_timeoutseconds'] = timeoutSeconds;
 
-  const retryCount = asNumber(data["retryCount"]);
-  if (retryCount != null) payload["sprk_retrycount"] = retryCount;
+  const retryCount = asNumber(data['retryCount']);
+  if (retryCount != null) payload['sprk_retrycount'] = retryCount;
 
-  const conditionJson = asString(data["conditionJson"]);
-  if (conditionJson) payload["sprk_conditionjson"] = conditionJson;
+  const conditionJson = asString(data['conditionJson']);
+  if (conditionJson) payload['sprk_conditionjson'] = conditionJson;
 
   const result = await webApi.createRecord(ENTITY_NAME, payload);
-  console.info(
-    `${LOG_PREFIX} Created node ${result.id} from canvas ${node.id}: ${name}`,
-  );
+  console.info(`${LOG_PREFIX} Created node ${result.id} from canvas ${node.id}: ${name}`);
   return result.id;
 }
 
-async function updateNode(
-  webApi: PcfWebApi,
-  nodeId: string,
-  node: CanvasNode,
-  executionOrder: number,
-): Promise<void> {
+async function updateNode(webApi: PcfWebApi, nodeId: string, node: CanvasNode, executionOrder: number): Promise<void> {
   const data = node.data;
   const configJson = JSON.stringify({
     __canvasNodeId: node.id,
@@ -270,36 +236,33 @@ async function updateNode(
     sprk_position_y: Math.round(node.position.y),
   };
 
-  const name = asString(data["label"]) ?? asString(data["name"]);
-  if (name) payload["sprk_name"] = name;
+  const name = asString(data['label']) ?? asString(data['name']);
+  if (name) payload['sprk_name'] = name;
 
-  const outputVariable = asString(data["outputVariable"]);
-  if (outputVariable) payload["sprk_outputvariable"] = outputVariable;
+  const outputVariable = asString(data['outputVariable']);
+  if (outputVariable) payload['sprk_outputvariable'] = outputVariable;
 
-  const actionId = asString(data["actionId"]);
-  if (actionId)
-    payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+  const actionId = asString(data['actionId']);
+  if (actionId) payload['sprk_actionid@odata.bind'] = `/sprk_analysisactions(${actionId})`;
 
-  const toolId = asString(data["toolId"]);
-  if (toolId)
-    payload["sprk_toolid@odata.bind"] = `/sprk_analysistools(${toolId})`;
+  const toolId = asString(data['toolId']);
+  if (toolId) payload['sprk_toolid@odata.bind'] = `/sprk_analysistools(${toolId})`;
 
-  const modelDeploymentId = asString(data["modelDeploymentId"]);
+  const modelDeploymentId = asString(data['modelDeploymentId']);
   if (modelDeploymentId)
-    payload["sprk_modeldeploymentid@odata.bind"] =
-      `/sprk_aimodeldeployments(${modelDeploymentId})`;
+    payload['sprk_modeldeploymentid@odata.bind'] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
-  const timeoutSeconds = asNumber(data["timeoutSeconds"]);
-  if (timeoutSeconds != null) payload["sprk_timeoutseconds"] = timeoutSeconds;
+  const timeoutSeconds = asNumber(data['timeoutSeconds']);
+  if (timeoutSeconds != null) payload['sprk_timeoutseconds'] = timeoutSeconds;
 
-  const retryCount = asNumber(data["retryCount"]);
-  if (retryCount != null) payload["sprk_retrycount"] = retryCount;
+  const retryCount = asNumber(data['retryCount']);
+  if (retryCount != null) payload['sprk_retrycount'] = retryCount;
 
-  const conditionJson = asString(data["conditionJson"]);
-  if (conditionJson) payload["sprk_conditionjson"] = conditionJson;
+  const conditionJson = asString(data['conditionJson']);
+  if (conditionJson) payload['sprk_conditionjson'] = conditionJson;
 
-  const isActive = asBool(data["isActive"]);
-  if (isActive != null) payload["sprk_isactive"] = isActive;
+  const isActive = asBool(data['isActive']);
+  if (isActive != null) payload['sprk_isactive'] = isActive;
 
   await webApi.updateRecord(ENTITY_NAME, nodeId, payload);
 }
@@ -309,11 +272,8 @@ async function updateNode(
 // ---------------------------------------------------------------------------
 
 /** Kahn's algorithm — topological sort of canvas edges → execution order per node. */
-function computeExecutionOrders(
-  nodes: CanvasNode[],
-  edges: CanvasEdge[],
-): Map<string, number> {
-  const nodeIds = new Set(nodes.map((n) => n.id));
+function computeExecutionOrders(nodes: CanvasNode[], edges: CanvasEdge[]): Map<string, number> {
+  const nodeIds = new Set(nodes.map(n => n.id));
   const inDegree = new Map<string, number>();
   const adjacency = new Map<string, string[]>();
 
@@ -384,35 +344,33 @@ function extractCanvasNodeId(configJson: string | null): string | null {
   if (!configJson) return null;
   try {
     const obj = JSON.parse(configJson);
-    return typeof obj.__canvasNodeId === "string" ? obj.__canvasNodeId : null;
+    return typeof obj.__canvasNodeId === 'string' ? obj.__canvasNodeId : null;
   } catch {
     return null;
   }
 }
 
 /** Strip known Dataverse-bound fields and UI-only metadata from data to produce clean config. */
-function stripKnownFields(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
+function stripKnownFields(data: Record<string, unknown>): Record<string, unknown> {
   const known = new Set([
     // Dataverse-bound fields (stored in their own columns)
-    "label",
-    "name",
-    "actionId",
-    "toolId",
-    "modelDeploymentId",
-    "outputVariable",
-    "timeoutSeconds",
-    "retryCount",
-    "conditionJson",
-    "isActive",
-    "skillIds",
-    "knowledgeIds",
-    "toolIds",
+    'label',
+    'name',
+    'actionId',
+    'toolId',
+    'modelDeploymentId',
+    'outputVariable',
+    'timeoutSeconds',
+    'retryCount',
+    'conditionJson',
+    'isActive',
+    'skillIds',
+    'knowledgeIds',
+    'toolIds',
     // UI-only metadata (not part of executor config)
-    "type",
-    "isConfigured",
-    "validationErrors",
+    'type',
+    'isConfigured',
+    'validationErrors',
   ]);
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
@@ -422,11 +380,11 @@ function stripKnownFields(
   // For nodes that store their config in a nested configJson string
   // (updateRecord, sendEmail, createTask), extract the inner fields
   // to the top level so the server-side executor can read them directly.
-  if (typeof result["configJson"] === "string") {
+  if (typeof result['configJson'] === 'string') {
     try {
-      const inner = JSON.parse(result["configJson"] as string);
-      if (inner && typeof inner === "object") {
-        delete result["configJson"];
+      const inner = JSON.parse(result['configJson'] as string);
+      if (inner && typeof inner === 'object') {
+        delete result['configJson'];
         Object.assign(result, inner);
       }
     } catch {
@@ -438,12 +396,12 @@ function stripKnownFields(
 }
 
 function asString(v: unknown): string | null {
-  return typeof v === "string" && v.length > 0 ? v : null;
+  return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
 function asNumber(v: unknown): number | null {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
     const n = Number(v);
     return isNaN(n) ? null : n;
   }
@@ -451,6 +409,6 @@ function asNumber(v: unknown): number | null {
 }
 
 function asBool(v: unknown): boolean | null {
-  if (typeof v === "boolean") return v;
+  if (typeof v === 'boolean') return v;
   return null;
 }

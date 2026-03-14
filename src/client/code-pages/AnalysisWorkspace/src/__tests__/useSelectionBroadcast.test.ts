@@ -13,9 +13,9 @@
  * @see hooks/useSelectionBroadcast.ts
  */
 
-import { renderHook, act } from "@testing-library/react";
-import { useSelectionBroadcast } from "../hooks/useSelectionBroadcast";
-import { SprkChatBridge } from "./mocks/MockSprkChatBridge";
+import { renderHook, act } from '@testing-library/react';
+import { useSelectionBroadcast } from '../hooks/useSelectionBroadcast';
+import { SprkChatBridge } from './mocks/MockSprkChatBridge';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -26,7 +26,7 @@ function createMockEditorRef() {
   return {
     current: {
       focus: jest.fn(),
-      getHtml: jest.fn(() => ""),
+      getHtml: jest.fn(() => ''),
       setHtml: jest.fn(),
       clear: jest.fn(),
     },
@@ -43,18 +43,14 @@ function simulateSelection(
     startOffset?: number;
     endOffset?: number;
     insideEditor?: boolean;
-  },
+  }
 ) {
-  const {
-    startOffset = 0,
-    endOffset = text.length,
-    insideEditor = true,
-  } = options ?? {};
+  const { startOffset = 0, endOffset = text.length, insideEditor = true } = options ?? {};
 
   // Create a mock contenteditable container
-  const editorContainer = document.createElement("div");
-  editorContainer.setAttribute("contenteditable", "true");
-  editorContainer.setAttribute("data-lexical-editor", "true");
+  const editorContainer = document.createElement('div');
+  editorContainer.setAttribute('contenteditable', 'true');
+  editorContainer.setAttribute('data-lexical-editor', 'true');
   document.body.appendChild(editorContainer);
 
   const textNode = document.createTextNode(text);
@@ -81,7 +77,7 @@ function simulateSelection(
 
   // Mock cloneContents
   const fragment = document.createDocumentFragment();
-  const span = document.createElement("span");
+  const span = document.createElement('span');
   span.textContent = text;
   fragment.appendChild(span);
   range.cloneContents = jest.fn(() => fragment);
@@ -93,14 +89,12 @@ function simulateSelection(
     getRangeAt: jest.fn(() => range),
     isCollapsed: !text,
   };
-  jest
-    .spyOn(document, "getSelection")
-    .mockReturnValue(mockSelection as unknown as Selection);
+  jest.spyOn(document, 'getSelection').mockReturnValue(mockSelection as unknown as Selection);
 
   // If not inside editor, remove the editorContainer before the event fires
   if (!insideEditor) {
     // Re-attach textNode to a non-editor parent
-    const externalDiv = document.createElement("div");
+    const externalDiv = document.createElement('div');
     externalDiv.appendChild(textNode);
     document.body.appendChild(externalDiv);
     // Update range to use the new parent
@@ -109,7 +103,7 @@ function simulateSelection(
   }
 
   // Dispatch selectionchange event
-  document.dispatchEvent(new Event("selectionchange"));
+  document.dispatchEvent(new Event('selectionchange'));
 
   return {
     cleanup: () => {
@@ -125,13 +119,13 @@ function simulateSelection(
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("useSelectionBroadcast", () => {
+describe('useSelectionBroadcast', () => {
   let bridge: SprkChatBridge;
   let editorRef: ReturnType<typeof createMockEditorRef>;
 
   beforeEach(() => {
     jest.useFakeTimers();
-    bridge = new SprkChatBridge({ context: "test-selection" });
+    bridge = new SprkChatBridge({ context: 'test-selection' });
     editorRef = createMockEditorRef();
   });
 
@@ -145,25 +139,24 @@ describe("useSelectionBroadcast", () => {
   // 1. Text Selection Emits selection_changed
   // -----------------------------------------------------------------------
 
-  it("selectionChange_TextSelected_EmitsSelectionChangedEvent", () => {
+  it('selectionChange_TextSelected_EmitsSelectionChangedEvent', () => {
     // Arrange
     const emittedEvents: Array<{ text: string; context: string }> = [];
-    bridge.subscribe("selection_changed", (payload: unknown) => {
+    bridge.subscribe('selection_changed', (payload: unknown) => {
       const p = payload as { text: string; context: string };
       emittedEvents.push(p);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: simulate a text selection inside the editor
-    const { cleanup } = simulateSelection("selected text");
+    const { cleanup } = simulateSelection('selected text');
 
     // Advance past the 300ms debounce
     act(() => {
@@ -172,7 +165,7 @@ describe("useSelectionBroadcast", () => {
 
     // Assert: selection_changed emitted with the selected text
     expect(emittedEvents).toHaveLength(1);
-    expect(emittedEvents[0].text).toBe("selected text");
+    expect(emittedEvents[0].text).toBe('selected text');
 
     cleanup();
   });
@@ -181,42 +174,41 @@ describe("useSelectionBroadcast", () => {
   // 2. Drag Debounce
   // -----------------------------------------------------------------------
 
-  it("selectionChange_RapidDragSelect_DebouncesAt300ms", () => {
+  it('selectionChange_RapidDragSelect_DebouncesAt300ms', () => {
     // Arrange
     const emittedEvents: unknown[] = [];
-    bridge.subscribe("selection_changed", (payload) => {
+    bridge.subscribe('selection_changed', payload => {
       emittedEvents.push(payload);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: rapid selection changes (simulates drag)
-    const s1 = simulateSelection("sel");
+    const s1 = simulateSelection('sel');
     act(() => {
       jest.advanceTimersByTime(100);
     }); // 100ms
     s1.cleanup();
 
-    const s2 = simulateSelection("select");
+    const s2 = simulateSelection('select');
     act(() => {
       jest.advanceTimersByTime(100);
     }); // 200ms total
     s2.cleanup();
 
-    const s3 = simulateSelection("selected te");
+    const s3 = simulateSelection('selected te');
     act(() => {
       jest.advanceTimersByTime(100);
     }); // 300ms total
     s3.cleanup();
 
-    const s4 = simulateSelection("selected text final");
+    const s4 = simulateSelection('selected text final');
     act(() => {
       jest.advanceTimersByTime(300);
     }); // Only final fires
@@ -227,7 +219,7 @@ describe("useSelectionBroadcast", () => {
     const lastEvent = emittedEvents[emittedEvents.length - 1] as {
       text: string;
     };
-    expect(lastEvent.text).toBe("selected text final");
+    expect(lastEvent.text).toBe('selected text final');
 
     s4.cleanup();
   });
@@ -236,42 +228,39 @@ describe("useSelectionBroadcast", () => {
   // 3. Deselect (Selection Cleared)
   // -----------------------------------------------------------------------
 
-  it("selectionChange_EmptySelection_EmitsSelectionClearedContext", () => {
+  it('selectionChange_EmptySelection_EmitsSelectionClearedContext', () => {
     // Arrange
     const emittedEvents: Array<{ text: string; context: string }> = [];
-    bridge.subscribe("selection_changed", (payload: unknown) => {
+    bridge.subscribe('selection_changed', (payload: unknown) => {
       const p = payload as { text: string; context: string };
       emittedEvents.push(p);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: first select text, then deselect (empty selection)
-    const s1 = simulateSelection("some text");
+    const s1 = simulateSelection('some text');
     act(() => {
       jest.advanceTimersByTime(300);
     });
     s1.cleanup();
 
     // Now simulate an empty selection (deselect)
-    const s2 = simulateSelection("");
+    const s2 = simulateSelection('');
     act(() => {
       jest.advanceTimersByTime(300);
     });
 
     // Assert: a selection_cleared event was emitted after the text selection
-    const clearedEvents = emittedEvents.filter(
-      (e) => e.context === "selection_cleared",
-    );
+    const clearedEvents = emittedEvents.filter(e => e.context === 'selection_cleared');
     expect(clearedEvents.length).toBeGreaterThanOrEqual(1);
-    expect(clearedEvents[0].text).toBe("");
+    expect(clearedEvents[0].text).toBe('');
 
     s2.cleanup();
   });
@@ -280,27 +269,23 @@ describe("useSelectionBroadcast", () => {
   // 4. Cleanup on Unmount
   // -----------------------------------------------------------------------
 
-  it("unmount_CleanupCalled_RemovesEventListenerAndClearsTimer", () => {
+  it('unmount_CleanupCalled_RemovesEventListenerAndClearsTimer', () => {
     // Arrange
-    const removeListenerSpy = jest.spyOn(document, "removeEventListener");
+    const removeListenerSpy = jest.spyOn(document, 'removeEventListener');
 
     const { unmount } = renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: unmount the hook
     unmount();
 
     // Assert: removeEventListener was called for "selectionchange"
-    expect(removeListenerSpy).toHaveBeenCalledWith(
-      "selectionchange",
-      expect.any(Function),
-    );
+    expect(removeListenerSpy).toHaveBeenCalledWith('selectionchange', expect.any(Function));
 
     removeListenerSpy.mockRestore();
   });
@@ -309,24 +294,23 @@ describe("useSelectionBroadcast", () => {
   // 5. Disabled hook does not listen
   // -----------------------------------------------------------------------
 
-  it("selectionChange_WhenDisabled_DoesNotEmitEvents", () => {
+  it('selectionChange_WhenDisabled_DoesNotEmitEvents', () => {
     // Arrange
     const emittedEvents: unknown[] = [];
-    bridge.subscribe("selection_changed", (payload) => {
+    bridge.subscribe('selection_changed', payload => {
       emittedEvents.push(payload);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: false,
-      }),
+      })
     );
 
     // Act
-    const { cleanup } = simulateSelection("should not emit");
+    const { cleanup } = simulateSelection('should not emit');
     act(() => {
       jest.advanceTimersByTime(300);
     });
@@ -341,27 +325,26 @@ describe("useSelectionBroadcast", () => {
   // 6. Bridge disconnected skips emission
   // -----------------------------------------------------------------------
 
-  it("selectionChange_BridgeDisconnected_DoesNotEmit", () => {
+  it('selectionChange_BridgeDisconnected_DoesNotEmit', () => {
     // Arrange
     const emittedEvents: unknown[] = [];
-    bridge.subscribe("selection_changed", (payload) => {
+    bridge.subscribe('selection_changed', payload => {
       emittedEvents.push(payload);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Disconnect the bridge before selection
     bridge.disconnect();
 
     // Act
-    const { cleanup } = simulateSelection("text after disconnect");
+    const { cleanup } = simulateSelection('text after disconnect');
     act(() => {
       jest.advanceTimersByTime(300);
     });
@@ -376,19 +359,18 @@ describe("useSelectionBroadcast", () => {
   // 7. Null bridge skips
   // -----------------------------------------------------------------------
 
-  it("selectionChange_NullBridge_DoesNotEmitOrCrash", () => {
+  it('selectionChange_NullBridge_DoesNotEmitOrCrash', () => {
     // Arrange
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge: null,
         enabled: true,
-      }),
+      })
     );
 
     // Act: should not crash even with null bridge
-    const { cleanup } = simulateSelection("test text");
+    const { cleanup } = simulateSelection('test text');
     act(() => {
       jest.advanceTimersByTime(300);
     });
@@ -403,24 +385,23 @@ describe("useSelectionBroadcast", () => {
   // 8. Selection outside editor is ignored
   // -----------------------------------------------------------------------
 
-  it("selectionChange_OutsideEditor_DoesNotEmit", () => {
+  it('selectionChange_OutsideEditor_DoesNotEmit', () => {
     // Arrange
     const emittedEvents: unknown[] = [];
-    bridge.subscribe("selection_changed", (payload) => {
+    bridge.subscribe('selection_changed', payload => {
       emittedEvents.push(payload);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: simulate selection outside editor
-    const { cleanup } = simulateSelection("outside text", {
+    const { cleanup } = simulateSelection('outside text', {
       insideEditor: false,
     });
     act(() => {
@@ -437,39 +418,36 @@ describe("useSelectionBroadcast", () => {
   // 9. Duplicate selection text is not re-emitted
   // -----------------------------------------------------------------------
 
-  it("selectionChange_SameTextTwice_OnlyEmitsOnce", () => {
+  it('selectionChange_SameTextTwice_OnlyEmitsOnce', () => {
     // Arrange
     const emittedEvents: unknown[] = [];
-    bridge.subscribe("selection_changed", (payload) => {
+    bridge.subscribe('selection_changed', payload => {
       emittedEvents.push(payload);
     });
 
     renderHook(() =>
       useSelectionBroadcast({
-        editorRef:
-          editorRef as React.RefObject<unknown> as React.RefObject<null>,
+        editorRef: editorRef as React.RefObject<unknown> as React.RefObject<null>,
         bridge,
         enabled: true,
-      }),
+      })
     );
 
     // Act: select same text twice
-    const s1 = simulateSelection("duplicate text");
+    const s1 = simulateSelection('duplicate text');
     act(() => {
       jest.advanceTimersByTime(300);
     });
     s1.cleanup();
 
-    const s2 = simulateSelection("duplicate text");
+    const s2 = simulateSelection('duplicate text');
     act(() => {
       jest.advanceTimersByTime(300);
     });
     s2.cleanup();
 
     // Assert: only emitted once (second is a duplicate, filtered by the hook)
-    const textEvents = (emittedEvents as { text: string }[]).filter(
-      (e) => e.text === "duplicate text",
-    );
+    const textEvents = (emittedEvents as { text: string }[]).filter(e => e.text === 'duplicate text');
     expect(textEvents).toHaveLength(1);
   });
 });

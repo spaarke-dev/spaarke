@@ -41,10 +41,7 @@ export interface IDataverseClient {
    * @param data - Record payload object
    * @returns Created record reference with id
    */
-  createRecord(
-    entityLogicalName: string,
-    data: Record<string, unknown>,
-  ): Promise<DataverseRecordRef>;
+  createRecord(entityLogicalName: string, data: Record<string, unknown>): Promise<DataverseRecordRef>;
 
   /**
    * Update a record in Dataverse.
@@ -53,11 +50,7 @@ export interface IDataverseClient {
    * @param id - Record GUID
    * @param data - Fields to update
    */
-  updateRecord(
-    entityLogicalName: string,
-    id: string,
-    data: Record<string, unknown>,
-  ): Promise<void>;
+  updateRecord(entityLogicalName: string, id: string, data: Record<string, unknown>): Promise<void>;
 }
 
 /**
@@ -245,7 +238,7 @@ export interface UploadProgress {
   currentFileName: string;
 
   /** Current status */
-  status: "uploading" | "complete" | "failed";
+  status: 'uploading' | 'complete' | 'failed';
 
   /** Error message (when status is 'failed') */
   error?: string;
@@ -422,12 +415,8 @@ export interface ILogger {
  * Default console logger implementation.
  */
 export const consoleLogger: ILogger = {
-  info: (source, message, data) =>
-    console.log(`[${source}] ${message}`, data ?? ""),
-  warn: (source, message, data) =>
-    console.warn(`[${source}] ${message}`, data ?? ""),
-  error: (source, message, error) =>
-    console.error(`[${source}] ${message}`, error ?? ""),
-  debug: (source, message, data) =>
-    console.debug(`[${source}] ${message}`, data ?? ""),
+  info: (source, message, data) => console.log(`[${source}] ${message}`, data ?? ''),
+  warn: (source, message, data) => console.warn(`[${source}] ${message}`, data ?? ''),
+  error: (source, message, error) => console.error(`[${source}] ${message}`, error ?? ''),
+  debug: (source, message, data) => console.debug(`[${source}] ${message}`, data ?? ''),
 };

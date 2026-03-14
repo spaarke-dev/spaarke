@@ -15,26 +15,19 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Spinner,
-  Text,
-  Button,
-} from "@fluentui/react-components";
-import { ISprkChatProps, IChatMessage, IPlaybookOption } from "./types";
-import { SprkChatMessage } from "./SprkChatMessage";
-import { SprkChatInput } from "./SprkChatInput";
-import { SprkChatContextSelector } from "./SprkChatContextSelector";
-import { SprkChatPredefinedPrompts } from "./SprkChatPredefinedPrompts";
-import { SprkChatHighlightRefine } from "./SprkChatHighlightRefine";
-import { SprkChatSuggestions } from "./SprkChatSuggestions";
-import { useSseStream, parseSseEvent } from "./hooks/useSseStream";
-import { useChatSession } from "./hooks/useChatSession";
-import { useChatPlaybooks } from "./hooks/useChatPlaybooks";
-import { useSelectionListener } from "./hooks/useSelectionListener";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { ISprkChatProps, IChatMessage, IPlaybookOption } from './types';
+import { SprkChatMessage } from './SprkChatMessage';
+import { SprkChatInput } from './SprkChatInput';
+import { SprkChatContextSelector } from './SprkChatContextSelector';
+import { SprkChatPredefinedPrompts } from './SprkChatPredefinedPrompts';
+import { SprkChatHighlightRefine } from './SprkChatHighlightRefine';
+import { SprkChatSuggestions } from './SprkChatSuggestions';
+import { useSseStream, parseSseEvent } from './hooks/useSseStream';
+import { useChatSession } from './hooks/useChatSession';
+import { useChatPlaybooks } from './hooks/useChatPlaybooks';
+import { useSelectionListener } from './hooks/useSelectionListener';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -42,34 +35,34 @@ import { useSelectionListener } from "./hooks/useSelectionListener";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.overflow("hidden"),
+    ...shorthands.overflow('hidden'),
   },
   messageList: {
     flexGrow: 1,
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    position: "relative",
+    position: 'relative',
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexGrow: 1,
     ...shorthands.gap(tokens.spacingVerticalS),
     color: tokens.colorNeutralForeground3,
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalL),
   },
   errorBanner: {
@@ -77,11 +70,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorPaletteRedBackground1,
     color: tokens.colorPaletteRedForeground1,
     fontSize: tokens.fontSizeBase200,
-    textAlign: "center",
+    textAlign: 'center',
   },
   playbookChips: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
   },
@@ -133,7 +126,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   // Merge passed-in playbooks with discovered ones (deduplicate by id)
   const allPlaybooks = React.useMemo((): IPlaybookOption[] => {
-    const seen = new Set<string>(playbooks.map((p) => p.id));
+    const seen = new Set<string>(playbooks.map(p => p.id));
     const merged = [...playbooks];
     for (const pb of discoveredPlaybooks) {
       if (!seen.has(pb.id)) {
@@ -176,23 +169,15 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   // Editor-sourced refine state (separate from chat SSE stream)
   const [isEditorRefining, setIsEditorRefining] = React.useState(false);
-  const [editorRefineError, setEditorRefineError] =
-    React.useState<Error | null>(null);
+  const [editorRefineError, setEditorRefineError] = React.useState<Error | null>(null);
   const editorRefineAbortRef = React.useRef<AbortController | null>(null);
 
   // Additional documents state for multi-document context
-  const [additionalDocumentIds, setAdditionalDocumentIds] = React.useState<
-    string[]
-  >([]);
-  const additionalDocsDebounceRef = React.useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
+  const [additionalDocumentIds, setAdditionalDocumentIds] = React.useState<string[]>([]);
+  const additionalDocsDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cross-pane selection listener (receives selection_changed from Analysis Workspace editor)
-  const {
-    selection: crossPaneSelection,
-    clearSelection: clearCrossPaneSelection,
-  } = useSelectionListener({
+  const { selection: crossPaneSelection, clearSelection: clearCrossPaneSelection } = useSelectionListener({
     bridge: bridge ?? null,
     enabled: !!bridge,
   });
@@ -202,21 +187,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     const initSession = async () => {
       if (initialSessionId) {
         // Resume existing session
-        const newSession = await createSession(
-          documentId,
-          playbookId,
-          hostContext,
-        );
+        const newSession = await createSession(documentId, playbookId, hostContext);
         if (newSession) {
           // loadHistory needs the session to be set first - handled by useChatSession
         }
       } else {
         // Create new session
-        const newSession = await createSession(
-          documentId,
-          playbookId,
-          hostContext,
-        );
+        const newSession = await createSession(documentId, playbookId, hostContext);
         if (newSession && onSessionCreated) {
           onSessionCreated(newSession);
         }
@@ -269,7 +246,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Add user message
       const userMessage: IChatMessage = {
-        role: "User",
+        role: 'User',
         content: messageText,
         timestamp: new Date().toISOString(),
       };
@@ -277,31 +254,22 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Add placeholder assistant message for streaming
       const assistantMessage: IChatMessage = {
-        role: "Assistant",
-        content: "",
+        role: 'Assistant',
+        content: '',
         timestamp: new Date().toISOString(),
       };
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
       // Start SSE stream — normalize URL to prevent double /api prefix
-      const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
         { message: messageText, documentId },
-        accessToken,
+        accessToken
       );
     },
-    [
-      session,
-      isStreaming,
-      addMessage,
-      startStream,
-      clearSuggestions,
-      apiBaseUrl,
-      documentId,
-      accessToken,
-    ],
+    [session, isStreaming, addMessage, startStream, clearSuggestions, apiBaseUrl, documentId, accessToken]
   );
 
   // Handle predefined prompt selection
@@ -309,7 +277,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     (prompt: string) => {
       handleSend(prompt);
     },
-    [handleSend],
+    [handleSend]
   );
 
   // Handle follow-up suggestion selection — sends suggestion text as a new user message
@@ -317,7 +285,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     (suggestion: string) => {
       handleSend(suggestion);
     },
-    [handleSend],
+    [handleSend]
   );
 
   // Handle context changes — clear cross-pane selection when document/record changes
@@ -326,14 +294,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       clearCrossPaneSelection();
       switchContext(newDocId || undefined, playbookId);
     },
-    [switchContext, playbookId, clearCrossPaneSelection],
+    [switchContext, playbookId, clearCrossPaneSelection]
   );
 
   const handlePlaybookChange = React.useCallback(
     (newPlaybookId: string) => {
       switchContext(documentId, newPlaybookId);
     },
-    [switchContext, documentId],
+    [switchContext, documentId]
   );
 
   // Handle additional documents change with debounce (300ms)
@@ -349,7 +317,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         switchContext(documentId, playbookId, hostContext, newIds);
       }, 300);
     },
-    [switchContext, documentId, playbookId, hostContext],
+    [switchContext, documentId, playbookId, hostContext]
   );
 
   // Clean up debounce timer and editor refine abort controller on unmount
@@ -365,19 +333,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   }, []);
 
   // Extract tenant ID from JWT for X-Tenant-Id header (same logic as useSseStream)
-  const extractTenantIdFromToken = React.useCallback(
-    (token: string): string | null => {
-      try {
-        const parts = token.split(".");
-        if (parts.length !== 3) return null;
-        const payload = JSON.parse(atob(parts[1]));
-        return payload.tid || null;
-      } catch {
-        return null;
-      }
-    },
-    [],
-  );
+  const extractTenantIdFromToken = React.useCallback((token: string): string | null => {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const payload = JSON.parse(atob(parts[1]));
+      return payload.tid || null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   /**
    * Handle editor-sourced refine requests by streaming SSE response through the bridge.
@@ -403,16 +368,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Add a brief user message in the chat for awareness
       const refineMessage: IChatMessage = {
-        role: "User",
-        content: `Refining editor selection: "${selectedText.substring(0, 100)}${selectedText.length > 100 ? "\u2026" : ""}"\n\nInstruction: ${instruction}`,
+        role: 'User',
+        content: `Refining editor selection: "${selectedText.substring(0, 100)}${selectedText.length > 100 ? '\u2026' : ''}"\n\nInstruction: ${instruction}`,
         timestamp: new Date().toISOString(),
       };
       addMessage(refineMessage);
 
       // Add a placeholder assistant message that will show status
       const statusMessage: IChatMessage = {
-        role: "Assistant",
-        content: "Generating revision\u2026",
+        role: 'Assistant',
+        content: 'Generating revision\u2026',
         timestamp: new Date().toISOString(),
       };
       addMessage(statusMessage);
@@ -430,24 +395,22 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         try {
           // Emit document_stream_start through the bridge with operationType "diff"
           // so the Analysis Workspace's useDiffReview hook captures and buffers tokens.
-          bridge.emit("document_stream_start", {
+          bridge.emit('document_stream_start', {
             operationId,
-            targetPosition: "selection",
-            operationType: "diff",
+            targetPosition: 'selection',
+            operationType: 'diff',
           });
 
           const tenantId = extractTenantIdFromToken(accessToken);
-          const baseUrl = apiBaseUrl
-            .replace(/\/+$/, "")
-            .replace(/\/api\/?$/, "");
+          const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
           const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
 
           const response = await fetch(refineUrl, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
               Authorization: `Bearer ${accessToken}`,
-              ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
             },
             body: JSON.stringify({
               selectedText,
@@ -460,18 +423,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
           if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(
-              `Refine request failed (${response.status}): ${errorText}`,
-            );
+            throw new Error(`Refine request failed (${response.status}): ${errorText}`);
           }
 
           if (!response.body) {
-            throw new Error("Response body is empty");
+            throw new Error('Response body is empty');
           }
 
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
-          let buffer = "";
+          let buffer = '';
 
           while (true) {
             const { done, value } = await reader.read();
@@ -480,31 +441,31 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             buffer += decoder.decode(value, { stream: true });
 
             // Parse SSE events separated by double newlines
-            const parts = buffer.split("\n\n");
-            buffer = parts.pop() || "";
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
 
             for (const part of parts) {
-              const lines = part.split("\n");
+              const lines = part.split('\n');
               for (const line of lines) {
                 const event = parseSseEvent(line);
                 if (!event) continue;
 
-                if (event.type === "token" && event.content) {
+                if (event.type === 'token' && event.content) {
                   // Route token through bridge for Analysis Workspace consumption
-                  bridge.emit("document_stream_token", {
+                  bridge.emit('document_stream_token', {
                     operationId,
                     token: event.content,
                     index: tokenIndex++,
                   });
-                } else if (event.type === "done") {
+                } else if (event.type === 'done') {
                   // Stream completed successfully
-                  bridge.emit("document_stream_end", {
+                  bridge.emit('document_stream_end', {
                     operationId,
                     cancelled: false,
                     totalTokens: tokenIndex,
                   });
-                } else if (event.type === "error") {
-                  throw new Error(event.content || "Refinement stream error");
+                } else if (event.type === 'error') {
+                  throw new Error(event.content || 'Refinement stream error');
                 }
               }
             }
@@ -512,55 +473,54 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
           // Process any remaining buffer
           if (buffer.trim()) {
-            const lines = buffer.split("\n");
+            const lines = buffer.split('\n');
             for (const line of lines) {
               const event = parseSseEvent(line);
               if (!event) continue;
-              if (event.type === "token" && event.content) {
-                bridge.emit("document_stream_token", {
+              if (event.type === 'token' && event.content) {
+                bridge.emit('document_stream_token', {
                   operationId,
                   token: event.content,
                   index: tokenIndex++,
                 });
-              } else if (event.type === "done") {
-                bridge.emit("document_stream_end", {
+              } else if (event.type === 'done') {
+                bridge.emit('document_stream_end', {
                   operationId,
                   cancelled: false,
                   totalTokens: tokenIndex,
                 });
-              } else if (event.type === "error") {
-                throw new Error(event.content || "Refinement stream error");
+              } else if (event.type === 'error') {
+                throw new Error(event.content || 'Refinement stream error');
               }
             }
           }
 
           // Update the chat status message
           if (tokenIndex === 0) {
-            updateLastMessage("No changes suggested.");
+            updateLastMessage('No changes suggested.');
           } else {
-            updateLastMessage("Revision sent to editor for review.");
+            updateLastMessage('Revision sent to editor for review.');
           }
 
           // Clear cross-pane selection after successful submission
           clearCrossPaneSelection();
         } catch (err: unknown) {
-          if (err instanceof DOMException && err.name === "AbortError") {
+          if (err instanceof DOMException && err.name === 'AbortError') {
             // Cancelled by user, not an error
-            bridge.emit("document_stream_end", {
+            bridge.emit('document_stream_end', {
               operationId,
               cancelled: true,
               totalTokens: tokenIndex,
             });
-            updateLastMessage("Refinement cancelled.");
+            updateLastMessage('Refinement cancelled.');
             return;
           }
 
-          const errorObj =
-            err instanceof Error ? err : new Error("Unknown refine error");
+          const errorObj = err instanceof Error ? err : new Error('Unknown refine error');
           setEditorRefineError(errorObj);
 
           // Emit stream end with cancel to clean up Analysis Workspace state
-          bridge.emit("document_stream_end", {
+          bridge.emit('document_stream_end', {
             operationId,
             cancelled: true,
             totalTokens: tokenIndex,
@@ -587,7 +547,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       accessToken,
       clearCrossPaneSelection,
       extractTenantIdFromToken,
-    ],
+    ]
   );
 
   /**
@@ -602,7 +562,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Add the refinement request as a user message
       const refineMessage: IChatMessage = {
-        role: "User",
+        role: 'User',
         content: `Refine the following text: "${selectedText}"\n\nInstruction: ${instruction}`,
         timestamp: new Date().toISOString(),
       };
@@ -610,22 +570,22 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Add placeholder for assistant response
       const assistantMessage: IChatMessage = {
-        role: "Assistant",
-        content: "",
+        role: 'Assistant',
+        content: '',
         timestamp: new Date().toISOString(),
       };
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
       // Start SSE stream to refine endpoint — normalize URL to prevent double /api prefix
-      const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`,
         { selectedText, instruction },
-        accessToken,
+        accessToken
       );
     },
-    [session, isStreaming, addMessage, startStream, apiBaseUrl, accessToken],
+    [session, isStreaming, addMessage, startStream, apiBaseUrl, accessToken]
   );
 
   /**
@@ -639,8 +599,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handleRefine = React.useCallback(
     (selectedText: string, instruction: string) => {
       // Determine source from crossPaneSelection state
-      const isEditorSource =
-        !!crossPaneSelection && crossPaneSelection.text.length > 0;
+      const isEditorSource = !!crossPaneSelection && crossPaneSelection.text.length > 0;
 
       if (isEditorSource && bridge) {
         handleEditorRefine(selectedText, instruction);
@@ -648,7 +607,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         handleChatRefine(selectedText, instruction);
       }
     },
-    [crossPaneSelection, bridge, handleEditorRefine, handleChatRefine],
+    [crossPaneSelection, bridge, handleEditorRefine, handleChatRefine]
   );
 
   // Handle playbook chip selection — switches context to the selected playbook
@@ -656,20 +615,15 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     (pb: IPlaybookOption) => {
       switchContext(documentId, pb.id, hostContext);
     },
-    [switchContext, documentId, hostContext],
+    [switchContext, documentId, hostContext]
   );
 
   const displayError = sessionError || streamError || editorRefineError;
-  const showPredefinedPrompts =
-    messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
-  const showPlaybookChips =
-    messages.length === 0 && allPlaybooks.length > 1 && !isSessionLoading;
+  const showPredefinedPrompts = messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
+  const showPlaybookChips = messages.length === 0 && allPlaybooks.length > 1 && !isSessionLoading;
 
   return (
-    <div
-      className={className ? `${styles.root} ${className}` : styles.root}
-      data-testid="sprkchat-root"
-    >
+    <div className={className ? `${styles.root} ${className}` : styles.root} data-testid="sprkchat-root">
       {/* Context selector bar */}
       {(documents.length > 0 || allPlaybooks.length > 0) && (
         <SprkChatContextSelector
@@ -687,11 +641,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       {/* Error banner */}
       {displayError && (
-        <div
-          className={styles.errorBanner}
-          role="alert"
-          data-testid="chat-error-banner"
-        >
+        <div className={styles.errorBanner} role="alert" data-testid="chat-error-banner">
           {displayError.message}
         </div>
       )}
@@ -713,8 +663,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         {showPlaybookChips && (
           <div className={styles.playbookChips} data-testid="playbook-chips">
             {allPlaybooks
-              .filter((pb) => pb.id !== playbookId)
-              .map((pb) => (
+              .filter(pb => pb.id !== playbookId)
+              .map(pb => (
                 <Button
                   key={pb.id}
                   appearance="outline"
@@ -737,25 +687,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           />
         )}
 
-        {!isSessionLoading &&
-          messages.length === 0 &&
-          !showPredefinedPrompts && (
-            <div className={styles.emptyState}>
-              <Text size={300}>No messages yet</Text>
-              <Text size={200}>Send a message to start the conversation</Text>
-            </div>
-          )}
+        {!isSessionLoading && messages.length === 0 && !showPredefinedPrompts && (
+          <div className={styles.emptyState}>
+            <Text size={300}>No messages yet</Text>
+            <Text size={200}>Send a message to start the conversation</Text>
+          </div>
+        )}
 
         {messages.map((msg, index) => {
           // Citations apply to the last assistant message (the one that was just streamed).
           // They are cleared on each new startStream call, so they always correspond
           // to the most recent response.
-          const isLastAssistant =
-            index === messages.length - 1 && msg.role === "Assistant";
-          const messageCitations =
-            isLastAssistant && streamCitations.length > 0
-              ? streamCitations
-              : undefined;
+          const isLastAssistant = index === messages.length - 1 && msg.role === 'Assistant';
+          const messageCitations = isLastAssistant && streamCitations.length > 0 ? streamCitations : undefined;
 
           return (
             <SprkChatMessage

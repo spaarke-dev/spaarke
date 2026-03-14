@@ -14,18 +14,18 @@
  * per ADR-012 transition plan (will be moved to @spaarke/ui-components)
  */
 
-import { Theme, webLightTheme, webDarkTheme } from "@fluentui/react-components";
-import { IInputs } from "../generated/ManifestTypes";
+import { Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { IInputs } from '../generated/ManifestTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Storage Utilities
 // TRACKED: GitHub #234 - Import from @spaarke/ui-components when published
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "spaarke-theme";
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const STORAGE_KEY = 'spaarke-theme';
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-type ThemePreference = "auto" | "light" | "dark";
+type ThemePreference = 'auto' | 'light' | 'dark';
 
 /**
  * Get the user's theme preference from localStorage
@@ -33,13 +33,13 @@ type ThemePreference = "auto" | "light" | "dark";
 export function getUserThemePreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "auto") {
+    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
       return stored;
     }
   } catch {
     // localStorage not available (SSR, private browsing, etc.)
   }
-  return "auto";
+  return 'auto';
 }
 
 /**
@@ -51,10 +51,10 @@ function detectDarkModeFromNavbar(): boolean | null {
     if (navbar) {
       const bgColor = window.getComputedStyle(navbar).backgroundColor;
       // rgb(10, 10, 10) = dark, rgb(240, 240, 240) = light
-      if (bgColor === "rgb(10, 10, 10)") {
+      if (bgColor === 'rgb(10, 10, 10)') {
         return true;
       }
-      if (bgColor === "rgb(240, 240, 240)") {
+      if (bgColor === 'rgb(240, 240, 240)') {
         return false;
       }
     }
@@ -69,7 +69,7 @@ function detectDarkModeFromNavbar(): boolean | null {
  */
 function getSystemThemePreference(): boolean {
   try {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   } catch {
     return false;
   }
@@ -87,16 +87,14 @@ function getSystemThemePreference(): boolean {
  * @param context - PCF context (optional)
  * @returns boolean - true if dark mode should be active
  */
-export function getEffectiveDarkMode(
-  context?: ComponentFramework.Context<IInputs>,
-): boolean {
+export function getEffectiveDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
   const preference = getUserThemePreference();
 
   // 1. User explicit choice overrides everything
-  if (preference === "dark") {
+  if (preference === 'dark') {
     return true;
   }
-  if (preference === "light") {
+  if (preference === 'light') {
     return false;
   }
 
@@ -122,17 +120,14 @@ export function getEffectiveDarkMode(
  * @param context - PCF context (optional, for context-based theme detection)
  * @returns Cleanup function to remove listeners
  */
-export function setupThemeListener(
-  callback: () => void,
-  context?: ComponentFramework.Context<IInputs>,
-): () => void {
+export function setupThemeListener(callback: () => void, context?: ComponentFramework.Context<IInputs>): () => void {
   // Handle custom theme change event (from ribbon menu)
   const handleThemeChange = () => callback();
 
   // Handle system preference change
   const handleSystemChange = () => {
     // Only respond if user preference is 'auto'
-    if (getUserThemePreference() === "auto") {
+    if (getUserThemePreference() === 'auto') {
       callback();
     }
   };
@@ -141,13 +136,13 @@ export function setupThemeListener(
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange);
 
   // Listen for system preference changes
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  mediaQuery.addEventListener("change", handleSystemChange);
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  mediaQuery.addEventListener('change', handleSystemChange);
 
   // Return cleanup function
   return () => {
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange);
-    mediaQuery.removeEventListener("change", handleSystemChange);
+    mediaQuery.removeEventListener('change', handleSystemChange);
   };
 }
 
@@ -163,9 +158,7 @@ export function setupThemeListener(
  * @param context - PCF context with theme information
  * @returns Fluent UI theme object
  */
-export function resolveTheme(
-  context: ComponentFramework.Context<IInputs>,
-): Theme {
+export function resolveTheme(context: ComponentFramework.Context<IInputs>): Theme {
   try {
     const isDark = getEffectiveDarkMode(context);
     return isDark ? webDarkTheme : webLightTheme;

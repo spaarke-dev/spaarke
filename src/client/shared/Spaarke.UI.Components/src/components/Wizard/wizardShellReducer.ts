@@ -8,12 +8,7 @@
  * logic (file uploads, form values, follow-on actions) belongs in the
  * consumer's own reducer, not here.
  */
-import type {
-  IWizardShellState,
-  IWizardShellStep,
-  IWizardStepConfig,
-  WizardShellAction,
-} from "./wizardShellTypes";
+import type { IWizardShellState, IWizardShellStep, IWizardStepConfig, WizardShellAction } from './wizardShellTypes';
 
 // ---------------------------------------------------------------------------
 // Initial state builder
@@ -29,13 +24,11 @@ import type {
  * @param steps - Ordered step configurations provided by the consumer.
  * @returns A fresh IWizardShellState with currentStepIndex = 0.
  */
-export function buildInitialShellState(
-  steps: ReadonlyArray<IWizardStepConfig>,
-): IWizardShellState {
+export function buildInitialShellState(steps: ReadonlyArray<IWizardStepConfig>): IWizardShellState {
   const shellSteps: IWizardShellStep[] = steps.map((config, index) => ({
     id: config.id,
     label: config.label,
-    status: index === 0 ? "active" : "pending",
+    status: index === 0 ? 'active' : 'pending',
   }));
 
   return {
@@ -54,14 +47,11 @@ export function buildInitialShellState(
  *   - index === activeIndex  -> 'active'
  *   - indices > activeIndex  -> 'pending'
  */
-function rebuildStatuses(
-  steps: IWizardShellStep[],
-  activeIndex: number,
-): IWizardShellStep[] {
+function rebuildStatuses(steps: IWizardShellStep[], activeIndex: number): IWizardShellStep[] {
   return steps.map((step, i) => {
-    if (i < activeIndex) return { ...step, status: "completed" };
-    if (i === activeIndex) return { ...step, status: "active" };
-    return { ...step, status: "pending" };
+    if (i < activeIndex) return { ...step, status: 'completed' };
+    if (i === activeIndex) return { ...step, status: 'active' };
+    return { ...step, status: 'pending' };
   });
 }
 
@@ -73,7 +63,7 @@ function toShellStep(config: IWizardStepConfig): IWizardShellStep {
   return {
     id: config.id,
     label: config.label,
-    status: "pending",
+    status: 'pending',
   };
 }
 
@@ -91,13 +81,10 @@ function toShellStep(config: IWizardStepConfig): IWizardShellStep {
  * @param action - One of the WizardShellAction discriminated union members.
  * @returns Updated shell state (new object if changed, same reference if no-op).
  */
-export function wizardShellReducer(
-  state: IWizardShellState,
-  action: WizardShellAction,
-): IWizardShellState {
+export function wizardShellReducer(state: IWizardShellState, action: WizardShellAction): IWizardShellState {
   switch (action.type) {
     // ----- NEXT_STEP --------------------------------------------------------
-    case "NEXT_STEP": {
+    case 'NEXT_STEP': {
       const nextIndex = state.currentStepIndex + 1;
       if (nextIndex >= state.steps.length) return state; // already at last step
 
@@ -109,7 +96,7 @@ export function wizardShellReducer(
     }
 
     // ----- PREV_STEP --------------------------------------------------------
-    case "PREV_STEP": {
+    case 'PREV_STEP': {
       const prevIndex = state.currentStepIndex - 1;
       if (prevIndex < 0) return state; // already at first step
 
@@ -121,11 +108,8 @@ export function wizardShellReducer(
     }
 
     // ----- GO_TO_STEP -------------------------------------------------------
-    case "GO_TO_STEP": {
-      const targetIndex = Math.max(
-        0,
-        Math.min(action.stepIndex, state.steps.length - 1),
-      );
+    case 'GO_TO_STEP': {
+      const targetIndex = Math.max(0, Math.min(action.stepIndex, state.steps.length - 1));
 
       return {
         ...state,
@@ -135,9 +119,9 @@ export function wizardShellReducer(
     }
 
     // ----- ADD_DYNAMIC_STEP -------------------------------------------------
-    case "ADD_DYNAMIC_STEP": {
+    case 'ADD_DYNAMIC_STEP': {
       // No-op if a step with the same id already exists
-      if (state.steps.some((s) => s.id === action.config.id)) {
+      if (state.steps.some(s => s.id === action.config.id)) {
         return state;
       }
 
@@ -175,9 +159,7 @@ export function wizardShellReducer(
         }
 
         // Sort the canonical steps by their position in the canonical array
-        canonicalSteps.sort(
-          (a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0),
-        );
+        canonicalSteps.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
 
         // Merge: non-canonical steps first (these are the base steps that were
         // already present), then canonical steps in order.
@@ -196,11 +178,11 @@ export function wizardShellReducer(
     }
 
     // ----- REMOVE_DYNAMIC_STEP ----------------------------------------------
-    case "REMOVE_DYNAMIC_STEP": {
-      const removeIndex = state.steps.findIndex((s) => s.id === action.stepId);
+    case 'REMOVE_DYNAMIC_STEP': {
+      const removeIndex = state.steps.findIndex(s => s.id === action.stepId);
       if (removeIndex === -1) return state; // step not found — no-op
 
-      const filtered = state.steps.filter((s) => s.id !== action.stepId);
+      const filtered = state.steps.filter(s => s.id !== action.stepId);
 
       let newIndex = state.currentStepIndex;
 

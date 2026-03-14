@@ -9,7 +9,7 @@
  * Task 024: Added toast notifications for mapping results.
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dropdown,
   Option,
@@ -28,14 +28,9 @@ import {
   DialogContent,
   DialogActions,
   Toaster,
-} from "@fluentui/react-components";
-import {
-  Search20Regular,
-  ArrowSync20Regular,
-  Dismiss20Regular,
-  Open16Regular,
-} from "@fluentui/react-icons";
-import { IInputs } from "./generated/ManifestTypes";
+} from '@fluentui/react-components';
+import { Search20Regular, ArrowSync20Regular, Dismiss20Regular, Open16Regular } from '@fluentui/react-icons';
+import { IInputs } from './generated/ManifestTypes';
 import {
   handleRecordSelection,
   clearAllRegardingFields,
@@ -47,13 +42,13 @@ import {
   IRecordSelectionResult,
   IDetectedParentContext,
   EntityLookupConfig,
-} from "./handlers/RecordSelectionHandler";
+} from './handlers/RecordSelectionHandler';
 import {
   FieldMappingHandler,
   createFieldMappingHandler,
   IFieldMappingApplicationResult,
-} from "./handlers/FieldMappingHandler";
-import { useMappingToast } from "./hooks/useMappingToast";
+} from './handlers/FieldMappingHandler';
+import { useMappingToast } from './hooks/useMappingToast';
 
 // Entity configuration type - now loaded dynamically from sprk_recordtype_ref
 // Using EntityLookupConfig from RecordSelectionHandler for consistency
@@ -67,12 +62,10 @@ function navigateToRecord(entityLogicalName: string, recordId: string): void {
   if (xrm?.Navigation?.openForm) {
     xrm.Navigation.openForm({
       entityName: entityLogicalName,
-      entityId: recordId.replace(/[{}]/g, ""),
+      entityId: recordId.replace(/[{}]/g, ''),
     });
   } else {
-    console.error(
-      "[AssociationResolver] Xrm.Navigation.openForm not available",
-    );
+    console.error('[AssociationResolver] Xrm.Navigation.openForm not available');
   }
 }
 
@@ -95,40 +88,40 @@ interface AssociationResolverAppProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalM,
-    height: "100%",
+    height: '100%',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   searchSection: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    alignItems: "flex-end",
+    alignItems: 'flex-end',
   },
   dropdown: {
-    minWidth: "200px",
+    minWidth: '200px',
   },
   selectedRecord: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
   },
   footer: {
-    marginTop: "auto",
+    marginTop: 'auto',
     paddingTop: tokens.spacingVerticalS,
     borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   versionText: {
     fontSize: tokens.fontSizeBase100,
@@ -145,9 +138,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [selectedEntityType, setSelectedEntityType] = React.useState<
-    string | null
-  >(null);
+  const [selectedEntityType, setSelectedEntityType] = React.useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = React.useState<{
     id: string;
     name: string;
@@ -161,22 +152,15 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
   // Auto-detection state
   const [isAutoDetected, setIsAutoDetected] = React.useState(false);
-  const [autoDetectionComplete, setAutoDetectionComplete] =
-    React.useState(false);
-  const [detectedParent, setDetectedParent] =
-    React.useState<IDetectedParentContext | null>(null);
+  const [autoDetectionComplete, setAutoDetectionComplete] = React.useState(false);
+  const [detectedParent, setDetectedParent] = React.useState<IDetectedParentContext | null>(null);
 
   // Dynamic entity configs - loaded from sprk_recordtype_ref
-  const [entityConfigs, setEntityConfigs] =
-    React.useState<EntityConfig[]>(getEntityConfigs());
+  const [entityConfigs, setEntityConfigs] = React.useState<EntityConfig[]>(getEntityConfigs());
   const [configsLoaded, setConfigsLoaded] = React.useState(false);
 
   // Task 024: Toast notifications for mapping results
-  const {
-    toasterId,
-    showMappingResult,
-    showError: showErrorToast,
-  } = useMappingToast();
+  const { toasterId, showMappingResult, showError: showErrorToast } = useMappingToast();
 
   // Field mapping handler - memoized to avoid recreating on every render
   const fieldMappingHandler = React.useMemo<FieldMappingHandler | null>(() => {
@@ -192,18 +176,13 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       if (!context?.webAPI || configsLoaded) return;
 
       try {
-        console.log("[AssociationResolver] Loading dynamic entity configs...");
+        console.log('[AssociationResolver] Loading dynamic entity configs...');
         const configs = await loadEntityConfigs(context.webAPI);
         setEntityConfigs(configs);
         setConfigsLoaded(true);
-        console.log(
-          `[AssociationResolver] Loaded ${configs.length} entity configs`,
-        );
+        console.log(`[AssociationResolver] Loaded ${configs.length} entity configs`);
       } catch (error) {
-        console.error(
-          "[AssociationResolver] Error loading entity configs:",
-          error,
-        );
+        console.error('[AssociationResolver] Error loading entity configs:', error);
         // Keep using fallback configs
         setConfigsLoaded(true);
       }
@@ -221,7 +200,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         return;
       }
 
-      console.log("[AssociationResolver] Running auto-detection...");
+      console.log('[AssociationResolver] Running auto-detection...');
       setIsLoading(true);
 
       try {
@@ -230,7 +209,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
         if (detected) {
           console.log(
-            `[AssociationResolver] Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`,
+            `[AssociationResolver] Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`
           );
           setIsAutoDetected(true);
           setDetectedParent(detected);
@@ -241,10 +220,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
           });
 
           // Complete the association (set denormalized fields)
-          const result = await completeAutoDetectedAssociation(
-            detected,
-            context.webAPI,
-          );
+          const result = await completeAutoDetectedAssociation(detected, context.webAPI);
 
           if (result.success) {
             // Notify parent component
@@ -255,77 +231,54 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
               setIsApplyingMappings(true);
               try {
                 const targetRecord: Record<string, unknown> = {};
-                const mappingResult =
-                  await fieldMappingHandler.applyMappingsForSelection(
-                    detected.entityType,
-                    detected.recordId,
-                    targetRecord,
-                  );
+                const mappingResult = await fieldMappingHandler.applyMappingsForSelection(
+                  detected.entityType,
+                  detected.recordId,
+                  targetRecord
+                );
 
-                if (
-                  mappingResult.profileFound &&
-                  mappingResult.fieldsMapped > 0
-                ) {
+                if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
                   fieldMappingHandler.applyToForm(targetRecord, true);
                   setMappingStatus(
-                    `Auto-populated from ${detected.entityDisplayName}: ${mappingResult.fieldsMapped} fields mapped`,
+                    `Auto-populated from ${detected.entityDisplayName}: ${mappingResult.fieldsMapped} fields mapped`
                   );
                   showMappingResult(mappingResult, detected.entityDisplayName);
                 } else {
-                  setMappingStatus(
-                    `Associated with ${detected.entityDisplayName}: ${detected.recordName}`,
-                  );
+                  setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
                 }
               } catch (mappingErr) {
-                console.error(
-                  "[AssociationResolver] Auto field mapping error:",
-                  mappingErr,
-                );
+                console.error('[AssociationResolver] Auto field mapping error:', mappingErr);
               } finally {
                 setIsApplyingMappings(false);
               }
             } else {
-              setMappingStatus(
-                `Associated with ${detected.entityDisplayName}: ${detected.recordName}`,
-              );
+              setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
             }
           } else {
-            console.warn(
-              "[AssociationResolver] Auto-detection completion had errors:",
-              result.errors,
-            );
-            setMappingStatus(
-              `Associated with ${detected.entityDisplayName}: ${detected.recordName}`,
-            );
+            console.warn('[AssociationResolver] Auto-detection completion had errors:', result.errors);
+            setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
           }
         } else {
           // No auto-detection - check if bound Record Type is set (fallback)
           if (regardingRecordType?.id) {
             try {
-              const recordTypeId = regardingRecordType.id.replace(/[{}]/g, "");
+              const recordTypeId = regardingRecordType.id.replace(/[{}]/g, '');
               const result = await context.webAPI.retrieveRecord(
-                "sprk_recordtype_ref",
+                'sprk_recordtype_ref',
                 recordTypeId,
-                "?$select=sprk_recordlogicalname,sprk_recorddisplayname",
+                '?$select=sprk_recordlogicalname,sprk_recorddisplayname'
               );
 
               const entityLogicalName = result.sprk_recordlogicalname as string;
               if (entityLogicalName) {
-                const config = entityConfigs.find(
-                  (c) => c.logicalName === entityLogicalName,
-                );
+                const config = entityConfigs.find(c => c.logicalName === entityLogicalName);
                 if (config) {
-                  console.log(
-                    `[AssociationResolver] Initialized entity type from Record Type: ${entityLogicalName}`,
-                  );
+                  console.log(`[AssociationResolver] Initialized entity type from Record Type: ${entityLogicalName}`);
                   setSelectedEntityType(config.logicalName);
                 }
               }
             } catch (err) {
-              console.error(
-                "[AssociationResolver] Error initializing from Record Type:",
-                err,
-              );
+              console.error('[AssociationResolver] Error initializing from Record Type:', err);
             }
           }
         }
@@ -355,14 +308,11 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       }
 
       try {
-        const hasProfile =
-          await fieldMappingHandler.hasProfileForEntity(selectedEntityType);
+        const hasProfile = await fieldMappingHandler.hasProfileForEntity(selectedEntityType);
         setHasProfileForEntity(hasProfile);
-        console.log(
-          `[AssociationResolver] Profile check for ${selectedEntityType}: ${hasProfile}`,
-        );
+        console.log(`[AssociationResolver] Profile check for ${selectedEntityType}: ${hasProfile}`);
       } catch (err) {
-        console.error("[AssociationResolver] Error checking profile:", err);
+        console.error('[AssociationResolver] Error checking profile:', err);
         setHasProfileForEntity(false);
       }
     };
@@ -370,10 +320,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     checkProfileExists();
   }, [fieldMappingHandler, selectedEntityType, selectedRecord]);
 
-  const handleEntityTypeChange = (
-    _event: unknown,
-    data: { optionValue?: string; optionText?: string },
-  ) => {
+  const handleEntityTypeChange = (_event: unknown, data: { optionValue?: string; optionText?: string }) => {
     if (data.optionValue) {
       setSelectedEntityType(data.optionValue);
       setSelectedRecord(null);
@@ -392,12 +339,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
    */
   const applyFieldMappings = async (
     sourceEntity: string,
-    sourceRecordId: string,
+    sourceRecordId: string
   ): Promise<IFieldMappingApplicationResult | null> => {
     if (!fieldMappingHandler) {
-      console.warn(
-        "[AssociationResolver] FieldMappingHandler not initialized - webAPI not available",
-      );
+      console.warn('[AssociationResolver] FieldMappingHandler not initialized - webAPI not available');
       return null;
     }
 
@@ -408,35 +353,24 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       const targetRecord: Record<string, unknown> = {};
 
       // Apply mappings from source record to target record object
-      const result = await fieldMappingHandler.applyMappingsForSelection(
-        sourceEntity,
-        sourceRecordId,
-        targetRecord,
-      );
+      const result = await fieldMappingHandler.applyMappingsForSelection(sourceEntity, sourceRecordId, targetRecord);
 
       if (result.profileFound) {
         // Apply mapped values to the form (skipping user-modified fields)
-        const fieldsSetOnForm = fieldMappingHandler.applyToForm(
-          targetRecord,
-          true,
-        );
+        const fieldsSetOnForm = fieldMappingHandler.applyToForm(targetRecord, true);
 
         console.log(
           `[AssociationResolver] Field mappings applied: ` +
-            `${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`,
+            `${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`
         );
 
         // Get entity display name for toast message
-        const entityConfig = entityConfigs.find(
-          (c) => c.logicalName === sourceEntity,
-        );
+        const entityConfig = entityConfigs.find(c => c.logicalName === sourceEntity);
         const entityName = entityConfig?.displayName || sourceEntity;
 
         // Update status message
         if (result.fieldsMapped > 0) {
-          setMappingStatus(
-            `${result.fieldsMapped} fields populated from ${entityName}`,
-          );
+          setMappingStatus(`${result.fieldsMapped} fields populated from ${entityName}`);
         }
 
         // Task 024: Show toast notification for mapping result
@@ -444,25 +378,17 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
         // Log any warnings/errors
         if (result.errors.length > 0) {
-          console.warn(
-            "[AssociationResolver] Mapping warnings:",
-            result.errors,
-          );
+          console.warn('[AssociationResolver] Mapping warnings:', result.errors);
         }
       } else {
-        console.log(
-          `[AssociationResolver] No field mapping profile found for ${sourceEntity} -> sprk_event`,
-        );
+        console.log(`[AssociationResolver] No field mapping profile found for ${sourceEntity} -> sprk_event`);
       }
 
       return result;
     } catch (error) {
-      console.error(
-        "[AssociationResolver] Failed to apply field mappings:",
-        error,
-      );
+      console.error('[AssociationResolver] Failed to apply field mappings:', error);
       // Task 024: Show error toast for mapping failures
-      showErrorToast("Failed to apply field mappings. Please try again.");
+      showErrorToast('Failed to apply field mappings. Please try again.');
       // Don't set error state - field mapping failure shouldn't block record selection
       return null;
     } finally {
@@ -472,7 +398,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
   const handleLookupClick = async () => {
     if (!selectedEntityType) {
-      setError("Please select an entity type first");
+      setError('Please select an entity type first');
       return;
     }
 
@@ -491,13 +417,13 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       // Access Xrm from parent window (PCF runs in iframe)
       const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
       if (!xrm?.Utility?.lookupObjects) {
-        throw new Error("Xrm.Utility.lookupObjects not available");
+        throw new Error('Xrm.Utility.lookupObjects not available');
       }
 
       const results = await xrm.Utility.lookupObjects(lookupOptions);
       if (results && results.length > 0) {
         const selected = results[0];
-        const recordId = selected.id.replace(/[{}]/g, "");
+        const recordId = selected.id.replace(/[{}]/g, '');
         const recordName = selected.name;
 
         // Create selection object for handler
@@ -508,10 +434,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         };
 
         // Call handler to populate regarding fields and clear others (async - queries Record Type)
-        const result: IRecordSelectionResult = await handleRecordSelection(
-          selection,
-          context.webAPI,
-        );
+        const result: IRecordSelectionResult = await handleRecordSelection(selection, context.webAPI);
 
         if (result.success) {
           setSelectedRecord({
@@ -522,25 +445,18 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
           // Show initial success message
           const clearedCount = result.otherLookupsCleared;
-          setMappingStatus(
-            `Regarding fields set. ${clearedCount} other lookups cleared.`,
-          );
+          setMappingStatus(`Regarding fields set. ${clearedCount} other lookups cleared.`);
 
           // Task 022: Apply field mappings from source entity to Event
           // This auto-populates Event fields based on mapping profiles
-          const mappingResult = await applyFieldMappings(
-            selectedEntityType,
-            recordId,
-          );
+          const mappingResult = await applyFieldMappings(selectedEntityType, recordId);
           if (mappingResult && mappingResult.fieldsMapped > 0) {
             // Status already updated by applyFieldMappings
             // Append to show both actions
-            const entityConfig = entityConfigs.find(
-              (c) => c.logicalName === selectedEntityType,
-            );
+            const entityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
             const entityName = entityConfig?.displayName || selectedEntityType;
             setMappingStatus(
-              `Regarding fields set. ${mappingResult.fieldsMapped} fields auto-populated from ${entityName}.`,
+              `Regarding fields set. ${mappingResult.fieldsMapped} fields auto-populated from ${entityName}.`
             );
           }
         } else {
@@ -552,7 +468,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
           onRecordSelected(recordId, recordName);
 
           if (result.errors.length > 0) {
-            setError(`Warning: ${result.errors.join(", ")}`);
+            setError(`Warning: ${result.errors.join(', ')}`);
           }
 
           // Still try to apply field mappings even on partial success
@@ -560,8 +476,8 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         }
       }
     } catch (err) {
-      console.error("[AssociationResolver] Lookup error:", err);
-      setError(err instanceof Error ? err.message : "Failed to open lookup");
+      console.error('[AssociationResolver] Lookup error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to open lookup');
     } finally {
       setIsLoading(false);
     }
@@ -581,14 +497,12 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
       // Clear local state
       setSelectedRecord(null);
-      onRecordSelected("", "");
+      onRecordSelected('', '');
 
-      setMappingStatus("Selection cleared");
+      setMappingStatus('Selection cleared');
     } catch (err) {
-      console.error("[AssociationResolver] Clear error:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to clear selection",
-      );
+      console.error('[AssociationResolver] Clear error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to clear selection');
     } finally {
       setIsLoading(false);
     }
@@ -601,12 +515,12 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
    */
   const handleRefreshClick = () => {
     if (!selectedRecord || !selectedEntityType) {
-      setError("Please select a record first");
+      setError('Please select a record first');
       return;
     }
 
     if (!hasProfileForEntity) {
-      setError("No field mapping profile configured for this entity type");
+      setError('No field mapping profile configured for this entity type');
       return;
     }
 
@@ -625,12 +539,12 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     setShowRefreshConfirm(false);
 
     if (!selectedRecord || !selectedEntityType) {
-      setError("Please select a record first");
+      setError('Please select a record first');
       return;
     }
 
     if (!fieldMappingHandler) {
-      setError("Field mapping service not available");
+      setError('Field mapping service not available');
       return;
     }
 
@@ -646,30 +560,23 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       const mappingResult = await fieldMappingHandler.applyMappingsForSelection(
         selectedEntityType,
         selectedRecord.id,
-        targetRecord,
+        targetRecord
       );
 
       if (mappingResult) {
         if (mappingResult.profileFound) {
           // Apply mapped values to the form, overwriting user changes (skipDirtyFields=false)
           // Task 023: Refresh from Parent should overwrite all fields
-          const fieldsSetOnForm = fieldMappingHandler.applyToForm(
-            targetRecord,
-            false,
-          );
+          const fieldsSetOnForm = fieldMappingHandler.applyToForm(targetRecord, false);
 
           // Get entity display name for messages
-          const entityConfig = entityConfigs.find(
-            (c) => c.logicalName === selectedEntityType,
-          );
+          const entityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
           const entityName = entityConfig?.displayName || selectedEntityType;
 
           if (mappingResult.fieldsMapped > 0) {
-            setMappingStatus(
-              `Refreshed ${fieldsSetOnForm} fields from ${entityName}`,
-            );
+            setMappingStatus(`Refreshed ${fieldsSetOnForm} fields from ${entityName}`);
           } else {
-            setMappingStatus("No fields to update - all values are current");
+            setMappingStatus('No fields to update - all values are current');
           }
 
           // Task 024: Show toast notification for refresh result
@@ -677,36 +584,25 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
           // Show any warnings
           if (mappingResult.errors.length > 0) {
-            console.warn(
-              "[AssociationResolver] Refresh warnings:",
-              mappingResult.errors,
-            );
+            console.warn('[AssociationResolver] Refresh warnings:', mappingResult.errors);
           }
         } else {
-          setMappingStatus(
-            "No field mapping profile configured for this entity type",
-          );
+          setMappingStatus('No field mapping profile configured for this entity type');
         }
       } else {
-        setError("Failed to refresh fields from parent");
+        setError('Failed to refresh fields from parent');
         // Task 024: Show error toast for refresh failure
-        showErrorToast(
-          "Failed to refresh fields from parent. Please try again.",
-        );
+        showErrorToast('Failed to refresh fields from parent. Please try again.');
       }
     } catch (err) {
-      console.error("[AssociationResolver] Refresh error:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to refresh from parent",
-      );
+      console.error('[AssociationResolver] Refresh error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh from parent');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const selectedEntityConfig = entityConfigs.find(
-    (c) => c.logicalName === selectedEntityType,
-  );
+  const selectedEntityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
 
   // If still loading/detecting, show minimal loading state
   if (isLoading && !autoDetectionComplete) {
@@ -714,7 +610,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       <div className={styles.container}>
         <Toaster toasterId={toasterId} position="top-end" />
         <div className={styles.header}>
-          <Spinner size="tiny" style={{ marginRight: "8px" }} />
+          <Spinner size="tiny" style={{ marginRight: '8px' }} />
           <Text>Detecting parent context...</Text>
         </div>
       </div>
@@ -736,7 +632,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         {isApplyingMappings && (
           <MessageBar intent="info">
             <MessageBarBody>
-              <Spinner size="tiny" style={{ marginRight: "8px" }} />
+              <Spinner size="tiny" style={{ marginRight: '8px' }} />
               Applying field mappings...
             </MessageBarBody>
           </MessageBar>
@@ -752,14 +648,11 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         <div className={styles.selectedRecord}>
           <Text weight="semibold">{detectedParent.entityDisplayName}:</Text>
           <Link
-            onClick={(e) => {
+            onClick={e => {
               e.preventDefault();
-              navigateToRecord(
-                detectedParent.entityType,
-                detectedParent.recordId,
-              );
+              navigateToRecord(detectedParent.entityType, detectedParent.recordId);
             }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
             {detectedParent.recordName}
             <Open16Regular />
@@ -769,33 +662,22 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
             icon={<ArrowSync20Regular />}
             onClick={handleRefreshClick}
             disabled={!hasProfileForEntity || isLoading || isApplyingMappings}
-            title={
-              hasProfileForEntity
-                ? "Refresh fields from parent record"
-                : "No field mapping profile available"
-            }
+            title={hasProfileForEntity ? 'Refresh fields from parent record' : 'No field mapping profile available'}
           >
-            {isApplyingMappings ? <Spinner size="tiny" /> : "Refresh"}
+            {isApplyingMappings ? <Spinner size="tiny" /> : 'Refresh'}
           </Button>
         </div>
 
         {/* Refresh Confirmation Dialog */}
-        <Dialog
-          open={showRefreshConfirm}
-          onOpenChange={(_, data) => setShowRefreshConfirm(data.open)}
-        >
+        <Dialog open={showRefreshConfirm} onOpenChange={(_, data) => setShowRefreshConfirm(data.open)}>
           <DialogSurface>
             <DialogBody>
               <DialogTitle>Refresh from Parent?</DialogTitle>
               <DialogContent>
-                This will overwrite current field values with values from the
-                parent record.
+                This will overwrite current field values with values from the parent record.
               </DialogContent>
               <DialogActions>
-                <Button
-                  appearance="secondary"
-                  onClick={() => setShowRefreshConfirm(false)}
-                >
+                <Button appearance="secondary" onClick={() => setShowRefreshConfirm(false)}>
                   Cancel
                 </Button>
                 <Button appearance="primary" onClick={confirmRefresh}>
@@ -834,7 +716,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       {isApplyingMappings && (
         <MessageBar intent="info">
           <MessageBarBody>
-            <Spinner size="tiny" style={{ marginRight: "8px" }} />
+            <Spinner size="tiny" style={{ marginRight: '8px' }} />
             Applying field mappings...
           </MessageBarBody>
         </MessageBar>
@@ -850,10 +732,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         <Dropdown
           className={styles.dropdown}
           placeholder="Select entity type"
-          value={selectedEntityConfig?.displayName || ""}
+          value={selectedEntityConfig?.displayName || ''}
           onOptionSelect={handleEntityTypeChange}
         >
-          {entityConfigs.map((config) => (
+          {entityConfigs.map(config => (
             <Option key={config.logicalName} value={config.logicalName}>
               {config.displayName}
             </Option>
@@ -866,11 +748,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
           onClick={handleLookupClick}
           disabled={!selectedEntityType || isLoading || isApplyingMappings}
         >
-          {isLoading || isApplyingMappings ? (
-            <Spinner size="tiny" />
-          ) : (
-            "Select Record"
-          )}
+          {isLoading || isApplyingMappings ? <Spinner size="tiny" /> : 'Select Record'}
         </Button>
       </div>
 
@@ -878,11 +756,11 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         <div className={styles.selectedRecord}>
           <Text weight="semibold">{selectedEntityConfig?.displayName}:</Text>
           <Link
-            onClick={(e) => {
+            onClick={e => {
               e.preventDefault();
               navigateToRecord(selectedEntityType, selectedRecord.id);
             }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
             {selectedRecord.name}
             <Open16Regular />
@@ -894,15 +772,11 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
             disabled={!hasProfileForEntity || isLoading || isApplyingMappings}
             title={
               hasProfileForEntity
-                ? "Refresh fields from parent record"
-                : "No field mapping profile available for this entity type"
+                ? 'Refresh fields from parent record'
+                : 'No field mapping profile available for this entity type'
             }
           >
-            {isApplyingMappings ? (
-              <Spinner size="tiny" />
-            ) : (
-              "Refresh from Parent"
-            )}
+            {isApplyingMappings ? <Spinner size="tiny" /> : 'Refresh from Parent'}
           </Button>
           <Button
             appearance="subtle"
@@ -917,22 +791,16 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       )}
 
       {/* Refresh Confirmation Dialog - Task 023 */}
-      <Dialog
-        open={showRefreshConfirm}
-        onOpenChange={(_, data) => setShowRefreshConfirm(data.open)}
-      >
+      <Dialog open={showRefreshConfirm} onOpenChange={(_, data) => setShowRefreshConfirm(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>Refresh from Parent?</DialogTitle>
             <DialogContent>
-              This will overwrite current field values with values from the
-              parent record. Any changes you've made will be lost.
+              This will overwrite current field values with values from the parent record. Any changes you've made will
+              be lost.
             </DialogContent>
             <DialogActions>
-              <Button
-                appearance="secondary"
-                onClick={() => setShowRefreshConfirm(false)}
-              >
+              <Button appearance="secondary" onClick={() => setShowRefreshConfirm(false)}>
                 Cancel
               </Button>
               <Button appearance="primary" onClick={confirmRefresh}>

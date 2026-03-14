@@ -26,41 +26,32 @@
 // Declare global Xrm
 declare const Xrm: any;
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom/client";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Theme,
-} from "@fluentui/react-components";
-import { AnalysisWorkspaceApp } from "./components/AnalysisWorkspaceApp";
-import { logInfo, logError } from "./utils/logger";
-import { getApiBaseUrl } from "./utils/environmentVariables";
-import { initializeAuth } from "./authInit";
-import { getAuthProvider } from "@spaarke/auth";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom/client';
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { AnalysisWorkspaceApp } from './components/AnalysisWorkspaceApp';
+import { logInfo, logError } from './utils/logger';
+import { getApiBaseUrl } from './utils/environmentVariables';
+import { initializeAuth } from './authInit';
+import { getAuthProvider } from '@spaarke/auth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "spaarke-theme";
-type ThemePreference = "auto" | "light" | "dark";
+const STORAGE_KEY = 'spaarke-theme';
+type ThemePreference = 'auto' | 'light' | 'dark';
 
 function getUserThemePreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "auto") {
+    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
       return stored;
     }
     try {
       const parentStored = window.parent?.localStorage?.getItem(STORAGE_KEY);
-      if (
-        parentStored === "light" ||
-        parentStored === "dark" ||
-        parentStored === "auto"
-      ) {
+      if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
         return parentStored;
       }
     } catch {
@@ -69,23 +60,20 @@ function getUserThemePreference(): ThemePreference {
   } catch {
     /* localStorage not available */
   }
-  return "auto";
+  return 'auto';
 }
 
 function detectDarkModeFromUrl(): boolean | null {
   try {
     if (
-      window.location.href.includes("themeOption%3Ddarkmode") ||
-      window.location.href.includes("themeOption=darkmode")
+      window.location.href.includes('themeOption%3Ddarkmode') ||
+      window.location.href.includes('themeOption=darkmode')
     ) {
       return true;
     }
     try {
       const parentUrl = window.parent?.location?.href;
-      if (
-        parentUrl?.includes("themeOption%3Ddarkmode") ||
-        parentUrl?.includes("themeOption=darkmode")
-      ) {
+      if (parentUrl?.includes('themeOption%3Ddarkmode') || parentUrl?.includes('themeOption=darkmode')) {
         return true;
       }
     } catch {
@@ -99,8 +87,8 @@ function detectDarkModeFromUrl(): boolean | null {
 
 function getResolvedTheme(): Theme {
   const preference = getUserThemePreference();
-  if (preference === "dark") return webDarkTheme;
-  if (preference === "light") return webLightTheme;
+  if (preference === 'dark') return webDarkTheme;
+  if (preference === 'light') return webLightTheme;
 
   // Auto mode - check URL flag first
   const urlDarkMode = detectDarkModeFromUrl();
@@ -109,10 +97,8 @@ function getResolvedTheme(): Theme {
   }
 
   // Fallback to system preference
-  if (typeof window !== "undefined" && window.matchMedia) {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? webDarkTheme
-      : webLightTheme;
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? webDarkTheme : webLightTheme;
   }
   return webLightTheme;
 }
@@ -121,44 +107,41 @@ function getResolvedTheme(): Theme {
 // PCF Control Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class AnalysisWorkspace implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class AnalysisWorkspace implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private _container: HTMLDivElement;
   private _context: ComponentFramework.Context<IInputs>;
   private _notifyOutputChanged: () => void;
   private _root: ReactDOM.Root | null = null;
 
   // Output values
-  private _workingDocumentContent: string = "";
-  private _chatHistory: string = "[]";
-  private _analysisStatus: string = "Draft";
+  private _workingDocumentContent = '';
+  private _chatHistory = '[]';
+  private _analysisStatus = 'Draft';
 
   // Theme state
   private _currentTheme: Theme = webLightTheme;
   private _themeMediaQuery: MediaQueryList | null = null;
 
   // Environment variable loaded API URL
-  private _apiBaseUrl: string = "";
+  private _apiBaseUrl = '';
 
   // Authentication (@spaarke/auth)
-  private _isAuthReady: boolean = false;
-  private _tenantId: string = "";
-  private _clientAppId: string = "";
-  private _bffAppId: string = "";
+  private _isAuthReady = false;
+  private _tenantId = '';
+  private _clientAppId = '';
+  private _bffAppId = '';
 
   constructor() {
-    logInfo("AnalysisWorkspace", "Constructor called");
+    logInfo('AnalysisWorkspace', 'Constructor called');
   }
 
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     _state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
-    logInfo("AnalysisWorkspace", "init() called");
+    logInfo('AnalysisWorkspace', 'init() called');
 
     this._context = context;
     this._container = container;
@@ -171,10 +154,10 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
     // Load configuration and initialize authentication
     this.initializeAsync()
       .then(() => {
-        logInfo("AnalysisWorkspace", `Initialization complete`);
+        logInfo('AnalysisWorkspace', `Initialization complete`);
       })
-      .catch((error) => {
-        logError("AnalysisWorkspace", "Initialization failed", error);
+      .catch(error => {
+        logError('AnalysisWorkspace', 'Initialization failed', error);
       });
 
     // Initial render (will re-render once auth is ready)
@@ -187,7 +170,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
   private async initializeAsync(): Promise<void> {
     // Load API URL configuration
     await this.loadConfiguration();
-    logInfo("AnalysisWorkspace", `API URL configured: ${this._apiBaseUrl}`);
+    logInfo('AnalysisWorkspace', `API URL configured: ${this._apiBaseUrl}`);
 
     // Initialize MSAL authentication
     await this.initializeAuth();
@@ -201,7 +184,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
     try {
       // Check for input parameter override first (from Custom Page)
       const inputUrl = this._context.parameters.apiBaseUrl?.raw;
-      if (inputUrl && inputUrl.trim() !== "") {
+      if (inputUrl && inputUrl.trim() !== '') {
         this._apiBaseUrl = inputUrl;
         this.renderComponent();
         return;
@@ -211,13 +194,9 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
       this._apiBaseUrl = await getApiBaseUrl(this._context.webAPI);
       this.renderComponent();
     } catch (error) {
-      logError(
-        "AnalysisWorkspace",
-        "Failed to load configuration from environment variables",
-        error,
-      );
+      logError('AnalysisWorkspace', 'Failed to load configuration from environment variables', error);
       // Use default fallback for development
-      this._apiBaseUrl = "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+      this._apiBaseUrl = 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
       this.renderComponent();
     }
   }
@@ -230,13 +209,13 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
   private async initializeAuth(): Promise<void> {
     try {
       // Read auth configuration from parameters
-      this._tenantId = this._context.parameters.tenantId?.raw || "";
-      this._clientAppId = this._context.parameters.clientAppId?.raw || "";
-      this._bffAppId = this._context.parameters.bffAppId?.raw || "";
+      this._tenantId = this._context.parameters.tenantId?.raw || '';
+      this._clientAppId = this._context.parameters.clientAppId?.raw || '';
+      this._bffAppId = this._context.parameters.bffAppId?.raw || '';
 
       // Validate auth configuration
       if (!this._tenantId || !this._clientAppId || !this._bffAppId) {
-        logError("AnalysisWorkspace", "Missing auth configuration", {
+        logError('AnalysisWorkspace', 'Missing auth configuration', {
           tenantId: !!this._tenantId,
           clientAppId: !!this._clientAppId,
           bffAppId: !!this._bffAppId,
@@ -246,31 +225,19 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
       }
 
       logInfo(
-        "AnalysisWorkspace",
-        `Initializing @spaarke/auth with tenantId: ${this._tenantId}, clientAppId: ${this._clientAppId.substring(0, 8)}...`,
+        'AnalysisWorkspace',
+        `Initializing @spaarke/auth with tenantId: ${this._tenantId}, clientAppId: ${this._clientAppId.substring(0, 8)}...`
       );
 
       // Initialize via @spaarke/auth shared library
-      await initializeAuth(
-        this._tenantId,
-        this._clientAppId,
-        this._bffAppId,
-        this._apiBaseUrl,
-      );
+      await initializeAuth(this._tenantId, this._clientAppId, this._bffAppId, this._apiBaseUrl);
       this._isAuthReady = true;
-      logInfo(
-        "AnalysisWorkspace",
-        `@spaarke/auth initialized. Using user_impersonation scope.`,
-      );
+      logInfo('AnalysisWorkspace', `@spaarke/auth initialized. Using user_impersonation scope.`);
 
       // Re-render with auth available
       this.renderComponent();
     } catch (error) {
-      logError(
-        "AnalysisWorkspace",
-        "Failed to initialize authentication",
-        error,
-      );
+      logError('AnalysisWorkspace', 'Failed to initialize authentication', error);
       // Don't throw - render in degraded mode (no auth)
     }
   }
@@ -285,7 +252,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
   };
 
   public updateView(context: ComponentFramework.Context<IInputs>): void {
-    logInfo("AnalysisWorkspace", "updateView() called");
+    logInfo('AnalysisWorkspace', 'updateView() called');
     this._context = context;
     this.renderComponent();
   }
@@ -299,7 +266,7 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
   }
 
   public destroy(): void {
-    logInfo("AnalysisWorkspace", "destroy() called");
+    logInfo('AnalysisWorkspace', 'destroy() called');
     this.cleanupThemeListeners();
     if (this._root) {
       this._root.unmount();
@@ -314,46 +281,40 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
   private renderComponent(): void {
     // Get Analysis ID - prefer form context (entityId) over bound field value
     // When on a form, entityId gives us the record GUID directly
-    let analysisId = "";
+    let analysisId = '';
     const contextInfo = (this._context.mode as any).contextInfo;
     if (contextInfo?.entityId) {
       // On a form - use the record ID from form context
-      analysisId = contextInfo.entityId.replace(/[{}]/g, "");
-      logInfo(
-        "AnalysisWorkspace",
-        `Got analysisId from form context: ${analysisId}`,
-      );
+      analysisId = contextInfo.entityId.replace(/[{}]/g, '');
+      logInfo('AnalysisWorkspace', `Got analysisId from form context: ${analysisId}`);
     } else if (this._context.parameters.analysisId?.raw) {
       // Custom Page or other context - use the parameter
       const rawValue = this._context.parameters.analysisId.raw;
       // Check if it looks like a GUID (contains hyphens and is 36 chars)
-      if (rawValue.includes("-") && rawValue.length >= 32) {
-        analysisId = rawValue.replace(/[{}]/g, "");
+      if (rawValue.includes('-') && rawValue.length >= 32) {
+        analysisId = rawValue.replace(/[{}]/g, '');
       }
-      logInfo(
-        "AnalysisWorkspace",
-        `Got analysisId from parameter: ${analysisId}`,
-      );
+      logInfo('AnalysisWorkspace', `Got analysisId from parameter: ${analysisId}`);
     }
 
     // Get other input parameters
-    const documentId = this._context.parameters.documentId?.raw || "";
-    const containerId = this._context.parameters.containerId?.raw || "";
-    const fileId = this._context.parameters.fileId?.raw || "";
+    const documentId = this._context.parameters.documentId?.raw || '';
+    const containerId = this._context.parameters.containerId?.raw || '';
+    const fileId = this._context.parameters.fileId?.raw || '';
 
     // Use loaded API URL from environment variable, fallback to input parameter or default
     const apiBaseUrl =
       this._apiBaseUrl ||
       this._context.parameters.apiBaseUrl?.raw ||
-      "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+      'https://spe-api-dev-67e2xz.azurewebsites.net/api';
 
     // Feature flag: useLegacyChat (default false = use new SprkChat component)
     // TwoOptions PCF property returns boolean, not string
     const useLegacyChat = this._context.parameters.useLegacyChat?.raw === true;
 
     logInfo(
-      "AnalysisWorkspace",
-      `Rendering with analysisId: ${analysisId}, apiUrl: ${apiBaseUrl.substring(0, 30)}..., useLegacyChat: ${useLegacyChat}`,
+      'AnalysisWorkspace',
+      `Rendering with analysisId: ${analysisId}, apiUrl: ${apiBaseUrl.substring(0, 30)}..., useLegacyChat: ${useLegacyChat}`
     );
 
     // Create or update React root (React 18 bundled, no platform-library)
@@ -378,8 +339,8 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
           onWorkingDocumentChange: this.handleWorkingDocumentChange.bind(this),
           onChatHistoryChange: this.handleChatHistoryChange.bind(this),
           onStatusChange: this.handleStatusChange.bind(this),
-        }),
-      ),
+        })
+      )
     );
   }
 
@@ -400,36 +361,24 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<
 
   private setupThemeListeners(): void {
     // Listen for system theme changes (auto mode)
-    if (typeof window !== "undefined" && window.matchMedia) {
-      this._themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-      this._themeMediaQuery.addEventListener(
-        "change",
-        this.handleSystemThemeChange.bind(this),
-      );
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      this._themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      this._themeMediaQuery.addEventListener('change', this.handleSystemThemeChange.bind(this));
     }
 
     // Listen for custom theme change events
-    window.addEventListener(
-      "spaarke-theme-change",
-      this.handleThemeChange.bind(this),
-    );
+    window.addEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
   }
 
   private cleanupThemeListeners(): void {
     if (this._themeMediaQuery) {
-      this._themeMediaQuery.removeEventListener(
-        "change",
-        this.handleSystemThemeChange.bind(this),
-      );
+      this._themeMediaQuery.removeEventListener('change', this.handleSystemThemeChange.bind(this));
     }
-    window.removeEventListener(
-      "spaarke-theme-change",
-      this.handleThemeChange.bind(this),
-    );
+    window.removeEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
   }
 
   private handleSystemThemeChange(): void {
-    if (getUserThemePreference() === "auto") {
+    if (getUserThemePreference() === 'auto') {
       this._currentTheme = getResolvedTheme();
       this.renderComponent();
     }

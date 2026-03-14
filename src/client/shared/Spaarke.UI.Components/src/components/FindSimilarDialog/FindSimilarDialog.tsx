@@ -13,7 +13,7 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -23,8 +23,8 @@ import {
   Button,
   Tooltip,
   shorthands,
-} from "@fluentui/react-components";
-import { DismissRegular, ArrowExpandRegular } from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { DismissRegular, ArrowExpandRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -45,20 +45,20 @@ export interface IFindSimilarDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    padding: "0px",
-    width: "85vw",
-    maxWidth: "85vw",
-    height: "85vh",
-    maxHeight: "85vh",
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.overflow("hidden"),
+    padding: '0px',
+    width: '85vw',
+    maxWidth: '85vw',
+    height: '85vh',
+    maxHeight: '85vh',
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.overflow('hidden'),
     ...shorthands.borderRadius(tokens.borderRadiusXLarge),
   },
   titleBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalXS,
     paddingRight: tokens.spacingHorizontalS,
@@ -69,19 +69,19 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   body: {
-    padding: "0px",
+    padding: '0px',
     flex: 1,
     minHeight: 0,
-    position: "relative" as const,
+    position: 'relative' as const,
   },
   frame: {
-    position: "absolute" as const,
+    position: 'absolute' as const,
     top: 0,
     left: 0,
-    width: "100%",
-    height: "100%",
-    border: "none",
-    display: "block",
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    display: 'block',
   },
 });
 
@@ -89,16 +89,12 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
-  open,
-  onClose,
-  url,
-}) => {
+export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url }) => {
   const styles = useStyles();
 
   const handleExpand = React.useCallback(() => {
     if (url) {
-      window.open(url, "_blank", "noopener,noreferrer");
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   }, [url]);
 
@@ -121,23 +117,11 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
             />
           </Tooltip>
           <Tooltip content="Close" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<DismissRegular />}
-              size="small"
-              onClick={onClose}
-              aria-label="Close"
-            />
+            <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
           </Tooltip>
         </div>
         <DialogBody className={styles.body}>
-          {url && (
-            <iframe
-              src={url}
-              title="Document Relationships"
-              className={styles.frame}
-            />
-          )}
+          {url && <iframe src={url} title="Document Relationships" className={styles.frame} />}
         </DialogBody>
       </DialogSurface>
     </Dialog>

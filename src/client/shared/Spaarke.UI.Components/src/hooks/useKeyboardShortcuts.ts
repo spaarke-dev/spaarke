@@ -1,6 +1,6 @@
-import { useEffect } from "react";
-import { ICommand, ICommandContext } from "../types/CommandTypes";
-import { CommandExecutor } from "../services/CommandExecutor";
+import { useEffect } from 'react';
+import { ICommand, ICommandContext } from '../types/CommandTypes';
+import { CommandExecutor } from '../services/CommandExecutor';
 
 export interface UseKeyboardShortcutsOptions {
   commands: ICommand[];
@@ -11,9 +11,7 @@ export interface UseKeyboardShortcutsOptions {
 /**
  * Hook to register keyboard shortcuts for commands
  */
-export function useKeyboardShortcuts(
-  options: UseKeyboardShortcutsOptions,
-): void {
+export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void {
   const { commands, context, enabled = true } = options;
 
   useEffect(() => {
@@ -22,20 +20,20 @@ export function useKeyboardShortcuts(
     const handleKeyDown = async (event: KeyboardEvent) => {
       // Build shortcut key (e.g., "Ctrl+N", "F5", "Delete")
       const parts: string[] = [];
-      if (event.ctrlKey || event.metaKey) parts.push("Ctrl");
-      if (event.shiftKey) parts.push("Shift");
-      if (event.altKey) parts.push("Alt");
+      if (event.ctrlKey || event.metaKey) parts.push('Ctrl');
+      if (event.shiftKey) parts.push('Shift');
+      if (event.altKey) parts.push('Alt');
 
       // Map key codes to friendly names
       let keyName = event.key;
-      if (keyName === " ") keyName = "Space";
+      if (keyName === ' ') keyName = 'Space';
       if (keyName.length === 1) keyName = keyName.toUpperCase();
 
       parts.push(keyName);
-      const shortcut = parts.join("+");
+      const shortcut = parts.join('+');
 
       // Find command with matching shortcut
-      const command = commands.find((cmd) => cmd.keyboardShortcut === shortcut);
+      const command = commands.find(cmd => cmd.keyboardShortcut === shortcut);
 
       if (!command) return;
 
@@ -54,10 +52,10 @@ export function useKeyboardShortcuts(
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [commands, context, enabled]);
 }

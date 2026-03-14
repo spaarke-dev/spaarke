@@ -14,13 +14,13 @@
  * @see ADR-006 - Code Pages for standalone dialogs
  */
 
-import type { HostContext } from "../types";
+import type { HostContext } from '../types';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[AnalysisWorkspace:HostContext]";
+const LOG_PREFIX = '[AnalysisWorkspace:HostContext]';
 
 // ---------------------------------------------------------------------------
 // Parse URL Parameters
@@ -37,23 +37,19 @@ const LOG_PREFIX = "[AnalysisWorkspace:HostContext]";
  */
 export function parseHostContext(): HostContext {
   const rawUrlParams = new URLSearchParams(window.location.search);
-  const dataEnvelope = rawUrlParams.get("data");
+  const dataEnvelope = rawUrlParams.get('data');
 
-  const params = dataEnvelope
-    ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-    : rawUrlParams;
+  const params = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelope)) : rawUrlParams;
 
   const context: HostContext = {
-    analysisId: params.get("analysisId") ?? "",
-    documentId: params.get("documentId") ?? "",
-    tenantId: params.get("tenantId") ?? "",
-    theme: params.get("theme") ?? undefined,
+    analysisId: params.get('analysisId') ?? '',
+    documentId: params.get('documentId') ?? '',
+    tenantId: params.get('tenantId') ?? '',
+    theme: params.get('theme') ?? undefined,
   };
 
   if (context.analysisId) {
-    console.info(
-      `${LOG_PREFIX} Parsed context: analysisId=${context.analysisId}, documentId=${context.documentId}`,
-    );
+    console.info(`${LOG_PREFIX} Parsed context: analysisId=${context.analysisId}, documentId=${context.documentId}`);
   } else {
     console.warn(`${LOG_PREFIX} No analysisId found in URL parameters`);
   }
@@ -71,11 +67,11 @@ export function validateHostContext(context: HostContext): string[] {
   const errors: string[] = [];
 
   if (!context.analysisId) {
-    errors.push("Missing required parameter: analysisId");
+    errors.push('Missing required parameter: analysisId');
   }
 
   if (!context.documentId) {
-    errors.push("Missing required parameter: documentId");
+    errors.push('Missing required parameter: documentId');
   }
 
   return errors;

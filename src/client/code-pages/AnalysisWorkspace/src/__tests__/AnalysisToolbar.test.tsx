@@ -15,11 +15,11 @@
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { AnalysisToolbar } from "../components/AnalysisToolbar";
-import type { AnalysisToolbarProps } from "../components/AnalysisToolbar";
+import React from 'react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { AnalysisToolbar } from '../components/AnalysisToolbar';
+import type { AnalysisToolbarProps } from '../components/AnalysisToolbar';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,12 +27,12 @@ import type { AnalysisToolbarProps } from "../components/AnalysisToolbar";
 
 function renderToolbar(overrides: Partial<AnalysisToolbarProps> = {}) {
   const defaultProps: AnalysisToolbarProps = {
-    saveState: "idle",
+    saveState: 'idle',
     onForceSave: jest.fn(),
     saveError: null,
-    exportState: "idle",
+    exportState: 'idle',
     onExport: jest.fn(),
-    getEditorHtml: jest.fn(() => "<p>Test content</p>"),
+    getEditorHtml: jest.fn(() => '<p>Test content</p>'),
     onUndo: jest.fn(),
     onRedo: jest.fn(),
     canUndo: true,
@@ -44,7 +44,7 @@ function renderToolbar(overrides: Partial<AnalysisToolbarProps> = {}) {
   const result = render(
     <FluentProvider theme={webLightTheme}>
       <AnalysisToolbar {...defaultProps} />
-    </FluentProvider>,
+    </FluentProvider>
   );
 
   return { ...result, props: defaultProps };
@@ -59,9 +59,9 @@ function pressKeyboardShortcut(
     ctrlKey?: boolean;
     shiftKey?: boolean;
     metaKey?: boolean;
-  } = {},
+  } = {}
 ) {
-  const event = new KeyboardEvent("keydown", {
+  const event = new KeyboardEvent('keydown', {
     key,
     ctrlKey: options.ctrlKey ?? false,
     shiftKey: options.shiftKey ?? false,
@@ -76,29 +76,29 @@ function pressKeyboardShortcut(
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("AnalysisToolbar", () => {
+describe('AnalysisToolbar', () => {
   // -----------------------------------------------------------------------
   // 1. Save Button
   // -----------------------------------------------------------------------
 
-  it("saveButton_Clicked_CallsOnForceSave", () => {
+  it('saveButton_Clicked_CallsOnForceSave', () => {
     // Arrange
     const { props } = renderToolbar();
 
     // Act: find the save button by aria-label and click it
-    const saveButton = screen.getByRole("button", { name: /save/i });
+    const saveButton = screen.getByRole('button', { name: /save/i });
     fireEvent.click(saveButton);
 
     // Assert
     expect(props.onForceSave).toHaveBeenCalledTimes(1);
   });
 
-  it("saveButton_SavingState_DisablesButton", () => {
+  it('saveButton_SavingState_DisablesButton', () => {
     // Arrange
-    renderToolbar({ saveState: "saving" });
+    renderToolbar({ saveState: 'saving' });
 
     // Act & Assert: save button should be disabled during saving
-    const saveButton = screen.getByRole("button", { name: /saving/i });
+    const saveButton = screen.getByRole('button', { name: /saving/i });
     expect(saveButton).toBeDisabled();
   });
 
@@ -106,27 +106,27 @@ describe("AnalysisToolbar", () => {
   // 2. Export Button
   // -----------------------------------------------------------------------
 
-  it("exportButton_Clicked_CallsOnExportWithDocx", () => {
+  it('exportButton_Clicked_CallsOnExportWithDocx', () => {
     // Arrange
     const { props } = renderToolbar();
 
     // Act: find the Export to Word button and click it
-    const exportButton = screen.getByRole("button", {
+    const exportButton = screen.getByRole('button', {
       name: /export to word/i,
     });
     fireEvent.click(exportButton);
 
     // Assert
     expect(props.onExport).toHaveBeenCalledTimes(1);
-    expect(props.onExport).toHaveBeenCalledWith("docx");
+    expect(props.onExport).toHaveBeenCalledWith('docx');
   });
 
-  it("exportButton_ExportingState_DisablesButton", () => {
+  it('exportButton_ExportingState_DisablesButton', () => {
     // Arrange
-    renderToolbar({ exportState: "exporting" });
+    renderToolbar({ exportState: 'exporting' });
 
     // Act & Assert
-    const exportButton = screen.getByRole("button", {
+    const exportButton = screen.getByRole('button', {
       name: /export to word/i,
     });
     expect(exportButton).toBeDisabled();
@@ -136,10 +136,10 @@ describe("AnalysisToolbar", () => {
   // 3. Copy Button
   // -----------------------------------------------------------------------
 
-  it("copyButton_Clicked_CopiesEditorHtmlToClipboard", async () => {
+  it('copyButton_Clicked_CopiesEditorHtmlToClipboard', async () => {
     // Arrange: mock the clipboard API
     const writeTextMock = jest.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
+    Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: writeTextMock, write: jest.fn() },
       writable: true,
       configurable: true,
@@ -147,11 +147,11 @@ describe("AnalysisToolbar", () => {
     // ClipboardItem may not be available in jsdom, so test the fallback
     (globalThis as Record<string, unknown>).ClipboardItem = undefined;
 
-    const getEditorHtml = jest.fn(() => "<p>HTML content to copy</p>");
+    const getEditorHtml = jest.fn(() => '<p>HTML content to copy</p>');
     renderToolbar({ getEditorHtml });
 
     // Act
-    const copyButton = screen.getByRole("button", {
+    const copyButton = screen.getByRole('button', {
       name: /copy to clipboard/i,
     });
     await act(async () => {
@@ -161,19 +161,19 @@ describe("AnalysisToolbar", () => {
     // Assert: getEditorHtml was called and clipboard was written to
     expect(getEditorHtml).toHaveBeenCalled();
     // The fallback uses writeText with plain text (stripped HTML)
-    expect(writeTextMock).toHaveBeenCalledWith("HTML content to copy");
+    expect(writeTextMock).toHaveBeenCalledWith('HTML content to copy');
   });
 
   // -----------------------------------------------------------------------
   // 4. Undo Button
   // -----------------------------------------------------------------------
 
-  it("undoButton_Clicked_CallsOnUndo", () => {
+  it('undoButton_Clicked_CallsOnUndo', () => {
     // Arrange
     const { props } = renderToolbar({ canUndo: true });
 
     // Act
-    const undoButton = screen.getByRole("button", { name: /undo/i });
+    const undoButton = screen.getByRole('button', { name: /undo/i });
     fireEvent.click(undoButton);
 
     // Assert
@@ -184,12 +184,12 @@ describe("AnalysisToolbar", () => {
   // 5. Redo Button
   // -----------------------------------------------------------------------
 
-  it("redoButton_Clicked_CallsOnRedo", () => {
+  it('redoButton_Clicked_CallsOnRedo', () => {
     // Arrange
     const { props } = renderToolbar({ canRedo: true });
 
     // Act
-    const redoButton = screen.getByRole("button", { name: /redo/i });
+    const redoButton = screen.getByRole('button', { name: /redo/i });
     fireEvent.click(redoButton);
 
     // Assert
@@ -200,25 +200,25 @@ describe("AnalysisToolbar", () => {
   // 6. Boundary Disable
   // -----------------------------------------------------------------------
 
-  it("undoRedoButtons_AtStackBoundaries_DisabledCorrectly", () => {
+  it('undoRedoButtons_AtStackBoundaries_DisabledCorrectly', () => {
     // Arrange: no undo or redo available
     renderToolbar({ canUndo: false, canRedo: false, historyLength: 0 });
 
     // Act & Assert
-    const undoButton = screen.getByRole("button", { name: /undo/i });
-    const redoButton = screen.getByRole("button", { name: /redo/i });
+    const undoButton = screen.getByRole('button', { name: /undo/i });
+    const redoButton = screen.getByRole('button', { name: /redo/i });
 
     expect(undoButton).toBeDisabled();
     expect(redoButton).toBeDisabled();
   });
 
-  it("undoButton_CanUndoTrue_EnabledCorrectly", () => {
+  it('undoButton_CanUndoTrue_EnabledCorrectly', () => {
     // Arrange
     renderToolbar({ canUndo: true, canRedo: false });
 
     // Act & Assert
-    const undoButton = screen.getByRole("button", { name: /undo/i });
-    const redoButton = screen.getByRole("button", { name: /redo/i });
+    const undoButton = screen.getByRole('button', { name: /undo/i });
+    const redoButton = screen.getByRole('button', { name: /redo/i });
 
     expect(undoButton).not.toBeDisabled();
     expect(redoButton).toBeDisabled();
@@ -228,26 +228,26 @@ describe("AnalysisToolbar", () => {
   // 7. Keyboard Shortcuts
   // -----------------------------------------------------------------------
 
-  it("keyboardShortcut_CtrlS_CallsOnForceSave", () => {
+  it('keyboardShortcut_CtrlS_CallsOnForceSave', () => {
     // Arrange
     const { props } = renderToolbar();
 
     // Act: simulate Ctrl+S
     act(() => {
-      pressKeyboardShortcut("s", { ctrlKey: true });
+      pressKeyboardShortcut('s', { ctrlKey: true });
     });
 
     // Assert
     expect(props.onForceSave).toHaveBeenCalledTimes(1);
   });
 
-  it("keyboardShortcut_CtrlZ_CallsOnUndo_WhenNotInContentEditable", () => {
+  it('keyboardShortcut_CtrlZ_CallsOnUndo_WhenNotInContentEditable', () => {
     // Arrange
     const { props } = renderToolbar();
 
     // Act: simulate Ctrl+Z on a non-contentEditable target
-    const event = new KeyboardEvent("keydown", {
-      key: "z",
+    const event = new KeyboardEvent('keydown', {
+      key: 'z',
       ctrlKey: true,
       bubbles: true,
       cancelable: true,
@@ -261,13 +261,13 @@ describe("AnalysisToolbar", () => {
     expect(props.onUndo).toHaveBeenCalledTimes(1);
   });
 
-  it("keyboardShortcut_CtrlY_CallsOnRedo_WhenNotInContentEditable", () => {
+  it('keyboardShortcut_CtrlY_CallsOnRedo_WhenNotInContentEditable', () => {
     // Arrange
     const { props } = renderToolbar();
 
     // Act: simulate Ctrl+Y
     act(() => {
-      pressKeyboardShortcut("y", { ctrlKey: true });
+      pressKeyboardShortcut('y', { ctrlKey: true });
     });
 
     // Assert
@@ -278,27 +278,26 @@ describe("AnalysisToolbar", () => {
   // 8. Copy with ClipboardItem API
   // -----------------------------------------------------------------------
 
-  it("copyButton_WithClipboardItemAvailable_CopiesHtmlAndPlainText", async () => {
+  it('copyButton_WithClipboardItemAvailable_CopiesHtmlAndPlainText', async () => {
     // Arrange: mock the modern ClipboardItem API
     const writeMock = jest.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
+    Object.defineProperty(navigator, 'clipboard', {
       value: { write: writeMock, writeText: jest.fn() },
       writable: true,
       configurable: true,
     });
-    (globalThis as Record<string, unknown>).ClipboardItem =
-      class MockClipboardItem {
-        items: Record<string, Blob>;
-        constructor(items: Record<string, Blob>) {
-          this.items = items;
-        }
-      };
+    (globalThis as Record<string, unknown>).ClipboardItem = class MockClipboardItem {
+      items: Record<string, Blob>;
+      constructor(items: Record<string, Blob>) {
+        this.items = items;
+      }
+    };
 
-    const getEditorHtml = jest.fn(() => "<p>Rich content</p>");
+    const getEditorHtml = jest.fn(() => '<p>Rich content</p>');
     renderToolbar({ getEditorHtml });
 
     // Act
-    const copyButton = screen.getByRole("button", {
+    const copyButton = screen.getByRole('button', {
       name: /copy to clipboard/i,
     });
     await act(async () => {
@@ -313,11 +312,11 @@ describe("AnalysisToolbar", () => {
     delete (globalThis as Record<string, unknown>).ClipboardItem;
   });
 
-  it("copyButton_ClipboardApiThrows_FallsBackToExecCommand", async () => {
+  it('copyButton_ClipboardApiThrows_FallsBackToExecCommand', async () => {
     // Arrange: clipboard API throws, forcing execCommand fallback
-    Object.defineProperty(navigator, "clipboard", {
+    Object.defineProperty(navigator, 'clipboard', {
       value: {
-        writeText: jest.fn().mockRejectedValue(new Error("Not allowed")),
+        writeText: jest.fn().mockRejectedValue(new Error('Not allowed')),
         write: jest.fn(),
       },
       writable: true,
@@ -329,11 +328,11 @@ describe("AnalysisToolbar", () => {
     const execCommandMock = jest.fn().mockReturnValue(true);
     (document as Record<string, unknown>).execCommand = execCommandMock;
 
-    const getEditorHtml = jest.fn(() => "<p>Fallback content</p>");
+    const getEditorHtml = jest.fn(() => '<p>Fallback content</p>');
     renderToolbar({ getEditorHtml });
 
     // Act
-    const copyButton = screen.getByRole("button", {
+    const copyButton = screen.getByRole('button', {
       name: /copy to clipboard/i,
     });
     await act(async () => {
@@ -341,26 +340,26 @@ describe("AnalysisToolbar", () => {
     });
 
     // Assert: execCommand('copy') was called as fallback
-    expect(execCommandMock).toHaveBeenCalledWith("copy");
+    expect(execCommandMock).toHaveBeenCalledWith('copy');
 
     // Cleanup
     delete (document as Record<string, unknown>).execCommand;
   });
 
-  it("copyButton_EmptyEditorHtml_DoesNotAttemptCopy", async () => {
+  it('copyButton_EmptyEditorHtml_DoesNotAttemptCopy', async () => {
     // Arrange: editor returns empty HTML
     const writeTextMock = jest.fn();
-    Object.defineProperty(navigator, "clipboard", {
+    Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: writeTextMock, write: jest.fn() },
       writable: true,
       configurable: true,
     });
 
-    const getEditorHtml = jest.fn(() => "");
+    const getEditorHtml = jest.fn(() => '');
     renderToolbar({ getEditorHtml });
 
     // Act
-    const copyButton = screen.getByRole("button", {
+    const copyButton = screen.getByRole('button', {
       name: /copy to clipboard/i,
     });
     await act(async () => {
@@ -376,21 +375,21 @@ describe("AnalysisToolbar", () => {
   // 9. Save state icons
   // -----------------------------------------------------------------------
 
-  it("saveButton_SavedState_ShowsSavedTooltip", () => {
+  it('saveButton_SavedState_ShowsSavedTooltip', () => {
     // Arrange
-    renderToolbar({ saveState: "saved" });
+    renderToolbar({ saveState: 'saved' });
 
     // Assert: tooltip text for saved state
-    const savedButton = screen.getByRole("button", { name: /saved/i });
+    const savedButton = screen.getByRole('button', { name: /saved/i });
     expect(savedButton).toBeDefined();
   });
 
-  it("saveButton_ErrorState_ShowsErrorTooltipWithMessage", () => {
+  it('saveButton_ErrorState_ShowsErrorTooltipWithMessage', () => {
     // Arrange
-    renderToolbar({ saveState: "error", saveError: "Connection timeout" });
+    renderToolbar({ saveState: 'error', saveError: 'Connection timeout' });
 
     // Assert: tooltip includes error message
-    const errorButton = screen.getByRole("button", {
+    const errorButton = screen.getByRole('button', {
       name: /save failed.*connection timeout/i,
     });
     expect(errorButton).toBeDefined();

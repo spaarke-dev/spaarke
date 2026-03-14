@@ -1,23 +1,17 @@
-import type {
-  PublicClientApplication,
-  AuthenticationResult,
-} from "@azure/msal-browser";
-import type { ITokenResult, ITokenStrategy } from "../types";
+import type { PublicClientApplication, AuthenticationResult } from '@azure/msal-browser';
+import type { ITokenResult, ITokenStrategy } from '../types';
 
 /**
  * Acquire token via MSAL interactive popup.
  * Last-resort fallback when all silent strategies fail.
  */
 export class MsalPopupStrategy implements ITokenStrategy {
-  readonly name = "msal-popup" as const;
+  readonly name = 'msal-popup' as const;
 
   private readonly _getMsalInstance: () => PublicClientApplication | null;
   private readonly _scope: string;
 
-  constructor(
-    getMsalInstance: () => PublicClientApplication | null,
-    scope: string,
-  ) {
+  constructor(getMsalInstance: () => PublicClientApplication | null, scope: string) {
     this._getMsalInstance = getMsalInstance;
     this._scope = scope;
   }
@@ -44,7 +38,7 @@ export class MsalPopupStrategy implements ITokenStrategy {
     return {
       accessToken: result.accessToken,
       expiresOn: result.expiresOn?.getTime() ?? Date.now() + 55 * 60 * 1000,
-      source: "msal-popup",
+      source: 'msal-popup',
     };
   }
 }

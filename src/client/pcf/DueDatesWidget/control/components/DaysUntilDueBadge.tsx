@@ -19,19 +19,9 @@
  * - ADR-021: Fluent UI v9 exclusively, design tokens only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  getDaysUntilDue,
-  getUrgencyColors,
-  UrgencyLevel,
-  IDaysUntilDueResult,
-} from "../utils/daysUntilDue";
+import * as React from 'react';
+import { makeStyles, tokens, Text, mergeClasses } from '@fluentui/react-components';
+import { getDaysUntilDue, getUrgencyColors, UrgencyLevel, IDaysUntilDueResult } from '../utils/daysUntilDue';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -49,7 +39,7 @@ export interface IDaysUntilDueBadgeProps {
   /** Custom aria-label override */
   ariaLabel?: string;
   /** Size variant */
-  size?: "small" | "medium";
+  size?: 'small' | 'medium';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,22 +49,22 @@ export interface IDaysUntilDueBadgeProps {
 const useStyles = makeStyles({
   // Base badge style - circular per mockup
   badge: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: tokens.borderRadiusCircular,
     flexShrink: 0,
   },
   // Size variants
   small: {
-    minWidth: "20px",
-    height: "20px",
+    minWidth: '20px',
+    height: '20px',
     paddingLeft: tokens.spacingHorizontalXS,
     paddingRight: tokens.spacingHorizontalXS,
   },
   medium: {
-    minWidth: "24px",
-    height: "24px",
+    minWidth: '24px',
+    height: '24px',
     paddingLeft: tokens.spacingHorizontalSNudge,
     paddingRight: tokens.spacingHorizontalSNudge,
   },
@@ -96,7 +86,7 @@ const useStyles = makeStyles({
   },
   // Text styles
   text: {
-    lineHeight: "1",
+    lineHeight: '1',
     fontWeight: tokens.fontWeightSemibold,
   },
   textSmall: {
@@ -124,7 +114,7 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
   isOverdue = false,
   urgencyOverride,
   ariaLabel,
-  size = "medium",
+  size = 'medium',
 }) => {
   const styles = useStyles();
 
@@ -136,9 +126,7 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
     }
 
     // Otherwise, use the provided daysUntilDue and isOverdue values
-    const days = isOverdue
-      ? -Math.abs(daysUntilDue ?? 0)
-      : Math.abs(daysUntilDue ?? 0);
+    const days = isOverdue ? -Math.abs(daysUntilDue ?? 0) : Math.abs(daysUntilDue ?? 0);
     return getDaysUntilDue(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
   }, [dueDate, daysUntilDue, isOverdue]);
 
@@ -148,13 +136,13 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
   // Get background class based on urgency
   const getBackgroundClass = (): string => {
     switch (urgency) {
-      case "overdue":
+      case 'overdue':
         return styles.overdue;
-      case "critical":
+      case 'critical':
         return styles.critical;
-      case "urgent":
+      case 'urgent':
         return styles.urgent;
-      case "warning":
+      case 'warning':
         return styles.warning;
       default:
         return styles.normal;
@@ -165,9 +153,9 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
   // Dark backgrounds (overdue, critical, urgent) need light text
   const getTextColorClass = (): string => {
     switch (urgency) {
-      case "overdue":
-      case "critical":
-      case "urgent":
+      case 'overdue':
+      case 'critical':
+      case 'urgent':
         return styles.textOnBrand;
       default:
         return styles.textNormal;
@@ -175,8 +163,8 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
   };
 
   // Get size classes
-  const sizeClass = size === "small" ? styles.small : styles.medium;
-  const textSizeClass = size === "small" ? styles.textSmall : styles.textMedium;
+  const sizeClass = size === 'small' ? styles.small : styles.medium;
+  const textSizeClass = size === 'small' ? styles.textSmall : styles.textMedium;
 
   // Build accessible label
   const accessibleLabelText = ariaLabel ?? result.accessibleLabel;
@@ -187,14 +175,7 @@ export const DaysUntilDueBadge: React.FC<IDaysUntilDueBadgeProps> = ({
       role="status"
       aria-label={accessibleLabelText}
     >
-      <Text
-        className={mergeClasses(
-          styles.text,
-          textSizeClass,
-          getTextColorClass(),
-        )}
-        aria-hidden="true"
-      >
+      <Text className={mergeClasses(styles.text, textSizeClass, getTextColorClass())} aria-hidden="true">
         {result.displayValue}
       </Text>
     </div>

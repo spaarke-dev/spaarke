@@ -26,7 +26,7 @@
  * ```
  */
 
-import type { IHostAdapter } from "./IHostAdapter";
+import type { IHostAdapter } from './IHostAdapter';
 import type {
   HostType,
   ItemType,
@@ -39,21 +39,17 @@ import type {
   GetDocumentContentOptions,
   HostAdapterError,
   HostAdapterErrorCode,
-} from "./types";
+} from './types';
 
 /**
  * Represents the mode the Outlook item is in.
  */
-type ItemMode = "read" | "compose" | "unknown";
+type ItemMode = 'read' | 'compose' | 'unknown';
 
 /**
  * Helper function to create HostAdapterError.
  */
-function createHostAdapterError(
-  code: HostAdapterErrorCode,
-  message: string,
-  innerError?: Error,
-): HostAdapterError {
+function createHostAdapterError(code: HostAdapterErrorCode, message: string, innerError?: Error): HostAdapterError {
   return { code, message, innerError };
 }
 
@@ -67,7 +63,7 @@ function createHostAdapterError(
 export class OutlookAdapter implements IHostAdapter {
   private _initialized = false;
   private _mailbox: Office.Mailbox | null = null;
-  private _currentMode: ItemMode = "unknown";
+  private _currentMode: ItemMode = 'unknown';
 
   /**
    * Check if Mailbox requirement set is supported.
@@ -77,7 +73,7 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private isMailboxSupported(version: string): boolean {
     try {
-      return Office.context.requirements.isSetSupported("Mailbox", version);
+      return Office.context.requirements.isSetSupported('Mailbox', version);
     } catch {
       return false;
     }
@@ -90,18 +86,12 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private getCurrentItem(): Office.Item {
     if (!this._initialized || !this._mailbox) {
-      throw createHostAdapterError(
-        "NOT_INITIALIZED",
-        "Adapter not initialized. Call initialize() first.",
-      );
+      throw createHostAdapterError('NOT_INITIALIZED', 'Adapter not initialized. Call initialize() first.');
     }
 
     const item = this._mailbox.item;
     if (!item) {
-      throw createHostAdapterError(
-        "NO_ITEM_SELECTED",
-        "No email item is currently selected or available.",
-      );
+      throw createHostAdapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
     }
 
     return item;
@@ -114,10 +104,10 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private getReadItem(): Office.MessageRead {
     const item = this.getCurrentItem();
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       throw createHostAdapterError(
-        "CAPABILITY_NOT_SUPPORTED",
-        "This operation requires read mode. Current mode: " + this._currentMode,
+        'CAPABILITY_NOT_SUPPORTED',
+        'This operation requires read mode. Current mode: ' + this._currentMode
       );
     }
     return item as Office.MessageRead;
@@ -130,11 +120,10 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private getComposeItem(): Office.MessageCompose {
     const item = this.getCurrentItem();
-    if (this._currentMode !== "compose") {
+    if (this._currentMode !== 'compose') {
       throw createHostAdapterError(
-        "CAPABILITY_NOT_SUPPORTED",
-        "This operation requires compose mode. Current mode: " +
-          this._currentMode,
+        'CAPABILITY_NOT_SUPPORTED',
+        'This operation requires compose mode. Current mode: ' + this._currentMode
       );
     }
     return item as Office.MessageCompose;
@@ -145,61 +134,49 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private determineMode(item: Office.Item | null): ItemMode {
     if (!item) {
-      return "unknown";
+      return 'unknown';
     }
 
     // Check for properties that are unique to read mode
     // In read mode, 'from' is a property (EmailAddressDetails)
     // In compose mode, 'from' is an Office.From object with getAsync
-    if ("itemType" in item) {
+    if ('itemType' in item) {
       // MessageRead has 'from' as EmailAddressDetails
       // MessageCompose has 'from' as Office.From (has getAsync method)
       const fromProperty = (item as unknown as Record<string, unknown>).from;
       if (fromProperty) {
         // In compose mode, from has getAsync method
-        if (
-          typeof fromProperty === "object" &&
-          fromProperty !== null &&
-          "getAsync" in fromProperty
-        ) {
-          return "compose";
+        if (typeof fromProperty === 'object' && fromProperty !== null && 'getAsync' in fromProperty) {
+          return 'compose';
         }
         // In read mode, from is EmailAddressDetails (has emailAddress property directly)
-        if (
-          typeof fromProperty === "object" &&
-          fromProperty !== null &&
-          "emailAddress" in fromProperty
-        ) {
-          return "read";
+        if (typeof fromProperty === 'object' && fromProperty !== null && 'emailAddress' in fromProperty) {
+          return 'read';
         }
       }
 
       // Alternative check: read mode has internetMessageId as a string
       // compose mode does not have internetMessageId
-      if ("internetMessageId" in item) {
-        return "read";
+      if ('internetMessageId' in item) {
+        return 'read';
       }
 
       // Another check: compose mode has body.setAsync, read mode only has body.getAsync
       // Actually both have getAsync, but compose mode allows setting
-      if ("subject" in item) {
+      if ('subject' in item) {
         const subject = (item as unknown as Record<string, unknown>).subject;
         // In compose mode, subject is a Subject object with getAsync/setAsync
-        if (
-          typeof subject === "object" &&
-          subject !== null &&
-          "setAsync" in subject
-        ) {
-          return "compose";
+        if (typeof subject === 'object' && subject !== null && 'setAsync' in subject) {
+          return 'compose';
         }
         // In read mode, subject is a string
-        if (typeof subject === "string") {
-          return "read";
+        if (typeof subject === 'string') {
+          return 'read';
         }
       }
     }
 
-    return "unknown";
+    return 'unknown';
   }
 
   // ============================================================
@@ -210,7 +187,7 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   getHostType(): HostType {
-    return "outlook";
+    return 'outlook';
   }
 
   /**
@@ -219,42 +196,36 @@ export class OutlookAdapter implements IHostAdapter {
   async getItemId(): Promise<string> {
     const item = this.getCurrentItem();
 
-    if (this._currentMode === "read") {
+    if (this._currentMode === 'read') {
       const readItem = item as Office.MessageRead;
       return readItem.itemId;
     }
 
-    if (this._currentMode === "compose") {
+    if (this._currentMode === 'compose') {
       // In compose mode, we need to get the item ID asynchronously
       const composeItem = item as Office.MessageCompose;
       return new Promise((resolve, reject) => {
-        composeItem.getItemIdAsync((result) => {
+        composeItem.getItemIdAsync(result => {
           if (result.status === Office.AsyncResultStatus.Succeeded) {
             // ItemId may be null for unsaved drafts
-            resolve(result.value ?? "");
+            resolve(result.value ?? '');
           } else {
             reject(
-              createHostAdapterError(
-                "CONTENT_RETRIEVAL_FAILED",
-                result.error?.message ?? "Failed to get item ID",
-              ),
+              createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get item ID')
             );
           }
         });
       });
     }
 
-    throw createHostAdapterError(
-      "UNKNOWN_ERROR",
-      "Unable to determine item mode",
-    );
+    throw createHostAdapterError('UNKNOWN_ERROR', 'Unable to determine item mode');
   }
 
   /**
    * @inheritdoc
    */
   getItemType(): ItemType {
-    return "email";
+    return 'email';
   }
 
   /**
@@ -263,57 +234,46 @@ export class OutlookAdapter implements IHostAdapter {
   async getSubject(): Promise<string> {
     const item = this.getCurrentItem();
 
-    if (this._currentMode === "read") {
+    if (this._currentMode === 'read') {
       const readItem = item as Office.MessageRead;
-      return readItem.subject ?? "";
+      return readItem.subject ?? '';
     }
 
-    if (this._currentMode === "compose") {
+    if (this._currentMode === 'compose') {
       const composeItem = item as Office.MessageCompose;
       return new Promise((resolve, reject) => {
-        composeItem.subject.getAsync((result) => {
+        composeItem.subject.getAsync(result => {
           if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve(result.value ?? "");
+            resolve(result.value ?? '');
           } else {
             reject(
-              createHostAdapterError(
-                "CONTENT_RETRIEVAL_FAILED",
-                result.error?.message ?? "Failed to get subject",
-              ),
+              createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get subject')
             );
           }
         });
       });
     }
 
-    return "";
+    return '';
   }
 
   /**
    * @inheritdoc
    */
-  async getBody(preferredType: "html" | "text" = "html"): Promise<BodyContent> {
+  async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
     const item = this.getCurrentItem();
 
-    const coercionType =
-      preferredType === "html"
-        ? Office.CoercionType.Html
-        : Office.CoercionType.Text;
+    const coercionType = preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
 
     return new Promise((resolve, reject) => {
-      item.body.getAsync(coercionType, (result) => {
+      item.body.getAsync(coercionType, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           resolve({
-            content: result.value ?? "",
+            content: result.value ?? '',
             type: preferredType,
           });
         } else {
-          reject(
-            createHostAdapterError(
-              "CONTENT_RETRIEVAL_FAILED",
-              result.error?.message ?? "Failed to get body",
-            ),
-          );
+          reject(createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get body'));
         }
       });
     });
@@ -323,7 +283,7 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   async getAttachments(): Promise<AttachmentInfo[]> {
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       // In compose mode, attachments is different
       // For now, return empty array as compose mode attachment listing is complex
       return [];
@@ -344,7 +304,7 @@ export class OutlookAdapter implements IHostAdapter {
         size: attachment.size,
         isInline: attachment.isInline,
         // Content is not populated here - use getAttachmentContent() to retrieve
-      }),
+      })
     );
   }
 
@@ -353,18 +313,18 @@ export class OutlookAdapter implements IHostAdapter {
    */
   async getAttachmentContent(attachmentId: string): Promise<AttachmentInfo> {
     // Check if Mailbox 1.8 is supported (required for getAttachmentContentAsync)
-    if (!this.isMailboxSupported("1.8")) {
+    if (!this.isMailboxSupported('1.8')) {
       throw createHostAdapterError(
-        "API_NOT_AVAILABLE",
-        "Attachment content retrieval requires Mailbox API 1.8 or higher. " +
-          "The current client does not support this requirement set.",
+        'API_NOT_AVAILABLE',
+        'Attachment content retrieval requires Mailbox API 1.8 or higher. ' +
+          'The current client does not support this requirement set.'
       );
     }
 
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       throw createHostAdapterError(
-        "CAPABILITY_NOT_SUPPORTED",
-        "Attachment content retrieval is only available in read mode.",
+        'CAPABILITY_NOT_SUPPORTED',
+        'Attachment content retrieval is only available in read mode.'
       );
     }
 
@@ -372,17 +332,14 @@ export class OutlookAdapter implements IHostAdapter {
 
     // Find the attachment metadata first
     const attachments = item.attachments;
-    const attachmentMeta = attachments?.find((a) => a.id === attachmentId);
+    const attachmentMeta = attachments?.find(a => a.id === attachmentId);
 
     if (!attachmentMeta) {
-      throw createHostAdapterError(
-        "ATTACHMENT_NOT_FOUND",
-        `Attachment with ID '${attachmentId}' not found.`,
-      );
+      throw createHostAdapterError('ATTACHMENT_NOT_FOUND', `Attachment with ID '${attachmentId}' not found.`);
     }
 
     return new Promise((resolve, reject) => {
-      item.getAttachmentContentAsync(attachmentId, (result) => {
+      item.getAttachmentContentAsync(attachmentId, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           const content = result.value;
           resolve({
@@ -398,9 +355,9 @@ export class OutlookAdapter implements IHostAdapter {
         } else {
           reject(
             createHostAdapterError(
-              "CONTENT_RETRIEVAL_FAILED",
-              result.error?.message ?? "Failed to get attachment content",
-            ),
+              'CONTENT_RETRIEVAL_FAILED',
+              result.error?.message ?? 'Failed to get attachment content'
+            )
           );
         }
       });
@@ -411,14 +368,14 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   async getSenderEmail(): Promise<string> {
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       // In compose mode, sender is the current user
       // Could potentially get from Office.context.mailbox.userProfile
-      return this._mailbox?.userProfile?.emailAddress ?? "";
+      return this._mailbox?.userProfile?.emailAddress ?? '';
     }
 
     const item = this.getReadItem();
-    return item.from?.emailAddress ?? "";
+    return item.from?.emailAddress ?? '';
   }
 
   /**
@@ -427,12 +384,12 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns The sender's display name or empty string
    */
   async getSenderDisplayName(): Promise<string> {
-    if (this._currentMode !== "read") {
-      return this._mailbox?.userProfile?.displayName ?? "";
+    if (this._currentMode !== 'read') {
+      return this._mailbox?.userProfile?.displayName ?? '';
     }
 
     const item = this.getReadItem();
-    return item.from?.displayName ?? "";
+    return item.from?.displayName ?? '';
   }
 
   /**
@@ -441,7 +398,7 @@ export class OutlookAdapter implements IHostAdapter {
   async getRecipients(): Promise<Recipient[]> {
     const recipients: Recipient[] = [];
 
-    if (this._currentMode === "read") {
+    if (this._currentMode === 'read') {
       const item = this.getReadItem();
 
       // To recipients
@@ -450,7 +407,7 @@ export class OutlookAdapter implements IHostAdapter {
           recipients.push({
             email: to.emailAddress,
             displayName: to.displayName,
-            type: "to",
+            type: 'to',
           });
         }
       }
@@ -461,7 +418,7 @@ export class OutlookAdapter implements IHostAdapter {
           recipients.push({
             email: cc.emailAddress,
             displayName: cc.displayName,
-            type: "cc",
+            type: 'cc',
           });
         }
       }
@@ -472,23 +429,23 @@ export class OutlookAdapter implements IHostAdapter {
           recipients.push({
             email: bcc.emailAddress,
             displayName: bcc.displayName,
-            type: "bcc",
+            type: 'bcc',
           });
         }
       }
-    } else if (this._currentMode === "compose") {
+    } else if (this._currentMode === 'compose') {
       const item = this.getComposeItem();
 
       // Get To recipients
-      const toRecipients = await this.getRecipientsAsync(item.to, "to");
+      const toRecipients = await this.getRecipientsAsync(item.to, 'to');
       recipients.push(...toRecipients);
 
       // Get CC recipients
-      const ccRecipients = await this.getRecipientsAsync(item.cc, "cc");
+      const ccRecipients = await this.getRecipientsAsync(item.cc, 'cc');
       recipients.push(...ccRecipients);
 
       // Get BCC recipients
-      const bccRecipients = await this.getRecipientsAsync(item.bcc, "bcc");
+      const bccRecipients = await this.getRecipientsAsync(item.bcc, 'bcc');
       recipients.push(...bccRecipients);
     }
 
@@ -498,22 +455,16 @@ export class OutlookAdapter implements IHostAdapter {
   /**
    * Helper to get recipients asynchronously (for compose mode).
    */
-  private async getRecipientsAsync(
-    recipientField: Office.Recipients,
-    type: "to" | "cc" | "bcc",
-  ): Promise<Recipient[]> {
-    return new Promise((resolve) => {
-      recipientField.getAsync((result) => {
-        if (
-          result.status === Office.AsyncResultStatus.Succeeded &&
-          result.value
-        ) {
+  private async getRecipientsAsync(recipientField: Office.Recipients, type: 'to' | 'cc' | 'bcc'): Promise<Recipient[]> {
+    return new Promise(resolve => {
+      recipientField.getAsync(result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded && result.value) {
           const recipients = result.value.map(
             (r): Recipient => ({
               email: r.emailAddress,
               displayName: r.displayName,
               type,
-            }),
+            })
           );
           resolve(recipients);
         } else {
@@ -527,9 +478,7 @@ export class OutlookAdapter implements IHostAdapter {
   /**
    * @inheritdoc
    */
-  async getDocumentContent(
-    _options?: GetDocumentContentOptions,
-  ): Promise<ArrayBuffer> {
+  async getDocumentContent(_options?: GetDocumentContentOptions): Promise<ArrayBuffer> {
     // Outlook emails are not documents - return empty ArrayBuffer
     return new ArrayBuffer(0);
   }
@@ -538,9 +487,9 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
-    const hasMailbox18 = this.isMailboxSupported("1.8");
-    const isReadMode = this._currentMode === "read";
-    const isComposeMode = this._currentMode === "compose";
+    const hasMailbox18 = this.isMailboxSupported('1.8');
+    const isReadMode = this._currentMode === 'read';
+    const isComposeMode = this._currentMode === 'compose';
 
     return {
       // Attachment operations require read mode and Mailbox 1.8
@@ -560,9 +509,9 @@ export class OutlookAdapter implements IHostAdapter {
       // File attachment is available in compose mode
       canAttachFile: isComposeMode,
       // Minimum API version for basic functionality
-      minApiVersion: "1.5",
+      minApiVersion: '1.5',
       // Actual supported version
-      supportedRequirementSet: hasMailbox18 ? "Mailbox 1.8" : "Mailbox 1.5",
+      supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.5',
     };
   }
 
@@ -571,14 +520,9 @@ export class OutlookAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host !== Office.HostType.Outlook) {
-          reject(
-            createHostAdapterError(
-              "INVALID_HOST",
-              `Expected Outlook host, but got: ${info.host}`,
-            ),
-          );
+          reject(createHostAdapterError('INVALID_HOST', `Expected Outlook host, but got: ${info.host}`));
           return;
         }
 
@@ -601,14 +545,11 @@ export class OutlookAdapter implements IHostAdapter {
   /**
    * @inheritdoc
    */
-  async insertLink(
-    url: string,
-    displayText?: string,
-  ): Promise<InsertLinkResult> {
-    if (this._currentMode !== "compose") {
+  async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
+    if (this._currentMode !== 'compose') {
       return {
         success: false,
-        errorMessage: "Link insertion is only available in compose mode.",
+        errorMessage: 'Link insertion is only available in compose mode.',
       };
     }
 
@@ -617,70 +558,56 @@ export class OutlookAdapter implements IHostAdapter {
       ? `<a href="${this.escapeHtml(url)}">${this.escapeHtml(displayText)}</a>`
       : `<a href="${this.escapeHtml(url)}">${this.escapeHtml(url)}</a>`;
 
-    return new Promise((resolve) => {
-      item.body.setSelectedDataAsync(
-        linkHtml,
-        { coercionType: Office.CoercionType.Html },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({ success: true });
-          } else {
-            resolve({
-              success: false,
-              errorMessage: result.error?.message ?? "Failed to insert link",
-            });
-          }
-        },
-      );
+    return new Promise(resolve => {
+      item.body.setSelectedDataAsync(linkHtml, { coercionType: Office.CoercionType.Html }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({ success: true });
+        } else {
+          resolve({
+            success: false,
+            errorMessage: result.error?.message ?? 'Failed to insert link',
+          });
+        }
+      });
     });
   }
 
   /**
    * @inheritdoc
    */
-  async attachFile(
-    content: string,
-    fileName: string,
-    contentType: string,
-  ): Promise<AttachFileResult> {
-    if (this._currentMode !== "compose") {
+  async attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult> {
+    if (this._currentMode !== 'compose') {
       return {
         success: false,
-        errorMessage: "File attachment is only available in compose mode.",
+        errorMessage: 'File attachment is only available in compose mode.',
       };
     }
 
     // Check for addFileAttachmentFromBase64Async support (Mailbox 1.8)
-    if (!this.isMailboxSupported("1.8")) {
+    if (!this.isMailboxSupported('1.8')) {
       return {
         success: false,
         errorMessage:
-          "File attachment requires Mailbox API 1.8 or higher. " +
-          "The current client does not support this feature.",
+          'File attachment requires Mailbox API 1.8 or higher. ' + 'The current client does not support this feature.',
       };
     }
 
     const item = this.getComposeItem();
 
-    return new Promise((resolve) => {
-      item.addFileAttachmentFromBase64Async(
-        content,
-        fileName,
-        { isInline: false, contentType },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({
-              success: true,
-              attachmentId: result.value,
-            });
-          } else {
-            resolve({
-              success: false,
-              errorMessage: result.error?.message ?? "Failed to attach file",
-            });
-          }
-        },
-      );
+    return new Promise(resolve => {
+      item.addFileAttachmentFromBase64Async(content, fileName, { isInline: false, contentType }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({
+            success: true,
+            attachmentId: result.value,
+          });
+        } else {
+          resolve({
+            success: false,
+            errorMessage: result.error?.message ?? 'Failed to attach file',
+          });
+        }
+      });
     });
   }
 
@@ -697,15 +624,15 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns The internet message ID or empty string
    */
   getInternetMessageId(): string {
-    if (this._currentMode !== "read") {
-      return "";
+    if (this._currentMode !== 'read') {
+      return '';
     }
 
     try {
       const item = this.getReadItem();
-      return item.internetMessageId ?? "";
+      return item.internetMessageId ?? '';
     } catch {
-      return "";
+      return '';
     }
   }
 
@@ -717,15 +644,15 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns The conversation ID or empty string
    */
   getConversationId(): string {
-    if (this._currentMode !== "read") {
-      return "";
+    if (this._currentMode !== 'read') {
+      return '';
     }
 
     try {
       const item = this.getReadItem();
-      return item.conversationId ?? "";
+      return item.conversationId ?? '';
     } catch {
-      return "";
+      return '';
     }
   }
 
@@ -742,13 +669,13 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns Object with header names and values
    */
   async getInternetHeaders(): Promise<Record<string, string>> {
-    if (!this.isMailboxSupported("1.8")) {
+    if (!this.isMailboxSupported('1.8')) {
       // Fall back to just the internetMessageId if available
       const messageId = this.getInternetMessageId();
-      return messageId ? { "Message-ID": messageId } : {};
+      return messageId ? { 'Message-ID': messageId } : {};
     }
 
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       return {};
     }
 
@@ -762,13 +689,13 @@ export class OutlookAdapter implements IHostAdapter {
     // Get the internet message ID (always available in read mode)
     const messageId = item.internetMessageId;
     if (messageId) {
-      headers["Message-ID"] = messageId;
+      headers['Message-ID'] = messageId;
     }
 
     // Get the conversation ID
     const conversationId = item.conversationId;
     if (conversationId) {
-      headers["X-Conversation-ID"] = conversationId;
+      headers['X-Conversation-ID'] = conversationId;
     }
 
     return headers;
@@ -779,9 +706,9 @@ export class OutlookAdapter implements IHostAdapter {
    *
    * @returns The importance level ('low', 'normal', 'high')
    */
-  getImportance(): "low" | "normal" | "high" {
-    if (this._currentMode !== "read") {
-      return "normal";
+  getImportance(): 'low' | 'normal' | 'high' {
+    if (this._currentMode !== 'read') {
+      return 'normal';
     }
 
     try {
@@ -790,14 +717,14 @@ export class OutlookAdapter implements IHostAdapter {
 
       // Office.MailboxEnums.Importance maps to string values
       if (importance === Office.MailboxEnums.Importance.Low) {
-        return "low";
+        return 'low';
       }
       if (importance === Office.MailboxEnums.Importance.High) {
-        return "high";
+        return 'high';
       }
-      return "normal";
+      return 'normal';
     } catch {
-      return "normal";
+      return 'normal';
     }
   }
 
@@ -807,7 +734,7 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns The received date or undefined
    */
   getReceivedDate(): Date | undefined {
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       return undefined;
     }
 
@@ -825,7 +752,7 @@ export class OutlookAdapter implements IHostAdapter {
    * @returns The sent date or undefined
    */
   getSentDate(): Date | undefined {
-    if (this._currentMode !== "read") {
+    if (this._currentMode !== 'read') {
       return undefined;
     }
 
@@ -855,13 +782,13 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private escapeHtml(text: string): string {
     const map: Record<string, string> = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;",
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;',
     };
-    return text.replace(/[&<>"']/g, (char) => map[char] ?? char);
+    return text.replace(/[&<>"']/g, char => map[char] ?? char);
   }
 }
 

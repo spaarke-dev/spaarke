@@ -5,8 +5,8 @@
  * Comment field is encouraged but optional.
  */
 
-import * as React from "react";
-import { useState, useRef, useEffect } from "react";
+import * as React from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -20,16 +20,16 @@ import {
   makeStyles,
   tokens,
   Spinner,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   content: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   commentField: {
-    minHeight: "80px",
+    minHeight: '80px',
   },
   hint: {
     color: tokens.colorNeutralForeground3,
@@ -61,7 +61,7 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
   onCancel,
 }) => {
   const styles = useStyles();
-  const [comment, setComment] = useState("");
+  const [comment, setComment] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-focus comment field when dialog opens
@@ -78,7 +78,7 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
   // Reset comment when dialog opens
   useEffect(() => {
     if (isOpen) {
-      setComment("");
+      setComment('');
     }
   }, [isOpen]);
 
@@ -88,7 +88,7 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Ctrl+Enter to submit
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleConfirm();
     }
@@ -100,15 +100,10 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
         <DialogBody>
           <DialogTitle>Check In Document</DialogTitle>
           <DialogContent className={styles.content}>
-            <p>
-              You are about to check in "{documentName}". This will save your
-              changes and create a new version.
-            </p>
+            <p>You are about to check in "{documentName}". This will save your changes and create a new version.</p>
 
             <div>
-              <Label htmlFor="checkin-comment">
-                Version comment (optional)
-              </Label>
+              <Label htmlFor="checkin-comment">Version comment (optional)</Label>
               <Textarea
                 ref={textareaRef}
                 id="checkin-comment"
@@ -125,11 +120,7 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
           </DialogContent>
 
           <DialogActions>
-            <Button
-              appearance="secondary"
-              onClick={onCancel}
-              disabled={isLoading}
-            >
+            <Button appearance="secondary" onClick={onCancel} disabled={isLoading}>
               Cancel
             </Button>
             <Button
@@ -138,7 +129,7 @@ export const CheckInDialog: React.FC<CheckInDialogProps> = ({
               disabled={isLoading}
               icon={isLoading ? <Spinner size="tiny" /> : undefined}
             >
-              {isLoading ? "Checking in..." : "Check In"}
+              {isLoading ? 'Checking in...' : 'Check In'}
             </Button>
           </DialogActions>
         </DialogBody>

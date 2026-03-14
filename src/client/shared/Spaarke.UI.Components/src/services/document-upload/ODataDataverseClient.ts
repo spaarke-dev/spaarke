@@ -10,13 +10,8 @@
  * @version 1.0.0
  */
 
-import type {
-  IDataverseClient,
-  ITokenProvider,
-  ILogger,
-  DataverseRecordRef,
-} from "./types";
-import { consoleLogger } from "./types";
+import type { IDataverseClient, ITokenProvider, ILogger, DataverseRecordRef } from './types';
+import { consoleLogger } from './types';
 
 /**
  * Configuration for ODataDataverseClient.
@@ -60,16 +55,14 @@ export class ODataDataverseClient implements IDataverseClient {
   private readonly logger: ILogger;
 
   constructor(options: ODataDataverseClientOptions) {
-    const dataverseUrl = options.dataverseUrl.endsWith("/")
-      ? options.dataverseUrl.slice(0, -1)
-      : options.dataverseUrl;
-    const apiVersion = options.apiVersion ?? "v9.2";
+    const dataverseUrl = options.dataverseUrl.endsWith('/') ? options.dataverseUrl.slice(0, -1) : options.dataverseUrl;
+    const apiVersion = options.apiVersion ?? 'v9.2';
 
     this.baseApiUrl = `${dataverseUrl}/api/data/${apiVersion}`;
     this.getAccessToken = options.getAccessToken;
     this.logger = options.logger ?? consoleLogger;
 
-    this.logger.info("ODataDataverseClient", "Initialized", {
+    this.logger.info('ODataDataverseClient', 'Initialized', {
       baseApiUrl: this.baseApiUrl,
     });
   }
@@ -79,30 +72,23 @@ export class ODataDataverseClient implements IDataverseClient {
    *
    * Uses the OData-EntityId response header to extract the created record GUID.
    */
-  async createRecord(
-    entityLogicalName: string,
-    data: Record<string, unknown>,
-  ): Promise<DataverseRecordRef> {
+  async createRecord(entityLogicalName: string, data: Record<string, unknown>): Promise<DataverseRecordRef> {
     const entitySetName = this.getEntitySetName(entityLogicalName);
     const url = `${this.baseApiUrl}/${entitySetName}`;
 
-    this.logger.info(
-      "ODataDataverseClient",
-      `Creating ${entityLogicalName} record`,
-      { url },
-    );
+    this.logger.info('ODataDataverseClient', `Creating ${entityLogicalName} record`, { url });
 
     const token = await this.getAccessToken();
 
     const response = await fetch(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
-        Prefer: "return=representation",
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation',
       },
       body: JSON.stringify(data),
     });
@@ -110,17 +96,14 @@ export class ODataDataverseClient implements IDataverseClient {
     if (!response.ok) {
       const errorBody = await this.tryReadErrorBody(response);
       throw new Error(
-        `Failed to create ${entityLogicalName} record: HTTP ${response.status} ${response.statusText}. ${errorBody}`,
+        `Failed to create ${entityLogicalName} record: HTTP ${response.status} ${response.statusText}. ${errorBody}`
       );
     }
 
     // Extract record ID from response
     const id = await this.extractRecordId(response, entityLogicalName);
 
-    this.logger.info(
-      "ODataDataverseClient",
-      `Created ${entityLogicalName} record: ${id}`,
-    );
+    this.logger.info('ODataDataverseClient', `Created ${entityLogicalName} record: ${id}`);
 
     return { id };
   }
@@ -128,31 +111,23 @@ export class ODataDataverseClient implements IDataverseClient {
   /**
    * Update a record via OData PATCH request.
    */
-  async updateRecord(
-    entityLogicalName: string,
-    id: string,
-    data: Record<string, unknown>,
-  ): Promise<void> {
+  async updateRecord(entityLogicalName: string, id: string, data: Record<string, unknown>): Promise<void> {
     const entitySetName = this.getEntitySetName(entityLogicalName);
-    const sanitizedId = id.replace(/[{}]/g, "").toLowerCase();
+    const sanitizedId = id.replace(/[{}]/g, '').toLowerCase();
     const url = `${this.baseApiUrl}/${entitySetName}(${sanitizedId})`;
 
-    this.logger.info(
-      "ODataDataverseClient",
-      `Updating ${entityLogicalName} record: ${sanitizedId}`,
-      { url },
-    );
+    this.logger.info('ODataDataverseClient', `Updating ${entityLogicalName} record: ${sanitizedId}`, { url });
 
     const token = await this.getAccessToken();
 
     const response = await fetch(url, {
-      method: "PATCH",
+      method: 'PATCH',
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0",
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
       },
       body: JSON.stringify(data),
     });
@@ -160,14 +135,11 @@ export class ODataDataverseClient implements IDataverseClient {
     if (!response.ok) {
       const errorBody = await this.tryReadErrorBody(response);
       throw new Error(
-        `Failed to update ${entityLogicalName} record ${sanitizedId}: HTTP ${response.status} ${response.statusText}. ${errorBody}`,
+        `Failed to update ${entityLogicalName} record ${sanitizedId}: HTTP ${response.status} ${response.statusText}. ${errorBody}`
       );
     }
 
-    this.logger.info(
-      "ODataDataverseClient",
-      `Updated ${entityLogicalName} record: ${sanitizedId}`,
-    );
+    this.logger.info('ODataDataverseClient', `Updated ${entityLogicalName} record: ${sanitizedId}`);
   }
 
   // -----------------------------------------------------------------------
@@ -192,10 +164,7 @@ export class ODataDataverseClient implements IDataverseClient {
    * 1. Response body JSON (when Prefer: return=representation is used)
    * 2. OData-EntityId response header
    */
-  private async extractRecordId(
-    response: Response,
-    entityLogicalName: string,
-  ): Promise<string> {
+  private async extractRecordId(response: Response, entityLogicalName: string): Promise<string> {
     // Try response body first (Prefer: return=representation)
     try {
       const body = await response.json();
@@ -212,7 +181,7 @@ export class ODataDataverseClient implements IDataverseClient {
     }
 
     // Try OData-EntityId header
-    const entityIdHeader = response.headers.get("OData-EntityId");
+    const entityIdHeader = response.headers.get('OData-EntityId');
     if (entityIdHeader) {
       const match = entityIdHeader.match(/\(([0-9a-f-]+)\)/i);
       if (match) {
@@ -220,9 +189,7 @@ export class ODataDataverseClient implements IDataverseClient {
       }
     }
 
-    throw new Error(
-      `Could not extract record ID from ${entityLogicalName} create response`,
-    );
+    throw new Error(`Could not extract record ID from ${entityLogicalName} create response`);
   }
 
   /**
@@ -236,7 +203,7 @@ export class ODataDataverseClient implements IDataverseClient {
       try {
         return await response.text();
       } catch {
-        return "";
+        return '';
       }
     }
   }

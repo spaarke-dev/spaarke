@@ -8,34 +8,32 @@
  * - Theme management
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import { createRoot, Root } from "react-dom/client";
-import { initializeAuth } from "./authInit";
-import { DocumentViewerApp } from "./SpeDocumentViewer";
-import { DocumentViewerState } from "./types";
-import { v4 as uuidv4 } from "uuid";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import { createRoot, Root } from 'react-dom/client';
+import { initializeAuth } from './authInit';
+import { DocumentViewerApp } from './SpeDocumentViewer';
+import { DocumentViewerState } from './types';
+import { v4 as uuidv4 } from 'uuid';
 
 // Theme storage utilities
-const THEME_STORAGE_KEY = "spaarke-theme";
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_STORAGE_KEY = 'spaarke-theme';
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-type ThemePreference = "light" | "dark" | "auto";
+type ThemePreference = 'light' | 'dark' | 'auto';
 
 function getUserThemePreference(): ThemePreference {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === "light" || stored === "dark" || stored === "auto") {
+  if (stored === 'light' || stored === 'dark' || stored === 'auto') {
     return stored;
   }
-  return "auto";
+  return 'auto';
 }
 
-function getEffectiveDarkMode(
-  context?: ComponentFramework.Context<IInputs>,
-): boolean {
+function getEffectiveDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
   const preference = getUserThemePreference();
-  if (preference === "dark") return true;
-  if (preference === "light") return false;
+  if (preference === 'dark') return true;
+  if (preference === 'light') return false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if ((context as any)?.fluentDesignLanguage?.isDarkTheme !== undefined) {
@@ -46,21 +44,16 @@ function getEffectiveDarkMode(
   const navbar = document.querySelector("[data-id='navbar-container']");
   if (navbar) {
     const bg = getComputedStyle(navbar).backgroundColor;
-    if (bg === "rgb(10, 10, 10)") return true;
-    if (bg === "rgb(240, 240, 240)") return false;
+    if (bg === 'rgb(10, 10, 10)') return true;
+    if (bg === 'rgb(240, 240, 240)') return false;
   }
 
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
 }
 
-interface ThemeChangeHandler {
-  (isDark: boolean): void;
-}
+type ThemeChangeHandler = (isDark: boolean) => void;
 
-function setupThemeListener(
-  onChange: ThemeChangeHandler,
-  context?: ComponentFramework.Context<IInputs>,
-): () => void {
+function setupThemeListener(onChange: ThemeChangeHandler, context?: ComponentFramework.Context<IInputs>): () => void {
   const handleStorageChange = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY) {
       onChange(getEffectiveDarkMode(context));
@@ -72,37 +65,34 @@ function setupThemeListener(
   };
 
   const handleSystemChange = (event: MediaQueryListEvent) => {
-    if (getUserThemePreference() === "auto") {
+    if (getUserThemePreference() === 'auto') {
       onChange(event.matches);
     }
   };
 
-  window.addEventListener("storage", handleStorageChange);
+  window.addEventListener('storage', handleStorageChange);
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
 
-  const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
-  mediaQuery?.addEventListener("change", handleSystemChange);
+  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+  mediaQuery?.addEventListener('change', handleSystemChange);
 
   return () => {
-    window.removeEventListener("storage", handleStorageChange);
+    window.removeEventListener('storage', handleStorageChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener("change", handleSystemChange);
+    mediaQuery?.removeEventListener('change', handleSystemChange);
   };
 }
 
-export class SpeDocumentViewer implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class SpeDocumentViewer implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement;
   private root: Root | null = null;
   private authInitialized = false;
 
   // Configuration
-  private bffApiUrl = "";
-  private clientAppId = "";
-  private bffAppId = "";
-  private tenantId = "";
+  private bffApiUrl = '';
+  private clientAppId = '';
+  private bffAppId = '';
+  private tenantId = '';
 
   // Feature flags
   private enableEdit = true;
@@ -123,9 +113,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
 
   constructor() {
     this.correlationId = uuidv4();
-    console.log(
-      `[SpeDocumentViewer] Control instance created. Correlation ID: ${this.correlationId}`,
-    );
+    console.log(`[SpeDocumentViewer] Control instance created. Correlation ID: ${this.correlationId}`);
   }
 
   /**
@@ -136,10 +124,10 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     // Check 1: URL contains form designer indicators
     const url = window.location.href.toLowerCase();
     if (
-      url.includes("/designer/") ||
-      url.includes("formtype=main") ||
-      url.includes("pagetype=entityrecord&cmdbar=false") ||
-      url.includes("/edit/")
+      url.includes('/designer/') ||
+      url.includes('formtype=main') ||
+      url.includes('pagetype=entityrecord&cmdbar=false') ||
+      url.includes('/edit/')
     ) {
       // Could be form designer - check other indicators
     }
@@ -154,13 +142,11 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
       if (window.parent !== window) {
         const parentUrl = window.parent.location.href.toLowerCase();
         if (
-          parentUrl.includes("/designer/") ||
-          parentUrl.includes("/formeditor/") ||
-          parentUrl.includes("appdesigner")
+          parentUrl.includes('/designer/') ||
+          parentUrl.includes('/formeditor/') ||
+          parentUrl.includes('appdesigner')
         ) {
-          console.log(
-            "[SpeDocumentViewer] Design mode detected via parent URL",
-          );
+          console.log('[SpeDocumentViewer] Design mode detected via parent URL');
           return true;
         }
       }
@@ -173,22 +159,15 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isAuthoringMode = (context as any).mode?.isAuthoringMode;
     if (isAuthoringMode === true) {
-      console.log(
-        "[SpeDocumentViewer] Design mode detected via isAuthoringMode",
-      );
+      console.log('[SpeDocumentViewer] Design mode detected via isAuthoringMode');
       return true;
     }
 
     // Check 5: Designer preview - allocated dimensions are often 0 or very small
     const allocatedHeight = context.mode.allocatedHeight;
     const allocatedWidth = context.mode.allocatedWidth;
-    if (
-      (allocatedHeight === 0 || allocatedHeight === -1) &&
-      (allocatedWidth === 0 || allocatedWidth === -1)
-    ) {
-      console.log(
-        "[SpeDocumentViewer] Design mode suspected via zero dimensions",
-      );
+    if ((allocatedHeight === 0 || allocatedHeight === -1) && (allocatedWidth === 0 || allocatedWidth === -1)) {
+      console.log('[SpeDocumentViewer] Design mode suspected via zero dimensions');
       // Don't return true yet - could be legitimate zero dimensions
     }
 
@@ -200,9 +179,9 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
    */
   private renderDesignModePlaceholder(): void {
     const isDark = getEffectiveDarkMode(this._context ?? undefined);
-    const bgColor = isDark ? "#1f1f1f" : "#f5f5f5";
-    const textColor = isDark ? "#ffffff" : "#333333";
-    const borderColor = isDark ? "#444444" : "#cccccc";
+    const bgColor = isDark ? '#1f1f1f' : '#f5f5f5';
+    const textColor = isDark ? '#ffffff' : '#333333';
+    const borderColor = isDark ? '#444444' : '#cccccc';
 
     this.container.innerHTML = `
             <div style="
@@ -242,7 +221,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): Promise<void> {
     this.container = container;
     this._notifyOutputChanged = notifyOutputChanged;
@@ -258,30 +237,26 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     this.container.style.height = `${controlHeight}px`;
     this.container.style.minHeight = `${controlHeight}px`;
     this.container.style.maxHeight = `${controlHeight}px`;
-    this.container.style.display = "flex";
-    this.container.style.flexDirection = "column";
-    this.container.style.overflow = "hidden";
+    this.container.style.display = 'flex';
+    this.container.style.flexDirection = 'column';
+    this.container.style.overflow = 'hidden';
     console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px`);
 
-    console.log("[SpeDocumentViewer] Initializing control...");
+    console.log('[SpeDocumentViewer] Initializing control...');
 
     // Check for design mode FIRST - before any authentication
     if (this.isDesignMode(context)) {
-      console.log(
-        "[SpeDocumentViewer] Running in design mode - showing placeholder",
-      );
+      console.log('[SpeDocumentViewer] Running in design mode - showing placeholder');
       this.renderDesignModePlaceholder();
       return;
     }
 
     try {
       // Extract configuration
-      this.tenantId = context.parameters.tenantId.raw || "";
-      this.clientAppId = context.parameters.clientAppId.raw || "";
-      this.bffAppId = context.parameters.bffAppId.raw || "";
-      this.bffApiUrl =
-        context.parameters.bffApiUrl.raw ||
-        "https://spe-api-dev-67e2xz.azurewebsites.net";
+      this.tenantId = context.parameters.tenantId.raw || '';
+      this.clientAppId = context.parameters.clientAppId.raw || '';
+      this.bffAppId = context.parameters.bffAppId.raw || '';
+      this.bffApiUrl = context.parameters.bffApiUrl.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
       // Feature flags
       this.enableEdit = context.parameters.enableEdit?.raw ?? true;
@@ -291,12 +266,10 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
 
       // Validate configuration
       if (!this.tenantId || !this.clientAppId || !this.bffAppId) {
-        throw new Error(
-          "Missing required configuration: tenantId, clientAppId, and bffAppId must be provided",
-        );
+        throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
       }
 
-      console.log("[SpeDocumentViewer] Configuration:", {
+      console.log('[SpeDocumentViewer] Configuration:', {
         tenantId: this.tenantId,
         clientAppId: this.clientAppId,
         bffAppId: this.bffAppId,
@@ -308,14 +281,9 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
       });
 
       // Initialize @spaarke/auth (replaces local AuthService)
-      await initializeAuth(
-        this.tenantId,
-        this.clientAppId,
-        this.bffAppId,
-        this.bffApiUrl,
-      );
+      await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
       this.authInitialized = true;
-      console.log("[SpeDocumentViewer] @spaarke/auth initialized");
+      console.log('[SpeDocumentViewer] @spaarke/auth initialized');
 
       // Track initial document ID
       try {
@@ -325,7 +293,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
       }
 
       // Set up theme listener
-      this._cleanupThemeListener = setupThemeListener((isDark) => {
+      this._cleanupThemeListener = setupThemeListener(isDark => {
         console.log(`[SpeDocumentViewer] Theme changed: isDark=${isDark}`);
         if (this._context && this._state === DocumentViewerState.Ready) {
           this.renderControl(this._context);
@@ -336,19 +304,16 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
       this.transitionTo(DocumentViewerState.Ready);
       this.renderControl(context);
     } catch (error) {
-      console.error("[SpeDocumentViewer] Initialization failed:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      console.error('[SpeDocumentViewer] Initialization failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Check if this is a popup-blocked error (likely in form designer)
       if (
-        errorMessage.toLowerCase().includes("popup") ||
-        errorMessage.toLowerCase().includes("blocked") ||
-        errorMessage.toLowerCase().includes("interaction_required")
+        errorMessage.toLowerCase().includes('popup') ||
+        errorMessage.toLowerCase().includes('blocked') ||
+        errorMessage.toLowerCase().includes('interaction_required')
       ) {
-        console.log(
-          "[SpeDocumentViewer] Popup blocked - likely in design mode, showing placeholder",
-        );
+        console.log('[SpeDocumentViewer] Popup blocked - likely in design mode, showing placeholder');
         this.renderDesignModePlaceholder();
         return;
       }
@@ -381,9 +346,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     }
 
     if (currentDocumentId !== this._previousDocumentId) {
-      console.log(
-        `[SpeDocumentViewer] Document ID changed: ${this._previousDocumentId} -> ${currentDocumentId}`,
-      );
+      console.log(`[SpeDocumentViewer] Document ID changed: ${this._previousDocumentId} -> ${currentDocumentId}`);
       this._previousDocumentId = currentDocumentId;
     }
 
@@ -397,54 +360,51 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     this._notifyOutputChanged?.();
   }
 
-  private extractDocumentId(
-    context: ComponentFramework.Context<IInputs>,
-  ): string {
+  private extractDocumentId(context: ComponentFramework.Context<IInputs>): string {
     const rawValue = context.parameters.documentId.raw;
 
-    if (rawValue && typeof rawValue === "string" && rawValue.trim() !== "") {
+    if (rawValue && typeof rawValue === 'string' && rawValue.trim() !== '') {
       const trimmed = rawValue.trim();
       if (!this.isValidGuid(trimmed)) {
-        throw new Error("Document ID must be a GUID format.");
+        throw new Error('Document ID must be a GUID format.');
       }
       return trimmed;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const recordId = (context.mode as any).contextInfo?.entityId;
-    if (recordId && typeof recordId === "string") {
+    if (recordId && typeof recordId === 'string') {
       if (!this.isValidGuid(recordId)) {
-        throw new Error("Form context did not provide a valid GUID.");
+        throw new Error('Form context did not provide a valid GUID.');
       }
       return recordId;
     }
 
-    return "";
+    return '';
   }
 
   private isValidGuid(value: string): boolean {
-    const guidRegex =
-      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    const guidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
     return guidRegex.test(value);
   }
 
   private renderLoading(): void {
-    const overlay = document.createElement("div");
-    overlay.className = "spe-document-viewer-loading-overlay";
-    overlay.setAttribute("role", "status");
-    overlay.setAttribute("aria-busy", "true");
+    const overlay = document.createElement('div');
+    overlay.className = 'spe-document-viewer-loading-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-busy', 'true');
 
-    const spinner = document.createElement("div");
-    spinner.className = "spe-document-viewer-loading-spinner";
+    const spinner = document.createElement('div');
+    spinner.className = 'spe-document-viewer-loading-spinner';
 
-    const text = document.createElement("span");
-    text.className = "spe-document-viewer-loading-text";
-    text.textContent = "Loading document viewer...";
+    const text = document.createElement('span');
+    text.className = 'spe-document-viewer-loading-text';
+    text.textContent = 'Loading document viewer...';
 
     overlay.appendChild(spinner);
     overlay.appendChild(text);
 
-    this.container.innerHTML = "";
+    this.container.innerHTML = '';
     this.container.appendChild(overlay);
   }
 
@@ -452,15 +412,13 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
     const documentId = this.extractDocumentId(context);
 
     if (!this.authInitialized) {
-      console.warn("[SpeDocumentViewer] Auth not initialized yet");
+      console.warn('[SpeDocumentViewer] Auth not initialized yet');
       return;
     }
 
     const isDarkTheme = getEffectiveDarkMode(context);
 
-    console.log(
-      `[SpeDocumentViewer] Rendering for document: ${documentId || "(none)"}`,
-    );
+    console.log(`[SpeDocumentViewer] Rendering for document: ${documentId || '(none)'}`);
 
     if (!this.root) {
       this.root = createRoot(this.container);
@@ -477,12 +435,12 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
         enableDownload: this.enableDownload,
         showToolbar: this.showToolbar,
         onRefresh: () => {
-          console.log("[SpeDocumentViewer] Refresh requested");
+          console.log('[SpeDocumentViewer] Refresh requested');
         },
         onDeleted: () => {
-          console.log("[SpeDocumentViewer] Document deleted");
+          console.log('[SpeDocumentViewer] Document deleted');
         },
-      }),
+      })
     );
   }
 
@@ -497,7 +455,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
   }
 
   private escapeHtml(text: string): string {
-    const div = document.createElement("div");
+    const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
@@ -507,7 +465,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<
   }
 
   public destroy(): void {
-    console.log("[SpeDocumentViewer] Destroying control...");
+    console.log('[SpeDocumentViewer] Destroying control...');
 
     if (this._cleanupThemeListener) {
       this._cleanupThemeListener();

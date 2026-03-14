@@ -18,25 +18,15 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/055-duedateswidget-all-events-link.poml
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Spinner,
-  shorthands,
-} from "@fluentui/react-components";
-import { Calendar20Regular } from "@fluentui/react-icons";
-import { IInputs } from "../generated/ManifestTypes";
-import { useUpcomingEvents } from "../hooks/useUpcomingEvents";
-import { IEventItem } from "../services/eventFilterService";
-import { EventListItem } from "./EventListItem";
-import { WidgetFooter } from "./WidgetFooter";
-import {
-  navigateToEvent,
-  navigateToEventsPage,
-  NavigationResult,
-} from "../services/navigationService";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Spinner, shorthands } from '@fluentui/react-components';
+import { Calendar20Regular } from '@fluentui/react-icons';
+import { IInputs } from '../generated/ManifestTypes';
+import { useUpcomingEvents } from '../hooks/useUpcomingEvents';
+import { IEventItem } from '../services/eventFilterService';
+import { EventListItem } from './EventListItem';
+import { WidgetFooter } from './WidgetFooter';
+import { navigateToEvent, navigateToEventsPage, NavigationResult } from '../services/navigationService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -57,17 +47,17 @@ export interface IDueDatesWidgetRootProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    boxSizing: "border-box",
-    position: "relative",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    boxSizing: 'border-box',
+    position: 'relative',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     marginBottom: tokens.spacingVerticalXS,
   },
@@ -77,42 +67,42 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   eventList: {
-    display: "flex",
-    flexDirection: "column",
-    overflowY: "auto",
+    display: 'flex',
+    flexDirection: 'column',
+    overflowY: 'auto',
     flexGrow: 1,
     ...shorthands.padding(0, tokens.spacingHorizontalM),
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexGrow: 1,
     color: tokens.colorNeutralForeground3,
     rowGap: tokens.spacingVerticalS,
   },
   emptyIcon: {
-    fontSize: "48px",
+    fontSize: '48px',
     color: tokens.colorNeutralForeground4,
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
   },
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorStatusDangerForeground1,
     rowGap: tokens.spacingVerticalS,
   },
   versionText: {
-    position: "absolute",
+    position: 'absolute',
     bottom: tokens.spacingVerticalXS,
     right: tokens.spacingHorizontalS,
     fontSize: tokens.fontSizeBase100,
@@ -135,24 +125,18 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
   const styles = useStyles();
 
   // Navigation state for loading indicator
-  const [navigatingEventId, setNavigatingEventId] = React.useState<
-    string | null
-  >(null);
-  const [navigationError, setNavigationError] = React.useState<string | null>(
-    null,
-  );
+  const [navigatingEventId, setNavigatingEventId] = React.useState<string | null>(null);
+  const [navigationError, setNavigationError] = React.useState<string | null>(null);
 
   // Use the hook for fetching events with proper filtering
-  const { events, totalCount, loading, error, initialized } = useUpcomingEvents(
-    {
-      context,
-      parentRecordId,
-      daysAhead,
-      maxItems,
-      includeOverdue: true,
-      autoFetch: true,
-    },
-  );
+  const { events, totalCount, loading, error, initialized } = useUpcomingEvents({
+    context,
+    parentRecordId,
+    daysAhead,
+    maxItems,
+    includeOverdue: true,
+    autoFetch: true,
+  });
 
   /**
    * Handle event list item click - navigates to Events tab and opens side pane
@@ -172,13 +156,10 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
           eventType,
           navigateToTab: true, // Navigate to Events tab first
           onNavigationComplete: () => {
-            console.log(
-              "[DueDatesWidget] Navigation complete for event:",
-              eventId,
-            );
+            console.log('[DueDatesWidget] Navigation complete for event:', eventId);
           },
           onNavigationError: (err: string) => {
-            console.error("[DueDatesWidget] Navigation error:", err);
+            console.error('[DueDatesWidget] Navigation error:', err);
             setNavigationError(err);
           },
         });
@@ -191,16 +172,15 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
           setNavigationError(result.error);
         }
       } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Navigation failed";
-        console.error("[DueDatesWidget] Unexpected navigation error:", err);
+        const errorMessage = err instanceof Error ? err.message : 'Navigation failed';
+        console.error('[DueDatesWidget] Unexpected navigation error:', err);
         setNavigationError(errorMessage);
       } finally {
         // Clear loading state
         setNavigatingEventId(null);
       }
     },
-    [onEventSelect],
+    [onEventSelect]
   );
 
   /**
@@ -208,16 +188,13 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
    * Task 055: Navigates to system-level Events page
    */
   const handleViewAllClick = React.useCallback((): void => {
-    console.log("[DueDatesWidget] View All Events clicked");
+    console.log('[DueDatesWidget] View All Events clicked');
     navigateToEventsPage({
       onNavigationComplete: () => {
-        console.log("[DueDatesWidget] Navigation to Events page complete");
+        console.log('[DueDatesWidget] Navigation to Events page complete');
       },
       onNavigationError: (err: string) => {
-        console.error(
-          "[DueDatesWidget] Navigation to Events page failed:",
-          err,
-        );
+        console.error('[DueDatesWidget] Navigation to Events page failed:', err);
         setNavigationError(err);
       },
     });
@@ -281,11 +258,7 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
       )}
 
       {/* Footer with "All Events" link and count badge (Task 055) */}
-      <WidgetFooter
-        totalEventCount={totalCount}
-        displayedCount={events.length}
-        onViewAllClick={handleViewAllClick}
-      />
+      <WidgetFooter totalEventCount={totalCount} displayedCount={events.length} onViewAllClick={handleViewAllClick} />
 
       {/* Version footer (ADR requirement) */}
       <span className={styles.versionText}>v1.0.8</span>

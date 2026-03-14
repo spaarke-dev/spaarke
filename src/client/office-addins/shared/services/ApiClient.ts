@@ -1,4 +1,4 @@
-import { authService } from "./AuthService";
+import { authService } from './AuthService';
 
 /**
  * API client for communicating with the Spaarke BFF API.
@@ -12,11 +12,7 @@ export interface IApiClient {
   post<T>(endpoint: string, body?: unknown): Promise<T>;
   put<T>(endpoint: string, body?: unknown): Promise<T>;
   delete<T>(endpoint: string): Promise<T>;
-  uploadFile(
-    endpoint: string,
-    file: File | Blob,
-    fileName: string,
-  ): Promise<UploadResponse>;
+  uploadFile(endpoint: string, file: File | Blob, fileName: string): Promise<UploadResponse>;
 }
 
 export interface ApiClientConfig {
@@ -27,7 +23,7 @@ export interface ApiClientConfig {
 export interface UploadResponse {
   documentId: string;
   jobId: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
 export interface ApiError {
@@ -40,45 +36,41 @@ export interface ApiError {
 }
 
 class ApiClient implements IApiClient {
-  private baseUrl: string = "";
-  private bffApiClientId: string = "";
+  private baseUrl: string = '';
+  private bffApiClientId: string = '';
 
   configure(config: ApiClientConfig): void {
-    this.baseUrl = config.baseUrl.replace(/\/$/, ""); // Remove trailing slash
+    this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
     this.bffApiClientId = config.bffApiClientId;
   }
 
   async get<T>(endpoint: string): Promise<T> {
-    return this.request<T>("GET", endpoint);
+    return this.request<T>('GET', endpoint);
   }
 
   async post<T>(endpoint: string, body?: unknown): Promise<T> {
-    return this.request<T>("POST", endpoint, body);
+    return this.request<T>('POST', endpoint, body);
   }
 
   async put<T>(endpoint: string, body?: unknown): Promise<T> {
-    return this.request<T>("PUT", endpoint, body);
+    return this.request<T>('PUT', endpoint, body);
   }
 
   async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>("DELETE", endpoint);
+    return this.request<T>('DELETE', endpoint);
   }
 
-  async uploadFile(
-    endpoint: string,
-    file: File | Blob,
-    fileName: string,
-  ): Promise<UploadResponse> {
+  async uploadFile(endpoint: string, file: File | Blob, fileName: string): Promise<UploadResponse> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
-      throw new Error("Not authenticated");
+      throw new Error('Not authenticated');
     }
 
     const formData = new FormData();
-    formData.append("file", file, fileName);
+    formData.append('file', file, fileName);
 
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -92,19 +84,15 @@ class ApiClient implements IApiClient {
     return response.json();
   }
 
-  private async request<T>(
-    method: string,
-    endpoint: string,
-    body?: unknown,
-  ): Promise<T> {
+  private async request<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
-      throw new Error("Not authenticated");
+      throw new Error('Not authenticated');
     }
 
     const headers: HeadersInit = {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     };
 
     const config: RequestInit = {
@@ -112,7 +100,7 @@ class ApiClient implements IApiClient {
       headers,
     };
 
-    if (body && (method === "POST" || method === "PUT")) {
+    if (body && (method === 'POST' || method === 'PUT')) {
       config.body = JSON.stringify(body);
     }
 
@@ -144,8 +132,8 @@ class ApiClient implements IApiClient {
       error = await response.json();
     } catch {
       error = {
-        type: "about:blank",
-        title: "Request failed",
+        type: 'about:blank',
+        title: 'Request failed',
         status: response.status,
         detail: response.statusText,
       };
@@ -160,7 +148,7 @@ export class ApiClientError extends Error {
 
   constructor(error: ApiError) {
     super(error.detail || error.title);
-    this.name = "ApiClientError";
+    this.name = 'ApiClientError';
     this.error = error;
   }
 }

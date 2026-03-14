@@ -9,13 +9,13 @@
  * @see ADR-021 - Fluent UI v9 (no hard-coded colors)
  */
 
-import * as React from "react";
-import { createRef } from "react";
-import { render, act } from "@testing-library/react";
-import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import { ContentEditable } from "@lexical/react/LexicalContentEditable";
-import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
+import * as React from 'react';
+import { createRef } from 'react';
+import { render, act } from '@testing-library/react';
+import { LexicalComposer } from '@lexical/react/LexicalComposer';
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+import { ContentEditable } from '@lexical/react/LexicalContentEditable';
+import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import {
   $getRoot,
   $createParagraphNode,
@@ -25,11 +25,8 @@ import {
   LexicalEditor,
   ParagraphNode,
   TextNode,
-} from "lexical";
-import {
-  StreamingInsertPlugin,
-  StreamingInsertHandle,
-} from "../StreamingInsertPlugin";
+} from 'lexical';
+import { StreamingInsertPlugin, StreamingInsertHandle } from '../StreamingInsertPlugin';
 
 // ---------------------------------------------------------------------------
 // Test Utilities
@@ -47,7 +44,7 @@ function renderStreamingEditor(options?: {
   let editorInstance: LexicalEditor | null = null;
 
   const initialConfig = {
-    namespace: "StreamingInsertTest",
+    namespace: 'StreamingInsertTest',
     onError: (error: Error) => {
       throw error;
     },
@@ -59,8 +56,7 @@ function renderStreamingEditor(options?: {
    * Captures the LexicalEditor instance for assertions.
    */
   function EditorCapture(): null {
-    const [editor] =
-      require("@lexical/react/LexicalComposerContext").useLexicalComposerContext();
+    const [editor] = require('@lexical/react/LexicalComposerContext').useLexicalComposerContext();
     editorInstance = editor;
 
     // Set initial content if provided
@@ -81,24 +77,17 @@ function renderStreamingEditor(options?: {
 
   const { container, unmount } = render(
     <LexicalComposer initialConfig={initialConfig}>
-      <RichTextPlugin
-        contentEditable={<ContentEditable />}
-        ErrorBoundary={LexicalErrorBoundary}
-      />
+      <RichTextPlugin contentEditable={<ContentEditable />} ErrorBoundary={LexicalErrorBoundary} />
       <EditorCapture />
-      <StreamingInsertPlugin
-        ref={pluginRef}
-        isStreaming={false}
-        onStreamingComplete={options?.onStreamingComplete}
-      />
-    </LexicalComposer>,
+      <StreamingInsertPlugin ref={pluginRef} isStreaming={false} onStreamingComplete={options?.onStreamingComplete} />
+    </LexicalComposer>
   );
 
   /**
    * Gets the full plain-text content of the editor.
    */
   function getEditorText(): string {
-    let text = "";
+    let text = '';
     editorInstance!.getEditorState().read(() => {
       text = $getRoot().getTextContent();
     });
@@ -171,26 +160,22 @@ beforeEach(() => {
   rafId = 0;
   rafCallbacks.clear();
 
-  jest
-    .spyOn(window, "requestAnimationFrame")
-    .mockImplementation((callback: FrameRequestCallback): number => {
-      const id = ++rafId;
-      rafCallbacks.set(id, callback);
-      // Schedule via setTimeout so jest.runAllTimers() triggers it
-      setTimeout(() => {
-        if (rafCallbacks.has(id)) {
-          rafCallbacks.delete(id);
-          callback(performance.now());
-        }
-      }, 0);
-      return id;
-    });
+  jest.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback): number => {
+    const id = ++rafId;
+    rafCallbacks.set(id, callback);
+    // Schedule via setTimeout so jest.runAllTimers() triggers it
+    setTimeout(() => {
+      if (rafCallbacks.has(id)) {
+        rafCallbacks.delete(id);
+        callback(performance.now());
+      }
+    }, 0);
+    return id;
+  });
 
-  jest
-    .spyOn(window, "cancelAnimationFrame")
-    .mockImplementation((id: number): void => {
-      rafCallbacks.delete(id);
-    });
+  jest.spyOn(window, 'cancelAnimationFrame').mockImplementation((id: number): void => {
+    rafCallbacks.delete(id);
+  });
 });
 
 afterEach(() => {
@@ -201,65 +186,65 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("StreamingInsertPlugin", () => {
-  describe("Token Insertion", () => {
-    it("should insert a single token into an empty editor", async () => {
+describe('StreamingInsertPlugin', () => {
+  describe('Token Insertion', () => {
+    it('should insert a single token into an empty editor', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("Hello");
+        pluginRef.current!.insertToken('Hello');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
-      expect(getEditorText()).toContain("Hello");
+      expect(getEditorText()).toContain('Hello');
     });
 
-    it("should insert multiple tokens concatenated in order", async () => {
+    it('should insert multiple tokens concatenated in order', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("Hello");
-        pluginRef.current!.insertToken(" ");
-        pluginRef.current!.insertToken("World");
+        pluginRef.current!.insertToken('Hello');
+        pluginRef.current!.insertToken(' ');
+        pluginRef.current!.insertToken('World');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
-      expect(getEditorText()).toContain("Hello World");
+      expect(getEditorText()).toContain('Hello World');
     });
 
-    it("should handle empty string tokens without error", async () => {
+    it('should handle empty string tokens without error', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("");
-        pluginRef.current!.insertToken("Hello");
-        pluginRef.current!.insertToken("");
+        pluginRef.current!.insertToken('');
+        pluginRef.current!.insertToken('Hello');
+        pluginRef.current!.insertToken('');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
-      expect(getEditorText()).toContain("Hello");
+      expect(getEditorText()).toContain('Hello');
     });
 
-    it("should handle tokens with whitespace", async () => {
+    it('should handle tokens with whitespace', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("  spaces  ");
+        pluginRef.current!.insertToken('  spaces  ');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
-      expect(getEditorText()).toContain("  spaces  ");
+      expect(getEditorText()).toContain('  spaces  ');
     });
 
-    it("should handle special characters in tokens", async () => {
+    it('should handle special characters in tokens', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
@@ -273,8 +258,8 @@ describe("StreamingInsertPlugin", () => {
     });
   });
 
-  describe("Stream Lifecycle", () => {
-    it("should set editor to non-editable during streaming", async () => {
+  describe('Stream Lifecycle', () => {
+    it('should set editor to non-editable during streaming', async () => {
       const { pluginRef, isEditable } = renderStreamingEditor();
 
       expect(isEditable()).toBe(true);
@@ -292,7 +277,7 @@ describe("StreamingInsertPlugin", () => {
       expect(isEditable()).toBe(true);
     });
 
-    it("should restore original editable state on endStream", async () => {
+    it('should restore original editable state on endStream', async () => {
       const { pluginRef, getEditor, isEditable } = renderStreamingEditor();
 
       // Set editor to non-editable before starting stream
@@ -317,7 +302,7 @@ describe("StreamingInsertPlugin", () => {
       expect(isEditable()).toBe(false);
     });
 
-    it("should call onStreamingComplete when endStream is called", async () => {
+    it('should call onStreamingComplete when endStream is called', async () => {
       const onComplete = jest.fn();
       const { pluginRef } = renderStreamingEditor({
         onStreamingComplete: onComplete,
@@ -325,7 +310,7 @@ describe("StreamingInsertPlugin", () => {
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("test");
+        pluginRef.current!.insertToken('test');
         await flushAll();
         pluginRef.current!.endStream();
       });
@@ -334,7 +319,7 @@ describe("StreamingInsertPlugin", () => {
       expect(onComplete).toHaveBeenCalledWith(false);
     });
 
-    it("should call onStreamingComplete with cancelled=true when cancelled", async () => {
+    it('should call onStreamingComplete with cancelled=true when cancelled', async () => {
       const onComplete = jest.fn();
       const { pluginRef } = renderStreamingEditor({
         onStreamingComplete: onComplete,
@@ -342,7 +327,7 @@ describe("StreamingInsertPlugin", () => {
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("test");
+        pluginRef.current!.insertToken('test');
         await flushAll();
         pluginRef.current!.endStream(true);
       });
@@ -351,40 +336,40 @@ describe("StreamingInsertPlugin", () => {
       expect(onComplete).toHaveBeenCalledWith(true);
     });
 
-    it("should ignore insertToken calls before startStream", async () => {
+    it('should ignore insertToken calls before startStream', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
-        pluginRef.current!.insertToken("should be ignored");
+        pluginRef.current!.insertToken('should be ignored');
         await flushAll();
       });
 
       // Editor text should only contain the default empty paragraph content
       const text = getEditorText();
-      expect(text).not.toContain("should be ignored");
+      expect(text).not.toContain('should be ignored');
     });
 
-    it("should ignore insertToken calls after endStream", async () => {
+    it('should ignore insertToken calls after endStream', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("before");
+        pluginRef.current!.insertToken('before');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       await act(async () => {
-        pluginRef.current!.insertToken("after");
+        pluginRef.current!.insertToken('after');
         await flushAll();
       });
 
       const text = getEditorText();
-      expect(text).toContain("before");
-      expect(text).not.toContain("after");
+      expect(text).toContain('before');
+      expect(text).not.toContain('after');
     });
 
-    it("should handle endStream called without startStream (no-op)", async () => {
+    it('should handle endStream called without startStream (no-op)', async () => {
       const onComplete = jest.fn();
       const { pluginRef } = renderStreamingEditor({
         onStreamingComplete: onComplete,
@@ -399,29 +384,29 @@ describe("StreamingInsertPlugin", () => {
     });
   });
 
-  describe("Cancellation", () => {
-    it("should remove inserted text when cancelled", async () => {
+  describe('Cancellation', () => {
+    it('should remove inserted text when cancelled', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("This ");
-        pluginRef.current!.insertToken("should ");
-        pluginRef.current!.insertToken("be removed");
+        pluginRef.current!.insertToken('This ');
+        pluginRef.current!.insertToken('should ');
+        pluginRef.current!.insertToken('be removed');
         await flushAll();
         pluginRef.current!.endStream(true);
       });
 
       const text = getEditorText();
-      expect(text).not.toContain("This should be removed");
+      expect(text).not.toContain('This should be removed');
     });
 
-    it("should restore editor to editable after cancellation", async () => {
+    it('should restore editor to editable after cancellation', async () => {
       const { pluginRef, isEditable } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("test");
+        pluginRef.current!.insertToken('test');
         await flushAll();
         pluginRef.current!.endStream(true);
       });
@@ -429,37 +414,37 @@ describe("StreamingInsertPlugin", () => {
       expect(isEditable()).toBe(true);
     });
 
-    it("should discard buffered tokens on cancellation", async () => {
+    it('should discard buffered tokens on cancellation', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
         // Insert tokens but do NOT flush before cancellation
-        pluginRef.current!.insertToken("buffered1");
-        pluginRef.current!.insertToken("buffered2");
+        pluginRef.current!.insertToken('buffered1');
+        pluginRef.current!.insertToken('buffered2');
         // Cancel immediately (tokens are still in buffer)
         pluginRef.current!.endStream(true);
         await flushAll();
       });
 
       const text = getEditorText();
-      expect(text).not.toContain("buffered1");
-      expect(text).not.toContain("buffered2");
+      expect(text).not.toContain('buffered1');
+      expect(text).not.toContain('buffered2');
     });
   });
 
-  describe("Zero-Token Stream", () => {
-    it("should leave editor state unchanged for begin-then-end with zero tokens", async () => {
+  describe('Zero-Token Stream', () => {
+    it('should leave editor state unchanged for begin-then-end with zero tokens', async () => {
       const { pluginRef, getEditorText, getEditor } = renderStreamingEditor();
 
       // Set initial content and get a valid node key for target position
-      let targetKey: string = "";
+      let targetKey: string = '';
       await act(async () => {
         getEditor().update(() => {
           const root = $getRoot();
           root.clear();
           const paragraph = $createParagraphNode();
-          const textNode = $createTextNode("Existing content");
+          const textNode = $createTextNode('Existing content');
           paragraph.append(textNode);
           root.append(paragraph);
           targetKey = textNode.getKey();
@@ -479,7 +464,7 @@ describe("StreamingInsertPlugin", () => {
       expect(textAfter).toBe(textBefore);
     });
 
-    it("should restore editability for zero-token stream", async () => {
+    it('should restore editability for zero-token stream', async () => {
       const { pluginRef, isEditable } = renderStreamingEditor();
 
       await act(async () => {
@@ -490,7 +475,7 @@ describe("StreamingInsertPlugin", () => {
       expect(isEditable()).toBe(true);
     });
 
-    it("should call onStreamingComplete for zero-token stream", async () => {
+    it('should call onStreamingComplete for zero-token stream', async () => {
       const onComplete = jest.fn();
       const { pluginRef } = renderStreamingEditor({
         onStreamingComplete: onComplete,
@@ -505,13 +490,13 @@ describe("StreamingInsertPlugin", () => {
     });
   });
 
-  describe("Newline Handling", () => {
-    it("should create new paragraphs for newline characters", async () => {
+  describe('Newline Handling', () => {
+    it('should create new paragraphs for newline characters', async () => {
       const { pluginRef, getParagraphCount } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("Line 1\nLine 2");
+        pluginRef.current!.insertToken('Line 1\nLine 2');
         await flushAll();
         pluginRef.current!.endStream();
       });
@@ -520,46 +505,44 @@ describe("StreamingInsertPlugin", () => {
       expect(getParagraphCount()).toBeGreaterThanOrEqual(2);
     });
 
-    it("should handle multiple consecutive newlines", async () => {
-      const { pluginRef, getParagraphCount, getEditorText } =
-        renderStreamingEditor();
+    it('should handle multiple consecutive newlines', async () => {
+      const { pluginRef, getParagraphCount, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("A\n\nB");
+        pluginRef.current!.insertToken('A\n\nB');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("A");
-      expect(text).toContain("B");
+      expect(text).toContain('A');
+      expect(text).toContain('B');
       // Should have at least 3 paragraphs (A, empty, B)
       expect(getParagraphCount()).toBeGreaterThanOrEqual(3);
     });
 
-    it("should handle newlines across multiple token boundaries", async () => {
-      const { pluginRef, getEditorText, getParagraphCount } =
-        renderStreamingEditor();
+    it('should handle newlines across multiple token boundaries', async () => {
+      const { pluginRef, getEditorText, getParagraphCount } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("First");
-        pluginRef.current!.insertToken("\n");
-        pluginRef.current!.insertToken("Second");
+        pluginRef.current!.insertToken('First');
+        pluginRef.current!.insertToken('\n');
+        pluginRef.current!.insertToken('Second');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("First");
-      expect(text).toContain("Second");
+      expect(text).toContain('First');
+      expect(text).toContain('Second');
       expect(getParagraphCount()).toBeGreaterThanOrEqual(2);
     });
   });
 
-  describe("Token Buffering", () => {
-    it("should batch multiple tokens before flushing", async () => {
+  describe('Token Buffering', () => {
+    it('should batch multiple tokens before flushing', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
@@ -576,24 +559,24 @@ describe("StreamingInsertPlugin", () => {
       });
 
       const text = getEditorText();
-      expect(text).toContain("t0t1t2t3t4");
+      expect(text).toContain('t0t1t2t3t4');
     });
 
-    it("should flush on endStream even if buffer has pending tokens", async () => {
+    it('should flush on endStream even if buffer has pending tokens', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("pending");
+        pluginRef.current!.insertToken('pending');
         // Do NOT call flushAll() - endStream should handle it
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("pending");
+      expect(text).toContain('pending');
     });
 
-    it("should not drop tokens during rapid burst insertion", async () => {
+    it('should not drop tokens during rapid burst insertion', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
       const tokenCount = 50;
 
@@ -619,18 +602,18 @@ describe("StreamingInsertPlugin", () => {
     });
   });
 
-  describe("Target Position", () => {
-    it("should start stream at a target position and append content", async () => {
+  describe('Target Position', () => {
+    it('should start stream at a target position and append content', async () => {
       const { pluginRef, getEditorText, getEditor } = renderStreamingEditor();
 
       // Set up initial content with a known target node key
-      let targetKey: string = "";
+      let targetKey: string = '';
       await act(async () => {
         getEditor().update(() => {
           const root = $getRoot();
           root.clear();
           const paragraph = $createParagraphNode();
-          const textNode = $createTextNode("Existing");
+          const textNode = $createTextNode('Existing');
           paragraph.append(textNode);
           root.append(paragraph);
           targetKey = textNode.getKey();
@@ -640,34 +623,34 @@ describe("StreamingInsertPlugin", () => {
 
       await act(async () => {
         pluginRef.current!.startStream(targetKey);
-        pluginRef.current!.insertToken(" appended");
+        pluginRef.current!.insertToken(' appended');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("Existing");
-      expect(text).toContain("appended");
+      expect(text).toContain('Existing');
+      expect(text).toContain('appended');
     });
 
-    it("should handle start with invalid target position gracefully", async () => {
+    it('should handle start with invalid target position gracefully', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         // Pass a non-existent node key
-        pluginRef.current!.startStream("non-existent-key-999");
-        pluginRef.current!.insertToken("fallback content");
+        pluginRef.current!.startStream('non-existent-key-999');
+        pluginRef.current!.insertToken('fallback content');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       // Should still insert content (falls back to end of document)
-      expect(getEditorText()).toContain("fallback content");
+      expect(getEditorText()).toContain('fallback content');
     });
   });
 
-  describe("Multiple Sequential Streams", () => {
-    it("should support starting a new stream after completing a previous one", async () => {
+  describe('Multiple Sequential Streams', () => {
+    it('should support starting a new stream after completing a previous one', async () => {
       const onComplete = jest.fn();
       const { pluginRef, getEditorText } = renderStreamingEditor({
         onStreamingComplete: onComplete,
@@ -676,7 +659,7 @@ describe("StreamingInsertPlugin", () => {
       // First stream
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("First stream");
+        pluginRef.current!.insertToken('First stream');
         await flushAll();
         pluginRef.current!.endStream();
       });
@@ -686,26 +669,26 @@ describe("StreamingInsertPlugin", () => {
       // Second stream
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken(" Second stream");
+        pluginRef.current!.insertToken(' Second stream');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       expect(onComplete).toHaveBeenCalledTimes(2);
       const text = getEditorText();
-      expect(text).toContain("First stream");
-      expect(text).toContain("Second stream");
+      expect(text).toContain('First stream');
+      expect(text).toContain('Second stream');
     });
 
-    it("should reset token count between streams", async () => {
+    it('should reset token count between streams', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       // First stream with 3 tokens
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("a");
-        pluginRef.current!.insertToken("b");
-        pluginRef.current!.insertToken("c");
+        pluginRef.current!.insertToken('a');
+        pluginRef.current!.insertToken('b');
+        pluginRef.current!.insertToken('c');
         await flushAll();
         pluginRef.current!.endStream();
       });
@@ -713,38 +696,38 @@ describe("StreamingInsertPlugin", () => {
       // Second stream with 2 tokens
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("d");
-        pluginRef.current!.insertToken("e");
+        pluginRef.current!.insertToken('d');
+        pluginRef.current!.insertToken('e');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("abc");
-      expect(text).toContain("de");
+      expect(text).toContain('abc');
+      expect(text).toContain('de');
     });
   });
 
-  describe("Edge Cases", () => {
-    it("should handle unicode characters", async () => {
+  describe('Edge Cases', () => {
+    it('should handle unicode characters', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("Caf\u00e9 ");
-        pluginRef.current!.insertToken("\u2603 ");
-        pluginRef.current!.insertToken("\u{1F600}");
+        pluginRef.current!.insertToken('Caf\u00e9 ');
+        pluginRef.current!.insertToken('\u2603 ');
+        pluginRef.current!.insertToken('\u{1F600}');
         await flushAll();
         pluginRef.current!.endStream();
       });
 
       const text = getEditorText();
-      expect(text).toContain("Caf\u00e9");
+      expect(text).toContain('Caf\u00e9');
     });
 
-    it("should handle very long tokens", async () => {
+    it('should handle very long tokens', async () => {
       const { pluginRef, getEditorText } = renderStreamingEditor();
-      const longToken = "A".repeat(10000);
+      const longToken = 'A'.repeat(10000);
 
       await act(async () => {
         pluginRef.current!.startStream();
@@ -757,13 +740,13 @@ describe("StreamingInsertPlugin", () => {
       expect(text).toContain(longToken);
     });
 
-    it("should clean up rAF on unmount during active stream", async () => {
-      const cancelSpy = jest.spyOn(window, "cancelAnimationFrame");
+    it('should clean up rAF on unmount during active stream', async () => {
+      const cancelSpy = jest.spyOn(window, 'cancelAnimationFrame');
       const { pluginRef, unmount } = renderStreamingEditor();
 
       await act(async () => {
         pluginRef.current!.startStream();
-        pluginRef.current!.insertToken("will unmount");
+        pluginRef.current!.insertToken('will unmount');
       });
 
       // Unmount during active stream

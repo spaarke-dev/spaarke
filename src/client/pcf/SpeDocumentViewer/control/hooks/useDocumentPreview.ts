@@ -5,9 +5,9 @@
  * Includes 15-second timeout for iframe loading.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { BffClient } from "../BffClient";
-import { FilePreviewResponse, DocumentInfo, CheckoutStatus } from "../types";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { BffClient } from '../BffClient';
+import { FilePreviewResponse, DocumentInfo, CheckoutStatus } from '../types';
 
 // Iframe load timeout in milliseconds (15 seconds per task 021)
 const IFRAME_LOAD_TIMEOUT_MS = 15000;
@@ -40,8 +40,7 @@ export interface UseDocumentPreviewActions {
   resetIframeState: () => void;
 }
 
-export interface UseDocumentPreviewResult
-  extends UseDocumentPreviewState, UseDocumentPreviewActions {}
+export interface UseDocumentPreviewResult extends UseDocumentPreviewState, UseDocumentPreviewActions {}
 
 /**
  * Hook for managing document preview state
@@ -55,7 +54,7 @@ export function useDocumentPreview(
   documentId: string | null | undefined,
   bffApiUrl: string,
   accessToken: string,
-  correlationId: string,
+  correlationId: string
 ): UseDocumentPreviewResult {
   const [state, setState] = useState<UseDocumentPreviewState>({
     previewUrl: null,
@@ -102,15 +101,13 @@ export function useDocumentPreview(
 
     iframeTimeoutRef.current = setTimeout(() => {
       if (isMounted.current) {
-        console.warn(
-          "[useDocumentPreview] Iframe load timeout after 15 seconds",
-        );
-        setState((prev) => ({
+        console.warn('[useDocumentPreview] Iframe load timeout after 15 seconds');
+        setState(prev => ({
           ...prev,
           isIframeLoading: false,
           isIframeTimedOut: true,
           error:
-            "Document preview timed out. The document may be too large or the connection is slow. Please try again.",
+            'Document preview timed out. The document may be too large or the connection is slow. Please try again.',
         }));
       }
     }, IFRAME_LOAD_TIMEOUT_MS);
@@ -121,7 +118,7 @@ export function useDocumentPreview(
    */
   const loadDocument = useCallback(async () => {
     if (!documentId) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isLoading: false,
         isIframeLoading: false,
@@ -134,7 +131,7 @@ export function useDocumentPreview(
     }
 
     // Reset state before loading
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isLoading: true,
       isIframeLoading: true,
@@ -143,24 +140,19 @@ export function useDocumentPreview(
     }));
 
     try {
-      console.log(
-        `[useDocumentPreview] Fetching view URL for document: ${documentId}`,
-      );
+      console.log(`[useDocumentPreview] Fetching view URL for document: ${documentId}`);
 
-      const response: FilePreviewResponse = await bffClient.current.getViewUrl(
-        documentId,
-        correlationId,
-      );
+      const response: FilePreviewResponse = await bffClient.current.getViewUrl(documentId, correlationId);
 
       if (!isMounted.current) return;
 
-      console.log("[useDocumentPreview] View URL received (real-time):", {
+      console.log('[useDocumentPreview] View URL received (real-time):', {
         hasUrl: !!response.previewUrl,
         documentName: response.documentInfo?.name,
         isCheckedOut: response.checkoutStatus?.isCheckedOut,
       });
 
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isLoading: false,
         previewUrl: response.previewUrl,
@@ -176,16 +168,13 @@ export function useDocumentPreview(
     } catch (error) {
       if (!isMounted.current) return;
 
-      console.error("[useDocumentPreview] Failed to load preview:", error);
+      console.error('[useDocumentPreview] Failed to load preview:', error);
 
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isLoading: false,
         isIframeLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load document preview",
+        error: error instanceof Error ? error.message : 'Failed to load document preview',
       }));
     }
   }, [documentId, correlationId, startIframeTimeout]);
@@ -194,11 +183,11 @@ export function useDocumentPreview(
    * Handle iframe load success
    */
   const onIframeLoad = useCallback(() => {
-    console.log("[useDocumentPreview] Iframe loaded successfully");
+    console.log('[useDocumentPreview] Iframe loaded successfully');
     clearIframeTimeout();
 
     if (isMounted.current) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isIframeLoading: false,
         isIframeTimedOut: false,
@@ -210,14 +199,14 @@ export function useDocumentPreview(
    * Handle iframe load error
    */
   const onIframeError = useCallback(() => {
-    console.error("[useDocumentPreview] Iframe failed to load");
+    console.error('[useDocumentPreview] Iframe failed to load');
     clearIframeTimeout();
 
     if (isMounted.current) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isIframeLoading: false,
-        error: "Failed to load document preview. Please try again.",
+        error: 'Failed to load document preview. Please try again.',
       }));
     }
   }, [clearIframeTimeout]);
@@ -227,7 +216,7 @@ export function useDocumentPreview(
    */
   const resetIframeState = useCallback(() => {
     clearIframeTimeout();
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isIframeLoading: true,
       isIframeTimedOut: false,

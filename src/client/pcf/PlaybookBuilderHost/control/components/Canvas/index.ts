@@ -2,4 +2,4 @@
  * Canvas Component - Barrel Export
  */
 
-export { Canvas } from "./Canvas";
+export { Canvas } from './Canvas';

@@ -26,7 +26,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[SprkChatPane:ContextService]";
+const LOG_PREFIX = '[SprkChatPane:ContextService]';
 
 /**
  * Default polling interval for context-change detection (2 seconds).
@@ -39,7 +39,7 @@ const CONTEXT_POLL_INTERVAL_MS = 2_000;
  * Session storage key prefix. Keyed by pane ID for isolation when multiple
  * side panes exist simultaneously.
  */
-const SESSION_STORAGE_PREFIX = "sprkchat-session-";
+const SESSION_STORAGE_PREFIX = 'sprkchat-session-';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,10 +78,7 @@ export interface PersistedSession {
  * Callback for context-change detection.
  * Invoked when the Xrm context differs from the current context.
  */
-export type ContextChangeCallback = (
-  newContext: DetectedContext,
-  previousContext: DetectedContext,
-) => void;
+export type ContextChangeCallback = (newContext: DetectedContext, previousContext: DetectedContext) => void;
 
 // ---------------------------------------------------------------------------
 // Default Playbook Mapping (Configurable)
@@ -100,16 +97,16 @@ export type ContextChangeCallback = (
 const DEFAULT_PLAYBOOK_MAP: Record<string, string> = {
   // All entity types currently use SprkChat Document Assistant playbook.
   // Add entity-specific playbook GUIDs here as they are created in Dataverse.
-  sprk_matter: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
-  sprk_project: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
-  sprk_invoice: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+  sprk_matter: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
+  sprk_project: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
+  sprk_invoice: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
 };
 
 /**
  * Fallback playbook when no entity-specific mapping exists.
  * Uses the SprkChat Document Assistant playbook GUID from Dataverse.
  */
-const FALLBACK_PLAYBOOK_ID = "5ece14f7-8a17-f111-8343-7ced8d1dc988";
+const FALLBACK_PLAYBOOK_ID = '5ece14f7-8a17-f111-8343-7ced8d1dc988';
 
 /**
  * Runtime playbook mapping. Initialized from DEFAULT_PLAYBOOK_MAP and
@@ -199,7 +196,7 @@ function findXrm(): XrmNamespace | null {
  * Xrm.Page.data.entity.getId() returns "{GUID}" format.
  */
 function normalizeGuid(guid: string): string {
-  return guid.replace(/[{}]/g, "").toLowerCase();
+  return guid.replace(/[{}]/g, '').toLowerCase();
 }
 
 /**
@@ -208,11 +205,9 @@ function normalizeGuid(guid: string): string {
  * @param params - The unwrapped URL search parameters.
  * @returns Partial context from URL, or null if not available.
  */
-function detectContextFromUrl(
-  params: URLSearchParams,
-): { entityType: string; entityId: string } | null {
-  const entityType = params.get("entityType") ?? "";
-  const entityId = params.get("entityId") ?? "";
+function detectContextFromUrl(params: URLSearchParams): { entityType: string; entityId: string } | null {
+  const entityType = params.get('entityType') ?? '';
+  const entityId = params.get('entityId') ?? '';
 
   if (entityType && entityId) {
     return { entityType, entityId: normalizeGuid(entityId) };
@@ -292,14 +287,9 @@ export function detectContext(params: URLSearchParams): DetectedContext {
   // Priority 1: URL parameters
   const urlContext = detectContextFromUrl(params);
   if (urlContext) {
-    const playbookFromUrl = params.get("playbookId") ?? "";
-    const playbookId =
-      playbookFromUrl || resolveDefaultPlaybook(urlContext.entityType);
-    console.info(
-      `${LOG_PREFIX} Context from URL params:`,
-      urlContext.entityType,
-      urlContext.entityId,
-    );
+    const playbookFromUrl = params.get('playbookId') ?? '';
+    const playbookId = playbookFromUrl || resolveDefaultPlaybook(urlContext.entityType);
+    console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId);
     return { ...urlContext, playbookId };
   }
 
@@ -307,11 +297,7 @@ export function detectContext(params: URLSearchParams): DetectedContext {
   const xrmPageContext = detectContextFromXrmPage();
   if (xrmPageContext) {
     const playbookId = resolveDefaultPlaybook(xrmPageContext.entityType);
-    console.info(
-      `${LOG_PREFIX} Context from Xrm.Page:`,
-      xrmPageContext.entityType,
-      xrmPageContext.entityId,
-    );
+    console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId);
     return { ...xrmPageContext, playbookId };
   }
 
@@ -319,19 +305,15 @@ export function detectContext(params: URLSearchParams): DetectedContext {
   const pageContext = detectContextFromPageContext();
   if (pageContext) {
     const playbookId = resolveDefaultPlaybook(pageContext.entityType);
-    console.info(
-      `${LOG_PREFIX} Context from getPageContext():`,
-      pageContext.entityType,
-      pageContext.entityId,
-    );
+    console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId);
     return { ...pageContext, playbookId };
   }
 
   // Priority 4: Empty fallback (pane opened without entity context)
   console.warn(`${LOG_PREFIX} No entity context detected — using fallback`);
   return {
-    entityType: "",
-    entityId: "",
+    entityType: '',
+    entityId: '',
     playbookId: FALLBACK_PLAYBOOK_ID,
   };
 }
@@ -361,10 +343,7 @@ export function saveSession(paneId: string, session: PersistedSession): void {
     sessionStorage.setItem(key, JSON.stringify(session));
     console.debug(`${LOG_PREFIX} Session saved for pane: ${paneId}`);
   } catch (err) {
-    console.warn(
-      `${LOG_PREFIX} Failed to save session to sessionStorage:`,
-      err,
-    );
+    console.warn(`${LOG_PREFIX} Failed to save session to sessionStorage:`, err);
   }
 }
 
@@ -392,10 +371,7 @@ export function restoreSession(paneId: string): PersistedSession | null {
     console.debug(`${LOG_PREFIX} Session restored for pane: ${paneId}`);
     return parsed;
   } catch (err) {
-    console.warn(
-      `${LOG_PREFIX} Failed to restore session from sessionStorage:`,
-      err,
-    );
+    console.warn(`${LOG_PREFIX} Failed to restore session from sessionStorage:`, err);
     return null;
   }
 }
@@ -411,10 +387,7 @@ export function clearSession(paneId: string): void {
     sessionStorage.removeItem(key);
     console.debug(`${LOG_PREFIX} Session cleared for pane: ${paneId}`);
   } catch (err) {
-    console.warn(
-      `${LOG_PREFIX} Failed to clear session from sessionStorage:`,
-      err,
-    );
+    console.warn(`${LOG_PREFIX} Failed to clear session from sessionStorage:`, err);
   }
 }
 
@@ -438,7 +411,7 @@ export function clearSession(paneId: string): void {
 export function startContextChangeDetection(
   currentContext: DetectedContext,
   onChange: ContextChangeCallback,
-  intervalMs: number = CONTEXT_POLL_INTERVAL_MS,
+  intervalMs: number = CONTEXT_POLL_INTERVAL_MS
 ): () => void {
   let lastEntityType = currentContext.entityType;
   let lastEntityId = currentContext.entityId;
@@ -459,9 +432,7 @@ export function startContextChangeDetection(
 
     // Check if context has changed
     const hasChanged =
-      (newEntityType !== lastEntityType || newEntityId !== lastEntityId) &&
-      newEntityType !== "" &&
-      newEntityId !== "";
+      (newEntityType !== lastEntityType || newEntityId !== lastEntityId) && newEntityType !== '' && newEntityId !== '';
 
     if (hasChanged && !notified) {
       notified = true;
@@ -480,8 +451,8 @@ export function startContextChangeDetection(
       console.info(
         `${LOG_PREFIX} Context change detected:`,
         `${lastEntityType}/${lastEntityId}`,
-        "->",
-        `${newEntityType}/${newEntityId}`,
+        '->',
+        `${newEntityType}/${newEntityId}`
       );
 
       onChange(newContext, previousContext);
@@ -504,11 +475,7 @@ export function startContextChangeDetection(
  * @param paneId - Pane ID for session storage update.
  * @param sessionId - Current session ID (empty to start fresh).
  */
-export function acceptContextSwitch(
-  newContext: DetectedContext,
-  paneId: string,
-  sessionId: string,
-): void {
+export function acceptContextSwitch(newContext: DetectedContext, paneId: string, sessionId: string): void {
   if (sessionId) {
     saveSession(paneId, {
       sessionId,
@@ -526,12 +493,12 @@ export function acceptContextSwitch(
  */
 export function getEntityDisplayName(entityType: string): string {
   const displayNames: Record<string, string> = {
-    sprk_matter: "Matter",
-    sprk_project: "Project",
-    sprk_invoice: "Invoice",
-    account: "Account",
-    contact: "Contact",
-    opportunity: "Opportunity",
+    sprk_matter: 'Matter',
+    sprk_project: 'Project',
+    sprk_invoice: 'Invoice',
+    account: 'Account',
+    contact: 'Contact',
+    opportunity: 'Opportunity',
   };
 
   if (displayNames[entityType]) {
@@ -539,6 +506,6 @@ export function getEntityDisplayName(entityType: string): string {
   }
 
   // Strip prefix and capitalize: "sprk_something" -> "Something"
-  const stripped = entityType.replace(/^[a-z]+_/, "");
+  const stripped = entityType.replace(/^[a-z]+_/, '');
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }

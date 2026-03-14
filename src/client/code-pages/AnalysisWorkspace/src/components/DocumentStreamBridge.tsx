@@ -32,13 +32,10 @@
  * @see ADR-012 - Shared Component Library
  */
 
-import { useEffect, useCallback } from "react";
-import type { RichTextEditorRef } from "@spaarke/ui-components/components/RichTextEditor";
-import {
-  useDocumentStreaming,
-  type UseDocumentStreamingResult,
-} from "../hooks/useDocumentStreaming";
-import { StreamingIndicator } from "./StreamingIndicator";
+import { useEffect, useCallback } from 'react';
+import type { RichTextEditorRef } from '@spaarke/ui-components/components/RichTextEditor';
+import { useDocumentStreaming, type UseDocumentStreamingResult } from '../hooks/useDocumentStreaming';
+import { StreamingIndicator } from './StreamingIndicator';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -119,20 +116,20 @@ export function DocumentStreamBridge({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (event.key === "Escape" && streaming.isStreaming) {
+      if (event.key === 'Escape' && streaming.isStreaming) {
         event.preventDefault();
         event.stopPropagation();
         streaming.cancelStream();
       }
     },
-    [streaming.isStreaming, streaming.cancelStream],
+    [streaming.isStreaming, streaming.cancelStream]
   );
 
   useEffect(() => {
     if (streaming.isStreaming) {
-      document.addEventListener("keydown", handleKeyDown, true);
+      document.addEventListener('keydown', handleKeyDown, true);
       return () => {
-        document.removeEventListener("keydown", handleKeyDown, true);
+        document.removeEventListener('keydown', handleKeyDown, true);
       };
     }
   }, [streaming.isStreaming, handleKeyDown]);

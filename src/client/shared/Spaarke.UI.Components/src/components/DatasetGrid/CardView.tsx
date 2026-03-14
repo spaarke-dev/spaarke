@@ -3,19 +3,10 @@
  * Standards: KM-UX-FLUENT-DESIGN-V9-STANDARDS.md
  */
 
-import * as React from "react";
-import {
-  Card,
-  CardHeader,
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Spinner,
-  Checkbox,
-} from "@fluentui/react-components";
-import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from "../../types";
-import { ColumnRendererService } from "../../services/ColumnRendererService";
+import * as React from 'react';
+import { Card, CardHeader, makeStyles, tokens, Text, Button, Spinner, Checkbox } from '@fluentui/react-components';
+import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from '../../types';
+import { ColumnRendererService } from '../../services/ColumnRendererService';
 
 export interface ICardViewProps {
   records: IDatasetRecord[];
@@ -31,39 +22,39 @@ export interface ICardViewProps {
 
 const useStyles = makeStyles({
   root: {
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   },
   scrollContainer: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingVerticalM,
   },
   cardGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: tokens.spacingHorizontalM,
   },
   card: {
-    cursor: "pointer",
-    height: "240px",
+    cursor: 'pointer',
+    height: '240px',
   },
   cardHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   cardContent: {
     padding: tokens.spacingVerticalM,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   fieldRow: {
-    display: "flex",
-    justifyContent: "space-between",
+    display: 'flex',
+    justifyContent: 'space-between',
   },
   fieldLabel: {
     color: tokens.colorNeutralForeground3,
@@ -74,9 +65,9 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   loadingOverlay: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
   },
   loadMoreButton: {
@@ -84,17 +75,17 @@ const useStyles = makeStyles({
   },
   emptyState: {
     padding: tokens.spacingVerticalXXL,
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
   },
 });
 
-export const CardView: React.FC<ICardViewProps> = (props) => {
+export const CardView: React.FC<ICardViewProps> = props => {
   const styles = useStyles();
 
   const isInfiniteScroll = React.useMemo(() => {
-    if (props.scrollBehavior === "Infinite") return true;
-    if (props.scrollBehavior === "Paged") return false;
+    if (props.scrollBehavior === 'Infinite') return true;
+    if (props.scrollBehavior === 'Paged') return false;
     return props.records.length > 100;
   }, [props.scrollBehavior, props.records.length]);
 
@@ -102,11 +93,10 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
     (e: React.UIEvent<HTMLDivElement>) => {
       if (!isInfiniteScroll || !props.hasNextPage || props.loading) return;
       const container = e.currentTarget;
-      const scrollPercentage =
-        (container.scrollTop + container.clientHeight) / container.scrollHeight;
+      const scrollPercentage = (container.scrollTop + container.clientHeight) / container.scrollHeight;
       if (scrollPercentage > 0.9) props.loadNextPage();
     },
-    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage],
+    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage]
   );
 
   const handleCardSelect = React.useCallback(
@@ -114,12 +104,10 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
       if (checked) {
         props.onSelectionChange([...props.selectedRecordIds, recordId]);
       } else {
-        props.onSelectionChange(
-          props.selectedRecordIds.filter((id) => id !== recordId),
-        );
+        props.onSelectionChange(props.selectedRecordIds.filter(id => id !== recordId));
       }
     },
-    [props],
+    [props]
   );
 
   const handleCardClick = React.useCallback(
@@ -127,13 +115,13 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
       if ((e.target as HTMLElement).closest('input[type="checkbox"]')) return;
       props.onRecordClick(record);
     },
-    [props],
+    [props]
   );
 
   // Filter readable columns and take first 3 for card display
   const displayColumns = React.useMemo(
-    () => props.columns.filter((col) => col.canRead !== false).slice(0, 3),
-    [props.columns],
+    () => props.columns.filter(col => col.canRead !== false).slice(0, 3),
+    [props.columns]
   );
 
   if (props.records.length === 0 && !props.loading) {
@@ -148,27 +136,19 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
     <div className={styles.root}>
       <div className={styles.scrollContainer} onScroll={handleScroll}>
         <div className={styles.cardGrid}>
-          {props.records.map((record) => {
+          {props.records.map(record => {
             const isSelected = props.selectedRecordIds.includes(record.id);
             const primaryField = displayColumns[0];
-            const primaryValue = primaryField
-              ? String(record[primaryField.name] || "")
-              : record.id;
+            const primaryValue = primaryField ? String(record[primaryField.name] || '') : record.id;
 
             return (
-              <Card
-                key={record.id}
-                className={styles.card}
-                onClick={(e) => handleCardClick(record, e)}
-              >
+              <Card key={record.id} className={styles.card} onClick={e => handleCardClick(record, e)}>
                 <CardHeader
                   header={
                     <div className={styles.cardHeader}>
                       <Checkbox
                         checked={isSelected}
-                        onChange={(_e, data) =>
-                          handleCardSelect(record.id, !!data.checked)
-                        }
+                        onChange={(_e, data) => handleCardSelect(record.id, !!data.checked)}
                       />
                       <Text weight="semibold" truncate>
                         {primaryValue}
@@ -177,19 +157,13 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
                   }
                 />
                 <div className={styles.cardContent}>
-                  {displayColumns.slice(1).map((col) => {
+                  {displayColumns.slice(1).map(col => {
                     const renderer = ColumnRendererService.getRenderer(col);
-                    const renderedValue = renderer(
-                      record[col.name],
-                      record,
-                      col,
-                    );
+                    const renderedValue = renderer(record[col.name], record, col);
 
                     return (
                       <div key={col.name} className={styles.fieldRow}>
-                        <Text className={styles.fieldLabel}>
-                          {col.displayName}:
-                        </Text>
+                        <Text className={styles.fieldLabel}>{col.displayName}:</Text>
                         <div className={styles.fieldValue}>{renderedValue}</div>
                       </div>
                     );
@@ -208,11 +182,7 @@ export const CardView: React.FC<ICardViewProps> = (props) => {
       )}
 
       {!isInfiniteScroll && props.hasNextPage && !props.loading && (
-        <Button
-          appearance="subtle"
-          className={styles.loadMoreButton}
-          onClick={props.loadNextPage}
-        >
+        <Button appearance="subtle" className={styles.loadMoreButton} onClick={props.loadNextPage}>
           Load More ({props.records.length} records loaded)
         </Button>
       )}

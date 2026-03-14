@@ -13,8 +13,8 @@
  * Then use authenticatedFetch() from '@spaarke/auth' for all BFF API calls.
  */
 
-import { initAuth } from "@spaarke/auth";
-import type { IAuthConfig } from "@spaarke/auth";
+import { initAuth } from '@spaarke/auth';
+import type { IAuthConfig } from '@spaarke/auth';
 
 /**
  * Initialize @spaarke/auth with PCF-specific configuration.
@@ -33,18 +33,16 @@ export async function initializeAuth(
   tenantId: string,
   clientAppId: string,
   bffAppId: string,
-  bffApiUrl: string,
+  bffApiUrl: string
 ): Promise<void> {
-  console.info(
-    "[authInit] Initializing @spaarke/auth for DocumentRelationshipViewer...",
-  );
+  console.info('[authInit] Initializing @spaarke/auth for DocumentRelationshipViewer...');
 
   const config: IAuthConfig = {
     clientId: clientAppId,
     authority: `https://login.microsoftonline.com/${tenantId}`,
     // CRITICAL: Static redirect URI matching Azure AD app registration
     // Must be the Dataverse org URL, NOT window.location.origin
-    redirectUri: "https://spaarkedev1.crm.dynamics.com",
+    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
     // Named scope: api://<BFF_APP_ID>/SDAP.Access
     bffApiScope: `api://${bffAppId}/SDAP.Access`,
     bffBaseUrl: bffApiUrl,
@@ -54,7 +52,5 @@ export async function initializeAuth(
 
   await initAuth(config);
 
-  console.info(
-    "[authInit] @spaarke/auth initialized successfully for DocumentRelationshipViewer",
-  );
+  console.info('[authInit] @spaarke/auth initialized successfully for DocumentRelationshipViewer');
 }

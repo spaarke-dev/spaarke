@@ -37,14 +37,14 @@
  * @see docs/architecture/sdap-auth-patterns.md - Pattern 7: Code Page Embedded Auth
  */
 
-import { PublicClientApplication } from "@azure/msal-browser";
-import { msalConfig, BFF_API_SCOPE } from "../config/msalConfig";
+import { PublicClientApplication } from '@azure/msal-browser';
+import { msalConfig, BFF_API_SCOPE } from '../config/msalConfig';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[AnalysisWorkspace:AuthService]";
+const LOG_PREFIX = '[AnalysisWorkspace:AuthService]';
 
 /**
  * Buffer time before token expiration to trigger proactive refresh (5 minutes).
@@ -93,10 +93,10 @@ export class AuthError extends Error {
       isXrmUnavailable?: boolean;
       isRetryable?: boolean;
       cause?: unknown;
-    },
+    }
   ) {
     super(message);
-    this.name = "AuthError";
+    this.name = 'AuthError';
     this.isXrmUnavailable = options?.isXrmUnavailable ?? false;
     this.isRetryable = options?.isRetryable ?? false;
     this.originalCause = options?.cause;
@@ -172,13 +172,13 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
       const context = xrm.Utility.getGlobalContext();
       const contextAny = context as any;
 
-      if (typeof contextAny.getAccessToken === "function") {
+      if (typeof contextAny.getAccessToken === 'function') {
         const tokenResult = await contextAny.getAccessToken();
-        if (tokenResult && typeof tokenResult === "string") {
+        if (tokenResult && typeof tokenResult === 'string') {
           const expiry = parseJwtExpiry(tokenResult);
           return { token: tokenResult, expiresAt: expiry };
         }
-        if (tokenResult && typeof tokenResult.token === "string") {
+        if (tokenResult && typeof tokenResult.token === 'string') {
           const expiresAt = tokenResult.expiresOn
             ? new Date(tokenResult.expiresOn).getTime()
             : Date.now() + 60 * 60 * 1000;
@@ -187,9 +187,7 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
       }
     }
   } catch {
-    console.debug(
-      `${LOG_PREFIX} getAccessToken() not available, trying alternative`,
-    );
+    console.debug(`${LOG_PREFIX} getAccessToken() not available, trying alternative`);
   }
 
   // Strategy 2: CRM token from global scope (legacy but widely available)
@@ -210,9 +208,9 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
       try {
         // __crmTokenProvider (injected by platform)
         const provider = (frame as any).__crmTokenProvider;
-        if (provider && typeof provider.getToken === "function") {
+        if (provider && typeof provider.getToken === 'function') {
           const tokenResult = await provider.getToken();
-          if (tokenResult && typeof tokenResult === "string") {
+          if (tokenResult && typeof tokenResult === 'string') {
             return {
               token: tokenResult,
               expiresAt: parseJwtExpiry(tokenResult),
@@ -222,15 +220,15 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
 
         // AUTHENTICATION_TOKEN global
         const globalToken = (frame as any).AUTHENTICATION_TOKEN;
-        if (globalToken && typeof globalToken === "string") {
+        if (globalToken && typeof globalToken === 'string') {
           return { token: globalToken, expiresAt: parseJwtExpiry(globalToken) };
         }
 
         // Xrm.Page.context.getAuthToken (deprecated but functional)
         const xrmPage = (frame as any).Xrm?.Page?.context;
-        if (xrmPage && typeof xrmPage.getAuthToken === "function") {
+        if (xrmPage && typeof xrmPage.getAuthToken === 'function') {
           const tokenResult = await xrmPage.getAuthToken();
-          if (tokenResult && typeof tokenResult === "string") {
+          if (tokenResult && typeof tokenResult === 'string') {
             return {
               token: tokenResult,
               expiresAt: parseJwtExpiry(tokenResult),
@@ -247,16 +245,12 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
 
   // Strategy 3: Window-level token from PCF bridge (__SPAARKE_BFF_TOKEN__)
   try {
-    const bridgeToken = (window as any).__SPAARKE_BFF_TOKEN__ as
-      | string
-      | undefined;
+    const bridgeToken = (window as any).__SPAARKE_BFF_TOKEN__ as string | undefined;
     if (bridgeToken) {
       return { token: bridgeToken, expiresAt: parseJwtExpiry(bridgeToken) };
     }
 
-    const parentToken = (window.parent as any)?.__SPAARKE_BFF_TOKEN__ as
-      | string
-      | undefined;
+    const parentToken = (window.parent as any)?.__SPAARKE_BFF_TOKEN__ as string | undefined;
     if (parentToken) {
       return { token: parentToken, expiresAt: parseJwtExpiry(parentToken) };
     }
@@ -296,10 +290,7 @@ async function ensureMsalInitialized(): Promise<PublicClientApplication | null> 
         _msalInstance = instance;
         console.info(`${LOG_PREFIX} MSAL initialized successfully`);
       } catch (err) {
-        console.warn(
-          `${LOG_PREFIX} MSAL initialization failed — Xrm strategies only`,
-          err,
-        );
+        console.warn(`${LOG_PREFIX} MSAL initialization failed — Xrm strategies only`, err);
         _msalInstance = null;
       }
     })();
@@ -335,14 +326,10 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
         account: accounts[0],
       });
       if (result?.accessToken) {
-        console.info(
-          `${LOG_PREFIX} Token acquired via MSAL silent (cached account)`,
-        );
+        console.info(`${LOG_PREFIX} Token acquired via MSAL silent (cached account)`);
         return {
           token: result.accessToken,
-          expiresAt: result.expiresOn
-            ? result.expiresOn.getTime()
-            : parseJwtExpiry(result.accessToken),
+          expiresAt: result.expiresOn ? result.expiresOn.getTime() : parseJwtExpiry(result.accessToken),
         };
       }
     }
@@ -353,9 +340,7 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
       console.info(`${LOG_PREFIX} Token acquired via MSAL ssoSilent`);
       return {
         token: ssoResult.accessToken,
-        expiresAt: ssoResult.expiresOn
-          ? ssoResult.expiresOn.getTime()
-          : parseJwtExpiry(ssoResult.accessToken),
+        expiresAt: ssoResult.expiresOn ? ssoResult.expiresOn.getTime() : parseJwtExpiry(ssoResult.accessToken),
       };
     }
   } catch (err) {
@@ -376,12 +361,12 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
  */
 function parseJwtExpiry(token: string): number {
   try {
-    const parts = token.split(".");
+    const parts = token.split('.');
     if (parts.length !== 3) {
       return Date.now() + 60 * 60 * 1000;
     }
     const payload = JSON.parse(atob(parts[1]));
-    if (typeof payload.exp === "number") {
+    if (typeof payload.exp === 'number') {
       return payload.exp * 1000;
     }
   } catch {
@@ -398,17 +383,13 @@ function parseJwtExpiry(token: string): number {
  * Sleep for the specified duration (ms).
  */
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
  * Retry an async operation with exponential backoff.
  */
-async function retryWithBackoff<T>(
-  operation: () => Promise<T>,
-  maxAttempts: number,
-  baseDelay: number,
-): Promise<T> {
+async function retryWithBackoff<T>(operation: () => Promise<T>, maxAttempts: number, baseDelay: number): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -426,9 +407,7 @@ async function retryWithBackoff<T>(
       }
 
       const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 500;
-      console.debug(
-        `${LOG_PREFIX} Retry attempt ${attempt + 1}/${maxAttempts} after ${Math.round(delay)}ms`,
-      );
+      console.debug(`${LOG_PREFIX} Retry attempt ${attempt + 1}/${maxAttempts} after ${Math.round(delay)}ms`);
       await sleep(delay);
     }
   }
@@ -458,9 +437,7 @@ async function acquireToken(): Promise<TokenCache> {
     return platformToken;
   }
 
-  console.debug(
-    `${LOG_PREFIX} Xrm platform strategies exhausted, trying MSAL ssoSilent...`,
-  );
+  console.debug(`${LOG_PREFIX} Xrm platform strategies exhausted, trying MSAL ssoSilent...`);
 
   // Strategy group 2: MSAL ssoSilent (embedded web resource fallback)
   const msalToken = await acquireTokenViaMsal();
@@ -469,10 +446,10 @@ async function acquireToken(): Promise<TokenCache> {
   }
 
   throw new AuthError(
-    "Could not acquire BFF API token. " +
-      "Xrm platform token and MSAL ssoSilent both failed. " +
-      "Ensure this page is running within Dataverse.",
-    { isRetryable: false },
+    'Could not acquire BFF API token. ' +
+      'Xrm platform token and MSAL ssoSilent both failed. ' +
+      'Ensure this page is running within Dataverse.',
+    { isRetryable: false }
   );
 }
 
@@ -532,16 +509,10 @@ export async function getAccessToken(): Promise<string> {
     cachedToken = null;
   }
 
-  const tokenCache = await retryWithBackoff(
-    () => acquireToken(),
-    MAX_RETRY_ATTEMPTS,
-    RETRY_BASE_DELAY_MS,
-  );
+  const tokenCache = await retryWithBackoff(() => acquireToken(), MAX_RETRY_ATTEMPTS, RETRY_BASE_DELAY_MS);
 
   cachedToken = tokenCache;
-  console.info(
-    `${LOG_PREFIX} Token acquired, expires at ${new Date(tokenCache.expiresAt).toISOString()}`,
-  );
+  console.info(`${LOG_PREFIX} Token acquired, expires at ${new Date(tokenCache.expiresAt).toISOString()}`);
 
   return tokenCache.token;
 }
@@ -570,9 +541,7 @@ export async function initializeAuth(): Promise<string> {
   if (clientUrl) {
     console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl}`);
   } else {
-    console.info(
-      `${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`,
-    );
+    console.info(`${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`);
   }
 
   const token = await getAccessToken();

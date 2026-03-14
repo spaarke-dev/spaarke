@@ -4,7 +4,7 @@ import {
   AuthenticationResult,
   createNestablePublicClientApplication,
   PublicClientApplication,
-} from "@azure/msal-browser";
+} from '@azure/msal-browser';
 
 /**
  * Authentication service for Office Add-ins.
@@ -20,16 +20,12 @@ import {
 
 // Configuration - loaded from environment via webpack DefinePlugin
 const AUTH_CONFIG = {
-  clientId:
-    process.env.ADDIN_CLIENT_ID || "c1258e2d-1688-49d2-ac99-a7485ebd9995",
-  tenantId: process.env.TENANT_ID || "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-  bffApiClientId:
-    process.env.BFF_API_CLIENT_ID || "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-  bffApiBaseUrl:
-    process.env.BFF_API_BASE_URL ||
-    "https://spe-api-dev-67e2xz.azurewebsites.net",
-  redirectUri: "brk-multihub://localhost", // NAA broker redirect
-  fallbackRedirectUri: "", // https://{addin-domain}/taskpane.html - set for production
+  clientId: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
+  tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
+  bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
+  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  redirectUri: 'brk-multihub://localhost', // NAA broker redirect
+  fallbackRedirectUri: '', // https://{addin-domain}/taskpane.html - set for production
 };
 
 export interface IAuthService {
@@ -50,9 +46,9 @@ export interface AuthConfig {
 }
 
 // Storage keys for token persistence across add-in reloads
-const TOKEN_STORAGE_KEY = "spaarke-auth-token";
-const TOKEN_EXPIRY_KEY = "spaarke-auth-expiry";
-const ACCOUNT_STORAGE_KEY = "spaarke-auth-account";
+const TOKEN_STORAGE_KEY = 'spaarke-auth-token';
+const TOKEN_EXPIRY_KEY = 'spaarke-auth-expiry';
+const ACCOUNT_STORAGE_KEY = 'spaarke-auth-account';
 
 class AuthService implements IAuthService {
   private msalInstance: IPublicClientApplication | null = null;
@@ -68,20 +64,14 @@ class AuthService implements IAuthService {
     try {
       if (this.cachedAccessToken && this.tokenExpiresAt) {
         sessionStorage.setItem(TOKEN_STORAGE_KEY, this.cachedAccessToken);
-        sessionStorage.setItem(
-          TOKEN_EXPIRY_KEY,
-          this.tokenExpiresAt.toString(),
-        );
+        sessionStorage.setItem(TOKEN_EXPIRY_KEY, this.tokenExpiresAt.toString());
       }
       if (this.currentAccount) {
-        sessionStorage.setItem(
-          ACCOUNT_STORAGE_KEY,
-          JSON.stringify(this.currentAccount),
-        );
+        sessionStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(this.currentAccount));
       }
-      console.log("[AuthService] Saved auth state to sessionStorage");
+      console.log('[AuthService] Saved auth state to sessionStorage');
     } catch (e) {
-      console.warn("[AuthService] Failed to save to sessionStorage:", e);
+      console.warn('[AuthService] Failed to save to sessionStorage:', e);
     }
   }
 
@@ -104,25 +94,22 @@ class AuthService implements IAuthService {
           this.cachedAccessToken = token;
           this.tokenExpiresAt = expiryTime;
           console.log(
-            "[AuthService] Restored token from storage (expires in",
+            '[AuthService] Restored token from storage (expires in',
             Math.round((expiryTime - now) / 1000 / 60),
-            "minutes)",
+            'minutes)'
           );
         } else {
-          console.log("[AuthService] Stored token expired, will need re-auth");
+          console.log('[AuthService] Stored token expired, will need re-auth');
           this.clearStorage();
         }
       }
 
       if (accountJson) {
         this.currentAccount = JSON.parse(accountJson) as AccountInfo;
-        console.log(
-          "[AuthService] Restored account from storage:",
-          this.currentAccount.username,
-        );
+        console.log('[AuthService] Restored account from storage:', this.currentAccount.username);
       }
     } catch (e) {
-      console.warn("[AuthService] Failed to load from sessionStorage:", e);
+      console.warn('[AuthService] Failed to load from sessionStorage:', e);
     }
   }
 
@@ -134,9 +121,9 @@ class AuthService implements IAuthService {
       sessionStorage.removeItem(TOKEN_STORAGE_KEY);
       sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
       sessionStorage.removeItem(ACCOUNT_STORAGE_KEY);
-      console.log("[AuthService] Cleared auth state from sessionStorage");
+      console.log('[AuthService] Cleared auth state from sessionStorage');
     } catch (e) {
-      console.warn("[AuthService] Failed to clear sessionStorage:", e);
+      console.warn('[AuthService] Failed to clear sessionStorage:', e);
     }
   }
 
@@ -155,7 +142,7 @@ class AuthService implements IAuthService {
           supportsNestedAppAuth: true,
         },
         cache: {
-          cacheLocation: "sessionStorage", // MUST use sessionStorage per auth.md
+          cacheLocation: 'sessionStorage', // MUST use sessionStorage per auth.md
           storeAuthStateInCookie: false,
         },
       });
@@ -168,7 +155,7 @@ class AuthService implements IAuthService {
           redirectUri: mergedConfig.fallbackRedirectUri,
         },
         cache: {
-          cacheLocation: "sessionStorage",
+          cacheLocation: 'sessionStorage',
           storeAuthStateInCookie: false,
         },
       });
@@ -184,17 +171,14 @@ class AuthService implements IAuthService {
       const accounts = this.msalInstance.getAllAccounts();
       if (accounts.length > 0 && accounts[0]) {
         this.currentAccount = accounts[0];
-        console.log(
-          "[AuthService] Found existing MSAL account:",
-          this.currentAccount.username,
-        );
+        console.log('[AuthService] Found existing MSAL account:', this.currentAccount.username);
       }
     }
   }
 
   async signIn(): Promise<AuthenticationResult | null> {
     if (!this.msalInstance) {
-      throw new Error("AuthService not initialized");
+      throw new Error('AuthService not initialized');
     }
 
     const scopes = [`api://${AUTH_CONFIG.bffApiClientId}/user_impersonation`];
@@ -204,33 +188,30 @@ class AuthService implements IAuthService {
     if (!this.isNaaSupported) {
       // Check if we already have an authenticated account from a previous dialog session
       if (this.currentAccount) {
-        console.log(
-          "[AuthService] Already authenticated via Dialog API, account:",
-          this.currentAccount.username,
-        );
+        console.log('[AuthService] Already authenticated via Dialog API, account:', this.currentAccount.username);
         // Return a minimal result - the token will be fetched via getAccessToken when needed
         return {
           account: this.currentAccount,
-          accessToken: "", // Token fetched separately via dialog
+          accessToken: '', // Token fetched separately via dialog
           scopes,
           expiresOn: null,
           tenantId: AUTH_CONFIG.tenantId,
           uniqueId: this.currentAccount.localAccountId,
           authority: `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
-          idToken: "",
+          idToken: '',
           idTokenClaims: {},
           fromCache: true,
-          tokenType: "Bearer",
-          correlationId: "",
+          tokenType: 'Bearer',
+          correlationId: '',
         } as AuthenticationResult;
       }
 
       // No cached account, open dialog for authentication
-      console.log("[AuthService] No cached account, opening auth dialog");
+      console.log('[AuthService] No cached account, opening auth dialog');
       try {
         return await this.signInWithDialog(scopes);
       } catch (error) {
-        console.error("Sign in failed:", error);
+        console.error('Sign in failed:', error);
         return null;
       }
     }
@@ -240,20 +221,15 @@ class AuthService implements IAuthService {
       // Try silent first with NAA
       if (this.currentAccount) {
         try {
-          console.log(
-            "[AuthService] Attempting silent token acquisition for cached account",
-          );
+          console.log('[AuthService] Attempting silent token acquisition for cached account');
           const result = await this.msalInstance.acquireTokenSilent({
             scopes,
             account: this.currentAccount,
           });
-          console.log("[AuthService] Silent auth succeeded - no dialog needed");
+          console.log('[AuthService] Silent auth succeeded - no dialog needed');
           return result;
         } catch (silentError) {
-          console.log(
-            "[AuthService] Silent auth failed, falling back to interactive:",
-            silentError,
-          );
+          console.log('[AuthService] Silent auth failed, falling back to interactive:', silentError);
         }
       }
 
@@ -264,7 +240,7 @@ class AuthService implements IAuthService {
       this.currentAccount = result.account;
       return result;
     } catch (error) {
-      console.error("Sign in failed:", error);
+      console.error('Sign in failed:', error);
       return null;
     }
   }
@@ -280,7 +256,7 @@ class AuthService implements IAuthService {
 
     if (!this.isNaaSupported) {
       // For Dialog API, just clear local state - no MSAL logout needed
-      console.log("[AuthService] Signed out (Dialog API mode)");
+      console.log('[AuthService] Signed out (Dialog API mode)');
       return;
     }
 
@@ -294,7 +270,7 @@ class AuthService implements IAuthService {
         account: this.currentAccount,
       });
     } catch (error) {
-      console.error("Sign out failed:", error);
+      console.error('Sign out failed:', error);
     }
   }
 
@@ -312,27 +288,22 @@ class AuthService implements IAuthService {
       // Check if token is still valid (with 5 minute buffer for clock skew)
       const now = Date.now();
       const bufferMs = 5 * 60 * 1000; // 5 minutes
-      const isTokenValid =
-        this.cachedAccessToken &&
-        this.tokenExpiresAt &&
-        this.tokenExpiresAt - bufferMs > now;
+      const isTokenValid = this.cachedAccessToken && this.tokenExpiresAt && this.tokenExpiresAt - bufferMs > now;
 
       if (isTokenValid) {
         console.log(
-          "[AuthService] Returning cached access token (expires in",
+          '[AuthService] Returning cached access token (expires in',
           Math.round((this.tokenExpiresAt! - now) / 1000 / 60),
-          "minutes)",
+          'minutes)'
         );
         return this.cachedAccessToken;
       }
 
       // Token expired or missing - need to re-authenticate via dialog
       if (this.cachedAccessToken && this.tokenExpiresAt) {
-        console.log(
-          "[AuthService] Token expired, triggering re-authentication",
-        );
+        console.log('[AuthService] Token expired, triggering re-authentication');
       } else {
-        console.log("[AuthService] No cached token, triggering dialog auth");
+        console.log('[AuthService] No cached token, triggering dialog auth');
       }
       const result = await this.signInWithDialog(scopes);
       return result?.accessToken || null;
@@ -358,7 +329,7 @@ class AuthService implements IAuthService {
         });
         return result.accessToken;
       } catch (error) {
-        console.error("Token acquisition failed:", error);
+        console.error('Token acquisition failed:', error);
         return null;
       }
     }
@@ -388,16 +359,12 @@ class AuthService implements IAuthService {
     //
     // To re-enable NAA in the future, Microsoft would need to provide a way to
     // register wildcard broker URIs or use a fixed broker URI format.
-    console.log("[AuthService] NAA disabled - using Dialog API fallback");
-    console.log(
-      "[AuthService] Reason: NAA requires dynamic broker URIs that cannot be pre-registered in Azure AD",
-    );
+    console.log('[AuthService] NAA disabled - using Dialog API fallback');
+    console.log('[AuthService] Reason: NAA requires dynamic broker URIs that cannot be pre-registered in Azure AD');
     return false;
   }
 
-  private async signInWithDialog(
-    _scopes: string[],
-  ): Promise<AuthenticationResult | null> {
+  private async signInWithDialog(_scopes: string[]): Promise<AuthenticationResult | null> {
     // Dialog API fallback for older Office clients
     // This opens a dialog window for authentication
     // Note: _scopes would be used in the dialog page to request tokens
@@ -405,7 +372,7 @@ class AuthService implements IAuthService {
       Office.context.ui.displayDialogAsync(
         `${window.location.origin}/auth-dialog.html`,
         { height: 60, width: 40 },
-        (result) => {
+        result => {
           if (result.status === Office.AsyncResultStatus.Failed) {
             reject(new Error(result.error.message));
             return;
@@ -416,26 +383,23 @@ class AuthService implements IAuthService {
           dialog.addEventHandler(
             Office.EventType.DialogMessageReceived,
             (arg: { message?: string | object; error?: number }) => {
-              console.log("[AuthService] Dialog message received:", arg);
+              console.log('[AuthService] Dialog message received:', arg);
               dialog.close();
 
               if (arg.message) {
                 try {
                   // Handle both string and object message formats
                   // Outlook web returns object, desktop may return string
-                  const message =
-                    typeof arg.message === "string"
-                      ? JSON.parse(arg.message)
-                      : arg.message;
-                  console.log("[AuthService] Parsed message:", message);
+                  const message = typeof arg.message === 'string' ? JSON.parse(arg.message) : arg.message;
+                  console.log('[AuthService] Parsed message:', message);
                   if (message.success) {
                     // Token received from dialog - construct proper AccountInfo
                     this.currentAccount = {
-                      homeAccountId: message.account?.homeAccountId || "",
-                      environment: "login.microsoftonline.com",
+                      homeAccountId: message.account?.homeAccountId || '',
+                      environment: 'login.microsoftonline.com',
                       tenantId: AUTH_CONFIG.tenantId,
-                      username: message.account?.username || "",
-                      localAccountId: message.account?.homeAccountId || "",
+                      username: message.account?.username || '',
+                      localAccountId: message.account?.homeAccountId || '',
                       name: message.account?.name,
                     } as AccountInfo;
                     // Cache the access token and expiration for later use
@@ -443,20 +407,17 @@ class AuthService implements IAuthService {
                     // Parse expiration - message.expiresOn can be Date string or Unix timestamp
                     if (message.expiresOn) {
                       this.tokenExpiresAt =
-                        typeof message.expiresOn === "number"
+                        typeof message.expiresOn === 'number'
                           ? message.expiresOn
                           : new Date(message.expiresOn).getTime();
                     } else {
                       // Default to 1 hour from now if not provided
                       this.tokenExpiresAt = Date.now() + 60 * 60 * 1000;
                     }
+                    console.log('[AuthService] Account set:', this.currentAccount);
                     console.log(
-                      "[AuthService] Account set:",
-                      this.currentAccount,
-                    );
-                    console.log(
-                      "[AuthService] Access token cached, expires at:",
-                      new Date(this.tokenExpiresAt).toLocaleTimeString(),
+                      '[AuthService] Access token cached, expires at:',
+                      new Date(this.tokenExpiresAt).toLocaleTimeString()
                     );
 
                     // Persist to sessionStorage for add-in reloads
@@ -470,13 +431,13 @@ class AuthService implements IAuthService {
                     reject(new Error(message.error));
                   }
                 } catch (e) {
-                  console.error("[AuthService] Parse error:", e);
-                  reject(new Error("Failed to parse auth response"));
+                  console.error('[AuthService] Parse error:', e);
+                  reject(new Error('Failed to parse auth response'));
                 }
               }
-            },
+            }
           );
-        },
+        }
       );
     });
   }

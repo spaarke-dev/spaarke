@@ -4,19 +4,19 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
-import { useRef, useState, useEffect } from "react";
+import * as React from 'react';
+import { useRef, useState, useEffect } from 'react';
 import {
   VerticalBarChart,
   HorizontalBarChart,
   IVerticalBarChartDataPoint,
   IHorizontalBarChartWithAxisDataPoint,
   IChartProps,
-} from "@fluentui/react-charting";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../types";
+} from '@fluentui/react-charting';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { DrillInteraction, IAggregatedDataPoint } from '../types';
 
-export type BarOrientation = "vertical" | "horizontal";
+export type BarOrientation = 'vertical' | 'horizontal';
 
 export interface IBarChartProps {
   /** Data points to display */
@@ -41,27 +41,27 @@ export interface IBarChartProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    minHeight: '200px',
   },
   title: {
-    marginBottom: "2px",
+    marginBottom: '2px',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   chartWrapper: {
     flex: 1,
-    position: "relative",
-    minHeight: "150px",
+    position: 'relative',
+    minHeight: '150px',
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -86,7 +86,7 @@ const getColorPalette = (): string[] => [
 export const BarChart: React.FC<IBarChartProps> = ({
   data,
   title,
-  orientation = "vertical",
+  orientation = 'vertical',
   showLabels = true,
   showLegend = false,
   onDrillInteraction,
@@ -102,7 +102,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
   useEffect(() => {
     if (!responsive || !containerRef.current) return;
 
-    const resizeObserver = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         setContainerWidth(entry.contentRect.width);
       }
@@ -117,7 +117,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
     if (onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: dataPoint.fieldValue,
         label: dataPoint.label,
       });
@@ -149,17 +149,15 @@ export const BarChart: React.FC<IBarChartProps> = ({
   }));
 
   // For horizontal chart, we need different data format
-  const horizontalData: IHorizontalBarChartWithAxisDataPoint[] = data.map(
-    (point, index) => ({
-      x: point.value,
-      y: point.label,
-      color: point.color || colors[index % colors.length],
-      legend: point.label,
-      xAxisCalloutData: point.value.toString(),
-      yAxisCalloutData: point.label,
-      onClick: () => handleBarClick(point),
-    }),
-  );
+  const horizontalData: IHorizontalBarChartWithAxisDataPoint[] = data.map((point, index) => ({
+    x: point.value,
+    y: point.label,
+    color: point.color || colors[index % colors.length],
+    legend: point.label,
+    xAxisCalloutData: point.value.toString(),
+    yAxisCalloutData: point.label,
+    onClick: () => handleBarClick(point),
+  }));
 
   const chartProps: IChartProps = {
     chartTitle: title,
@@ -169,7 +167,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
     <div className={styles.container} ref={containerRef}>
       {title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.chartWrapper}>
-        {orientation === "vertical" ? (
+        {orientation === 'vertical' ? (
           <VerticalBarChart
             data={chartData}
             width={responsive ? containerWidth : undefined}
@@ -182,11 +180,11 @@ export const BarChart: React.FC<IBarChartProps> = ({
           />
         ) : (
           <HorizontalBarChart
-            data={horizontalData.map((point) => ({
+            data={horizontalData.map(point => ({
               chartTitle: String(point.y),
               chartData: [
                 {
-                  legend: point.legend || "",
+                  legend: point.legend || '',
                   horizontalBarChartdata: { x: point.x, y: 0 },
                   color: point.color,
                   onClick: point.onClick,

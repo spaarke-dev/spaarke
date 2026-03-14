@@ -7,7 +7,7 @@
  * @see spec.md for intersection observer configuration
  */
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect } from 'react';
 
 interface UseInfiniteScrollOptions {
   /** Callback to load more items */
@@ -51,7 +51,7 @@ export function useInfiniteScroll({
   isLoading,
   hasMore,
   threshold = 0.1,
-  rootMargin = "100px",
+  rootMargin = '100px',
 }: UseInfiniteScrollOptions): UseInfiniteScrollResult {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -69,17 +69,13 @@ export function useInfiniteScroll({
     const observer = new IntersectionObserver(
       (entries: IntersectionObserverEntry[]) => {
         const [entry] = entries;
-        const {
-          onLoadMore: load,
-          isLoading: loading,
-          hasMore: more,
-        } = callbackRef.current;
+        const { onLoadMore: load, isLoading: loading, hasMore: more } = callbackRef.current;
 
         if (entry.isIntersecting && !loading && more) {
           load();
         }
       },
-      { threshold, rootMargin },
+      { threshold, rootMargin }
     );
 
     // Start observing the sentinel element

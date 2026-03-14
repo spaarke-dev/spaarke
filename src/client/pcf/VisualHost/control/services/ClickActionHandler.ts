@@ -4,8 +4,8 @@
  * Supports: openrecordform, opensidepane, navigatetopage, opendatasetgrid
  */
 
-import { IChartDefinition, OnClickAction } from "../types";
-import { logger } from "../utils/logger";
+import { IChartDefinition, OnClickAction } from '../types';
+import { logger } from '../utils/logger';
 
 export interface IClickActionContext {
   chartDefinition: IChartDefinition;
@@ -33,16 +33,12 @@ function resolveRecordId(ctx: IClickActionContext): string {
 
   if (chartDefinition.sprk_onclickrecordfield && recordData) {
     const fieldValue = recordData[chartDefinition.sprk_onclickrecordfield];
-    if (typeof fieldValue === "string" && fieldValue.trim() !== "") {
-      return fieldValue.replace(/[{}]/g, "");
+    if (typeof fieldValue === 'string' && fieldValue.trim() !== '') {
+      return fieldValue.replace(/[{}]/g, '');
     }
-    logger.warn(
-      "ClickActionHandler",
-      "Configured record field not found or empty, using default recordId",
-      {
-        field: chartDefinition.sprk_onclickrecordfield,
-      },
-    );
+    logger.warn('ClickActionHandler', 'Configured record field not found or empty, using default recordId', {
+      field: chartDefinition.sprk_onclickrecordfield,
+    });
   }
 
   return recordId;
@@ -54,14 +50,14 @@ function resolveRecordId(ctx: IClickActionContext): string {
 async function openRecordForm(ctx: IClickActionContext): Promise<void> {
   const xrm = getXrm();
   if (!xrm?.Navigation?.openForm) {
-    logger.warn("ClickActionHandler", "Xrm.Navigation.openForm not available");
+    logger.warn('ClickActionHandler', 'Xrm.Navigation.openForm not available');
     return;
   }
 
   const resolvedId = resolveRecordId(ctx);
   const targetEntity = ctx.chartDefinition.sprk_onclicktarget || ctx.entityName;
 
-  logger.info("ClickActionHandler", "Opening record form", {
+  logger.info('ClickActionHandler', 'Opening record form', {
     entityName: targetEntity,
     recordId: resolvedId,
   });
@@ -78,7 +74,7 @@ async function openRecordForm(ctx: IClickActionContext): Promise<void> {
 async function openSidePane(ctx: IClickActionContext): Promise<void> {
   const xrm = getXrm();
   if (!xrm?.App?.sidePanes?.createPane) {
-    logger.warn("ClickActionHandler", "Xrm.App.sidePanes not available");
+    logger.warn('ClickActionHandler', 'Xrm.App.sidePanes not available');
     return;
   }
 
@@ -86,26 +82,23 @@ async function openSidePane(ctx: IClickActionContext): Promise<void> {
   const pageName = ctx.chartDefinition.sprk_onclicktarget;
 
   if (!pageName) {
-    logger.warn(
-      "ClickActionHandler",
-      "No target page configured for opensidepane action",
-    );
+    logger.warn('ClickActionHandler', 'No target page configured for opensidepane action');
     return;
   }
 
-  logger.info("ClickActionHandler", "Opening side pane", {
+  logger.info('ClickActionHandler', 'Opening side pane', {
     pageName,
     recordId: resolvedId,
   });
 
   const pane = await xrm.App.sidePanes.createPane({
-    title: ctx.chartDefinition.sprk_name || "Details",
+    title: ctx.chartDefinition.sprk_name || 'Details',
     paneId: `visualhost_${resolvedId}`,
     canClose: true,
   });
 
   pane.navigate({
-    pageType: "custom",
+    pageType: 'custom',
     name: pageName,
     recordId: resolvedId,
   });
@@ -117,10 +110,7 @@ async function openSidePane(ctx: IClickActionContext): Promise<void> {
 async function navigateToPage(ctx: IClickActionContext): Promise<void> {
   const xrm = getXrm();
   if (!xrm?.Navigation?.navigateTo) {
-    logger.warn(
-      "ClickActionHandler",
-      "Xrm.Navigation.navigateTo not available",
-    );
+    logger.warn('ClickActionHandler', 'Xrm.Navigation.navigateTo not available');
     return;
   }
 
@@ -128,20 +118,17 @@ async function navigateToPage(ctx: IClickActionContext): Promise<void> {
   const target = ctx.chartDefinition.sprk_onclicktarget;
 
   if (!target) {
-    logger.warn(
-      "ClickActionHandler",
-      "No target configured for navigatetopage action",
-    );
+    logger.warn('ClickActionHandler', 'No target configured for navigatetopage action');
     return;
   }
 
-  logger.info("ClickActionHandler", "Navigating to page", {
+  logger.info('ClickActionHandler', 'Navigating to page', {
     target,
     recordId: resolvedId,
   });
 
   await xrm.Navigation.navigateTo({
-    pageType: "custom",
+    pageType: 'custom',
     name: target,
     recordId: resolvedId,
   });
@@ -151,21 +138,14 @@ async function navigateToPage(ctx: IClickActionContext): Promise<void> {
  * Execute the configured click action
  * Returns true if an action was executed, false if no action or action type is None
  */
-export async function executeClickAction(
-  ctx: IClickActionContext,
-  onExpandClick?: () => void,
-): Promise<boolean> {
+export async function executeClickAction(ctx: IClickActionContext, onExpandClick?: () => void): Promise<boolean> {
   const action = ctx.chartDefinition.sprk_onclickaction;
 
-  if (
-    action === undefined ||
-    action === null ||
-    action === OnClickAction.None
-  ) {
+  if (action === undefined || action === null || action === OnClickAction.None) {
     return false;
   }
 
-  logger.info("ClickActionHandler", "Executing click action", {
+  logger.info('ClickActionHandler', 'Executing click action', {
     action,
     chartName: ctx.chartDefinition.sprk_name,
     recordId: ctx.recordId,
@@ -192,13 +172,13 @@ export async function executeClickAction(
         return true;
 
       default:
-        logger.warn("ClickActionHandler", "Unknown click action type", {
+        logger.warn('ClickActionHandler', 'Unknown click action type', {
           action,
         });
         return false;
     }
   } catch (err) {
-    logger.error("ClickActionHandler", "Failed to execute click action", err);
+    logger.error('ClickActionHandler', 'Failed to execute click action', err);
     return false;
   }
 }

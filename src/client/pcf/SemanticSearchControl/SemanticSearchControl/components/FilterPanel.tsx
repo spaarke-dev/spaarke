@@ -9,49 +9,39 @@
  * @see spec.md for scope-aware filter rules
  */
 
-import * as React from "react";
-import { useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Divider,
-} from "@fluentui/react-components";
-import { Dismiss20Regular, ChevronLeft20Regular } from "@fluentui/react-icons";
-import {
-  IFilterPanelProps,
-  SearchFilters,
-  DateRange,
-  SearchMode,
-} from "../types";
-import { FilterDropdown } from "./FilterDropdown";
-import { DateRangeFilter } from "./DateRangeFilter";
-import { useFilterOptions } from "../hooks/useFilterOptions";
+import * as React from 'react';
+import { useCallback } from 'react';
+import { makeStyles, tokens, Button, Divider } from '@fluentui/react-components';
+import { Dismiss20Regular, ChevronLeft20Regular } from '@fluentui/react-icons';
+import { IFilterPanelProps, SearchFilters, DateRange, SearchMode } from '../types';
+import { FilterDropdown } from './FilterDropdown';
+import { DateRangeFilter } from './DateRangeFilter';
+import { useFilterOptions } from '../hooks/useFilterOptions';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    width: "100%",
+    width: '100%',
     minWidth: 0,
-    overflow: "hidden",
-    boxSizing: "border-box",
+    overflow: 'hidden',
+    boxSizing: 'border-box',
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   clearButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   collapseButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   filterSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalS,
     minWidth: 0,
@@ -65,23 +55,23 @@ const emptyFilters: SearchFilters = {
   dateRange: null,
   fileTypes: [],
   threshold: 0,
-  searchMode: "hybrid",
+  searchMode: 'hybrid',
 };
 
 // Threshold options (replaces Slider — 5 preset values)
 const THRESHOLD_OPTIONS = [
-  { key: "0", label: "Off" },
-  { key: "25", label: "25%" },
-  { key: "50", label: "50%" },
-  { key: "75", label: "75%" },
-  { key: "100", label: "100%" },
+  { key: '0', label: 'Off' },
+  { key: '25', label: '25%' },
+  { key: '50', label: '50%' },
+  { key: '75', label: '75%' },
+  { key: '100', label: '100%' },
 ];
 
 // Search mode options
 const MODE_OPTIONS = [
-  { key: "hybrid", label: "Hybrid" },
-  { key: "vectorOnly", label: "Concept Only" },
-  { key: "keywordOnly", label: "Keyword Only" },
+  { key: 'hybrid', label: 'Hybrid' },
+  { key: 'vectorOnly', label: 'Concept Only' },
+  { key: 'keywordOnly', label: 'Keyword Only' },
 ];
 
 /**
@@ -104,12 +94,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
   const styles = useStyles();
 
   // Fetch filter options from Dataverse
-  const {
-    documentTypeOptions,
-    matterTypeOptions,
-    fileTypeOptions,
-    isLoading: optionsLoading,
-  } = useFilterOptions();
+  const { documentTypeOptions, matterTypeOptions, fileTypeOptions, isLoading: optionsLoading } = useFilterOptions();
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -118,7 +103,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
     filters.dateRange !== null ||
     filters.fileTypes.length > 0 ||
     filters.threshold > 0 ||
-    filters.searchMode !== "hybrid";
+    filters.searchMode !== 'hybrid';
 
   // Handle clear all filters
   const handleClearFilters = useCallback(() => {
@@ -133,7 +118,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         documentTypes: keys,
       });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Handle matter type change
@@ -144,7 +129,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         matterTypes: keys,
       });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Handle file type change
@@ -155,7 +140,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         fileTypes: keys,
       });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Handle date range change
@@ -166,7 +151,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         dateRange: range,
       });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Handle threshold change (single-select dropdown, string[] → number)
@@ -178,7 +163,7 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         threshold: isNaN(value) ? 0 : value,
       });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Handle search mode change (single-select dropdown, string[] → SearchMode)
@@ -191,13 +176,12 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         });
       }
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // Scope-aware visibility: hide Matter Type when on any entity-scoped form
   // Only show when scope is "all" (system-wide) or "custom" (document IDs)
-  const showMatterTypeFilter =
-    searchScope === "all" || searchScope === "custom";
+  const showMatterTypeFilter = searchScope === 'all' || searchScope === 'custom';
 
   return (
     <div className={styles.container}>

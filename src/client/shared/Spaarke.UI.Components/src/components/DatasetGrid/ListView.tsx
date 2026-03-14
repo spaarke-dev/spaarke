@@ -3,20 +3,12 @@
  * Standards: KM-UX-FLUENT-DESIGN-V9-STANDARDS.md
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Spinner,
-  Checkbox,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { ChevronRightRegular } from "@fluentui/react-icons";
-import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from "../../types";
-import { useVirtualization } from "../../hooks/useVirtualization";
-import { VirtualizedListView } from "./VirtualizedListView";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Button, Spinner, Checkbox, mergeClasses } from '@fluentui/react-components';
+import { ChevronRightRegular } from '@fluentui/react-icons';
+import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from '../../types';
+import { useVirtualization } from '../../hooks/useVirtualization';
+import { VirtualizedListView } from './VirtualizedListView';
 
 export interface IListViewProps {
   records: IDatasetRecord[];
@@ -33,32 +25,32 @@ export interface IListViewProps {
 
 const useStyles = makeStyles({
   root: {
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
-    position: "relative",
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
   },
   scrollContainer: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
   },
   listContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
   },
   listItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
-    cursor: "pointer",
-    ":hover": {
+    cursor: 'pointer',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -67,29 +59,29 @@ const useStyles = makeStyles({
   },
   listItemContent: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
   primaryText: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   secondaryText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   metadataText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    marginLeft: "auto",
+    marginLeft: 'auto',
     flexShrink: 0,
   },
   chevron: {
@@ -97,29 +89,29 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   loadingOverlay: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     backgroundColor: tokens.colorNeutralBackground1,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
   },
   loadMoreButton: {
     margin: tokens.spacingVerticalM,
-    width: "calc(100% - 32px)",
+    width: 'calc(100% - 32px)',
     marginLeft: tokens.spacingHorizontalM,
     marginRight: tokens.spacingHorizontalM,
   },
   emptyState: {
     padding: tokens.spacingVerticalXXL,
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
   },
 });
 
-export const ListView: React.FC<IListViewProps> = (props) => {
+export const ListView: React.FC<IListViewProps> = props => {
   const styles = useStyles();
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -130,7 +122,7 @@ export const ListView: React.FC<IListViewProps> = (props) => {
 
   // Filter to only readable columns
   const readableColumns = React.useMemo(() => {
-    return props.columns.filter((col) => col.canRead !== false);
+    return props.columns.filter(col => col.canRead !== false);
   }, [props.columns]);
 
   // Use virtualized view for large datasets
@@ -142,8 +134,8 @@ export const ListView: React.FC<IListViewProps> = (props) => {
         selectedRecordIds={props.selectedRecordIds}
         itemHeight={virtualization.itemHeight}
         overscanCount={virtualization.overscanCount}
-        onRecordClick={(recordId) => {
-          const record = props.records.find((r) => r.id === recordId);
+        onRecordClick={recordId => {
+          const record = props.records.find(r => r.id === recordId);
           if (record) props.onRecordClick(record);
         }}
       />
@@ -151,8 +143,8 @@ export const ListView: React.FC<IListViewProps> = (props) => {
   }
 
   const isInfiniteScroll = React.useMemo(() => {
-    if (props.scrollBehavior === "Infinite") return true;
-    if (props.scrollBehavior === "Paged") return false;
+    if (props.scrollBehavior === 'Infinite') return true;
+    if (props.scrollBehavior === 'Paged') return false;
     return props.records.length > 100;
   }, [props.scrollBehavior, props.records.length]);
 
@@ -163,14 +155,13 @@ export const ListView: React.FC<IListViewProps> = (props) => {
       }
 
       const container = e.currentTarget;
-      const scrollPercentage =
-        (container.scrollTop + container.clientHeight) / container.scrollHeight;
+      const scrollPercentage = (container.scrollTop + container.clientHeight) / container.scrollHeight;
 
       if (scrollPercentage > 0.9) {
         props.loadNextPage();
       }
     },
-    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage],
+    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage]
   );
 
   const handleItemSelect = React.useCallback(
@@ -178,12 +169,10 @@ export const ListView: React.FC<IListViewProps> = (props) => {
       if (checked) {
         props.onSelectionChange([...props.selectedRecordIds, recordId]);
       } else {
-        props.onSelectionChange(
-          props.selectedRecordIds.filter((id) => id !== recordId),
-        );
+        props.onSelectionChange(props.selectedRecordIds.filter(id => id !== recordId));
       }
     },
-    [props],
+    [props]
   );
 
   const handleItemClick = React.useCallback(
@@ -193,7 +182,7 @@ export const ListView: React.FC<IListViewProps> = (props) => {
       }
       props.onRecordClick(record);
     },
-    [props],
+    [props]
   );
 
   const displayColumns = React.useMemo(() => {
@@ -210,53 +199,29 @@ export const ListView: React.FC<IListViewProps> = (props) => {
 
   return (
     <div className={styles.root}>
-      <div
-        className={styles.scrollContainer}
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-      >
+      <div className={styles.scrollContainer} ref={scrollContainerRef} onScroll={handleScroll}>
         <div className={styles.listContainer}>
-          {props.records.map((record) => {
+          {props.records.map(record => {
             const isSelected = props.selectedRecordIds.includes(record.id);
             const primaryCol = displayColumns[0];
             const secondaryCol = displayColumns[1];
             const metadataCol = displayColumns[2];
-            const primaryValue = primaryCol
-              ? String(record[primaryCol.name] || "")
-              : record.id;
-            const secondaryValue = secondaryCol
-              ? String(record[secondaryCol.name] || "")
-              : "";
-            const metadataValue = metadataCol
-              ? String(record[metadataCol.name] || "")
-              : "";
+            const primaryValue = primaryCol ? String(record[primaryCol.name] || '') : record.id;
+            const secondaryValue = secondaryCol ? String(record[secondaryCol.name] || '') : '';
+            const metadataValue = metadataCol ? String(record[metadataCol.name] || '') : '';
 
             return (
               <div
                 key={record.id}
-                className={mergeClasses(
-                  styles.listItem,
-                  isSelected && styles.listItemSelected,
-                )}
-                onClick={(e) => handleItemClick(record, e)}
+                className={mergeClasses(styles.listItem, isSelected && styles.listItemSelected)}
+                onClick={e => handleItemClick(record, e)}
               >
-                <Checkbox
-                  checked={isSelected}
-                  onChange={(_e, data) =>
-                    handleItemSelect(record.id, !!data.checked)
-                  }
-                />
+                <Checkbox checked={isSelected} onChange={(_e, data) => handleItemSelect(record.id, !!data.checked)} />
                 <div className={styles.listItemContent}>
                   <Text className={styles.primaryText}>{primaryValue}</Text>
-                  {secondaryValue && (
-                    <Text className={styles.secondaryText}>
-                      {secondaryValue}
-                    </Text>
-                  )}
+                  {secondaryValue && <Text className={styles.secondaryText}>{secondaryValue}</Text>}
                 </div>
-                {metadataValue && (
-                  <Text className={styles.metadataText}>{metadataValue}</Text>
-                )}
+                {metadataValue && <Text className={styles.metadataText}>{metadataValue}</Text>}
                 <ChevronRightRegular className={styles.chevron} />
               </div>
             );
@@ -271,11 +236,7 @@ export const ListView: React.FC<IListViewProps> = (props) => {
       )}
 
       {!isInfiniteScroll && props.hasNextPage && !props.loading && (
-        <Button
-          appearance="subtle"
-          className={styles.loadMoreButton}
-          onClick={props.loadNextPage}
-        >
+        <Button appearance="subtle" className={styles.loadMoreButton} onClick={props.loadNextPage}>
           Load More ({props.records.length} records loaded)
         </Button>
       )}

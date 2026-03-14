@@ -5,13 +5,8 @@
  * Dataverse URL to the component tree.
  */
 
-import { useState, useEffect } from "react";
-import {
-  initializeAuth,
-  getClientUrl,
-  stopTokenRefresh,
-  AuthError,
-} from "../services/authInit";
+import { useState, useEffect } from 'react';
+import { initializeAuth, getClientUrl, stopTokenRefresh, AuthError } from '../services/authInit';
 
 export interface AuthState {
   isAuthenticated: boolean;
@@ -44,8 +39,7 @@ export function useAuth(): AuthState {
         }
       } catch (err) {
         if (!cancelled) {
-          const message =
-            err instanceof AuthError ? err.message : "Authentication failed";
+          const message = err instanceof AuthError ? err.message : 'Authentication failed';
           setState({
             isAuthenticated: false,
             isLoading: false,

@@ -20,27 +20,18 @@
  * @see ADR-021 — Fluent UI v9 design system
  */
 
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  useEffect,
-} from "react";
-import { makeStyles, tokens, Spinner, Text } from "@fluentui/react-components";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
 import type {
   DocumentSearchResult,
   RecordSearchResult,
   SearchDomain,
   VisualizationColorBy,
   TimelineDateField,
-} from "../types";
-import {
-  useTimelineLayout,
-  type TimelinePoint,
-} from "../hooks/useTimelineLayout";
-import { getCategoryColor, buildColorLegend } from "../utils/colorScale";
-import { getResultDomain } from "../utils/groupResults";
+} from '../types';
+import { useTimelineLayout, type TimelinePoint } from '../hooks/useTimelineLayout';
+import { getCategoryColor, buildColorLegend } from '../utils/colorScale';
+import { getResultDomain } from '../utils/groupResults';
 
 // =============================================
 // Props
@@ -70,8 +61,8 @@ const NO_DATE_STRIP_HEIGHT = 40;
 const NO_DATE_GAP = 20;
 const ZOOM_FACTOR = 0.002;
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  month: "short",
-  year: "2-digit",
+  month: 'short',
+  year: '2-digit',
 };
 
 // =============================================
@@ -80,36 +71,36 @@ const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
 
 const useStyles = makeStyles({
   container: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
-    width: "100%",
-    height: "100%",
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
   svg: {
-    width: "100%",
-    height: "100%",
+    width: '100%',
+    height: '100%',
   },
   centerMessage: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   legend: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalS,
     left: tokens.spacingHorizontalS,
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -117,25 +108,25 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow4,
-    maxHeight: "200px",
-    overflowY: "auto",
+    maxHeight: '200px',
+    overflowY: 'auto',
   },
   legendItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   legendLabel: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: "140px",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '140px',
   },
   tooltip: {
-    position: "absolute",
-    pointerEvents: "none",
+    position: 'absolute',
+    pointerEvents: 'none',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -145,15 +136,15 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow8,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     zIndex: 20,
-    maxWidth: "260px",
+    maxWidth: '260px',
   },
   tooltipName: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   tooltipDetail: {
     fontSize: tokens.fontSizeBase100,
@@ -167,15 +158,15 @@ const useStyles = makeStyles({
 
 /** Format a date tick label. */
 function formatTickLabel(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString("en-US", DATE_FORMAT_OPTIONS);
+  return new Date(timestamp).toLocaleDateString('en-US', DATE_FORMAT_OPTIONS);
 }
 
 /** Format a full date for the tooltip. */
 function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
   });
 }
 
@@ -205,9 +196,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (containerRef.current) {
-      const obs = (
-        containerRef.current as unknown as { __resizeObserver?: ResizeObserver }
-      ).__resizeObserver;
+      const obs = (containerRef.current as unknown as { __resizeObserver?: ResizeObserver }).__resizeObserver;
       obs?.disconnect();
       containerRef.current = null;
     }
@@ -217,16 +206,14 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       const rect = node.getBoundingClientRect();
       setDimensions({ width: rect.width, height: rect.height });
 
-      const observer = new ResizeObserver((entries) => {
+      const observer = new ResizeObserver(entries => {
         for (const entry of entries) {
           const { width, height } = entry.contentRect;
           setDimensions({ width, height });
         }
       });
       observer.observe(node);
-      (
-        node as unknown as { __resizeObserver?: ResizeObserver }
-      ).__resizeObserver = observer;
+      (node as unknown as { __resizeObserver?: ResizeObserver }).__resizeObserver = observer;
     }
   }, []);
 
@@ -235,8 +222,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
     return () => {
       const node = containerRef.current;
       if (node) {
-        const obs = (node as unknown as { __resizeObserver?: ResizeObserver })
-          .__resizeObserver;
+        const obs = (node as unknown as { __resizeObserver?: ResizeObserver }).__resizeObserver;
         obs?.disconnect();
       }
     };
@@ -248,7 +234,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
     dateField,
     colorBy,
     dimensions.width,
-    dimensions.height,
+    dimensions.height
   );
 
   // Zoom state: narrowed time range
@@ -278,10 +264,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
   const hasUndated = undated.length > 0;
   const chartHeight = Math.max(
     0,
-    dimensions.height -
-      MARGIN.top -
-      MARGIN.bottom -
-      (hasUndated ? NO_DATE_STRIP_HEIGHT + NO_DATE_GAP : 0),
+    dimensions.height - MARGIN.top - MARGIN.bottom - (hasUndated ? NO_DATE_STRIP_HEIGHT + NO_DATE_GAP : 0)
   );
 
   // Scale functions
@@ -292,7 +275,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       if (range === 0) return MARGIN.left + chartWidth / 2;
       return MARGIN.left + ((timestamp - domMin) / range) * chartWidth;
     },
-    [activeXDomain, chartWidth],
+    [activeXDomain, chartWidth]
   );
 
   const scaleY = useCallback(
@@ -300,30 +283,22 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       // Score 0 = bottom, score 1 = top
       return MARGIN.top + chartHeight * (1 - score);
     },
-    [chartHeight],
+    [chartHeight]
   );
 
   // Recompute X positions for dated points when zoomed
   const visibleDated = useMemo(() => {
     const [domMin, domMax] = activeXDomain;
     return dated
-      .filter(
-        (p) =>
-          p.date !== null &&
-          p.date.getTime() >= domMin &&
-          p.date.getTime() <= domMax,
-      )
-      .map((p) => ({
+      .filter(p => p.date !== null && p.date.getTime() >= domMin && p.date.getTime() <= domMax)
+      .map(p => ({
         ...p,
         x: scaleX(p.date!.getTime()),
       }));
   }, [dated, activeXDomain, scaleX]);
 
   // Generate Y-axis labels
-  const yAxisLabels = useMemo(
-    () => [0, 25, 50, 75, 100].map((pct) => ({ pct, y: scaleY(pct / 100) })),
-    [scaleY],
-  );
+  const yAxisLabels = useMemo(() => [0, 25, 50, 75, 100].map(pct => ({ pct, y: scaleY(pct / 100) })), [scaleY]);
 
   // Generate X-axis tick positions (use hook ticks, but recalculate positions for zoom)
   const xAxisTicks = useMemo(() => {
@@ -338,13 +313,13 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       for (let i = 0; i < tickCount; i++) {
         generatedTicks.push(domMin + step * i);
       }
-      return generatedTicks.map((t) => ({ value: t, x: scaleX(t) }));
+      return generatedTicks.map(t => ({ value: t, x: scaleX(t) }));
     }
 
     // Use layout-provided ticks (convert Date → timestamp)
     return ticks
-      .filter((t) => t.getTime() >= domMin && t.getTime() <= domMax)
-      .map((t) => ({ value: t.getTime(), x: scaleX(t.getTime()) }));
+      .filter(t => t.getTime() >= domMin && t.getTime() <= domMax)
+      .map(t => ({ value: t.getTime(), x: scaleX(t.getTime()) }));
   }, [activeXDomain, zoomDomain, ticks, scaleX, chartWidth]);
 
   // Wheel handler — zoom X-axis around cursor
@@ -365,12 +340,10 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
 
       const delta = e.deltaY * ZOOM_FACTOR;
       const factor = 1 + delta;
-      const originalRange = xDomain
-        ? (xDomain[1].getTime() - xDomain[0].getTime()) * 1.5
-        : range * 2;
+      const originalRange = xDomain ? (xDomain[1].getTime() - xDomain[0].getTime()) * 1.5 : range * 2;
       const newRange = Math.max(
         1000 * 60 * 60 * 24 * 7, // min 1 week
-        Math.min(originalRange, range * factor),
+        Math.min(originalRange, range * factor)
       );
 
       const newMin = cursorTime - cursorFraction * newRange;
@@ -378,7 +351,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
 
       setZoomDomain([newMin, newMax]);
     },
-    [activeXDomain, chartWidth, xDomain],
+    [activeXDomain, chartWidth, xDomain]
   );
 
   // Double-click resets zoom
@@ -387,22 +360,19 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
   }, []);
 
   // Point event handlers
-  const handlePointMouseEnter = useCallback(
-    (e: React.MouseEvent, point: TimelinePoint) => {
-      setHoveredId(point.id);
-      const rect = e.currentTarget.closest("svg")?.getBoundingClientRect();
-      if (rect) {
-        setTooltipPos({
-          x: e.clientX - rect.left + 12,
-          y: e.clientY - rect.top + 12,
-        });
-      }
-    },
-    [],
-  );
+  const handlePointMouseEnter = useCallback((e: React.MouseEvent, point: TimelinePoint) => {
+    setHoveredId(point.id);
+    const rect = e.currentTarget.closest('svg')?.getBoundingClientRect();
+    if (rect) {
+      setTooltipPos({
+        x: e.clientX - rect.left + 12,
+        y: e.clientY - rect.top + 12,
+      });
+    }
+  }, []);
 
   const handlePointMouseMove = useCallback((e: React.MouseEvent) => {
-    const rect = e.currentTarget.closest("svg")?.getBoundingClientRect();
+    const rect = e.currentTarget.closest('svg')?.getBoundingClientRect();
     if (rect) {
       setTooltipPos({
         x: e.clientX - rect.left + 12,
@@ -420,23 +390,19 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       e.stopPropagation();
       onResultClick(point.id, getResultDomain(point.result));
     },
-    [onResultClick],
+    [onResultClick]
   );
 
   // Color legend
   const legendEntries = useMemo(() => {
-    const allCategories = [...dated, ...undated].map((p) => p.category);
+    const allCategories = [...dated, ...undated].map(p => p.category);
     return buildColorLegend(allCategories);
   }, [dated, undated]);
 
   // Hovered point for tooltip
   const hoveredPoint = useMemo<TimelinePoint | null>(() => {
     if (!hoveredId) return null;
-    return (
-      visibleDated.find((p) => p.id === hoveredId) ??
-      undated.find((p) => p.id === hoveredId) ??
-      null
-    );
+    return visibleDated.find(p => p.id === hoveredId) ?? undated.find(p => p.id === hoveredId) ?? null;
   }, [hoveredId, visibleDated, undated]);
 
   // No Date strip Y position
@@ -530,7 +496,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
         />
 
         {/* Y-Axis labels and grid lines */}
-        {yAxisLabels.map((label) => (
+        {yAxisLabels.map(label => (
           <g key={`y-${label.pct}`}>
             <line
               x1={MARGIN.left - 4}
@@ -577,7 +543,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
         </text>
 
         {/* Dated points */}
-        {visibleDated.map((point) => {
+        {visibleDated.map(point => {
           const colors = getCategoryColor(point.category);
           const isHovered = hoveredId === point.id;
           const cy = scaleY(point.score);
@@ -592,14 +558,14 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
               stroke={colors.foreground}
               strokeWidth={isHovered ? 2 : 1}
               style={{
-                cursor: "pointer",
+                cursor: 'pointer',
                 opacity: hoveredId && !isHovered ? 0.4 : 1,
-                transition: "r 0.15s ease, opacity 0.15s ease",
+                transition: 'r 0.15s ease, opacity 0.15s ease',
               }}
-              onMouseEnter={(e) => handlePointMouseEnter(e, point)}
+              onMouseEnter={e => handlePointMouseEnter(e, point)}
               onMouseMove={handlePointMouseMove}
               onMouseLeave={handlePointMouseLeave}
-              onClick={(e) => handlePointClick(e, point)}
+              onClick={e => handlePointClick(e, point)}
             />
           );
         })}
@@ -634,10 +600,7 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
             {undated.map((point, idx) => {
               const colors = getCategoryColor(point.category);
               const isHovered = hoveredId === point.id;
-              const spacing = Math.min(
-                30,
-                chartWidth / Math.max(1, undated.length + 1),
-              );
+              const spacing = Math.min(30, chartWidth / Math.max(1, undated.length + 1));
               const cx = MARGIN.left + spacing * (idx + 1);
               const cy = noDateStripY + NO_DATE_STRIP_HEIGHT / 2;
 
@@ -651,14 +614,14 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
                   stroke={colors.foreground}
                   strokeWidth={isHovered ? 2 : 1}
                   style={{
-                    cursor: "pointer",
+                    cursor: 'pointer',
                     opacity: hoveredId && !isHovered ? 0.4 : 1,
-                    transition: "r 0.15s ease, opacity 0.15s ease",
+                    transition: 'r 0.15s ease, opacity 0.15s ease',
                   }}
-                  onMouseEnter={(e) => handlePointMouseEnter(e, point)}
+                  onMouseEnter={e => handlePointMouseEnter(e, point)}
                   onMouseMove={handlePointMouseMove}
                   onMouseLeave={handlePointMouseLeave}
-                  onClick={(e) => handlePointClick(e, point)}
+                  onClick={e => handlePointClick(e, point)}
                 />
               );
             })}
@@ -669,17 +632,10 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
       {/* Color legend — upper-left */}
       {legendEntries.length > 0 && (
         <div className={styles.legend}>
-          {legendEntries.map((entry) => (
+          {legendEntries.map(entry => (
             <div key={entry.key} className={styles.legendItem}>
               <svg width="10" height="10">
-                <circle
-                  cx={5}
-                  cy={5}
-                  r={4}
-                  fill={entry.background}
-                  stroke={entry.foreground}
-                  strokeWidth={1}
-                />
+                <circle cx={5} cy={5} r={4} fill={entry.background} stroke={entry.foreground} strokeWidth={1} />
               </svg>
               <span className={styles.legendLabel}>{entry.key}</span>
             </div>
@@ -689,25 +645,12 @@ export const SearchResultsTimeline: React.FC<SearchResultsTimelineProps> = ({
 
       {/* Hover tooltip */}
       {hoveredPoint && (
-        <div
-          className={styles.tooltip}
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
-        >
+        <div className={styles.tooltip} style={{ left: tooltipPos.x, top: tooltipPos.y }}>
           <div className={styles.tooltipName}>{hoveredPoint.name}</div>
-          {hoveredPoint.date && (
-            <div className={styles.tooltipDetail}>
-              Date: {formatDate(hoveredPoint.date)}
-            </div>
-          )}
-          <div className={styles.tooltipDetail}>
-            Score: {Math.round(hoveredPoint.score * 100)}%
-          </div>
-          <div className={styles.tooltipDetail}>
-            Category: {hoveredPoint.category}
-          </div>
-          <div className={styles.tooltipDetail}>
-            Domain: {getResultDomain(hoveredPoint.result)}
-          </div>
+          {hoveredPoint.date && <div className={styles.tooltipDetail}>Date: {formatDate(hoveredPoint.date)}</div>}
+          <div className={styles.tooltipDetail}>Score: {Math.round(hoveredPoint.score * 100)}%</div>
+          <div className={styles.tooltipDetail}>Category: {hoveredPoint.category}</div>
+          <div className={styles.tooltipDetail}>Domain: {getResultDomain(hoveredPoint.result)}</div>
         </div>
       )}
     </div>

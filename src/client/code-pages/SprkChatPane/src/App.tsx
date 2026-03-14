@@ -40,41 +40,21 @@
  * @see ADR-021 - Fluent UI v9; makeStyles; design tokens; dark mode
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Spinner,
-  Text,
-  Button,
-} from "@fluentui/react-components";
-import {
-  ErrorCircle20Regular,
-  LockClosed20Regular,
-  ArrowClockwise20Regular,
-} from "@fluentui/react-icons";
-import { SprkChat, SprkChatBridge } from "@spaarke/ui-components";
-import type { IHostContext } from "@spaarke/ui-components";
-import {
-  getAccessToken,
-  initializeAuth,
-  clearTokenCache,
-  isXrmAvailable,
-  AuthError,
-} from "./services/authInit";
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { makeStyles, shorthands, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { ErrorCircle20Regular, LockClosed20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
+import { SprkChat, SprkChatBridge } from '@spaarke/ui-components';
+import type { IHostContext } from '@spaarke/ui-components';
+import { getAccessToken, initializeAuth, clearTokenCache, isXrmAvailable, AuthError } from './services/authInit';
 import {
   detectContext,
   restoreSession,
   saveSession,
   clearSession,
   startContextChangeDetection,
-} from "./services/contextService";
-import type {
-  DetectedContext,
-  PersistedSession,
-} from "./services/contextService";
-import { ContextSwitchDialog } from "./components/ContextSwitchDialog";
+} from './services/contextService';
+import type { DetectedContext, PersistedSession } from './services/contextService';
+import { ContextSwitchDialog } from './components/ContextSwitchDialog';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -91,7 +71,7 @@ const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
  * Default pane ID used for sessionStorage keying.
  * Matches the paneId used in Xrm.App.sidePanes.createPane().
  */
-const DEFAULT_PANE_ID = "sprkchat";
+const DEFAULT_PANE_ID = 'sprkchat';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -115,9 +95,9 @@ export interface AppProps {
 // ---------------------------------------------------------------------------
 
 type AuthState =
-  | { status: "loading" }
-  | { status: "authenticated"; token: string }
-  | { status: "error"; error: AuthError | Error; isXrmUnavailable: boolean };
+  | { status: 'loading' }
+  | { status: 'authenticated'; token: string }
+  | { status: 'error'; error: AuthError | Error; isXrmUnavailable: boolean };
 
 // ---------------------------------------------------------------------------
 // Context-Switch Dialog State
@@ -136,51 +116,51 @@ interface ContextSwitchState {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100vh",
-    minWidth: "300px",
-    maxWidth: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100vh',
+    minWidth: '300px',
+    maxWidth: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   chatContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     flexGrow: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
     /* Ensure no horizontal scrollbar at any width in 300-600px range */
-    overflowX: "hidden",
+    overflowX: 'hidden',
   },
   authLoading: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexGrow: 1,
     ...shorthands.gap(tokens.spacingVerticalL),
     ...shorthands.padding(tokens.spacingVerticalXXL, tokens.spacingHorizontalL),
   },
   authError: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexGrow: 1,
     ...shorthands.gap(tokens.spacingVerticalM),
     ...shorthands.padding(tokens.spacingVerticalXXL, tokens.spacingHorizontalL),
-    textAlign: "center",
+    textAlign: 'center',
   },
   errorIcon: {
     color: tokens.colorPaletteRedForeground1,
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalS,
   },
   lockIcon: {
     color: tokens.colorNeutralForeground3,
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalS,
   },
   errorTitle: {
@@ -189,7 +169,7 @@ const useStyles = makeStyles({
   },
   errorDetail: {
     color: tokens.colorNeutralForeground3,
-    maxWidth: "280px",
+    maxWidth: '280px',
   },
 });
 
@@ -210,9 +190,9 @@ export const App: React.FC<AppProps> = ({
   // Build URL params from props (these came from the data envelope in index.tsx)
   const urlParams = useMemo(() => {
     const params = new URLSearchParams();
-    if (propEntityType) params.set("entityType", propEntityType);
-    if (propEntityId) params.set("entityId", propEntityId);
-    if (propPlaybookId) params.set("playbookId", propPlaybookId);
+    if (propEntityType) params.set('entityType', propEntityType);
+    if (propEntityId) params.set('entityId', propEntityId);
+    if (propPlaybookId) params.set('playbookId', propPlaybookId);
     return params;
   }, [propEntityType, propEntityId, propPlaybookId]);
 
@@ -221,11 +201,7 @@ export const App: React.FC<AppProps> = ({
     // Try to restore from sessionStorage first (pane reload scenario)
     const restored = restoreSession(DEFAULT_PANE_ID);
     if (restored) {
-      console.info(
-        "[SprkChatPane] Restored session from sessionStorage:",
-        restored.entityType,
-        restored.entityId,
-      );
+      console.info('[SprkChatPane] Restored session from sessionStorage:', restored.entityType, restored.entityId);
       return {
         entityType: restored.entityType,
         entityId: restored.entityId,
@@ -246,35 +222,34 @@ export const App: React.FC<AppProps> = ({
   // ── Context-switch dialog state ─────────────────────────────────────
   const [contextSwitch, setContextSwitch] = useState<ContextSwitchState>({
     open: false,
-    newContext: { entityType: "", entityId: "", playbookId: "" },
+    newContext: { entityType: '', entityId: '', playbookId: '' },
   });
 
   // ── Auth state ──────────────────────────────────────────────────────
-  const [authState, setAuthState] = useState<AuthState>({ status: "loading" });
+  const [authState, setAuthState] = useState<AuthState>({ status: 'loading' });
 
   /**
    * Initialize authentication on mount.
    * Uses Xrm.Utility.getGlobalContext() to acquire the initial token.
    */
   const initAuth = useCallback(async () => {
-    setAuthState({ status: "loading" });
+    setAuthState({ status: 'loading' });
 
     try {
       const token = await initializeAuth();
-      setAuthState({ status: "authenticated", token });
+      setAuthState({ status: 'authenticated', token });
     } catch (err) {
       const authErr =
         err instanceof AuthError
           ? err
-          : new AuthError(
-              err instanceof Error ? err.message : "Authentication failed",
-              { isRetryable: true, cause: err },
-            );
+          : new AuthError(err instanceof Error ? err.message : 'Authentication failed', {
+              isRetryable: true,
+              cause: err,
+            });
       setAuthState({
-        status: "error",
+        status: 'error',
         error: authErr,
-        isXrmUnavailable:
-          authErr instanceof AuthError && authErr.isXrmUnavailable,
+        isXrmUnavailable: authErr instanceof AuthError && authErr.isXrmUnavailable,
       });
     }
   }, []);
@@ -291,14 +266,14 @@ export const App: React.FC<AppProps> = ({
    * until it actually expires.
    */
   useEffect(() => {
-    if (authState.status !== "authenticated") return;
+    if (authState.status !== 'authenticated') return;
 
     const intervalId = setInterval(async () => {
       try {
         const freshToken = await getAccessToken();
-        setAuthState({ status: "authenticated", token: freshToken });
+        setAuthState({ status: 'authenticated', token: freshToken });
       } catch (err) {
-        console.warn("[SprkChatPane] Token refresh failed, will retry:", err);
+        console.warn('[SprkChatPane] Token refresh failed, will retry:', err);
         // Don't set error state -- the existing token may still be valid.
         // The next API call will fail if the token is truly expired,
         // and SprkChat's error handling will display it.
@@ -347,16 +322,13 @@ export const App: React.FC<AppProps> = ({
   const bridgeRef = useRef<SprkChatBridge | null>(null);
 
   useEffect(() => {
-    const context = activeSessionId || activeContext.entityId || "default";
+    const context = activeSessionId || activeContext.entityId || 'default';
     const bridge = new SprkChatBridge({ context });
     bridgeRef.current = bridge;
 
     // Listen for context_changed events from other panes (e.g. workspace navigation)
-    const unsubContext = bridge.subscribe("context_changed", (payload) => {
-      console.debug(
-        "[SprkChatPane] context_changed received from bridge:",
-        payload,
-      );
+    const unsubContext = bridge.subscribe('context_changed', payload => {
+      console.debug('[SprkChatPane] context_changed received from bridge:', payload);
       // If another pane signals a context change, update our context to match
       if (payload.entityType && payload.entityId) {
         setActiveContext({
@@ -381,16 +353,13 @@ export const App: React.FC<AppProps> = ({
     if (!activeContext.entityType || !activeContext.entityId) return;
     if (!isXrmAvailable()) return;
 
-    const stopPolling = startContextChangeDetection(
-      activeContext,
-      (newContext, _previousContext) => {
-        // Show the context-switch dialog
-        setContextSwitch({
-          open: true,
-          newContext,
-        });
-      },
-    );
+    const stopPolling = startContextChangeDetection(activeContext, (newContext, _previousContext) => {
+      // Show the context-switch dialog
+      setContextSwitch({
+        open: true,
+        newContext,
+      });
+    });
 
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -404,12 +373,12 @@ export const App: React.FC<AppProps> = ({
   const handleContextSwitch = useCallback((newContext: DetectedContext) => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: "", entityId: "", playbookId: "" },
+      newContext: { entityType: '', entityId: '', playbookId: '' },
     });
 
     // Emit context_changed event via SprkChatBridge so other panes are notified
     if (bridgeRef.current && !bridgeRef.current.isDisconnected) {
-      bridgeRef.current.emit("context_changed", {
+      bridgeRef.current.emit('context_changed', {
         entityType: newContext.entityType,
         entityId: newContext.entityId,
         playbookId: newContext.playbookId,
@@ -418,16 +387,12 @@ export const App: React.FC<AppProps> = ({
 
     // Clear the old session (user is switching records; start fresh)
     clearSession(DEFAULT_PANE_ID);
-    setActiveSessionId("");
+    setActiveSessionId('');
 
     // Update active context -- this triggers SprkChat to re-create the session
     setActiveContext(newContext);
 
-    console.info(
-      "[SprkChatPane] Context switched to:",
-      newContext.entityType,
-      newContext.entityId,
-    );
+    console.info('[SprkChatPane] Context switched to:', newContext.entityType, newContext.entityId);
   }, []);
 
   /**
@@ -436,9 +401,9 @@ export const App: React.FC<AppProps> = ({
   const handleContextKeep = useCallback(() => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: "", entityId: "", playbookId: "" },
+      newContext: { entityType: '', entityId: '', playbookId: '' },
     });
-    console.debug("[SprkChatPane] User chose to keep current context");
+    console.debug('[SprkChatPane] User chose to keep current context');
   }, []);
 
   /**
@@ -452,7 +417,7 @@ export const App: React.FC<AppProps> = ({
   // ── Render ──────────────────────────────────────────────────────────
 
   // Auth loading state
-  if (authState.status === "loading") {
+  if (authState.status === 'loading') {
     return (
       <div className={styles.root} role="main" aria-label="SprkChat Pane">
         <div className={styles.authLoading} data-testid="auth-loading">
@@ -466,21 +431,16 @@ export const App: React.FC<AppProps> = ({
   }
 
   // Auth error: Xrm unavailable (outside Dataverse)
-  if (authState.status === "error" && authState.isXrmUnavailable) {
+  if (authState.status === 'error' && authState.isXrmUnavailable) {
     return (
       <div className={styles.root} role="main" aria-label="SprkChat Pane">
-        <div
-          className={styles.authError}
-          role="alert"
-          data-testid="auth-error-xrm"
-        >
+        <div className={styles.authError} role="alert" data-testid="auth-error-xrm">
           <LockClosed20Regular className={styles.lockIcon} />
           <Text size={400} className={styles.errorTitle}>
             Dataverse Required
           </Text>
           <Text size={200} className={styles.errorDetail}>
-            SprkChat must be opened from within Dataverse. Please open this pane
-            from a model-driven app form.
+            SprkChat must be opened from within Dataverse. Please open this pane from a model-driven app form.
           </Text>
         </div>
       </div>
@@ -488,21 +448,16 @@ export const App: React.FC<AppProps> = ({
   }
 
   // Auth error: token acquisition failure (retryable)
-  if (authState.status === "error") {
+  if (authState.status === 'error') {
     return (
       <div className={styles.root} role="main" aria-label="SprkChat Pane">
-        <div
-          className={styles.authError}
-          role="alert"
-          data-testid="auth-error-token"
-        >
+        <div className={styles.authError} role="alert" data-testid="auth-error-token">
           <ErrorCircle20Regular className={styles.errorIcon} />
           <Text size={400} className={styles.errorTitle}>
             Authentication Failed
           </Text>
           <Text size={200} className={styles.errorDetail}>
-            {authState.error.message ||
-              "Unable to acquire an authentication token. Please try again."}
+            {authState.error.message || 'Unable to acquire an authentication token. Please try again.'}
           </Text>
           <Button
             appearance="primary"

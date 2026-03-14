@@ -5,11 +5,11 @@
  * The edgeTypes map must be defined outside the component to avoid re-renders.
  */
 
-import type { EdgeTypes } from "@xyflow/react";
-import { TrueBranchEdge, FalseBranchEdge } from "./ConditionEdge";
+import type { EdgeTypes } from '@xyflow/react';
+import { TrueBranchEdge, FalseBranchEdge } from './ConditionEdge';
 
 // Re-export edge components
-export { TrueBranchEdge, FalseBranchEdge } from "./ConditionEdge";
+export { TrueBranchEdge, FalseBranchEdge } from './ConditionEdge';
 
 /**
  * Edge type registry for @xyflow/react v12.
@@ -27,7 +27,7 @@ export const edgeTypes: EdgeTypes = {
  * Edge type constants for type-safe usage.
  */
 export const EDGE_TYPES = {
-  TRUE_BRANCH: "trueBranch",
-  FALSE_BRANCH: "falseBranch",
-  DEFAULT: "smoothstep",
+  TRUE_BRANCH: 'trueBranch',
+  FALSE_BRANCH: 'falseBranch',
+  DEFAULT: 'smoothstep',
 } as const;

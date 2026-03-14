@@ -11,7 +11,7 @@ export enum LogLevel {
 }
 
 class Logger {
-  private prefix = "[UniversalQuickCreate]";
+  private prefix = '[UniversalQuickCreate]';
   private logLevel: LogLevel = LogLevel.INFO;
 
   /**
@@ -51,12 +51,7 @@ class Logger {
   /**
    * Log error message
    */
-  public error(
-    component: string,
-    message: string,
-    error?: Error | unknown,
-    ...args: unknown[]
-  ): void {
+  public error(component: string, message: string, error?: Error | unknown, ...args: unknown[]): void {
     if (this.logLevel <= LogLevel.ERROR) {
       console.error(`${this.prefix}[${component}] ${message}`, error, ...args);
     }
@@ -67,35 +62,18 @@ class Logger {
 export const logger = new Logger();
 
 // Helper function exports for convenience
-export const logInfo = (
-  component: string,
-  message: string,
-  ...args: unknown[]
-): void => {
+export const logInfo = (component: string, message: string, ...args: unknown[]): void => {
   logger.info(component, message, ...args);
 };
 
-export const logWarn = (
-  component: string,
-  message: string,
-  ...args: unknown[]
-): void => {
+export const logWarn = (component: string, message: string, ...args: unknown[]): void => {
   logger.warn(component, message, ...args);
 };
 
-export const logError = (
-  component: string,
-  message: string,
-  error?: Error | unknown,
-  ...args: unknown[]
-): void => {
+export const logError = (component: string, message: string, error?: Error | unknown, ...args: unknown[]): void => {
   logger.error(component, message, error, ...args);
 };
 
-export const logDebug = (
-  component: string,
-  message: string,
-  ...args: unknown[]
-): void => {
+export const logDebug = (component: string, message: string, ...args: unknown[]): void => {
   logger.debug(component, message, ...args);
 };

@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Display mode for the diff comparison */
-export type DiffCompareViewMode = "side-by-side" | "inline";
+export type DiffCompareViewMode = 'side-by-side' | 'inline';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diff Segment
@@ -22,7 +22,7 @@ export type DiffCompareViewMode = "side-by-side" | "inline";
 /** Represents a single segment of a computed diff */
 export interface IDiffSegment {
   /** The type of change this segment represents */
-  type: "added" | "removed" | "unchanged";
+  type: 'added' | 'removed' | 'unchanged';
   /** The text content of this segment */
   value: string;
 }
@@ -51,7 +51,7 @@ export interface DiffOptions {
    *
    * @default "relaxed"
    */
-  whitespace: "strict" | "relaxed";
+  whitespace: 'strict' | 'relaxed';
 
   /**
    * Diff granularity level.
@@ -60,7 +60,7 @@ export interface DiffOptions {
    *
    * @default "word"
    */
-  granularity: "word" | "character";
+  granularity: 'word' | 'character';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ export interface DiffStats {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Type of block-level change detected between two HTML documents */
-export type BlockChangeType = "added" | "removed" | "modified" | "unchanged";
+export type BlockChangeType = 'added' | 'removed' | 'modified' | 'unchanged';
 
 /**
  * Represents a block-level change (paragraph, heading, list item, etc.)

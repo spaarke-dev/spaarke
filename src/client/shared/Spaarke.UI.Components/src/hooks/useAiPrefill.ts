@@ -38,16 +38,16 @@
  * ```
  */
 
-import * as React from "react";
-import type { IUploadedFile } from "../components/FileUpload/fileUploadTypes";
-import type { ILookupItem } from "../types/LookupTypes";
-import { findBestLookupMatch } from "../utils/lookupMatching";
+import * as React from 'react';
+import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
+import type { ILookupItem } from '../types/LookupTypes';
+import { findBestLookupMatch } from '../utils/lookupMatching';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type AiPrefillStatus = "idle" | "loading" | "success" | "error";
+export type AiPrefillStatus = 'idle' | 'loading' | 'success' | 'error';
 
 /** Result returned by the useAiPrefill hook. */
 export interface IAiPrefillResult {
@@ -102,10 +102,7 @@ export interface IAiPrefillConfig {
    * Called with the final resolved fields (text values + lookup {id, name} pairs).
    * The consumer applies these to its form state.
    */
-  onApply: (
-    fields: IResolvedPrefillFields,
-    prefilledFieldNames: string[],
-  ) => void;
+  onApply: (fields: IResolvedPrefillFields, prefilledFieldNames: string[]) => void;
   /** Timeout in ms (default: 60000). BFF has 45s playbook timeout + extraction time. */
   timeout?: number;
   /** Skip pre-fill if true (e.g., form already has initial values from a prior mount). */
@@ -140,10 +137,10 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
     onApply,
     timeout = 60_000,
     skipIfInitialized = false,
-    logPrefix = "AiPrefill",
+    logPrefix = 'AiPrefill',
   } = config;
 
-  const [status, setStatus] = React.useState<AiPrefillStatus>("idle");
+  const [status, setStatus] = React.useState<AiPrefillStatus>('idle');
   const [prefilledFields, setPrefilledFields] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | undefined>();
 
@@ -165,7 +162,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
   }, [lookupResolvers]);
 
   // Stable dependency key: join file names so the effect doesn't re-run on array ref changes
-  const prefillKey = uploadedFiles.map((f) => f.name).join("|");
+  const prefillKey = uploadedFiles.map(f => f.name).join('|');
 
   React.useEffect(() => {
     if (uploadedFiles.length === 0 || attemptedRef.current) {
@@ -177,19 +174,16 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
     const abortController = new AbortController();
 
     const runPrefill = async (): Promise<void> => {
-      setStatus("loading");
+      setStatus('loading');
       setError(undefined);
 
-      const timeoutId = window.setTimeout(
-        () => abortController.abort(),
-        timeout,
-      );
+      const timeoutId = window.setTimeout(() => abortController.abort(), timeout);
 
       try {
         // Build multipart/form-data (BFF expects IFormFileCollection)
         const formData = new FormData();
         for (const f of uploadedFiles) {
-          formData.append("files", f.file, f.name);
+          formData.append('files', f.file, f.name);
         }
 
         console.info(`[${logPrefix}] Starting AI pre-fill...`, {
@@ -197,7 +191,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
         });
 
         const response = await fetchFn(`${bffBaseUrl}${endpoint}`, {
-          method: "POST",
+          method: 'POST',
           body: formData,
           signal: abortController.signal,
           // Note: do NOT set Content-Type header — browser sets it with boundary
@@ -208,7 +202,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
 
         if (!response.ok) {
           console.warn(`[${logPrefix}] Pre-fill returned ${response.status}`);
-          setStatus("error");
+          setStatus('error');
           setError(`HTTP ${response.status}`);
           return;
         }
@@ -247,7 +241,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
 
           resolvePromises.push(
             resolver(aiValue)
-              .then((candidates) => {
+              .then(candidates => {
                 const best = findBestLookupMatch(aiValue, candidates);
                 if (best) {
                   resolved[fieldName] = { id: best.id, name: best.name };
@@ -262,7 +256,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
                 // Lookup failed — keep display name only
                 resolved[fieldName] = aiValue;
                 fieldNames.push(fieldName);
-              }),
+              })
           );
         }
 
@@ -274,20 +268,18 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
         }
 
         setPrefilledFields(fieldNames);
-        setStatus("success");
+        setStatus('success');
       } catch (err) {
         clearTimeout(timeoutId);
         if (!cancelled) {
           if (abortController.signal.aborted) {
-            console.warn(
-              `[${logPrefix}] Pre-fill timed out after ${timeout}ms`,
-            );
-            setError("Request timed out");
+            console.warn(`[${logPrefix}] Pre-fill timed out after ${timeout}ms`);
+            setError('Request timed out');
           } else {
             console.warn(`[${logPrefix}] Pre-fill failed:`, err);
-            setError(err instanceof Error ? err.message : "Unknown error");
+            setError(err instanceof Error ? err.message : 'Unknown error');
           }
-          setStatus("error");
+          setStatus('error');
         }
       }
     };

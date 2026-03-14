@@ -17,8 +17,8 @@
  * @see spec-FR-10 - Action menu must respond in < 200ms
  */
 
-import { useState, useRef, useCallback } from "react";
-import type { IChatAction, ChatActionCategory } from "../types";
+import { useState, useRef, useCallback } from 'react';
+import type { IChatAction, ChatActionCategory } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API Response Types (matches ChatEndpoints.cs models)
@@ -57,10 +57,10 @@ interface ApiChatActionsResponse {
  * Must stay in sync with ActionCategory enum in ChatAction.cs.
  */
 const CATEGORY_MAP: Record<number, ChatActionCategory> = {
-  0: "playbooks",
-  1: "actions",
-  2: "search",
-  3: "settings",
+  0: 'playbooks',
+  1: 'actions',
+  2: 'search',
+  3: 'settings',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,11 +72,8 @@ const CATEGORY_MAP: Record<number, ChatActionCategory> = {
  * Cache is scoped per session+entity combination so that switching entity type
  * within the same session correctly refetches.
  */
-function buildCacheKey(
-  sessionId: string | undefined,
-  entityType: string | undefined,
-): string {
-  return `${sessionId ?? "none"}|${entityType ?? "none"}`;
+function buildCacheKey(sessionId: string | undefined, entityType: string | undefined): string {
+  return `${sessionId ?? 'none'}|${entityType ?? 'none'}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,12 +85,12 @@ function buildCacheKey(
  * SprkChatActionMenu. Maps numeric category values to string literals.
  */
 function transformApiActions(apiActions: ApiChatAction[]): IChatAction[] {
-  return apiActions.map((a) => ({
+  return apiActions.map(a => ({
     id: a.id,
     label: a.label,
     description: a.description || undefined,
     icon: a.icon || undefined,
-    category: CATEGORY_MAP[a.category] ?? "actions",
+    category: CATEGORY_MAP[a.category] ?? 'actions',
     shortcut: a.shortcut || undefined,
     disabled: false,
   }));
@@ -156,9 +153,7 @@ export interface IUseActionMenuDataResult {
  * });
  * ```
  */
-export function useActionMenuData(
-  options: UseActionMenuDataOptions,
-): IUseActionMenuDataResult {
+export function useActionMenuData(options: UseActionMenuDataOptions): IUseActionMenuDataResult {
   const { sessionId, entityType, apiBaseUrl, accessToken } = options;
 
   const [actions, setActions] = useState<IChatAction[]>([]);
@@ -169,10 +164,10 @@ export function useActionMenuData(
   const cacheRef = useRef<Map<string, IChatAction[]>>(new Map());
 
   // Track the last fetched cache key to detect context changes
-  const lastCacheKeyRef = useRef<string>("");
+  const lastCacheKeyRef = useRef<string>('');
 
   // Normalize URL: strip trailing slashes and trailing /api to prevent double /api/api/ prefix.
-  const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
 
   /**
    * Extract tenant ID from JWT access token for X-Tenant-Id header.
@@ -180,7 +175,7 @@ export function useActionMenuData(
    */
   const extractTenantId = (token: string): string | null => {
     try {
-      const parts = token.split(".");
+      const parts = token.split('.');
       if (parts.length !== 3) return null;
       const payload = JSON.parse(atob(parts[1]));
       return payload.tid || null;
@@ -213,21 +208,21 @@ export function useActionMenuData(
         // Build query parameters
         const params = new URLSearchParams();
         if (sessionId) {
-          params.set("sessionId", sessionId);
+          params.set('sessionId', sessionId);
         }
         if (entityType) {
-          params.set("entityType", entityType);
+          params.set('entityType', entityType);
         }
         const queryString = params.toString();
-        const url = `${baseUrl}/api/ai/chat/actions${queryString ? `?${queryString}` : ""}`;
+        const url = `${baseUrl}/api/ai/chat/actions${queryString ? `?${queryString}` : ''}`;
 
         const tenantId = extractTenantId(accessToken);
         const response = await fetch(url, {
-          method: "GET",
+          method: 'GET',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
-            ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+            ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
           },
         });
 
@@ -235,20 +230,16 @@ export function useActionMenuData(
           // Map specific status codes to user-friendly messages
           switch (response.status) {
             case 401:
-              throw new Error("Authentication required. Please sign in again.");
+              throw new Error('Authentication required. Please sign in again.');
             case 429:
-              throw new Error("Please try again in a moment.");
+              throw new Error('Please try again in a moment.');
             case 500:
             case 502:
             case 503:
-              throw new Error(
-                "The service is temporarily unavailable. Please try again.",
-              );
+              throw new Error('The service is temporarily unavailable. Please try again.');
             default: {
               const errorText = await response.text();
-              throw new Error(
-                `Failed to load actions (${response.status}): ${errorText}`,
-              );
+              throw new Error(`Failed to load actions (${response.status}): ${errorText}`);
             }
           }
         }
@@ -262,10 +253,7 @@ export function useActionMenuData(
 
         setActions(transformed);
       } catch (err: unknown) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Failed to load actions. Please try again.";
+        const message = err instanceof Error ? err.message : 'Failed to load actions. Please try again.';
         setError(message);
         // Keep stale cached data visible if available
         if (cacheRef.current.has(cacheKey)) {
@@ -275,7 +263,7 @@ export function useActionMenuData(
         setIsLoading(false);
       }
     },
-    [sessionId, entityType, baseUrl, accessToken],
+    [sessionId, entityType, baseUrl, accessToken]
   );
 
   /**

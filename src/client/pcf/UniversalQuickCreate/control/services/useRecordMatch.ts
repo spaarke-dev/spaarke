@@ -7,28 +7,23 @@
  * @version 1.0.0
  */
 
-import { useState, useCallback } from "react";
-import { ExtractedEntities } from "./useAiSummary";
+import { useState, useCallback } from 'react';
+import { ExtractedEntities } from './useAiSummary';
 
 /**
  * Record type options for filtering
  */
-export type RecordTypeFilter =
-  | "all"
-  | "sprk_matter"
-  | "sprk_project"
-  | "sprk_invoice";
+export type RecordTypeFilter = 'all' | 'sprk_matter' | 'sprk_project' | 'sprk_invoice';
 
 /**
  * Record type display info
  */
-export const RECORD_TYPE_OPTIONS: { value: RecordTypeFilter; label: string }[] =
-  [
-    { value: "all", label: "All Records" },
-    { value: "sprk_matter", label: "Matters" },
-    { value: "sprk_project", label: "Projects" },
-    { value: "sprk_invoice", label: "Invoices" },
-  ];
+export const RECORD_TYPE_OPTIONS: { value: RecordTypeFilter; label: string }[] = [
+  { value: 'all', label: 'All Records' },
+  { value: 'sprk_matter', label: 'Matters' },
+  { value: 'sprk_project', label: 'Projects' },
+  { value: 'sprk_invoice', label: 'Invoices' },
+];
 
 /**
  * A single record match suggestion from the API
@@ -91,15 +86,9 @@ export interface UseRecordMatchResult {
   /** Association success message */
   successMessage: string | null;
   /** Find matching records for extracted entities */
-  findMatches: (
-    entities: ExtractedEntities,
-    recordTypeFilter: RecordTypeFilter,
-  ) => Promise<void>;
+  findMatches: (entities: ExtractedEntities, recordTypeFilter: RecordTypeFilter) => Promise<void>;
   /** Associate a document with a record */
-  associateRecord: (
-    documentId: string,
-    suggestion: RecordMatchSuggestion,
-  ) => Promise<boolean>;
+  associateRecord: (documentId: string, suggestion: RecordMatchSuggestion) => Promise<boolean>;
   /** Clear current state */
   clear: () => void;
 }
@@ -109,9 +98,7 @@ export interface UseRecordMatchResult {
  *
  * Provides record matching and association functionality for documents.
  */
-export const useRecordMatch = (
-  options: UseRecordMatchOptions,
-): UseRecordMatchResult => {
+export const useRecordMatch = (options: UseRecordMatchOptions): UseRecordMatchResult => {
   const { apiBaseUrl, getToken, maxResults = 5 } = options;
 
   const [suggestions, setSuggestions] = useState<RecordMatchSuggestion[]>([]);
@@ -136,26 +123,23 @@ export const useRecordMatch = (
           token = await getToken();
         }
 
-        const response = await fetch(
-          `${apiBaseUrl}/ai/document-intelligence/match-records`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({
-              entities: {
-                organizations: entities.organizations || [],
-                people: entities.people || [],
-                references: entities.references || [],
-                keywords: [], // Could add keywords from document if available
-              },
-              recordTypeFilter,
-              maxResults,
-            }),
+        const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/match-records`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-        );
+          body: JSON.stringify({
+            entities: {
+              organizations: entities.organizations || [],
+              people: entities.people || [],
+              references: entities.references || [],
+              keywords: [], // Could add keywords from document if available
+            },
+            recordTypeFilter,
+            maxResults,
+          }),
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -165,27 +149,20 @@ export const useRecordMatch = (
         const result: RecordMatchResponse = await response.json();
         setSuggestions(result.suggestions);
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to find matching records",
-        );
+        setError(err instanceof Error ? err.message : 'Failed to find matching records');
         setSuggestions([]);
       } finally {
         setIsMatching(false);
       }
     },
-    [apiBaseUrl, getToken, maxResults],
+    [apiBaseUrl, getToken, maxResults]
   );
 
   /**
    * Associate a document with a record
    */
   const associateRecord = useCallback(
-    async (
-      documentId: string,
-      suggestion: RecordMatchSuggestion,
-    ): Promise<boolean> => {
+    async (documentId: string, suggestion: RecordMatchSuggestion): Promise<boolean> => {
       setIsAssociating(true);
       setError(null);
       setSuccessMessage(null);
@@ -196,22 +173,19 @@ export const useRecordMatch = (
           token = await getToken();
         }
 
-        const response = await fetch(
-          `${apiBaseUrl}/ai/document-intelligence/associate-record`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({
-              documentId,
-              recordId: suggestion.recordId,
-              recordType: suggestion.recordType,
-              lookupFieldName: suggestion.lookupFieldName,
-            }),
+        const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/associate-record`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-        );
+          body: JSON.stringify({
+            documentId,
+            recordId: suggestion.recordId,
+            recordType: suggestion.recordType,
+            lookupFieldName: suggestion.lookupFieldName,
+          }),
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -221,23 +195,19 @@ export const useRecordMatch = (
         const result: AssociateRecordResponse = await response.json();
 
         if (result.success) {
-          setSuccessMessage(
-            result.message || `Associated with ${suggestion.recordName}`,
-          );
+          setSuccessMessage(result.message || `Associated with ${suggestion.recordName}`);
           return true;
         } else {
-          throw new Error(result.message || "Association failed");
+          throw new Error(result.message || 'Association failed');
         }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to associate record",
-        );
+        setError(err instanceof Error ? err.message : 'Failed to associate record');
         return false;
       } finally {
         setIsAssociating(false);
       }
     },
-    [apiBaseUrl, getToken],
+    [apiBaseUrl, getToken]
   );
 
   /**

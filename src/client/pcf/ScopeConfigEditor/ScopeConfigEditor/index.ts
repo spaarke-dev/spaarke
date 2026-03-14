@@ -17,15 +17,10 @@
  * @version 1.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import {
-  FluentProvider,
-  Theme,
-  webLightTheme,
-  webDarkTheme,
-} from "@fluentui/react-components";
-import { ScopeConfigEditorApp } from "./components/ScopeConfigEditorApp";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { ScopeConfigEditorApp } from './components/ScopeConfigEditorApp';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -35,19 +30,13 @@ function resolveTheme(context: ComponentFramework.Context<IInputs>): Theme {
   // Check URL for Dataverse dark mode flag
   try {
     const href = window.location.href;
-    if (
-      href.includes("themeOption%3Ddarkmode") ||
-      href.includes("themeOption=darkmode")
-    ) {
+    if (href.includes('themeOption%3Ddarkmode') || href.includes('themeOption=darkmode')) {
       return webDarkTheme;
     }
     // Try parent frame (PCF runs in iframe)
     try {
       const parentHref = window.parent?.location?.href;
-      if (
-        parentHref?.includes("themeOption%3Ddarkmode") ||
-        parentHref?.includes("themeOption=darkmode")
-      ) {
+      if (parentHref?.includes('themeOption%3Ddarkmode') || parentHref?.includes('themeOption=darkmode')) {
         return webDarkTheme;
       }
     } catch {
@@ -67,10 +56,7 @@ function resolveTheme(context: ComponentFramework.Context<IInputs>): Theme {
 // PCF Control Class (virtual / ReactControl)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class ScopeConfigEditor implements ComponentFramework.ReactControl<
-  IInputs,
-  IOutputs
-> {
+export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private _notifyOutputChanged: () => void;
   private _context: ComponentFramework.Context<IInputs>;
   private _theme: Theme = webLightTheme;
@@ -90,7 +76,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
-    _state: ComponentFramework.Dictionary,
+    _state: ComponentFramework.Dictionary
   ): void {
     this._notifyOutputChanged = notifyOutputChanged;
     this._context = context;
@@ -106,16 +92,12 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<
    * Called when any value in the property bag changes.
    * Returns a React element (virtual / ReactControl pattern — ADR-022).
    */
-  public updateView(
-    context: ComponentFramework.Context<IInputs>,
-  ): React.ReactElement {
+  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
     this._context = context;
     this._theme = resolveTheme(context);
 
-    const fieldValue = context.parameters.fieldValue?.raw ?? "";
-    const apiBaseUrl =
-      context.parameters.apiBaseUrl?.raw ??
-      "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+    const fieldValue = context.parameters.fieldValue?.raw ?? '';
+    const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
 
     // Detect entity type from form context
     const entityLogicalName = this._getEntityLogicalName(context);
@@ -129,11 +111,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<
 
     // style={{ width: "100%" }} ensures the FluentProvider stretches to fill
     // the PCF container — without this, it collapses to content width on new-record forms.
-    return React.createElement(
-      FluentProvider,
-      { theme: this._theme, style: { width: "100%" } },
-      appElement,
-    );
+    return React.createElement(FluentProvider, { theme: this._theme, style: { width: '100%' } }, appElement);
   }
 
   /**
@@ -160,9 +138,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<
    * Detect the entity logical name from PCF context.
    * PCF virtual controls expose contextInfo.entityTypeName in mode.
    */
-  private _getEntityLogicalName(
-    context: ComponentFramework.Context<IInputs>,
-  ): string {
+  private _getEntityLogicalName(context: ComponentFramework.Context<IInputs>): string {
     try {
       // Access mode contextInfo — available when control is on a form
       const contextInfo = (
@@ -176,7 +152,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<
     } catch {
       // Not on a form context — ignore
     }
-    return "";
+    return '';
   }
 
   /**

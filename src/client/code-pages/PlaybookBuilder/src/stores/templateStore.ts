@@ -10,8 +10,8 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import { create } from "zustand";
-import { getAccessToken } from "../services/authInit";
+import { create } from 'zustand';
+import { getAccessToken } from '../services/authInit';
 
 // ============================================================================
 // Types
@@ -63,10 +63,7 @@ interface TemplateState {
   // Actions
   setApiBaseUrl: (url: string) => void;
   fetchTemplates: (page?: number, nameFilter?: string) => Promise<void>;
-  clonePlaybook: (
-    templateId: string,
-    newName?: string,
-  ) => Promise<ClonedPlaybook>;
+  clonePlaybook: (templateId: string, newName?: string) => Promise<ClonedPlaybook>;
   clearError: () => void;
 }
 
@@ -74,16 +71,13 @@ interface TemplateState {
 // API Client Helper
 // ============================================================================
 
-async function fetchWithBearerAuth(
-  url: string,
-  options: RequestInit = {},
-): Promise<Response> {
+async function fetchWithBearerAuth(url: string, options: RequestInit = {}): Promise<Response> {
   const token = await getAccessToken();
 
   const response = await fetch(url, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       ...options.headers,
     },
@@ -91,9 +85,7 @@ async function fetchWithBearerAuth(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      errorText || `HTTP ${response.status}: ${response.statusText}`,
-    );
+    throw new Error(errorText || `HTTP ${response.status}: ${response.statusText}`);
   }
 
   return response;
@@ -115,17 +107,17 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   isCloning: false,
   cloneError: null,
 
-  apiBaseUrl: "",
+  apiBaseUrl: '',
 
   setApiBaseUrl: (url: string) => {
-    set({ apiBaseUrl: url.replace(/\/$/, "") });
+    set({ apiBaseUrl: url.replace(/\/$/, '') });
   },
 
   fetchTemplates: async (page = 1, nameFilter?: string) => {
     const { apiBaseUrl, pageSize } = get();
 
     if (!apiBaseUrl) {
-      set({ error: "API configuration error" });
+      set({ error: 'API configuration error' });
       return;
     }
 
@@ -148,31 +140,27 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       });
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to load templates",
+        error: error instanceof Error ? error.message : 'Failed to load templates',
         isLoading: false,
       });
     }
   },
 
-  clonePlaybook: async (
-    templateId: string,
-    newName?: string,
-  ): Promise<ClonedPlaybook> => {
+  clonePlaybook: async (templateId: string, newName?: string): Promise<ClonedPlaybook> => {
     const { apiBaseUrl } = get();
 
     if (!apiBaseUrl) {
-      throw new Error("API configuration error");
+      throw new Error('API configuration error');
     }
 
     set({ isCloning: true, cloneError: null });
 
     try {
       const url = `${apiBaseUrl}/api/ai/playbooks/${templateId}/clone`;
-      const body = newName ? JSON.stringify({ newName }) : "{}";
+      const body = newName ? JSON.stringify({ newName }) : '{}';
 
       const response = await fetchWithBearerAuth(url, {
-        method: "POST",
+        method: 'POST',
         body,
       });
 
@@ -186,8 +174,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         description: clonedPlaybook.description,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to clone playbook";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to clone playbook';
       set({ cloneError: errorMessage, isCloning: false });
       throw new Error(errorMessage);
     }

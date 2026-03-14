@@ -10,16 +10,9 @@
  * Standards: ADR-012 (shared component library)
  */
 
-import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
-  Tooltip,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { makeStyles, tokens, Toolbar, ToolbarButton, ToolbarDivider, Tooltip } from '@fluentui/react-components';
 import {
   TextBoldRegular,
   TextItalicRegular,
@@ -33,9 +26,9 @@ import {
   TextNumberListLtrRegular,
   ArrowUndoRegular,
   ArrowRedoRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   $getSelection,
   $isRangeSelection,
@@ -46,21 +39,17 @@ import {
   REDO_COMMAND,
   UNDO_COMMAND,
   SELECTION_CHANGE_COMMAND,
-} from "lexical";
-import {
-  $isHeadingNode,
-  $createHeadingNode,
-  HeadingTagType,
-} from "@lexical/rich-text";
+} from 'lexical';
+import { $isHeadingNode, $createHeadingNode, HeadingTagType } from '@lexical/rich-text';
 import {
   INSERT_ORDERED_LIST_COMMAND,
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
   $isListNode,
   ListNode,
-} from "@lexical/list";
-import { $setBlocksType } from "@lexical/selection";
-import { $getNearestNodeOfType } from "@lexical/utils";
+} from '@lexical/list';
+import { $setBlocksType } from '@lexical/selection';
+import { $getNearestNodeOfType } from '@lexical/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -70,7 +59,7 @@ interface ToolbarPluginProps {
   isDarkMode?: boolean;
 }
 
-type BlockType = "paragraph" | "h1" | "h2" | "h3" | "quote" | "ul" | "ol";
+type BlockType = 'paragraph' | 'h1' | 'h2' | 'h3' | 'quote' | 'ul' | 'ol';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -80,9 +69,9 @@ const useStyles = makeStyles({
   toolbar: {
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    padding: "4px 8px",
-    flexWrap: "wrap",
-    gap: "2px",
+    padding: '4px 8px',
+    flexWrap: 'wrap',
+    gap: '2px',
   },
   toolbarDark: {
     backgroundColor: tokens.colorNeutralBackground4,
@@ -96,9 +85,7 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ToolbarPlugin({
-  isDarkMode = false,
-}: ToolbarPluginProps): React.ReactElement {
+export function ToolbarPlugin({ isDarkMode = false }: ToolbarPluginProps): React.ReactElement {
   const [editor] = useLexicalComposerContext();
   const styles = useStyles();
 
@@ -107,7 +94,7 @@ export function ToolbarPlugin({
   const [isItalic, setIsItalic] = useState(false);
   const [isUnderline, setIsUnderline] = useState(false);
   const [isStrikethrough, setIsStrikethrough] = useState(false);
-  const [blockType, setBlockType] = useState<BlockType>("paragraph");
+  const [blockType, setBlockType] = useState<BlockType>('paragraph');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -116,37 +103,30 @@ export function ToolbarPlugin({
     const selection = $getSelection();
     if ($isRangeSelection(selection)) {
       // Text formatting
-      setIsBold(selection.hasFormat("bold"));
-      setIsItalic(selection.hasFormat("italic"));
-      setIsUnderline(selection.hasFormat("underline"));
-      setIsStrikethrough(selection.hasFormat("strikethrough"));
+      setIsBold(selection.hasFormat('bold'));
+      setIsItalic(selection.hasFormat('italic'));
+      setIsUnderline(selection.hasFormat('underline'));
+      setIsStrikethrough(selection.hasFormat('strikethrough'));
 
       // Block type
       const anchorNode = selection.anchor.getNode();
-      const element =
-        anchorNode.getKey() === "root"
-          ? anchorNode
-          : anchorNode.getTopLevelElementOrThrow();
+      const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
       const elementKey = element.getKey();
       const elementDOM = editor.getElementByKey(elementKey);
 
       if (elementDOM !== null) {
         if ($isListNode(element)) {
           const parentList = $getNearestNodeOfType(anchorNode, ListNode);
-          const type = parentList
-            ? parentList.getListType()
-            : element.getListType();
-          setBlockType(type === "number" ? "ol" : "ul");
+          const type = parentList ? parentList.getListType() : element.getListType();
+          setBlockType(type === 'number' ? 'ol' : 'ul');
         } else {
-          const type = $isHeadingNode(element)
-            ? element.getTag()
-            : element.getType();
-          if (type === "h1" || type === "h2" || type === "h3") {
+          const type = $isHeadingNode(element) ? element.getTag() : element.getType();
+          if (type === 'h1' || type === 'h2' || type === 'h3') {
             setBlockType(type);
-          } else if (type === "quote") {
-            setBlockType("quote");
+          } else if (type === 'quote') {
+            setBlockType('quote');
           } else {
-            setBlockType("paragraph");
+            setBlockType('paragraph');
           }
         }
       }
@@ -161,47 +141,47 @@ export function ToolbarPlugin({
         updateToolbar();
         return false;
       },
-      COMMAND_PRIORITY_CRITICAL,
+      COMMAND_PRIORITY_CRITICAL
     );
   }, [editor, updateToolbar]);
 
   useEffect(() => {
     return editor.registerCommand(
       CAN_UNDO_COMMAND,
-      (payload) => {
+      payload => {
         setCanUndo(payload);
         return false;
       },
-      COMMAND_PRIORITY_CRITICAL,
+      COMMAND_PRIORITY_CRITICAL
     );
   }, [editor]);
 
   useEffect(() => {
     return editor.registerCommand(
       CAN_REDO_COMMAND,
-      (payload) => {
+      payload => {
         setCanRedo(payload);
         return false;
       },
-      COMMAND_PRIORITY_CRITICAL,
+      COMMAND_PRIORITY_CRITICAL
     );
   }, [editor]);
 
   // Format handlers
   const formatBold = () => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold");
+    editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold');
   };
 
   const formatItalic = () => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, "italic");
+    editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic');
   };
 
   const formatUnderline = () => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, "underline");
+    editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline');
   };
 
   const formatStrikethrough = () => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, "strikethrough");
+    editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough');
   };
 
   const formatHeading = (headingType: HeadingTagType) => {
@@ -214,7 +194,7 @@ export function ToolbarPlugin({
   };
 
   const formatBulletList = () => {
-    if (blockType !== "ul") {
+    if (blockType !== 'ul') {
       editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined);
     } else {
       editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
@@ -222,7 +202,7 @@ export function ToolbarPlugin({
   };
 
   const formatNumberedList = () => {
-    if (blockType !== "ol") {
+    if (blockType !== 'ol') {
       editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined);
     } else {
       editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
@@ -237,28 +217,16 @@ export function ToolbarPlugin({
     editor.dispatchCommand(REDO_COMMAND, undefined);
   };
 
-  const toolbarClass = isDarkMode
-    ? `${styles.toolbar} ${styles.toolbarDark}`
-    : styles.toolbar;
+  const toolbarClass = isDarkMode ? `${styles.toolbar} ${styles.toolbarDark}` : styles.toolbar;
 
   return (
     <Toolbar className={toolbarClass} size="small">
       {/* Undo/Redo */}
       <Tooltip content="Undo (Ctrl+Z)" relationship="label">
-        <ToolbarButton
-          icon={<ArrowUndoRegular />}
-          onClick={undo}
-          disabled={!canUndo}
-          aria-label="Undo"
-        />
+        <ToolbarButton icon={<ArrowUndoRegular />} onClick={undo} disabled={!canUndo} aria-label="Undo" />
       </Tooltip>
       <Tooltip content="Redo (Ctrl+Y)" relationship="label">
-        <ToolbarButton
-          icon={<ArrowRedoRegular />}
-          onClick={redo}
-          disabled={!canRedo}
-          aria-label="Redo"
-        />
+        <ToolbarButton icon={<ArrowRedoRegular />} onClick={redo} disabled={!canRedo} aria-label="Redo" />
       </Tooltip>
 
       <ToolbarDivider />
@@ -307,28 +275,28 @@ export function ToolbarPlugin({
       <Tooltip content="Heading 1" relationship="label">
         <ToolbarButton
           icon={<TextHeader1Regular />}
-          onClick={() => formatHeading("h1")}
-          className={blockType === "h1" ? styles.buttonActive : undefined}
+          onClick={() => formatHeading('h1')}
+          className={blockType === 'h1' ? styles.buttonActive : undefined}
           aria-label="Heading 1"
-          aria-pressed={blockType === "h1"}
+          aria-pressed={blockType === 'h1'}
         />
       </Tooltip>
       <Tooltip content="Heading 2" relationship="label">
         <ToolbarButton
           icon={<TextHeader2Regular />}
-          onClick={() => formatHeading("h2")}
-          className={blockType === "h2" ? styles.buttonActive : undefined}
+          onClick={() => formatHeading('h2')}
+          className={blockType === 'h2' ? styles.buttonActive : undefined}
           aria-label="Heading 2"
-          aria-pressed={blockType === "h2"}
+          aria-pressed={blockType === 'h2'}
         />
       </Tooltip>
       <Tooltip content="Heading 3" relationship="label">
         <ToolbarButton
           icon={<TextHeader3Regular />}
-          onClick={() => formatHeading("h3")}
-          className={blockType === "h3" ? styles.buttonActive : undefined}
+          onClick={() => formatHeading('h3')}
+          className={blockType === 'h3' ? styles.buttonActive : undefined}
           aria-label="Heading 3"
-          aria-pressed={blockType === "h3"}
+          aria-pressed={blockType === 'h3'}
         />
       </Tooltip>
 
@@ -339,18 +307,18 @@ export function ToolbarPlugin({
         <ToolbarButton
           icon={<TextBulletListRegular />}
           onClick={formatBulletList}
-          className={blockType === "ul" ? styles.buttonActive : undefined}
+          className={blockType === 'ul' ? styles.buttonActive : undefined}
           aria-label="Bullet List"
-          aria-pressed={blockType === "ul"}
+          aria-pressed={blockType === 'ul'}
         />
       </Tooltip>
       <Tooltip content="Numbered List" relationship="label">
         <ToolbarButton
           icon={<TextNumberListLtrRegular />}
           onClick={formatNumberedList}
-          className={blockType === "ol" ? styles.buttonActive : undefined}
+          className={blockType === 'ol' ? styles.buttonActive : undefined}
           aria-label="Numbered List"
-          aria-pressed={blockType === "ol"}
+          aria-pressed={blockType === 'ol'}
         />
       </Tooltip>
     </Toolbar>

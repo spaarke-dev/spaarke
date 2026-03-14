@@ -30,7 +30,7 @@
  *   - No domain-specific imports
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -44,21 +44,18 @@ import {
   Spinner,
   makeStyles,
   tokens,
-} from "@fluentui/react-components";
-import { Dismiss24Regular } from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Dismiss24Regular } from '@fluentui/react-icons';
 
-import { WizardStepper } from "./WizardStepper";
-import { WizardSuccessScreen } from "./WizardSuccessScreen";
-import {
-  wizardShellReducer,
-  buildInitialShellState,
-} from "./wizardShellReducer";
+import { WizardStepper } from './WizardStepper';
+import { WizardSuccessScreen } from './WizardSuccessScreen';
+import { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
 import type {
   IWizardShellProps,
   IWizardShellHandle,
   IWizardStepConfig,
   IWizardSuccessConfig,
-} from "./wizardShellTypes";
+} from './wizardShellTypes';
 
 // ---------------------------------------------------------------------------
 // Styles (generic shell layout only)
@@ -67,42 +64,42 @@ import type {
 const useStyles = makeStyles({
   // Override DialogSurface — landscape orientation, resizable
   surface: {
-    width: "1100px",
-    maxWidth: "95vw",
-    maxHeight: "80vh",
-    padding: "0px",
-    resize: "both",
-    overflow: "auto",
+    width: '1100px',
+    maxWidth: '95vw',
+    maxHeight: '80vh',
+    padding: '0px',
+    resize: 'both',
+    overflow: 'auto',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   // DialogBody: remove default padding so we control layout entirely
   body: {
-    padding: "0px",
-    display: "flex",
-    flexDirection: "column",
-    height: "70vh",
-    overflow: "hidden",
+    padding: '0px',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '70vh',
+    overflow: 'hidden',
   },
   // Embedded mode: fills the host container (e.g., Dataverse dialog iframe)
   embeddedRoot: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Custom title bar (replaces DialogTitle default rendering)
   titleBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalL,
     paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalL,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
@@ -114,17 +111,17 @@ const useStyles = makeStyles({
   },
   // Main body: sidebar + content side by side
   mainArea: {
-    display: "flex",
-    flex: "1 1 auto",
-    overflow: "hidden",
+    display: 'flex',
+    flex: '1 1 auto',
+    overflow: 'hidden',
   },
   // Content area (right of sidebar)
   contentArea: {
-    flex: "1 1 auto",
-    display: "flex",
-    flexDirection: "column",
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    overflowY: "auto",
+    overflowY: 'auto',
     paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXL,
@@ -132,32 +129,32 @@ const useStyles = makeStyles({
   },
   // Footer / dialog actions
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalL,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground1,
     flexShrink: 0,
   },
   footerLeft: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
   footerRight: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    alignItems: "center",
+    alignItems: 'center',
   },
   // Progress indicator row (spinner + label)
   progressRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground3,
   },
@@ -167,10 +164,7 @@ const useStyles = makeStyles({
 // WizardShell (exported — forwardRef)
 // ---------------------------------------------------------------------------
 
-export const WizardShell = React.forwardRef<
-  IWizardShellHandle,
-  IWizardShellProps
->((props, ref) => {
+export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProps>((props, ref) => {
   const {
     open,
     embedded = false,
@@ -180,18 +174,14 @@ export const WizardShell = React.forwardRef<
     steps: stepConfigs,
     onClose,
     onFinish,
-    finishingLabel = "Processing\u2026",
-    finishLabel = "Finish",
+    finishingLabel = 'Processing\u2026',
+    finishLabel = 'Finish',
   } = props;
 
   const styles = useStyles();
 
   // ── Navigation state via reducer ───────────────────────────────────────
-  const [shellState, dispatch] = React.useReducer(
-    wizardShellReducer,
-    stepConfigs,
-    buildInitialShellState,
-  );
+  const [shellState, dispatch] = React.useReducer(wizardShellReducer, stepConfigs, buildInitialShellState);
 
   // ── Step config lookup map ─────────────────────────────────────────────
   const configMapRef = React.useRef<Map<string, IWizardStepConfig>>(new Map());
@@ -202,8 +192,7 @@ export const WizardShell = React.forwardRef<
   // ── Finishing flow state ───────────────────────────────────────────────
   const [isFinishing, setIsFinishing] = React.useState(false);
   const [finishError, setFinishError] = React.useState<string | null>(null);
-  const [successConfig, setSuccessConfig] =
-    React.useState<IWizardSuccessConfig | null>(null);
+  const [successConfig, setSuccessConfig] = React.useState<IWizardSuccessConfig | null>(null);
 
   // ── Imperative handle ──────────────────────────────────────────────────
   React.useImperativeHandle(
@@ -214,7 +203,7 @@ export const WizardShell = React.forwardRef<
         configMapRef.current.set(config.id, config);
         // Dispatch to reducer to add the step to navigation state
         dispatch({
-          type: "ADD_DYNAMIC_STEP",
+          type: 'ADD_DYNAMIC_STEP',
           config,
           canonicalOrder,
         });
@@ -225,7 +214,7 @@ export const WizardShell = React.forwardRef<
         configMapRef.current.delete(stepId);
         // Dispatch to reducer to remove the step from navigation state
         dispatch({
-          type: "REMOVE_DYNAMIC_STEP",
+          type: 'REMOVE_DYNAMIC_STEP',
           stepId,
         });
       },
@@ -238,7 +227,7 @@ export const WizardShell = React.forwardRef<
         return shellState;
       },
     }),
-    [shellState, forceRender],
+    [shellState, forceRender]
   );
 
   // ── Reset on open (false -> true) ──────────────────────────────────────
@@ -249,7 +238,7 @@ export const WizardShell = React.forwardRef<
 
     if (open && !wasOpen) {
       // Reset reducer to initial state from current step configs
-      dispatch({ type: "GO_TO_STEP", stepIndex: 0 });
+      dispatch({ type: 'GO_TO_STEP', stepIndex: 0 });
 
       // Clear finishing state
       setSuccessConfig(null);
@@ -258,7 +247,7 @@ export const WizardShell = React.forwardRef<
 
       // Rebuild config map from base step configs
       const newMap = new Map<string, IWizardStepConfig>();
-      stepConfigs.forEach((config) => {
+      stepConfigs.forEach(config => {
         newMap.set(config.id, config);
       });
       configMapRef.current = newMap;
@@ -270,19 +259,16 @@ export const WizardShell = React.forwardRef<
   // configs immediately. This fixes the stale-closure bug where AI pre-fill
   // updates form validity but the Next button stays disabled until user
   // interaction triggers a re-render.
-  stepConfigs.forEach((config) => {
+  stepConfigs.forEach(config => {
     configMapRef.current.set(config.id, config);
   });
 
   // ── Derived values ────────────────────────────────────────────────────
   const currentStepDef = shellState.steps[shellState.currentStepIndex];
-  const currentConfig = currentStepDef
-    ? configMapRef.current.get(currentStepDef.id)
-    : undefined;
+  const currentConfig = currentStepDef ? configMapRef.current.get(currentStepDef.id) : undefined;
 
   const isFirstStep = shellState.currentStepIndex === 0;
-  const isLastStep =
-    shellState.currentStepIndex === shellState.steps.length - 1;
+  const isLastStep = shellState.currentStepIndex === shellState.steps.length - 1;
 
   // Early finish: the current step config says we can finish early
   const isEarlyFinish = currentConfig?.isEarlyFinish?.() ?? false;
@@ -295,7 +281,7 @@ export const WizardShell = React.forwardRef<
   const primaryButtonLabel: string = (() => {
     if (isFinishing) return finishingLabel;
     if (showFinish) return finishLabel;
-    return "Next";
+    return 'Next';
   })();
 
   // ── Handle finish ─────────────────────────────────────────────────────
@@ -311,8 +297,7 @@ export const WizardShell = React.forwardRef<
         onClose();
       }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "An unknown error occurred.";
+      const message = err instanceof Error ? err.message : 'An unknown error occurred.';
       setFinishError(message);
     } finally {
       setIsFinishing(false);
@@ -324,18 +309,18 @@ export const WizardShell = React.forwardRef<
     if (showFinish) {
       void handleFinish();
     } else {
-      dispatch({ type: "NEXT_STEP" });
+      dispatch({ type: 'NEXT_STEP' });
     }
   }, [showFinish, handleFinish]);
 
   // ── Back button click ─────────────────────────────────────────────────
   const handleBack = React.useCallback(() => {
-    dispatch({ type: "PREV_STEP" });
+    dispatch({ type: 'PREV_STEP' });
   }, []);
 
   // ── Skip button click (advances without canAdvance check) ────────────
   const handleSkip = React.useCallback(() => {
-    dispatch({ type: "NEXT_STEP" });
+    dispatch({ type: 'NEXT_STEP' });
   }, []);
 
   // ── Build the imperative handle for renderContent ─────────────────────
@@ -346,7 +331,7 @@ export const WizardShell = React.forwardRef<
       addDynamicStep(config: IWizardStepConfig, canonicalOrder?: string[]) {
         configMapRef.current.set(config.id, config);
         dispatch({
-          type: "ADD_DYNAMIC_STEP",
+          type: 'ADD_DYNAMIC_STEP',
           config,
           canonicalOrder,
         });
@@ -354,7 +339,7 @@ export const WizardShell = React.forwardRef<
       removeDynamicStep(stepId: string) {
         configMapRef.current.delete(stepId);
         dispatch({
-          type: "REMOVE_DYNAMIC_STEP",
+          type: 'REMOVE_DYNAMIC_STEP',
           stepId,
         });
       },
@@ -362,7 +347,7 @@ export const WizardShell = React.forwardRef<
         return shellState;
       },
     }),
-    [shellState],
+    [shellState]
   );
 
   // ── Shared inner content (used by both dialog and embedded modes) ─────
@@ -372,12 +357,7 @@ export const WizardShell = React.forwardRef<
       {/* Custom title bar with close button (hidden when host provides its own chrome) */}
       {!hideTitle && (
         <div className={styles.titleBar}>
-          <Text
-            as="h1"
-            size={500}
-            weight="semibold"
-            className={styles.titleText}
-          >
+          <Text as="h1" size={500} weight="semibold" className={styles.titleText}>
             {title}
           </Text>
           <Button
@@ -404,11 +384,7 @@ export const WizardShell = React.forwardRef<
           )}
 
           {/* Success screen replaces step content */}
-          {successConfig ? (
-            <WizardSuccessScreen config={successConfig} />
-          ) : (
-            currentConfig?.renderContent(handle)
-          )}
+          {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
         </div>
       </div>
 
@@ -416,11 +392,7 @@ export const WizardShell = React.forwardRef<
       {!successConfig && (
         <div className={styles.footer}>
           <div className={styles.footerLeft}>
-            <Button
-              appearance="secondary"
-              onClick={onClose}
-              disabled={isFinishing}
-            >
+            <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
               Cancel
             </Button>
           </div>
@@ -439,11 +411,7 @@ export const WizardShell = React.forwardRef<
 
             {/* Back button — hidden on step 0, disabled when finishing */}
             {!isFirstStep && (
-              <Button
-                appearance="secondary"
-                onClick={handleBack}
-                disabled={isFinishing}
-              >
+              <Button appearance="secondary" onClick={handleBack} disabled={isFinishing}>
                 Back
               </Button>
             )}
@@ -456,11 +424,7 @@ export const WizardShell = React.forwardRef<
             )}
 
             {/* Next / Finish */}
-            <Button
-              appearance="primary"
-              onClick={handlePrimaryButtonClick}
-              disabled={!canAdvance || isFinishing}
-            >
+            <Button appearance="primary" onClick={handlePrimaryButtonClick} disabled={!canAdvance || isFinishing}>
               {primaryButtonLabel}
             </Button>
           </div>
@@ -497,4 +461,4 @@ export const WizardShell = React.forwardRef<
   );
 });
 
-WizardShell.displayName = "WizardShell";
+WizardShell.displayName = 'WizardShell';

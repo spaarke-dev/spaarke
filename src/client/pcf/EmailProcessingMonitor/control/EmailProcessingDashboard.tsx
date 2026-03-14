@@ -10,8 +10,8 @@
  * - Dark mode support
  */
 
-import * as React from "react";
-import { useState, useEffect, useCallback, useRef } from "react";
+import * as React from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FluentProvider,
   webLightTheme,
@@ -29,7 +29,7 @@ import {
   tokens,
   makeStyles,
   shorthands,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 // Using inline SVG icons to reduce bundle size (replaces @fluentui/react-icons)
 import {
   ArrowSync24Regular,
@@ -39,9 +39,9 @@ import {
   DocumentArrowRight24Regular,
   Filter24Regular,
   Clock24Regular,
-} from "./icons";
-import { authenticatedFetch } from "@spaarke/auth";
-import { EmailProcessingStats } from "./types";
+} from './icons';
+import { authenticatedFetch } from '@spaarke/auth';
+import { EmailProcessingStats } from './types';
 
 // ============================================================================
 // Styles using Fluent UI makeStyles (v9 pattern)
@@ -49,48 +49,48 @@ import { EmailProcessingStats } from "./types";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    ...shorthands.padding("16px"),
-    boxSizing: "border-box",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    ...shorthands.padding('16px'),
+    boxSizing: 'border-box',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "16px",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '16px',
   },
   headerTitle: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
   },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-    ...shorthands.gap("16px"),
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    ...shorthands.gap('16px'),
     flexGrow: 1,
-    overflowY: "auto",
+    overflowY: 'auto',
   },
   card: {
-    minHeight: "120px",
+    minHeight: '120px',
   },
   cardContent: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("8px"),
-    ...shorthands.padding("0", "16px", "16px", "16px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('8px'),
+    ...shorthands.padding('0', '16px', '16px', '16px'),
   },
   metricRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   metricValue: {
-    fontWeight: "bold",
-    fontSize: "24px",
+    fontWeight: 'bold',
+    fontSize: '24px',
   },
   metricLabel: {
     color: tokens.colorNeutralForeground3,
@@ -105,43 +105,43 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: "16px",
-    paddingTop: "8px",
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '16px',
+    paddingTop: '8px',
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
   },
   footerText: {
     color: tokens.colorNeutralForeground3,
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    ...shorthands.gap("16px"),
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    ...shorthands.gap('16px'),
   },
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    ...shorthands.gap("16px"),
-    ...shorthands.padding("24px"),
-    textAlign: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    ...shorthands.gap('16px'),
+    ...shorthands.padding('24px'),
+    textAlign: 'center',
   },
   smallMetrics: {
-    display: "flex",
-    ...shorthands.gap("16px"),
-    flexWrap: "wrap",
+    display: 'flex',
+    ...shorthands.gap('16px'),
+    flexWrap: 'wrap',
   },
   smallMetric: {
-    display: "flex",
-    alignItems: "baseline",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    alignItems: 'baseline',
+    ...shorthands.gap('4px'),
   },
 });
 
@@ -163,9 +163,13 @@ interface EmailProcessingDashboardProps {
 // Component
 // ============================================================================
 
-export const EmailProcessingDashboard: React.FC<
-  EmailProcessingDashboardProps
-> = ({ bffApiUrl, isDarkTheme, refreshIntervalSeconds, version, onError }) => {
+export const EmailProcessingDashboard: React.FC<EmailProcessingDashboardProps> = ({
+  bffApiUrl,
+  isDarkTheme,
+  refreshIntervalSeconds,
+  version,
+  onError,
+}) => {
   const styles = useStyles();
   const [stats, setStats] = useState<EmailProcessingStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -176,23 +180,19 @@ export const EmailProcessingDashboard: React.FC<
   // Fetch stats from BFF API using @spaarke/auth authenticatedFetch
   const fetchStats = useCallback(async () => {
     try {
-      const response = await authenticatedFetch(
-        `${bffApiUrl}/api/admin/email-processing/stats`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
+      const response = await authenticatedFetch(`${bffApiUrl}/api/admin/email-processing/stats`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      );
+      });
 
       const data = (await response.json()) as EmailProcessingStats;
       setStats(data);
       setLastRefresh(new Date());
       setError(null);
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to fetch statistics";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch statistics';
       setError(errorMessage);
       onError?.(errorMessage);
     } finally {
@@ -206,10 +206,7 @@ export const EmailProcessingDashboard: React.FC<
 
     // Set up auto-refresh if interval > 0
     if (refreshIntervalSeconds > 0) {
-      refreshTimerRef.current = window.setInterval(
-        fetchStats,
-        refreshIntervalSeconds * 1000,
-      );
+      refreshTimerRef.current = window.setInterval(fetchStats, refreshIntervalSeconds * 1000);
     }
 
     return () => {
@@ -250,7 +247,7 @@ export const EmailProcessingDashboard: React.FC<
 
   // Format timestamp
   const formatTime = (date: Date | null): string => {
-    if (!date) return "Never";
+    if (!date) return 'Never';
     return date.toLocaleTimeString();
   };
 
@@ -295,13 +292,8 @@ export const EmailProcessingDashboard: React.FC<
               </Badge>
             )}
           </div>
-          <Button
-            appearance="subtle"
-            icon={<ArrowSync24Regular />}
-            onClick={handleRefresh}
-            disabled={loading}
-          >
-            {loading ? "Refreshing..." : "Refresh"}
+          <Button appearance="subtle" icon={<ArrowSync24Regular />} onClick={handleRefresh} disabled={loading}>
+            {loading ? 'Refreshing...' : 'Refresh'}
           </Button>
         </div>
 
@@ -318,9 +310,7 @@ export const EmailProcessingDashboard: React.FC<
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Total Requests</Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.conversion.totalRequests)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.conversion.totalRequests)}</Text>
                 </div>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Success Rate</Text>
@@ -339,22 +329,16 @@ export const EmailProcessingDashboard: React.FC<
                 <Divider />
                 <div className={styles.smallMetrics}>
                   <div className={styles.smallMetric}>
-                    <CheckmarkCircle24Regular
-                      color={tokens.colorPaletteGreenForeground1}
-                    />
+                    <CheckmarkCircle24Regular color={tokens.colorPaletteGreenForeground1} />
                     <Body1>{formatNumber(stats.conversion.successes)}</Body1>
                   </div>
                   <div className={styles.smallMetric}>
-                    <DismissCircle24Regular
-                      color={tokens.colorPaletteRedForeground1}
-                    />
+                    <DismissCircle24Regular color={tokens.colorPaletteRedForeground1} />
                     <Body1>{formatNumber(stats.conversion.failures)}</Body1>
                   </div>
                   <div className={styles.smallMetric}>
                     <Clock24Regular />
-                    <Body1>
-                      {formatDuration(stats.conversion.averageDurationMs)}
-                    </Body1>
+                    <Body1>{formatDuration(stats.conversion.averageDurationMs)}</Body1>
                   </div>
                 </div>
               </div>
@@ -369,9 +353,7 @@ export const EmailProcessingDashboard: React.FC<
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Received</Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.webhook.totalReceived)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.webhook.totalReceived)}</Text>
                 </div>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Accept Rate</Text>
@@ -410,9 +392,7 @@ export const EmailProcessingDashboard: React.FC<
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Total Processed</Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.job.totalProcessed)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.job.totalProcessed)}</Text>
                 </div>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Success Rate</Text>
@@ -456,15 +436,11 @@ export const EmailProcessingDashboard: React.FC<
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Evaluations</Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.filter.totalEvaluations)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.filter.totalEvaluations)}</Text>
                 </div>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Match Rate</Text>
-                  <Text className={styles.metricValue}>
-                    {formatPercent(stats.filter.matchRate)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatPercent(stats.filter.matchRate)}</Text>
                 </div>
                 <Divider />
                 <div className={styles.smallMetrics}>
@@ -489,9 +465,7 @@ export const EmailProcessingDashboard: React.FC<
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Total Runs</Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.polling.totalRuns)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.polling.totalRuns)}</Text>
                 </div>
                 <Divider />
                 <div className={styles.smallMetrics}>
@@ -515,18 +489,12 @@ export const EmailProcessingDashboard: React.FC<
               />
               <div className={styles.cardContent}>
                 <div className={styles.metricRow}>
-                  <Text className={styles.metricLabel}>
-                    Attachments Processed
-                  </Text>
-                  <Text className={styles.metricValue}>
-                    {formatNumber(stats.file.totalAttachmentsProcessed)}
-                  </Text>
+                  <Text className={styles.metricLabel}>Attachments Processed</Text>
+                  <Text className={styles.metricValue}>{formatNumber(stats.file.totalAttachmentsProcessed)}</Text>
                 </div>
                 <div className={styles.metricRow}>
                   <Text className={styles.metricLabel}>Avg EML Size</Text>
-                  <Text className={styles.metricValue}>
-                    {formatBytes(stats.file.averageEmlSizeBytes)}
-                  </Text>
+                  <Text className={styles.metricValue}>{formatBytes(stats.file.averageEmlSizeBytes)}</Text>
                 </div>
               </div>
             </Card>
@@ -537,8 +505,7 @@ export const EmailProcessingDashboard: React.FC<
         <div className={styles.footer}>
           <Caption1 className={styles.footerText}>
             Last refresh: {formatTime(lastRefresh)}
-            {refreshIntervalSeconds > 0 &&
-              ` (Auto-refresh: ${refreshIntervalSeconds}s)`}
+            {refreshIntervalSeconds > 0 && ` (Auto-refresh: ${refreshIntervalSeconds}s)`}
           </Caption1>
           <Caption1 className={styles.footerText}>v{version}</Caption1>
         </div>

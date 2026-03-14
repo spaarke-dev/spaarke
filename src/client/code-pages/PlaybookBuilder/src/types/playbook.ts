@@ -14,16 +14,16 @@
  * String values match the canvas store type identifiers.
  */
 export enum PlaybookNodeType {
-  Start = "start",
-  AiAnalysis = "aiAnalysis",
-  AiCompletion = "aiCompletion",
-  Condition = "condition",
-  DeliverOutput = "deliverOutput",
-  DeliverToIndex = "deliverToIndex",
-  UpdateRecord = "updateRecord",
-  CreateTask = "createTask",
-  SendEmail = "sendEmail",
-  Wait = "wait",
+  Start = 'start',
+  AiAnalysis = 'aiAnalysis',
+  AiCompletion = 'aiCompletion',
+  Condition = 'condition',
+  DeliverOutput = 'deliverOutput',
+  DeliverToIndex = 'deliverToIndex',
+  UpdateRecord = 'updateRecord',
+  CreateTask = 'createTask',
+  SendEmail = 'sendEmail',
+  Wait = 'wait',
 }
 
 // ---------------------------------------------------------------------------
@@ -49,19 +49,18 @@ export enum DataverseNodeType {
 /**
  * Map canvas PlaybookNodeType → Dataverse sprk_nodetype (coarse category).
  */
-export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> =
-  {
-    [PlaybookNodeType.Start]: DataverseNodeType.Control,
-    [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
-    [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
-    [PlaybookNodeType.Condition]: DataverseNodeType.Control,
-    [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
-    [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
-    [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.Wait]: DataverseNodeType.Control,
-  };
+export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = {
+  [PlaybookNodeType.Start]: DataverseNodeType.Control,
+  [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
+  [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
+  [PlaybookNodeType.Condition]: DataverseNodeType.Control,
+  [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
+  [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
+  [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.Wait]: DataverseNodeType.Control,
+};
 
 // ---------------------------------------------------------------------------
 // ActionType — Fine-grained executor dispatch (matches server enum)
@@ -156,7 +155,7 @@ export interface PlaybookNodeData {
   conditionJson?: string;
 
   // Deliver Output config
-  deliveryType?: "markdown" | "html" | "text" | "json";
+  deliveryType?: 'markdown' | 'html' | 'text' | 'json';
   template?: string;
   includeMetadata?: boolean;
   includeSourceCitations?: boolean;
@@ -164,7 +163,7 @@ export interface PlaybookNodeData {
 
   // Deliver to Index config
   indexName?: string;
-  indexSource?: "document" | "content";
+  indexSource?: 'document' | 'content';
   indexContentVariable?: string;
   indexParentEntityType?: string;
   indexParentEntityId?: string;
@@ -193,7 +192,7 @@ export interface PlaybookNodeData {
   maxTokens?: number;
 
   // Wait config
-  waitType?: "duration" | "until" | "condition";
+  waitType?: 'duration' | 'until' | 'condition';
   waitDurationHours?: number;
   waitUntilDateTime?: string;
 
@@ -214,7 +213,7 @@ export interface NodeTypeInfo {
   label: string;
   description: string;
   icon: string;
-  category: "ai" | "logic" | "output" | "action";
+  category: 'ai' | 'logic' | 'output' | 'action';
 }
 
 /**
@@ -223,58 +222,58 @@ export interface NodeTypeInfo {
 export const NODE_TYPE_INFO: NodeTypeInfo[] = [
   {
     type: PlaybookNodeType.AiAnalysis,
-    label: "AI Analysis",
-    description: "Run AI analysis with skills, knowledge, and tools",
-    icon: "BrainCircuit",
-    category: "ai",
+    label: 'AI Analysis',
+    description: 'Run AI analysis with skills, knowledge, and tools',
+    icon: 'BrainCircuit',
+    category: 'ai',
   },
   {
     type: PlaybookNodeType.AiCompletion,
-    label: "AI Completion",
-    description: "Generate text with a system prompt and template",
-    icon: "Sparkle",
-    category: "ai",
+    label: 'AI Completion',
+    description: 'Generate text with a system prompt and template',
+    icon: 'Sparkle',
+    category: 'ai',
   },
   {
     type: PlaybookNodeType.Condition,
-    label: "Condition",
-    description: "Branch based on a conditional expression",
-    icon: "ArrowSplit",
-    category: "logic",
+    label: 'Condition',
+    description: 'Branch based on a conditional expression',
+    icon: 'ArrowSplit',
+    category: 'logic',
   },
   {
     type: PlaybookNodeType.DeliverOutput,
-    label: "Deliver Output",
-    description: "Format and deliver results as markdown, HTML, or text",
-    icon: "DocumentText",
-    category: "output",
+    label: 'Deliver Output',
+    description: 'Format and deliver results as markdown, HTML, or text',
+    icon: 'DocumentText',
+    category: 'output',
   },
   {
     type: PlaybookNodeType.DeliverToIndex,
-    label: "Deliver to Index",
-    description: "Queue document for RAG semantic indexing",
-    icon: "DatabaseSearch",
-    category: "output",
+    label: 'Deliver to Index',
+    description: 'Queue document for RAG semantic indexing',
+    icon: 'DatabaseSearch',
+    category: 'output',
   },
   {
     type: PlaybookNodeType.CreateTask,
-    label: "Create Task",
-    description: "Create a Dataverse task record",
-    icon: "TaskListSquare",
-    category: "action",
+    label: 'Create Task',
+    description: 'Create a Dataverse task record',
+    icon: 'TaskListSquare',
+    category: 'action',
   },
   {
     type: PlaybookNodeType.SendEmail,
-    label: "Send Email",
-    description: "Send an email with template variable support",
-    icon: "Mail",
-    category: "action",
+    label: 'Send Email',
+    description: 'Send an email with template variable support',
+    icon: 'Mail',
+    category: 'action',
   },
   {
     type: PlaybookNodeType.Wait,
-    label: "Wait",
-    description: "Pause execution for a duration or until a condition",
-    icon: "Clock",
-    category: "logic",
+    label: 'Wait',
+    description: 'Pause execution for a duration or until a condition',
+    icon: 'Clock',
+    category: 'logic',
   },
 ];

@@ -1,13 +1,13 @@
-import React from "react";
-import { makeStyles, tokens, TabList, Tab } from "@fluentui/react-components";
+import React from 'react';
+import { makeStyles, tokens, TabList, Tab } from '@fluentui/react-components';
 import {
   SaveRegular,
   // V1: Disabled icons - uncomment for future releases
   // ShareRegular,
   // ClockRegular,
   // DocumentSearchRegular,
-} from "@fluentui/react-icons";
-import type { HostType } from "./TaskPaneHeader";
+} from '@fluentui/react-icons';
+import type { HostType } from './TaskPaneHeader';
 
 /**
  * TaskPaneNavigation - Tab navigation for Office Add-in task pane.
@@ -26,8 +26,8 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   tabList: {
-    display: "flex",
-    justifyContent: "center",
+    display: 'flex',
+    justifyContent: 'center',
     paddingTop: tokens.spacingVerticalXS,
   },
   tabListCompact: {
@@ -38,7 +38,7 @@ const useStyles = makeStyles({
 /**
  * Available navigation tabs.
  */
-export type NavigationTab = "save" | "share" | "recent" | "search";
+export type NavigationTab = 'save' | 'share' | 'recent' | 'search';
 
 /**
  * Tab configuration.
@@ -57,10 +57,10 @@ interface TabConfig {
  */
 const TAB_CONFIGS: TabConfig[] = [
   {
-    value: "save",
-    label: "Save",
+    value: 'save',
+    label: 'Save',
     icon: <SaveRegular />,
-    availableFor: ["outlook", "word"],
+    availableFor: ['outlook', 'word'],
   },
   // V1: Disabled - uncomment for future releases
   // {
@@ -99,20 +99,16 @@ export interface TaskPaneNavigationProps {
 export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
   selectedTab,
   onTabChange,
-  hostType = "outlook",
+  hostType = 'outlook',
   compact = false,
   disabled = false,
 }) => {
   const styles = useStyles();
 
   // Filter tabs based on host type
-  const availableTabs = TAB_CONFIGS.filter((tab) =>
-    tab.availableFor.includes(hostType),
-  );
+  const availableTabs = TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
 
-  const tabListClassName = compact
-    ? `${styles.tabList} ${styles.tabListCompact}`
-    : styles.tabList;
+  const tabListClassName = compact ? `${styles.tabList} ${styles.tabListCompact}` : styles.tabList;
 
   return (
     <nav className={styles.navigation} aria-label="Task pane navigation">
@@ -121,15 +117,10 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
         selectedValue={selectedTab}
         onTabSelect={(_, data) => onTabChange(data.value as NavigationTab)}
         disabled={disabled}
-        size={compact ? "small" : "medium"}
+        size={compact ? 'small' : 'medium'}
       >
-        {availableTabs.map((tab) => (
-          <Tab
-            key={tab.value}
-            value={tab.value}
-            icon={tab.icon}
-            aria-label={tab.label}
-          >
+        {availableTabs.map(tab => (
+          <Tab key={tab.value} value={tab.value} icon={tab.icon} aria-label={tab.label}>
             {!compact && tab.label}
           </Tab>
         ))}
@@ -142,5 +133,5 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
  * Gets the default tab for a host type.
  */
 export function getDefaultTab(hostType: HostType): NavigationTab {
-  return "save";
+  return 'save';
 }

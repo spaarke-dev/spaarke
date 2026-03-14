@@ -49,7 +49,7 @@ export interface CustomCommand {
   errorMessage: string;
 
   /** Button appearance (primary, secondary, subtle) */
-  appearance?: "primary" | "secondary" | "subtle";
+  appearance?: 'primary' | 'secondary' | 'subtle';
 }
 
 /**
@@ -82,49 +82,49 @@ export interface GridConfiguration {
  */
 export const DEFAULT_GRID_CONFIG: GridConfiguration = {
   fieldMappings: {
-    hasFile: "sprk_hasfile",
-    fileName: "sprk_filename",
-    fileSize: "sprk_filesize",
-    mimeType: "sprk_mimetype",
-    graphItemId: "sprk_graphitemid",
-    graphDriveId: "sprk_graphdriveid",
+    hasFile: 'sprk_hasfile',
+    fileName: 'sprk_filename',
+    fileSize: 'sprk_filesize',
+    mimeType: 'sprk_mimetype',
+    graphItemId: 'sprk_graphitemid',
+    graphDriveId: 'sprk_graphdriveid',
   },
   customCommands: [
     {
-      id: "addFile",
-      label: "Add File",
-      icon: "Add24Regular",
-      enableRule: "selectedCount === 1 && !hasFile",
-      errorMessage: "Select a single document without a file",
-      appearance: "primary",
+      id: 'addFile',
+      label: 'Add File',
+      icon: 'Add24Regular',
+      enableRule: 'selectedCount === 1 && !hasFile',
+      errorMessage: 'Select a single document without a file',
+      appearance: 'primary',
     },
     {
-      id: "removeFile",
-      label: "Remove File",
-      icon: "Delete24Regular",
-      enableRule: "selectedCount === 1 && hasFile",
-      errorMessage: "Select a single document with a file",
-      appearance: "secondary",
+      id: 'removeFile',
+      label: 'Remove File',
+      icon: 'Delete24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
     },
     {
-      id: "updateFile",
-      label: "Update File",
-      icon: "ArrowUpload24Regular",
-      enableRule: "selectedCount === 1 && hasFile",
-      errorMessage: "Select a single document with a file",
-      appearance: "secondary",
+      id: 'updateFile',
+      label: 'Update File',
+      icon: 'ArrowUpload24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
     },
     {
-      id: "downloadFile",
-      label: "Download",
-      icon: "ArrowDownload24Regular",
-      enableRule: "selectedCount > 0 && (selectedCount > 1 || hasFile)",
-      errorMessage: "Select at least one document with a file",
-      appearance: "secondary",
+      id: 'downloadFile',
+      label: 'Download',
+      icon: 'ArrowDownload24Regular',
+      enableRule: 'selectedCount > 0 && (selectedCount > 1 || hasFile)',
+      errorMessage: 'Select at least one document with a file',
+      appearance: 'secondary',
     },
   ],
   sdapConfig: {
-    baseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
+    baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
     timeout: 300000, // 5 minutes
   },
 };
@@ -382,20 +382,20 @@ export const FILE_UPLOAD_LIMITS = {
 
   /** Dangerous file extensions (blocked for security) */
   DANGEROUS_EXTENSIONS: [
-    ".exe",
-    ".dll",
-    ".bat",
-    ".cmd",
-    ".ps1",
-    ".vbs",
-    ".js",
-    ".jar",
-    ".app",
-    ".msi",
-    ".scr",
-    ".com",
-    ".pif",
-    ".gadget",
-    ".sh",
+    '.exe',
+    '.dll',
+    '.bat',
+    '.cmd',
+    '.ps1',
+    '.vbs',
+    '.js',
+    '.jar',
+    '.app',
+    '.msi',
+    '.scr',
+    '.com',
+    '.pif',
+    '.gadget',
+    '.sh',
   ],
 } as const;

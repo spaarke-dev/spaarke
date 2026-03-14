@@ -10,11 +10,6 @@ export {
   type ScopeItem,
   type ScopeType,
   type OwnershipType,
-} from "./ScopeBrowser";
-export { ScopeList, type ScopeListProps } from "./ScopeList";
-export {
-  ScopeFormDialog,
-  type ScopeFormDialogProps,
-  type ScopeFormData,
-  type DialogMode,
-} from "./ScopeFormDialog";
+} from './ScopeBrowser';
+export { ScopeList, type ScopeListProps } from './ScopeList';
+export { ScopeFormDialog, type ScopeFormDialogProps, type ScopeFormData, type DialogMode } from './ScopeFormDialog';

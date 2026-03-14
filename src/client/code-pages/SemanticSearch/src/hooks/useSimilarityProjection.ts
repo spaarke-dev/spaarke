@@ -8,8 +8,8 @@
  * Returns raw node data and edges — no positions are computed here.
  */
 
-import { useMemo } from "react";
-import type { VisualizationColorBy } from "../types";
+import { useMemo } from 'react';
+import type { VisualizationColorBy } from '../types';
 import {
   type SearchResult,
   isDocumentResult,
@@ -18,7 +18,7 @@ import {
   getResultName,
   extractClusterKey,
   filterAndSortResults,
-} from "../utils/groupResults";
+} from '../utils/groupResults';
 
 // =============================================
 // Public types
@@ -56,15 +56,7 @@ const MAX_RESULTS = 100;
 const MIN_LINK_SIMILARITY = 0.35;
 
 /** Generic fallback category values that should NOT count as meaningful matches. */
-const GENERIC_CATEGORIES = new Set([
-  "Uncategorized",
-  "Document",
-  "Other",
-  "Unassigned",
-  "Unknown",
-  "Record",
-  "Matter",
-]);
+const GENERIC_CATEGORIES = new Set(['Uncategorized', 'Document', 'Other', 'Unassigned', 'Unknown', 'Record', 'Matter']);
 
 // =============================================
 // Helpers
@@ -85,11 +77,7 @@ function hasOverlap(a: string[] | undefined, b: string[] | undefined): boolean {
  * Compute pairwise metadata similarity between two results.
  * Returns a value in [0, ~1.1] — higher means more related.
  */
-function computePairSimilarity(
-  a: SearchResult,
-  b: SearchResult,
-  colorBy: VisualizationColorBy,
-): number {
+function computePairSimilarity(a: SearchResult, b: SearchResult, colorBy: VisualizationColorBy): number {
   let similarity = 0;
 
   // Same category: +0.4 (only for meaningful/specific categories, not generic fallbacks)
@@ -143,7 +131,7 @@ function computePairSimilarity(
 export function useSimilarityProjection(
   results: SearchResult[],
   colorBy: VisualizationColorBy,
-  minSimilarity: number,
+  minSimilarity: number
 ): { nodes: NetworkNodeData[]; edges: SimilarityEdge[]; isReady: boolean } {
   return useMemo(() => {
     if (results.length === 0) return { nodes: [], edges: [], isReady: true };
@@ -154,7 +142,7 @@ export function useSimilarityProjection(
     if (filtered.length === 0) return { nodes: [], edges: [], isReady: true };
 
     // 2. Build node data with category assignment
-    const nodes: NetworkNodeData[] = filtered.map((result) => {
+    const nodes: NetworkNodeData[] = filtered.map(result => {
       const score = getScore(result);
       return {
         id: getResultId(result),
@@ -170,11 +158,7 @@ export function useSimilarityProjection(
     const edges: SimilarityEdge[] = [];
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
-        const sim = computePairSimilarity(
-          nodes[i].result,
-          nodes[j].result,
-          colorBy,
-        );
+        const sim = computePairSimilarity(nodes[i].result, nodes[j].result, colorBy);
         if (sim > MIN_LINK_SIMILARITY) {
           edges.push({
             sourceId: nodes[i].id,

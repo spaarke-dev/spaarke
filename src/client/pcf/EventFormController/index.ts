@@ -12,43 +12,34 @@
  * @version 2.0.0 - Refactored to use shared EventTypeService (ADR-012)
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Theme,
-} from "@fluentui/react-components";
-import { EventFormControllerApp } from "./EventFormControllerApp";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { EventFormControllerApp } from './EventFormControllerApp';
 
-const CONTROL_VERSION = "2.0.0";
-const DEFAULT_EVENT_TYPE_FIELD = "sprk_eventtype";
+const CONTROL_VERSION = '2.0.0';
+const DEFAULT_EVENT_TYPE_FIELD = 'sprk_eventtype';
 
 function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
   if (context?.fluentDesignLanguage?.isDarkTheme) return webDarkTheme;
-  const stored = localStorage.getItem("spaarke-theme");
-  if (stored === "dark") return webDarkTheme;
-  if (stored === "light") return webLightTheme;
-  if (window.matchMedia?.("(prefers-color-scheme: dark)").matches)
-    return webDarkTheme;
+  const stored = localStorage.getItem('spaarke-theme');
+  if (stored === 'dark') return webDarkTheme;
+  if (stored === 'light') return webLightTheme;
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return webDarkTheme;
   return webLightTheme;
 }
 
-export class EventFormController implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class EventFormController implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private context: ComponentFramework.Context<IInputs>;
   private notifyOutputChanged: () => void;
-  private _controlStatus: string = "initialized";
+  private _controlStatus = 'initialized';
   private _eventTypeFieldName: string = DEFAULT_EVENT_TYPE_FIELD;
-  private _eventTypeId: string = "";
-  private _eventTypeName: string = "";
-  private _currentRecordId: string = "";
-  private _isLoading: boolean = false;
+  private _eventTypeId = '';
+  private _eventTypeName = '';
+  private _currentRecordId = '';
+  private _isLoading = false;
 
   constructor() {}
 
@@ -56,7 +47,7 @@ export class EventFormController implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.context = context;
     this.notifyOutputChanged = notifyOutputChanged;
@@ -69,10 +60,7 @@ export class EventFormController implements ComponentFramework.StandardControl<
 
     // Log context info for debugging
     const modeAny = context.mode as unknown as Record<string, unknown>;
-    console.log(
-      "[EventFormController] Init - contextInfo:",
-      JSON.stringify(modeAny.contextInfo || {}),
-    );
+    console.log('[EventFormController] Init - contextInfo:', JSON.stringify(modeAny.contextInfo || {}));
 
     // Fetch Event Type from current record
     this.fetchEventTypeFromRecord();
@@ -92,9 +80,7 @@ export class EventFormController implements ComponentFramework.StandardControl<
     // Check if record changed (new record or navigation)
     const entityId = this.getEntityId();
     if (entityId && entityId !== this._currentRecordId) {
-      console.log(
-        `[EventFormController] Record changed from ${this._currentRecordId} to ${entityId}`,
-      );
+      console.log(`[EventFormController] Record changed from ${this._currentRecordId} to ${entityId}`);
       this._currentRecordId = entityId;
       this.fetchEventTypeFromRecord();
     } else {
@@ -122,22 +108,21 @@ export class EventFormController implements ComponentFramework.StandardControl<
   private getEntityId(): string {
     // Try multiple ways to get the entity ID
     const modeAny = this.context.mode as unknown as Record<string, unknown>;
-    const contextInfo = modeAny.contextInfo as
-      | Record<string, unknown>
-      | undefined;
+    const contextInfo = modeAny.contextInfo as Record<string, unknown> | undefined;
 
     if (contextInfo?.entityId) {
-      return String(contextInfo.entityId).replace(/[{}]/g, "");
+      return String(contextInfo.entityId).replace(/[{}]/g, '');
     }
 
     // Try from page context
-    const pageContext = (this.context as unknown as Record<string, unknown>)
-      .page as Record<string, unknown> | undefined;
+    const pageContext = (this.context as unknown as Record<string, unknown>).page as
+      | Record<string, unknown>
+      | undefined;
     if (pageContext?.entityId) {
-      return String(pageContext.entityId).replace(/[{}]/g, "");
+      return String(pageContext.entityId).replace(/[{}]/g, '');
     }
 
-    return "";
+    return '';
   }
 
   /**
@@ -145,16 +130,14 @@ export class EventFormController implements ComponentFramework.StandardControl<
    */
   private getEntityName(): string {
     const modeAny = this.context.mode as unknown as Record<string, unknown>;
-    const contextInfo = modeAny.contextInfo as
-      | Record<string, unknown>
-      | undefined;
+    const contextInfo = modeAny.contextInfo as Record<string, unknown> | undefined;
 
     if (contextInfo?.entityTypeName) {
       return String(contextInfo.entityTypeName);
     }
 
     // Default to sprk_event
-    return "sprk_event";
+    return 'sprk_event';
   }
 
   /**
@@ -165,15 +148,13 @@ export class EventFormController implements ComponentFramework.StandardControl<
     const entityName = this.getEntityName();
 
     console.log(
-      `[EventFormController] Fetching Event Type for ${entityName}:${entityId}, field: ${this._eventTypeFieldName}`,
+      `[EventFormController] Fetching Event Type for ${entityName}:${entityId}, field: ${this._eventTypeFieldName}`
     );
 
     if (!entityId) {
-      console.log(
-        "[EventFormController] No entity ID available - might be new record",
-      );
-      this._eventTypeId = "";
-      this._eventTypeName = "";
+      console.log('[EventFormController] No entity ID available - might be new record');
+      this._eventTypeId = '';
+      this._eventTypeName = '';
       this.renderComponent();
       return;
     }
@@ -188,38 +169,26 @@ export class EventFormController implements ComponentFramework.StandardControl<
       // and use $expand to get the related record's name
       const lookupValueField = `_${this._eventTypeFieldName}_value`;
 
-      const result = await this.context.webAPI.retrieveRecord(
-        entityName,
-        entityId,
-        `?$select=${lookupValueField}`,
-      );
+      const result = await this.context.webAPI.retrieveRecord(entityName, entityId, `?$select=${lookupValueField}`);
 
-      console.log(
-        "[EventFormController] WebAPI result:",
-        JSON.stringify(result),
-      );
+      console.log('[EventFormController] WebAPI result:', JSON.stringify(result));
 
       // Extract lookup value - the ID is in _fieldname_value
-      const eventTypeId = (result[lookupValueField] as string) || "";
+      const eventTypeId = (result[lookupValueField] as string) || '';
       // The formatted value (display name) is in _fieldname_value@OData.Community.Display.V1.FormattedValue
-      const eventTypeName =
-        (result[
-          `${lookupValueField}@OData.Community.Display.V1.FormattedValue`
-        ] as string) || "";
+      const eventTypeName = (result[`${lookupValueField}@OData.Community.Display.V1.FormattedValue`] as string) || '';
 
-      this._eventTypeId = eventTypeId ? eventTypeId.replace(/[{}]/g, "") : "";
+      this._eventTypeId = eventTypeId ? eventTypeId.replace(/[{}]/g, '') : '';
       this._eventTypeName = eventTypeName;
 
-      console.log(
-        `[EventFormController] Event Type: id=${this._eventTypeId}, name=${this._eventTypeName}`,
-      );
+      console.log(`[EventFormController] Event Type: id=${this._eventTypeId}, name=${this._eventTypeName}`);
 
-      this._controlStatus = this._eventTypeId ? "loaded" : "no-event-type";
+      this._controlStatus = this._eventTypeId ? 'loaded' : 'no-event-type';
     } catch (err) {
-      console.error("[EventFormController] Error fetching Event Type:", err);
-      this._eventTypeId = "";
-      this._eventTypeName = "";
-      this._controlStatus = "error";
+      console.error('[EventFormController] Error fetching Event Type:', err);
+      this._eventTypeId = '';
+      this._eventTypeName = '';
+      this._controlStatus = 'error';
     } finally {
       this._isLoading = false;
       this.renderComponent();
@@ -237,22 +206,22 @@ export class EventFormController implements ComponentFramework.StandardControl<
     const theme = resolveTheme(this.context);
 
     console.log(
-      `[EventFormController] Rendering with eventTypeId=${this._eventTypeId}, eventTypeName=${this._eventTypeName}, loading=${this._isLoading}`,
+      `[EventFormController] Rendering with eventTypeId=${this._eventTypeId}, eventTypeName=${this._eventTypeName}, loading=${this._isLoading}`
     );
 
     ReactDOM.render(
       React.createElement(
         FluentProvider,
-        { theme, style: { height: "100%", width: "100%" } },
+        { theme, style: { height: '100%', width: '100%' } },
         React.createElement(EventFormControllerApp, {
           context: this.context,
           eventTypeId: this._eventTypeId,
           eventTypeName: this._eventTypeName,
           onStatusChange: this.handleStatusChange,
           version: CONTROL_VERSION,
-        }),
+        })
       ),
-      this.container,
+      this.container
     );
   }
 }

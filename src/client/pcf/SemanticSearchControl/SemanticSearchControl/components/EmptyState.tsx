@@ -7,23 +7,23 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text, Button } from "@fluentui/react-components";
-import { SearchInfo20Regular, Dismiss20Regular } from "@fluentui/react-icons";
-import { IEmptyStateProps } from "../types";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import { SearchInfo20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { IEmptyStateProps } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingHorizontalXXL,
-    textAlign: "center" as const,
-    minHeight: "200px",
+    textAlign: 'center' as const,
+    minHeight: '200px',
   },
   icon: {
-    fontSize: "48px",
+    fontSize: '48px',
     color: tokens.colorNeutralForeground3,
     marginBottom: tokens.spacingVerticalL,
   },
@@ -40,11 +40,11 @@ const useStyles = makeStyles({
   },
   suggestions: {
     marginBottom: tokens.spacingVerticalL,
-    maxWidth: "400px",
+    maxWidth: '400px',
   },
   suggestionsList: {
-    listStyle: "disc",
-    textAlign: "left" as const,
+    listStyle: 'disc',
+    textAlign: 'left' as const,
     paddingLeft: tokens.spacingHorizontalL,
     color: tokens.colorNeutralForeground2,
   },
@@ -62,9 +62,11 @@ const useStyles = makeStyles({
  * @param props.query - The search query that returned no results
  * @param props.hasFilters - Whether filters are currently applied
  */
-export const EmptyState: React.FC<
-  IEmptyStateProps & { onClearFilters?: () => void }
-> = ({ query, hasFilters, onClearFilters }) => {
+export const EmptyState: React.FC<IEmptyStateProps & { onClearFilters?: () => void }> = ({
+  query,
+  hasFilters,
+  onClearFilters,
+}) => {
   const styles = useStyles();
 
   return (
@@ -80,8 +82,7 @@ export const EmptyState: React.FC<
       {/* Query echo */}
       {query && (
         <Text className={styles.queryEcho}>
-          No documents matching{" "}
-          <span className={styles.query}>&ldquo;{query}&rdquo;</span>
+          No documents matching <span className={styles.query}>&ldquo;{query}&rdquo;</span>
         </Text>
       )}
 

@@ -7,12 +7,12 @@
  * Uses Fluent UI v9 design tokens for all colors (ADR-021).
  */
 
-import React from "react";
-import type { Node, NodeProps } from "@xyflow/react";
-import { tokens, Text } from "@fluentui/react-components";
-import { DocumentArrowRight20Regular } from "@fluentui/react-icons";
-import { BaseNode } from "./BaseNode";
-import type { PlaybookNodeData } from "../../types/canvas";
+import React from 'react';
+import type { Node, NodeProps } from '@xyflow/react';
+import { tokens, Text } from '@fluentui/react-components';
+import { DocumentArrowRight20Regular } from '@fluentui/react-icons';
+import { BaseNode } from './BaseNode';
+import type { PlaybookNodeData } from '../../types/canvas';
 
 /**
  * Deliver Output node — outputs data to Power Apps or other consumers.

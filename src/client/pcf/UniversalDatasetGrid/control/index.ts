@@ -3,27 +3,19 @@
  * Version 2.0.7 - Single React Root Architecture with Fluent UI v9
  */
 
-import * as React from "react";
-import * as ReactDOM from "react-dom/client";
-import { FluentProvider } from "@fluentui/react-components";
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import { UniversalDatasetGridRoot } from "./components/UniversalDatasetGridRoot";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import {
-  DEFAULT_GRID_CONFIG,
-  GridConfiguration,
-  CalendarFilter,
-  parseCalendarFilter,
-} from "./types";
-import { logger } from "./utils/logger";
-import { initializeAuth } from "./authInit";
-import { getAuthProvider } from "@spaarke/auth";
+import * as React from 'react';
+import * as ReactDOM from 'react-dom/client';
+import { FluentProvider } from '@fluentui/react-components';
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { UniversalDatasetGridRoot } from './components/UniversalDatasetGridRoot';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { resolveTheme, setupThemeListener } from './providers/ThemeProvider';
+import { DEFAULT_GRID_CONFIG, GridConfiguration, CalendarFilter, parseCalendarFilter } from './types';
+import { logger } from './utils/logger';
+import { initializeAuth } from './authInit';
+import { getAuthProvider } from '@spaarke/auth';
 
-export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class UniversalDatasetGrid implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private root: ReactDOM.Root | null = null;
   private notifyOutputChanged: () => void;
   private config: GridConfiguration;
@@ -35,7 +27,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
   private _selectedEventDate: string | null = null;
 
   constructor() {
-    logger.info("Control", "Constructor called");
+    logger.info('Control', 'Constructor called');
     this.config = DEFAULT_GRID_CONFIG;
     // Bind the row click handler to preserve 'this' context
     this.handleRowClick = this.handleRowClick.bind(this);
@@ -47,7 +39,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
    * @param date - ISO date string (YYYY-MM-DD) or null if no date
    */
   private handleRowClick(date: string | null): void {
-    logger.info("Control", `Row clicked - date: ${date}`);
+    logger.info('Control', `Row clicked - date: ${date}`);
     this._selectedEventDate = date;
     this.notifyOutputChanged();
   }
@@ -56,10 +48,10 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     try {
-      logger.info("Control", "Init - Creating single React root");
+      logger.info('Control', 'Init - Creating single React root');
 
       this.notifyOutputChanged = notifyOutputChanged;
       this._context = context;
@@ -72,8 +64,8 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
       this.root = ReactDOM.createRoot(container);
 
       // Set up theme listener for dynamic theme changes
-      this._cleanupThemeListener = setupThemeListener((isDark) => {
-        logger.info("Control", `Theme changed: isDark=${isDark}`);
+      this._cleanupThemeListener = setupThemeListener(isDark => {
+        logger.info('Control', `Theme changed: isDark=${isDark}`);
         if (this._context && this.root) {
           this.renderReactTree(this._context);
         }
@@ -82,9 +74,9 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
       // Render React tree
       this.renderReactTree(context);
 
-      logger.info("Control", "Init complete");
+      logger.info('Control', 'Init complete');
     } catch (error) {
-      logger.error("Control", "Init failed", error);
+      logger.error('Control', 'Init failed', error);
       throw error;
     }
   }
@@ -102,7 +94,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
       const calendarFilterJson = context.parameters.calendarFilter?.raw;
       this._calendarFilter = parseCalendarFilter(calendarFilterJson);
 
-      console.log("[UniversalDatasetGrid] UpdateView called", {
+      console.log('[UniversalDatasetGrid] UpdateView called', {
         recordCount,
         isLoading,
         hasDataset: !!dataset,
@@ -110,18 +102,18 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
         calendarFilter: this._calendarFilter,
       });
 
-      logger.debug("Control", "UpdateView - Re-rendering with new props");
+      logger.debug('Control', 'UpdateView - Re-rendering with new props');
 
       // Just re-render with new context - React handles the updates
       this.renderReactTree(context);
     } catch (error) {
-      logger.error("Control", "UpdateView failed", error);
+      logger.error('Control', 'UpdateView failed', error);
     }
   }
 
   public destroy(): void {
     try {
-      logger.info("Control", "Destroy - Unmounting React root");
+      logger.info('Control', 'Destroy - Unmounting React root');
 
       // Clean up theme listener
       if (this._cleanupThemeListener) {
@@ -131,7 +123,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
       // Clear @spaarke/auth token cache (optional - sessionStorage will be cleared on tab close)
       if (this.authInitialized) {
-        logger.info("Control", "Destroy - Clearing @spaarke/auth token cache");
+        logger.info('Control', 'Destroy - Clearing @spaarke/auth token cache');
         try {
           getAuthProvider().clearCache();
         } catch {
@@ -147,7 +139,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
       this._context = null;
     } catch (error) {
-      logger.error("Control", "Destroy failed", error);
+      logger.error('Control', 'Destroy failed', error);
     }
   }
 
@@ -164,7 +156,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
    */
   private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
     if (!this.root) {
-      logger.error("Control", "Cannot render - root not initialized");
+      logger.error('Control', 'Cannot render - root not initialized');
       return;
     }
 
@@ -185,12 +177,12 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
               calendarFilter: this._calendarFilter,
               // Task 012: Pass row click handler for bi-directional calendar sync
               onRowClick: this.handleRowClick,
-            }),
-          ),
-        ),
+            })
+          )
+        )
       );
     } catch (error) {
-      logger.error("Control", "Render failed", error);
+      logger.error('Control', 'Render failed', error);
       throw error;
     }
   }
@@ -206,21 +198,21 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
   private initializeMsalAsync(container: HTMLDivElement): void {
     (async () => {
       try {
-        logger.info("Control", "Initializing @spaarke/auth...");
+        logger.info('Control', 'Initializing @spaarke/auth...');
 
         // Initialize @spaarke/auth (replaces local MsalAuthProvider)
         await initializeAuth();
         this.authInitialized = true;
 
-        logger.info("Control", "@spaarke/auth initialized successfully");
+        logger.info('Control', '@spaarke/auth initialized successfully');
       } catch (error) {
-        logger.error("Control", "Failed to initialize @spaarke/auth:", error);
+        logger.error('Control', 'Failed to initialize @spaarke/auth:', error);
 
         // Show user-friendly error message
         this.showError(
           container,
-          "Authentication initialization failed. Please refresh the page and try again. " +
-            "If the problem persists, contact your administrator.",
+          'Authentication initialization failed. Please refresh the page and try again. ' +
+            'If the problem persists, contact your administrator.'
         );
       }
     })();
@@ -237,16 +229,15 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
    */
   private showError(container: HTMLDivElement, message: string): void {
     // Create error div
-    const errorDiv = document.createElement("div");
-    errorDiv.style.padding = "20px";
-    errorDiv.style.color = "#a4262c"; // Office UI Fabric error red
-    errorDiv.style.backgroundColor = "#fde7e9"; // Light red background
-    errorDiv.style.border = "1px solid #a4262c";
-    errorDiv.style.borderRadius = "4px";
-    errorDiv.style.fontFamily =
-      "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-    errorDiv.style.fontSize = "14px";
-    errorDiv.style.margin = "10px";
+    const errorDiv = document.createElement('div');
+    errorDiv.style.padding = '20px';
+    errorDiv.style.color = '#a4262c'; // Office UI Fabric error red
+    errorDiv.style.backgroundColor = '#fde7e9'; // Light red background
+    errorDiv.style.border = '1px solid #a4262c';
+    errorDiv.style.borderRadius = '4px';
+    errorDiv.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+    errorDiv.style.fontSize = '14px';
+    errorDiv.style.margin = '10px';
 
     // Add error icon + message
     errorDiv.innerHTML = `

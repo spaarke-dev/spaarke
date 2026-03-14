@@ -17,8 +17,8 @@
  * @see projects/sdap-office-integration/spec.md for API contracts
  */
 
-import { naaAuthService, type INaaAuthService } from "../auth";
-import { DEFAULT_AUTH_CONFIG, type NaaAuthConfig } from "../auth/authConfig";
+import { naaAuthService, type INaaAuthService } from '../auth';
+import { DEFAULT_AUTH_CONFIG, type NaaAuthConfig } from '../auth/authConfig';
 import {
   OfficeApiError,
   createNetworkErrorDetails,
@@ -26,7 +26,7 @@ import {
   createTimeoutErrorDetails,
   createUnknownErrorDetails,
   parseRetryAfter,
-} from "./errors";
+} from './errors';
 import type {
   // Save types
   SaveRequest,
@@ -51,7 +51,7 @@ import type {
   RecentItemsResponse,
   // Error types
   ProblemDetails,
-} from "./types";
+} from './types';
 
 /**
  * Configuration for the Office API Client.
@@ -84,13 +84,13 @@ export interface RequestOptions {
  */
 function generateUuid(): string {
   // Use crypto.randomUUID if available (modern browsers)
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
   // Fallback for older browsers
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
 }
@@ -103,37 +103,22 @@ export interface IOfficeApiClient {
   save(request: SaveRequest, options?: RequestOptions): Promise<SaveResponse>;
 
   // Job operations
-  getJobStatus(
-    jobId: string,
-    options?: RequestOptions,
-  ): Promise<JobStatusResponse>;
+  getJobStatus(jobId: string, options?: RequestOptions): Promise<JobStatusResponse>;
 
   // Search operations
-  searchEntities(
-    params: EntitySearchParams,
-    options?: RequestOptions,
-  ): Promise<EntitySearchResponse>;
-  searchDocuments(
-    params: DocumentSearchParams,
-    options?: RequestOptions,
-  ): Promise<DocumentSearchResponse>;
+  searchEntities(params: EntitySearchParams, options?: RequestOptions): Promise<EntitySearchResponse>;
+  searchDocuments(params: DocumentSearchParams, options?: RequestOptions): Promise<DocumentSearchResponse>;
 
   // Quick create operations
   quickCreate(
     entityType: QuickCreateEntityType,
     data: QuickCreateRequest,
-    options?: RequestOptions,
+    options?: RequestOptions
   ): Promise<QuickCreateResponse>;
 
   // Share operations
-  shareLinks(
-    request: ShareLinksRequest,
-    options?: RequestOptions,
-  ): Promise<ShareLinksResponse>;
-  shareAttach(
-    request: ShareAttachRequest,
-    options?: RequestOptions,
-  ): Promise<ShareAttachResponse>;
+  shareLinks(request: ShareLinksRequest, options?: RequestOptions): Promise<ShareLinksResponse>;
+  shareAttach(request: ShareAttachRequest, options?: RequestOptions): Promise<ShareAttachResponse>;
 
   // Recent items
   getRecent(options?: RequestOptions): Promise<RecentItemsResponse>;
@@ -151,13 +136,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   private includeCredentials: boolean;
   private authService: INaaAuthService;
 
-  constructor(
-    config?: Partial<OfficeApiClientConfig>,
-    authService?: INaaAuthService,
-  ) {
-    this.baseUrl = (
-      config?.baseUrl || DEFAULT_AUTH_CONFIG.bffApiBaseUrl
-    ).replace(/\/$/, "");
+  constructor(config?: Partial<OfficeApiClientConfig>, authService?: INaaAuthService) {
+    this.baseUrl = (config?.baseUrl || DEFAULT_AUTH_CONFIG.bffApiBaseUrl).replace(/\/$/, '');
     this.timeout = config?.timeout ?? 30000;
     this.includeCredentials = config?.includeCredentials ?? true;
     this.authService = authService ?? naaAuthService;
@@ -168,7 +148,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    */
   configure(config: Partial<OfficeApiClientConfig>): void {
     if (config.baseUrl !== undefined) {
-      this.baseUrl = config.baseUrl.replace(/\/$/, "");
+      this.baseUrl = config.baseUrl.replace(/\/$/, '');
     }
     if (config.timeout !== undefined) {
       this.timeout = config.timeout;
@@ -190,15 +170,11 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options (idempotencyKey, signal, etc.)
    * @returns Save response with jobId and status
    */
-  async save(
-    request: SaveRequest,
-    options?: RequestOptions,
-  ): Promise<SaveResponse> {
-    return this.post<SaveResponse>("/office/save", request, {
+  async save(request: SaveRequest, options?: RequestOptions): Promise<SaveResponse> {
+    return this.post<SaveResponse>('/office/save', request, {
       ...options,
       // Generate idempotency key if not provided
-      idempotencyKey:
-        options?.idempotencyKey || this.generateIdempotencyKey(request),
+      idempotencyKey: options?.idempotencyKey || this.generateIdempotencyKey(request),
     });
   }
 
@@ -214,14 +190,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Job status with stage information
    */
-  async getJobStatus(
-    jobId: string,
-    options?: RequestOptions,
-  ): Promise<JobStatusResponse> {
-    return this.get<JobStatusResponse>(
-      `/office/jobs/${encodeURIComponent(jobId)}`,
-      options,
-    );
+  async getJobStatus(jobId: string, options?: RequestOptions): Promise<JobStatusResponse> {
+    return this.get<JobStatusResponse>(`/office/jobs/${encodeURIComponent(jobId)}`, options);
   }
 
   // ============================================
@@ -236,28 +206,20 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Search results with entities
    */
-  async searchEntities(
-    params: EntitySearchParams,
-    options?: RequestOptions,
-  ): Promise<EntitySearchResponse> {
+  async searchEntities(params: EntitySearchParams, options?: RequestOptions): Promise<EntitySearchResponse> {
     const queryParams = new URLSearchParams();
-    queryParams.set("q", params.q);
+    queryParams.set('q', params.q);
 
     if (params.type) {
-      const types = Array.isArray(params.type)
-        ? params.type.join(",")
-        : params.type;
-      queryParams.set("type", types);
+      const types = Array.isArray(params.type) ? params.type.join(',') : params.type;
+      queryParams.set('type', types);
     }
 
     if (params.limit !== undefined) {
-      queryParams.set("limit", params.limit.toString());
+      queryParams.set('limit', params.limit.toString());
     }
 
-    return this.get<EntitySearchResponse>(
-      `/office/search/entities?${queryParams.toString()}`,
-      options,
-    );
+    return this.get<EntitySearchResponse>(`/office/search/entities?${queryParams.toString()}`, options);
   }
 
   /**
@@ -268,33 +230,27 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Search results with documents
    */
-  async searchDocuments(
-    params: DocumentSearchParams,
-    options?: RequestOptions,
-  ): Promise<DocumentSearchResponse> {
+  async searchDocuments(params: DocumentSearchParams, options?: RequestOptions): Promise<DocumentSearchResponse> {
     const queryParams = new URLSearchParams();
-    queryParams.set("q", params.q);
+    queryParams.set('q', params.q);
 
     if (params.contentTypes && params.contentTypes.length > 0) {
-      queryParams.set("contentTypes", params.contentTypes.join(","));
+      queryParams.set('contentTypes', params.contentTypes.join(','));
     }
 
     if (params.associationType) {
-      queryParams.set("associationType", params.associationType);
+      queryParams.set('associationType', params.associationType);
     }
 
     if (params.associationId) {
-      queryParams.set("associationId", params.associationId);
+      queryParams.set('associationId', params.associationId);
     }
 
     if (params.limit !== undefined) {
-      queryParams.set("limit", params.limit.toString());
+      queryParams.set('limit', params.limit.toString());
     }
 
-    return this.get<DocumentSearchResponse>(
-      `/office/search/documents?${queryParams.toString()}`,
-      options,
-    );
+    return this.get<DocumentSearchResponse>(`/office/search/documents?${queryParams.toString()}`, options);
   }
 
   // ============================================
@@ -313,13 +269,9 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   async quickCreate(
     entityType: QuickCreateEntityType,
     data: QuickCreateRequest,
-    options?: RequestOptions,
+    options?: RequestOptions
   ): Promise<QuickCreateResponse> {
-    return this.post<QuickCreateResponse>(
-      `/office/quickcreate/${encodeURIComponent(entityType)}`,
-      data,
-      options,
-    );
+    return this.post<QuickCreateResponse>(`/office/quickcreate/${encodeURIComponent(entityType)}`, data, options);
   }
 
   // ============================================
@@ -334,15 +286,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Generated links and invitations
    */
-  async shareLinks(
-    request: ShareLinksRequest,
-    options?: RequestOptions,
-  ): Promise<ShareLinksResponse> {
-    return this.post<ShareLinksResponse>(
-      "/office/share/links",
-      request,
-      options,
-    );
+  async shareLinks(request: ShareLinksRequest, options?: RequestOptions): Promise<ShareLinksResponse> {
+    return this.post<ShareLinksResponse>('/office/share/links', request, options);
   }
 
   /**
@@ -353,15 +298,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Attachment info with download URLs
    */
-  async shareAttach(
-    request: ShareAttachRequest,
-    options?: RequestOptions,
-  ): Promise<ShareAttachResponse> {
-    return this.post<ShareAttachResponse>(
-      "/office/share/attach",
-      request,
-      options,
-    );
+  async shareAttach(request: ShareAttachRequest, options?: RequestOptions): Promise<ShareAttachResponse> {
+    return this.post<ShareAttachResponse>('/office/share/attach', request, options);
   }
 
   // ============================================
@@ -376,7 +314,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @returns Recent associations, documents, and favorites
    */
   async getRecent(options?: RequestOptions): Promise<RecentItemsResponse> {
-    return this.get<RecentItemsResponse>("/office/recent", options);
+    return this.get<RecentItemsResponse>('/office/recent', options);
   }
 
   // ============================================
@@ -387,29 +325,20 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * Make a GET request.
    */
   private async get<T>(endpoint: string, options?: RequestOptions): Promise<T> {
-    return this.request<T>("GET", endpoint, undefined, options);
+    return this.request<T>('GET', endpoint, undefined, options);
   }
 
   /**
    * Make a POST request.
    */
-  private async post<T>(
-    endpoint: string,
-    body?: unknown,
-    options?: RequestOptions,
-  ): Promise<T> {
-    return this.request<T>("POST", endpoint, body, options);
+  private async post<T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return this.request<T>('POST', endpoint, body, options);
   }
 
   /**
    * Make an HTTP request with authentication and error handling.
    */
-  private async request<T>(
-    method: string,
-    endpoint: string,
-    body?: unknown,
-    options?: RequestOptions,
-  ): Promise<T> {
+  private async request<T>(method: string, endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> {
     // Get access token
     const token = await this.getAccessToken();
 
@@ -419,32 +348,32 @@ class OfficeApiClientImpl implements IOfficeApiClient {
     // Build headers
     const headers: HeadersInit = {
       Authorization: `Bearer ${token}`,
-      Accept: "application/json",
+      Accept: 'application/json',
     };
 
     // Add Content-Type for POST/PUT requests with body
-    if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
-      headers["Content-Type"] = "application/json";
+    if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+      headers['Content-Type'] = 'application/json';
     }
 
     // Add correlation ID
     const correlationId = options?.correlationId || generateUuid();
-    headers["X-Correlation-Id"] = correlationId;
+    headers['X-Correlation-Id'] = correlationId;
 
     // Add idempotency key for POST requests
-    if (options?.idempotencyKey && method === "POST") {
-      headers["X-Idempotency-Key"] = options.idempotencyKey;
+    if (options?.idempotencyKey && method === 'POST') {
+      headers['X-Idempotency-Key'] = options.idempotencyKey;
     }
 
     // Build request config
     const config: RequestInit = {
       method,
       headers,
-      credentials: this.includeCredentials ? "include" : "same-origin",
+      credentials: this.includeCredentials ? 'include' : 'same-origin',
     };
 
     // Add body for POST/PUT requests
-    if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
+    if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       config.body = JSON.stringify(body);
     }
 
@@ -455,7 +384,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
 
     if (options?.signal) {
       // Chain to provided signal
-      options.signal.addEventListener("abort", () => controller.abort());
+      options.signal.addEventListener('abort', () => controller.abort());
     }
 
     if (timeout > 0) {
@@ -496,12 +425,10 @@ class OfficeApiClientImpl implements IOfficeApiClient {
       }
 
       // Handle abort/timeout
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (error instanceof DOMException && error.name === 'AbortError') {
         // Check if it was a timeout vs user cancellation
         if (options?.signal?.aborted) {
-          throw new OfficeApiError(
-            createUnknownErrorDetails(new Error("Request cancelled")),
-          );
+          throw new OfficeApiError(createUnknownErrorDetails(new Error('Request cancelled')));
         }
         throw new OfficeApiError(createTimeoutErrorDetails());
       }
@@ -512,7 +439,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
       }
 
       // Handle network errors
-      if (error instanceof TypeError && error.message.includes("fetch")) {
+      if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new OfficeApiError(createNetworkErrorDetails(error), {
           isNetworkError: true,
         });
@@ -529,20 +456,16 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   private async getAccessToken(): Promise<string> {
     // Ensure auth service is initialized
     if (!this.authService.isInitialized()) {
-      throw new OfficeApiError(
-        createAuthErrorDetails("Authentication service not initialized"),
-        {
-          isAuthError: true,
-        },
-      );
+      throw new OfficeApiError(createAuthErrorDetails('Authentication service not initialized'), {
+        isAuthError: true,
+      });
     }
 
     try {
       const result = await this.authService.getAccessToken();
       return result.accessToken;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to acquire token";
+      const message = error instanceof Error ? error.message : 'Failed to acquire token';
       throw new OfficeApiError(createAuthErrorDetails(message), {
         isAuthError: true,
       });
@@ -555,9 +478,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   private async handleErrorResponse(response: Response): Promise<never> {
     // Check for rate limiting
     const isRateLimited = response.status === 429;
-    const retryAfterSeconds = isRateLimited
-      ? parseRetryAfter(response.headers.get("Retry-After"))
-      : undefined;
+    const retryAfterSeconds = isRateLimited ? parseRetryAfter(response.headers.get('Retry-After')) : undefined;
 
     // Check for auth errors
     const isAuthError = response.status === 401;
@@ -565,18 +486,15 @@ class OfficeApiClientImpl implements IOfficeApiClient {
     // Try to parse ProblemDetails
     let problemDetails: ProblemDetails;
     try {
-      const contentType = response.headers.get("Content-Type") || "";
-      if (
-        contentType.includes("application/json") ||
-        contentType.includes("application/problem+json")
-      ) {
+      const contentType = response.headers.get('Content-Type') || '';
+      if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
         problemDetails = await response.json();
         // Ensure required fields are present
         if (!problemDetails.type) {
-          problemDetails.type = "about:blank";
+          problemDetails.type = 'about:blank';
         }
         if (!problemDetails.title) {
-          problemDetails.title = response.statusText || "Error";
+          problemDetails.title = response.statusText || 'Error';
         }
         if (!problemDetails.status) {
           problemDetails.status = response.status;
@@ -585,8 +503,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
         // Non-JSON error response
         const text = await response.text();
         problemDetails = {
-          type: "about:blank",
-          title: response.statusText || "Error",
+          type: 'about:blank',
+          title: response.statusText || 'Error',
           status: response.status,
           detail: text || undefined,
         };
@@ -594,8 +512,8 @@ class OfficeApiClientImpl implements IOfficeApiClient {
     } catch {
       // Failed to parse response body
       problemDetails = {
-        type: "about:blank",
-        title: response.statusText || "Error",
+        type: 'about:blank',
+        title: response.statusText || 'Error',
         status: response.status,
       };
     }
@@ -643,7 +561,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
       hash = hash & hash; // Convert to 32-bit integer
     }
     // Convert to hex and pad
-    const hex = Math.abs(hash).toString(16).padStart(8, "0");
+    const hex = Math.abs(hash).toString(16).padStart(8, '0');
     return `idempotency-${hex}-${Date.now().toString(36)}`;
   }
 }
@@ -657,7 +575,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
  */
 export function createOfficeApiClient(
   config?: Partial<OfficeApiClientConfig>,
-  authService?: INaaAuthService,
+  authService?: INaaAuthService
 ): IOfficeApiClient & {
   configure: (config: Partial<OfficeApiClientConfig>) => void;
 } {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from 'react';
 
 /**
  * useAnnounce - Hook for screen reader announcements.
@@ -26,7 +26,7 @@ import { useCallback, useEffect, useRef } from "react";
  * ```
  */
 
-export type AnnounceMode = "polite" | "assertive";
+export type AnnounceMode = 'polite' | 'assertive';
 
 export interface UseAnnounceOptions {
   /** Delay in ms before clearing the announcement (for re-announcing same message) */
@@ -46,9 +46,7 @@ export interface UseAnnounceResult {
  * @param options - Configuration options
  * @returns Object with announce and clear functions
  */
-export function useAnnounce(
-  options: UseAnnounceOptions = {},
-): UseAnnounceResult {
+export function useAnnounce(options: UseAnnounceOptions = {}): UseAnnounceResult {
   const { clearDelay = 1000 } = options;
 
   // Refs for the live region elements
@@ -59,41 +57,41 @@ export function useAnnounce(
   // Create live region elements on mount
   useEffect(() => {
     // Create polite live region
-    const politeRegion = document.createElement("div");
-    politeRegion.setAttribute("role", "status");
-    politeRegion.setAttribute("aria-live", "polite");
-    politeRegion.setAttribute("aria-atomic", "true");
-    politeRegion.className = "sr-only";
+    const politeRegion = document.createElement('div');
+    politeRegion.setAttribute('role', 'status');
+    politeRegion.setAttribute('aria-live', 'polite');
+    politeRegion.setAttribute('aria-atomic', 'true');
+    politeRegion.className = 'sr-only';
     Object.assign(politeRegion.style, {
-      position: "absolute",
-      width: "1px",
-      height: "1px",
-      padding: "0",
-      margin: "-1px",
-      overflow: "hidden",
-      clip: "rect(0, 0, 0, 0)",
-      whiteSpace: "nowrap",
-      border: "0",
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      padding: '0',
+      margin: '-1px',
+      overflow: 'hidden',
+      clip: 'rect(0, 0, 0, 0)',
+      whiteSpace: 'nowrap',
+      border: '0',
     });
     document.body.appendChild(politeRegion);
     politeRegionRef.current = politeRegion;
 
     // Create assertive live region
-    const assertiveRegion = document.createElement("div");
-    assertiveRegion.setAttribute("role", "alert");
-    assertiveRegion.setAttribute("aria-live", "assertive");
-    assertiveRegion.setAttribute("aria-atomic", "true");
-    assertiveRegion.className = "sr-only";
+    const assertiveRegion = document.createElement('div');
+    assertiveRegion.setAttribute('role', 'alert');
+    assertiveRegion.setAttribute('aria-live', 'assertive');
+    assertiveRegion.setAttribute('aria-atomic', 'true');
+    assertiveRegion.className = 'sr-only';
     Object.assign(assertiveRegion.style, {
-      position: "absolute",
-      width: "1px",
-      height: "1px",
-      padding: "0",
-      margin: "-1px",
-      overflow: "hidden",
-      clip: "rect(0, 0, 0, 0)",
-      whiteSpace: "nowrap",
-      border: "0",
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      padding: '0',
+      margin: '-1px',
+      overflow: 'hidden',
+      clip: 'rect(0, 0, 0, 0)',
+      whiteSpace: 'nowrap',
+      border: '0',
     });
     document.body.appendChild(assertiveRegion);
     assertiveRegionRef.current = assertiveRegion;
@@ -116,10 +114,10 @@ export function useAnnounce(
 
   const clear = useCallback(() => {
     if (politeRegionRef.current) {
-      politeRegionRef.current.textContent = "";
+      politeRegionRef.current.textContent = '';
     }
     if (assertiveRegionRef.current) {
-      assertiveRegionRef.current.textContent = "";
+      assertiveRegionRef.current.textContent = '';
     }
     if (clearTimeoutRef.current) {
       clearTimeout(clearTimeoutRef.current);
@@ -128,21 +126,18 @@ export function useAnnounce(
   }, []);
 
   const announce = useCallback(
-    (message: string, mode: AnnounceMode = "polite") => {
+    (message: string, mode: AnnounceMode = 'polite') => {
       // Clear any pending timeout
       if (clearTimeoutRef.current) {
         clearTimeout(clearTimeoutRef.current);
       }
 
       // Select the appropriate region
-      const region =
-        mode === "assertive"
-          ? assertiveRegionRef.current
-          : politeRegionRef.current;
+      const region = mode === 'assertive' ? assertiveRegionRef.current : politeRegionRef.current;
 
       if (region) {
         // Clear first to ensure re-announcement of same message works
-        region.textContent = "";
+        region.textContent = '';
 
         // Use requestAnimationFrame to ensure the clear has been processed
         requestAnimationFrame(() => {
@@ -154,12 +149,12 @@ export function useAnnounce(
         // Schedule clearing the message to allow re-announcement
         clearTimeoutRef.current = setTimeout(() => {
           if (region) {
-            region.textContent = "";
+            region.textContent = '';
           }
         }, clearDelay);
       }
     },
-    [clearDelay],
+    [clearDelay]
   );
 
   return { announce, clear };
@@ -182,7 +177,7 @@ export function useAnnounce(
 export function useAnnounceOnChange(
   message: string | null | undefined,
   deps: React.DependencyList,
-  mode: AnnounceMode = "polite",
+  mode: AnnounceMode = 'polite'
 ): void {
   const { announce } = useAnnounce();
   const isFirstRender = useRef(true);

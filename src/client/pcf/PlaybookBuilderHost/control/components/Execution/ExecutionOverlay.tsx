@@ -7,8 +7,8 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import { useMemo } from "react";
+import * as React from 'react';
+import { useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,7 +21,7 @@ import {
   ProgressBar,
   Tooltip,
   mergeClasses,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Play20Regular,
   Stop20Regular,
@@ -30,37 +30,34 @@ import {
   Clock20Regular,
   BrainCircuit20Regular,
   Sparkle20Regular,
-} from "@fluentui/react-icons";
-import {
-  useExecutionStore,
-  NodeExecutionStatus,
-} from "../../stores/executionStore";
-import { ConfidenceBadge, ConfidenceNodeBadge } from "./ConfidenceBadge";
+} from '@fluentui/react-icons';
+import { useExecutionStore, NodeExecutionStatus } from '../../stores/executionStore';
+import { ConfidenceBadge, ConfidenceNodeBadge } from './ConfidenceBadge';
 
 const useStyles = makeStyles({
   overlay: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    pointerEvents: "none", // Allow clicks through to canvas
+    pointerEvents: 'none', // Allow clicks through to canvas
     zIndex: 100,
   },
   // Top status bar during execution
   statusBar: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalS,
-    left: "50%",
-    transform: "translateX(-50%)",
-    display: "flex",
-    alignItems: "center",
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalM),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     boxShadow: tokens.shadow8,
-    pointerEvents: "auto", // Allow interaction with status bar
+    pointerEvents: 'auto', // Allow interaction with status bar
   },
   statusBarExecuting: {
     backgroundColor: tokens.colorBrandBackground,
@@ -73,19 +70,19 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorPaletteRedBackground2,
   },
   stopButton: {
-    pointerEvents: "auto",
+    pointerEvents: 'auto',
   },
   // Metrics panel (bottom right during/after execution)
   metricsPanel: {
-    position: "absolute",
+    position: 'absolute',
     bottom: tokens.spacingVerticalM,
     right: tokens.spacingHorizontalM,
-    minWidth: "200px",
-    pointerEvents: "auto",
+    minWidth: '200px',
+    pointerEvents: 'auto',
   },
   metricsRow: {
-    display: "flex",
-    justifyContent: "space-between",
+    display: 'flex',
+    justifyContent: 'space-between',
     ...shorthands.padding(tokens.spacingVerticalXS, 0),
   },
   metricsLabel: {
@@ -96,14 +93,14 @@ const useStyles = makeStyles({
   },
   // Node status badges (positioned over nodes via React Flow)
   nodeBadge: {
-    position: "absolute",
-    top: "-8px",
-    right: "-8px",
+    position: 'absolute',
+    top: '-8px',
+    right: '-8px',
     zIndex: 10,
   },
   progressRing: {
-    width: "24px",
-    height: "24px",
+    width: '24px',
+    height: '24px',
   },
 });
 
@@ -118,32 +115,21 @@ interface ExecutionOverlayProps {
  * Overlay component showing real-time execution status.
  * Renders status bar, progress, and metrics.
  */
-export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
-  onStop,
-  showControls = true,
-}) => {
+export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({ onStop, showControls = true }) => {
   const styles = useStyles();
 
-  const {
-    status,
-    nodeStates,
-    totalTokensUsed,
-    error,
-    startedAt,
-    completedAt,
-    overallConfidence,
-  } = useExecutionStore();
+  const { status, nodeStates, totalTokensUsed, error, startedAt, completedAt, overallConfidence } = useExecutionStore();
 
   // Calculate execution metrics
   const metrics = useMemo(() => {
     const nodes = Array.from(nodeStates.values());
-    const completedNodes = nodes.filter((n) => n.status === "completed").length;
-    const failedNodes = nodes.filter((n) => n.status === "failed").length;
-    const runningNodes = nodes.filter((n) => n.status === "running").length;
+    const completedNodes = nodes.filter(n => n.status === 'completed').length;
+    const failedNodes = nodes.filter(n => n.status === 'failed').length;
+    const runningNodes = nodes.filter(n => n.status === 'running').length;
     const totalNodes = nodes.length;
 
     // Calculate duration
-    let duration = "";
+    let duration = '';
     if (startedAt) {
       const start = new Date(startedAt).getTime();
       const end = completedAt ? new Date(completedAt).getTime() : Date.now();
@@ -168,13 +154,13 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
   }, [nodeStates, startedAt, completedAt]);
 
   // Don't render anything if not executing and no results
-  if (status === "idle" && nodeStates.size === 0) {
+  if (status === 'idle' && nodeStates.size === 0) {
     return null;
   }
 
-  const isExecuting = status === "running";
-  const isCompleted = status === "completed";
-  const isFailed = status === "failed";
+  const isExecuting = status === 'running';
+  const isCompleted = status === 'completed';
+  const isFailed = status === 'failed';
 
   return (
     <div className={styles.overlay}>
@@ -185,7 +171,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
             styles.statusBar,
             isExecuting && styles.statusBarExecuting,
             isCompleted && styles.statusBarCompleted,
-            isFailed && styles.statusBarFailed,
+            isFailed && styles.statusBarFailed
           )}
         >
           {/* Status Icon */}
@@ -195,9 +181,9 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
 
           {/* Status Text */}
           <Text weight="semibold">
-            {isExecuting && "Executing..."}
-            {isCompleted && "Execution Complete"}
-            {isFailed && "Execution Failed"}
+            {isExecuting && 'Executing...'}
+            {isCompleted && 'Execution Complete'}
+            {isFailed && 'Execution Failed'}
           </Text>
 
           {/* Progress */}
@@ -237,13 +223,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
           </Text>
 
           {/* Progress Bar */}
-          {isExecuting && (
-            <ProgressBar
-              value={metrics.progress / 100}
-              max={1}
-              thickness="medium"
-            />
-          )}
+          {isExecuting && <ProgressBar value={metrics.progress / 100} max={1} thickness="medium" />}
 
           {/* Stats */}
           <div className={styles.metricsRow}>
@@ -260,11 +240,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
               <Text className={styles.metricsLabel} size={200}>
                 Failed
               </Text>
-              <Text
-                className={styles.metricsValue}
-                size={200}
-                style={{ color: tokens.colorPaletteRedForeground1 }}
-              >
+              <Text className={styles.metricsValue} size={200} style={{ color: tokens.colorPaletteRedForeground1 }}>
                 {metrics.failedNodes}
               </Text>
             </div>
@@ -284,9 +260,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
           {totalTokensUsed > 0 && (
             <div className={styles.metricsRow}>
               <Text className={styles.metricsLabel} size={200}>
-                <BrainCircuit20Regular
-                  style={{ verticalAlign: "middle", marginRight: "4px" }}
-                />
+                <BrainCircuit20Regular style={{ verticalAlign: 'middle', marginRight: '4px' }} />
                 Tokens
               </Text>
               <Text className={styles.metricsValue} size={200}>
@@ -310,9 +284,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
           {overallConfidence !== null && overallConfidence !== undefined && (
             <div className={styles.metricsRow}>
               <Text className={styles.metricsLabel} size={200}>
-                <Sparkle20Regular
-                  style={{ verticalAlign: "middle", marginRight: "4px" }}
-                />
+                <Sparkle20Regular style={{ verticalAlign: 'middle', marginRight: '4px' }} />
                 Confidence
               </Text>
               <ConfidenceBadge confidence={overallConfidence} size="compact" />
@@ -345,11 +317,9 @@ interface NodeExecutionBadgeProps {
   nodeId: string;
 }
 
-export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({
-  nodeId,
-}) => {
+export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({ nodeId }) => {
   const styles = useStyles();
-  const nodeState = useExecutionStore((state) => state.nodeStates.get(nodeId));
+  const nodeState = useExecutionStore(state => state.nodeStates.get(nodeId));
 
   if (!nodeState) {
     return null;
@@ -359,46 +329,25 @@ export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({
 
   return (
     <div className={styles.nodeBadge}>
-      {status === "running" && (
-        <Tooltip
-          content={`Running${progress ? ` (${progress}%)` : ""}`}
-          relationship="label"
-        >
-          <Badge
-            appearance="filled"
-            color="brand"
-            icon={<Spinner size="extra-tiny" />}
-          />
+      {status === 'running' && (
+        <Tooltip content={`Running${progress ? ` (${progress}%)` : ''}`} relationship="label">
+          <Badge appearance="filled" color="brand" icon={<Spinner size="extra-tiny" />} />
         </Tooltip>
       )}
-      {status === "completed" &&
+      {status === 'completed' &&
         (confidence !== undefined ? (
           <ConfidenceNodeBadge confidence={confidence} />
         ) : (
           <Tooltip content="Completed" relationship="label">
-            <Badge
-              appearance="filled"
-              color="success"
-              icon={<Checkmark20Regular />}
-            />
+            <Badge appearance="filled" color="success" icon={<Checkmark20Regular />} />
           </Tooltip>
         ))}
-      {status === "failed" && (
-        <Tooltip content={nodeState.error ?? "Failed"} relationship="label">
-          <Badge
-            appearance="filled"
-            color="danger"
-            icon={<Dismiss20Regular />}
-          />
+      {status === 'failed' && (
+        <Tooltip content={nodeState.error ?? 'Failed'} relationship="label">
+          <Badge appearance="filled" color="danger" icon={<Dismiss20Regular />} />
         </Tooltip>
       )}
-      {status === "pending" && (
-        <Badge
-          appearance="outline"
-          color="informative"
-          icon={<Clock20Regular />}
-        />
-      )}
+      {status === 'pending' && <Badge appearance="outline" color="informative" icon={<Clock20Regular />} />}
     </div>
   );
 };
@@ -407,19 +356,17 @@ export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({
  * Get CSS class name for node based on execution status.
  * Used by custom node components for visual styling.
  */
-export function getNodeExecutionClassName(
-  status: NodeExecutionStatus | undefined,
-): string {
+export function getNodeExecutionClassName(status: NodeExecutionStatus | undefined): string {
   switch (status) {
-    case "running":
-      return "node-executing";
-    case "completed":
-      return "node-completed";
-    case "failed":
-      return "node-failed";
-    case "skipped":
-      return "node-skipped";
+    case 'running':
+      return 'node-executing';
+    case 'completed':
+      return 'node-completed';
+    case 'failed':
+      return 'node-failed';
+    case 'skipped':
+      return 'node-skipped';
     default:
-      return "";
+      return '';
   }
 }

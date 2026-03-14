@@ -11,18 +11,12 @@
  * - Footer actions (Save Playbook, Save As, Cancel, Execute)
  */
 
-import * as React from "react";
-import {
-  Spinner,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { PlaybookSelector } from "./PlaybookSelector";
-import { ScopeTabs } from "./ScopeTabs";
-import { ScopeList } from "./ScopeList";
-import { FooterActions } from "./FooterActions";
+import * as React from 'react';
+import { Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import { PlaybookSelector } from './PlaybookSelector';
+import { ScopeTabs } from './ScopeTabs';
+import { ScopeList } from './ScopeList';
+import { FooterActions } from './FooterActions';
 import {
   IAnalysisBuilderAppProps,
   IPlaybook,
@@ -33,9 +27,9 @@ import {
   IOutputFormat,
   ScopeTabId,
   IScopeTab,
-} from "../types";
-import { logInfo, logError } from "../utils/logger";
-import "../css/AnalysisBuilder.css";
+} from '../types';
+import { logInfo, logError } from '../utils/logger';
+import '../css/AnalysisBuilder.css';
 
 // Declare global Xrm object for Dataverse Web API operations
 declare const Xrm: {
@@ -48,69 +42,67 @@ declare const Xrm: {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
     flex: 1,
     minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
-    boxSizing: "border-box",
+    overflow: 'hidden',
+    boxSizing: 'border-box',
   },
   content: {
     flex: 1,
-    overflow: "hidden",
-    display: "flex",
-    flexDirection: "column",
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0, // Important for flex child overflow
   },
   scrollableContent: {
     flex: 1,
-    overflow: "auto",
-    display: "flex",
-    flexDirection: "column",
+    overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0,
   },
   scopeContent: {
     flex: 1,
-    overflow: "auto",
-    paddingTop: "12px",
-    paddingBottom: "12px",
-    paddingLeft: "16px",
-    paddingRight: "16px",
+    overflow: 'auto',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    paddingLeft: '16px',
+    paddingRight: '16px',
     minHeight: 0,
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flex: 1,
-    gap: "16px",
+    gap: '16px',
   },
   footerWrapper: {
     flexShrink: 0,
-    marginTop: "auto",
+    marginTop: 'auto',
     backgroundColor: tokens.colorNeutralBackground2,
   },
   version: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center" as const,
-    paddingTop: "4px",
-    paddingBottom: "4px",
+    textAlign: 'center' as const,
+    paddingTop: '4px',
+    paddingBottom: '4px',
     backgroundColor: tokens.colorNeutralBackground1,
   },
 });
 
 // Build date for version footer
-const BUILD_DATE = new Date().toISOString().split("T")[0];
-const VERSION = "2.9.2";
+const BUILD_DATE = new Date().toISOString().split('T')[0];
+const VERSION = '2.9.2';
 
-export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
-  props,
-) => {
+export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = props => {
   const styles = useStyles();
   const {
     documentId,
@@ -139,23 +131,15 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const [outputFormats, setOutputFormats] = React.useState<IOutputFormat[]>([]);
 
   // Selection state
-  const [selectedPlaybook, setSelectedPlaybook] = React.useState<
-    IPlaybook | undefined
-  >();
-  const [selectedActionId, setSelectedActionId] = React.useState<
-    string | undefined
-  >();
+  const [selectedPlaybook, setSelectedPlaybook] = React.useState<IPlaybook | undefined>();
+  const [selectedActionId, setSelectedActionId] = React.useState<string | undefined>();
   const [selectedSkillIds, setSelectedSkillIds] = React.useState<string[]>([]);
-  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = React.useState<
-    string[]
-  >([]);
+  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = React.useState<string[]>([]);
   const [selectedToolIds, setSelectedToolIds] = React.useState<string[]>([]);
-  const [selectedOutputFormat, setSelectedOutputFormat] = React.useState<
-    string | undefined
-  >();
+  const [selectedOutputFormat, setSelectedOutputFormat] = React.useState<string | undefined>();
 
   // UI state
-  const [activeTab, setActiveTab] = React.useState<ScopeTabId>("action");
+  const [activeTab, setActiveTab] = React.useState<ScopeTabId>('action');
 
   // Load initial data
   React.useEffect(() => {
@@ -167,7 +151,7 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
     setError(undefined);
 
     try {
-      logInfo("AnalysisBuilderApp", "Loading initial data...");
+      logInfo('AnalysisBuilderApp', 'Loading initial data...');
 
       // Load playbooks, actions, skills, etc. from Dataverse
       await Promise.all([
@@ -179,11 +163,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
         loadOutputFormats(),
       ]);
 
-      logInfo("AnalysisBuilderApp", "Initial data loaded successfully");
+      logInfo('AnalysisBuilderApp', 'Initial data loaded successfully');
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to load data";
-      logError("AnalysisBuilderApp", "Error loading data", err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
+      logError('AnalysisBuilderApp', 'Error loading data', err);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -193,29 +176,27 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const loadPlaybooks = async (): Promise<void> => {
     try {
       const result = await webApi.retrieveMultipleRecords(
-        "sprk_analysisplaybook",
-        "?$select=sprk_analysisplaybookid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_analysisplaybook',
+        '?$select=sprk_analysisplaybookid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name'
       );
 
-      const loadedPlaybooks: IPlaybook[] = result.entities.map(
-        (entity: ComponentFramework.WebApi.Entity) => ({
-          id: entity.sprk_analysisplaybookid as string,
-          name: entity.sprk_name as string,
-          description: (entity.sprk_description as string) || "",
-          icon: "Lightbulb", // Default icon - field doesn't exist in Dataverse
-          isDefault: false,
-        }),
-      );
+      const loadedPlaybooks: IPlaybook[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
+        id: entity.sprk_analysisplaybookid as string,
+        name: entity.sprk_name as string,
+        description: (entity.sprk_description as string) || '',
+        icon: 'Lightbulb', // Default icon - field doesn't exist in Dataverse
+        isDefault: false,
+      }));
 
       setPlaybooks(loadedPlaybooks);
 
       // Select default playbook if available
-      const defaultPlaybook = loadedPlaybooks.find((p) => p.isDefault);
+      const defaultPlaybook = loadedPlaybooks.find(p => p.isDefault);
       if (defaultPlaybook) {
         handlePlaybookSelect(defaultPlaybook);
       }
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading playbooks", err);
+      logError('AnalysisBuilderApp', 'Error loading playbooks', err);
       // Set sample data for development
       setPlaybooks(getSamplePlaybooks());
     }
@@ -224,23 +205,21 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const loadActions = async (): Promise<void> => {
     try {
       const result = await webApi.retrieveMultipleRecords(
-        "sprk_analysisaction",
-        "?$select=sprk_analysisactionid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_analysisaction',
+        '?$select=sprk_analysisactionid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name'
       );
 
-      const loadedActions: IAction[] = result.entities.map(
-        (entity: ComponentFramework.WebApi.Entity) => ({
-          id: entity.sprk_analysisactionid as string,
-          name: entity.sprk_name as string,
-          description: (entity.sprk_description as string) || "",
-          icon: "Play", // Default icon - field doesn't exist in Dataverse
-          isSelected: false,
-        }),
-      );
+      const loadedActions: IAction[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
+        id: entity.sprk_analysisactionid as string,
+        name: entity.sprk_name as string,
+        description: (entity.sprk_description as string) || '',
+        icon: 'Play', // Default icon - field doesn't exist in Dataverse
+        isSelected: false,
+      }));
 
       setActions(loadedActions);
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading actions", err);
+      logError('AnalysisBuilderApp', 'Error loading actions', err);
       setActions(getSampleActions());
     }
   };
@@ -248,24 +227,22 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const loadSkills = async (): Promise<void> => {
     try {
       const result = await webApi.retrieveMultipleRecords(
-        "sprk_analysisskill",
-        "?$select=sprk_analysisskillid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_analysisskill',
+        '?$select=sprk_analysisskillid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name'
       );
 
-      const loadedSkills: ISkill[] = result.entities.map(
-        (entity: ComponentFramework.WebApi.Entity) => ({
-          id: entity.sprk_analysisskillid as string,
-          name: entity.sprk_name as string,
-          description: (entity.sprk_description as string) || "",
-          icon: "Brain", // Default icon - field doesn't exist in Dataverse
-          type: "analysis" as const,
-          isSelected: false,
-        }),
-      );
+      const loadedSkills: ISkill[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
+        id: entity.sprk_analysisskillid as string,
+        name: entity.sprk_name as string,
+        description: (entity.sprk_description as string) || '',
+        icon: 'Brain', // Default icon - field doesn't exist in Dataverse
+        type: 'analysis' as const,
+        isSelected: false,
+      }));
 
       setSkills(loadedSkills);
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading skills", err);
+      logError('AnalysisBuilderApp', 'Error loading skills', err);
       setSkills(getSampleSkills());
     }
   };
@@ -273,24 +250,22 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const loadKnowledge = async (): Promise<void> => {
     try {
       const result = await webApi.retrieveMultipleRecords(
-        "sprk_analysisknowledge",
-        "?$select=sprk_analysisknowledgeid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_analysisknowledge',
+        '?$select=sprk_analysisknowledgeid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name'
       );
 
-      const loadedKnowledge: IKnowledge[] = result.entities.map(
-        (entity: ComponentFramework.WebApi.Entity) => ({
-          id: entity.sprk_analysisknowledgeid as string,
-          name: entity.sprk_name as string,
-          description: (entity.sprk_description as string) || "",
-          icon: "Library", // Default icon - field doesn't exist in Dataverse
-          source: "dataverse" as const, // Default source - field doesn't exist in Dataverse
-          isSelected: false,
-        }),
-      );
+      const loadedKnowledge: IKnowledge[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
+        id: entity.sprk_analysisknowledgeid as string,
+        name: entity.sprk_name as string,
+        description: (entity.sprk_description as string) || '',
+        icon: 'Library', // Default icon - field doesn't exist in Dataverse
+        source: 'dataverse' as const, // Default source - field doesn't exist in Dataverse
+        isSelected: false,
+      }));
 
       setKnowledge(loadedKnowledge);
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading knowledge", err);
+      logError('AnalysisBuilderApp', 'Error loading knowledge', err);
       setKnowledge(getSampleKnowledge());
     }
   };
@@ -298,24 +273,22 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const loadTools = async (): Promise<void> => {
     try {
       const result = await webApi.retrieveMultipleRecords(
-        "sprk_analysistool",
-        "?$select=sprk_analysistoolid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_analysistool',
+        '?$select=sprk_analysistoolid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name'
       );
 
-      const loadedTools: ITool[] = result.entities.map(
-        (entity: ComponentFramework.WebApi.Entity) => ({
-          id: entity.sprk_analysistoolid as string,
-          name: entity.sprk_name as string,
-          description: (entity.sprk_description as string) || "",
-          icon: "Wrench", // Default icon - field doesn't exist in Dataverse
-          toolType: "api" as const, // Default type - field doesn't exist in Dataverse
-          isSelected: false,
-        }),
-      );
+      const loadedTools: ITool[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
+        id: entity.sprk_analysistoolid as string,
+        name: entity.sprk_name as string,
+        description: (entity.sprk_description as string) || '',
+        icon: 'Wrench', // Default icon - field doesn't exist in Dataverse
+        toolType: 'api' as const, // Default type - field doesn't exist in Dataverse
+        isSelected: false,
+      }));
 
       setTools(loadedTools);
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading tools", err);
+      logError('AnalysisBuilderApp', 'Error loading tools', err);
       setTools(getSampleTools());
     }
   };
@@ -324,31 +297,31 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
     // Output formats are typically static, but could be loaded from config
     setOutputFormats([
       {
-        id: "markdown",
-        name: "Markdown",
-        description: "Rich text format with headers and formatting",
-        icon: "Document",
-        format: "markdown",
+        id: 'markdown',
+        name: 'Markdown',
+        description: 'Rich text format with headers and formatting',
+        icon: 'Document',
+        format: 'markdown',
         isSelected: true,
       },
       {
-        id: "json",
-        name: "JSON",
-        description: "Structured data format",
-        icon: "Code",
-        format: "json",
+        id: 'json',
+        name: 'JSON',
+        description: 'Structured data format',
+        icon: 'Code',
+        format: 'json',
         isSelected: false,
       },
       {
-        id: "html",
-        name: "HTML",
-        description: "Web-ready format",
-        icon: "Globe",
-        format: "html",
+        id: 'html',
+        name: 'HTML',
+        description: 'Web-ready format',
+        icon: 'Globe',
+        format: 'html',
         isSelected: false,
       },
     ]);
-    setSelectedOutputFormat("markdown");
+    setSelectedOutputFormat('markdown');
   };
 
   /**
@@ -356,7 +329,7 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
    * Uses $expand to fetch related entities in a single query per scope type.
    */
   const loadPlaybookScopes = async (
-    playbookId: string,
+    playbookId: string
   ): Promise<{
     skillIds: string[];
     knowledgeIds: string[];
@@ -378,58 +351,45 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
       // - sprk_playbook_tool (Tools)
       // - sprk_analysisplaybook_action (Actions - note different pattern)
       const playbook = await webApi.retrieveRecord(
-        "sprk_analysisplaybook",
+        'sprk_analysisplaybook',
         playbookId,
-        "?$expand=sprk_playbook_skill($select=sprk_analysisskillid),sprk_playbook_knowledge($select=sprk_analysisknowledgeid),sprk_playbook_tool($select=sprk_analysistoolid),sprk_analysisplaybook_action($select=sprk_analysisactionid)",
+        '?$expand=sprk_playbook_skill($select=sprk_analysisskillid),sprk_playbook_knowledge($select=sprk_analysisknowledgeid),sprk_playbook_tool($select=sprk_analysistoolid),sprk_analysisplaybook_action($select=sprk_analysisactionid)'
       );
 
       // Extract skill IDs
-      if (
-        playbook.sprk_playbook_skill &&
-        Array.isArray(playbook.sprk_playbook_skill)
-      ) {
+      if (playbook.sprk_playbook_skill && Array.isArray(playbook.sprk_playbook_skill)) {
         scopeIds.skillIds = playbook.sprk_playbook_skill.map(
-          (s: { sprk_analysisskillid: string }) => s.sprk_analysisskillid,
+          (s: { sprk_analysisskillid: string }) => s.sprk_analysisskillid
         );
       }
 
       // Extract knowledge IDs
-      if (
-        playbook.sprk_playbook_knowledge &&
-        Array.isArray(playbook.sprk_playbook_knowledge)
-      ) {
+      if (playbook.sprk_playbook_knowledge && Array.isArray(playbook.sprk_playbook_knowledge)) {
         scopeIds.knowledgeIds = playbook.sprk_playbook_knowledge.map(
-          (k: { sprk_analysisknowledgeid: string }) =>
-            k.sprk_analysisknowledgeid,
+          (k: { sprk_analysisknowledgeid: string }) => k.sprk_analysisknowledgeid
         );
       }
 
       // Extract tool IDs
-      if (
-        playbook.sprk_playbook_tool &&
-        Array.isArray(playbook.sprk_playbook_tool)
-      ) {
+      if (playbook.sprk_playbook_tool && Array.isArray(playbook.sprk_playbook_tool)) {
         scopeIds.toolIds = playbook.sprk_playbook_tool.map(
-          (t: { sprk_analysistoolid: string }) => t.sprk_analysistoolid,
+          (t: { sprk_analysistoolid: string }) => t.sprk_analysistoolid
         );
       }
 
       // Extract action IDs (note: different relationship name pattern)
-      if (
-        playbook.sprk_analysisplaybook_action &&
-        Array.isArray(playbook.sprk_analysisplaybook_action)
-      ) {
+      if (playbook.sprk_analysisplaybook_action && Array.isArray(playbook.sprk_analysisplaybook_action)) {
         scopeIds.actionIds = playbook.sprk_analysisplaybook_action.map(
-          (a: { sprk_analysisactionid: string }) => a.sprk_analysisactionid,
+          (a: { sprk_analysisactionid: string }) => a.sprk_analysisactionid
         );
       }
 
       logInfo(
-        "AnalysisBuilderApp",
-        `Loaded playbook scopes: ${scopeIds.skillIds.length} skills, ${scopeIds.knowledgeIds.length} knowledge, ${scopeIds.toolIds.length} tools, ${scopeIds.actionIds.length} actions`,
+        'AnalysisBuilderApp',
+        `Loaded playbook scopes: ${scopeIds.skillIds.length} skills, ${scopeIds.knowledgeIds.length} knowledge, ${scopeIds.toolIds.length} tools, ${scopeIds.actionIds.length} actions`
       );
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error loading playbook scopes", err);
+      logError('AnalysisBuilderApp', 'Error loading playbook scopes', err);
       // Fall back gracefully - playbook will be selected but scopes won't auto-populate
     }
 
@@ -440,7 +400,7 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   const handlePlaybookSelect = async (playbook: IPlaybook): Promise<void> => {
     setSelectedPlaybook(playbook);
     onPlaybookSelect(playbook.id);
-    logInfo("AnalysisBuilderApp", `Selected playbook: ${playbook.name}`);
+    logInfo('AnalysisBuilderApp', `Selected playbook: ${playbook.name}`);
 
     // Clear all previous scope selections first (important when switching playbooks)
     setSelectedActionId(undefined);
@@ -471,18 +431,15 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
         onToolsSelect(scopes.toolIds);
       }
 
-      logInfo(
-        "AnalysisBuilderApp",
-        `Applied playbook scopes for: ${playbook.name}`,
-      );
+      logInfo('AnalysisBuilderApp', `Applied playbook scopes for: ${playbook.name}`);
     } catch (err) {
-      logError("AnalysisBuilderApp", "Error applying playbook scopes", err);
+      logError('AnalysisBuilderApp', 'Error applying playbook scopes', err);
     }
   };
 
   const handleTabChange = (tabId: ScopeTabId): void => {
     setActiveTab(tabId);
-    logInfo("AnalysisBuilderApp", `Tab changed to: ${tabId}`);
+    logInfo('AnalysisBuilderApp', `Tab changed to: ${tabId}`);
   };
 
   const handleActionSelectionChange = (selectedIds: string[]): void => {
@@ -511,27 +468,25 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   };
 
   const handleSavePlaybook = async (): Promise<void> => {
-    logInfo("AnalysisBuilderApp", "Save playbook clicked");
+    logInfo('AnalysisBuilderApp', 'Save playbook clicked');
     // TRACKED: GitHub #234 - Implement save playbook
   };
 
   const handleSaveAs = async (): Promise<void> => {
-    logInfo("AnalysisBuilderApp", "Save As clicked");
+    logInfo('AnalysisBuilderApp', 'Save As clicked');
     // TRACKED: GitHub #234 - Implement save as new playbook
   };
 
   const handleExecute = async (): Promise<void> => {
     // Validate required fields
     if (!documentId) {
-      setError(
-        "Document ID is required. Please ensure a document is selected.",
-      );
-      logError("AnalysisBuilderApp", "Missing documentId", { documentId });
+      setError('Document ID is required. Please ensure a document is selected.');
+      logError('AnalysisBuilderApp', 'Missing documentId', { documentId });
       return;
     }
 
     if (!selectedActionId) {
-      setError("Please select an action before executing.");
+      setError('Please select an action before executing.');
       return;
     }
 
@@ -539,7 +494,7 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
     setError(undefined);
 
     try {
-      logInfo("AnalysisBuilderApp", "Executing analysis...", {
+      logInfo('AnalysisBuilderApp', 'Executing analysis...', {
         documentId,
         actionId: selectedActionId,
         skillIds: selectedSkillIds,
@@ -551,28 +506,26 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
       // Lookup fields use @odata.bind syntax
       // Note: statuscode defaults automatically, no need to set it
       const analysisRecord: Record<string, unknown> = {
-        sprk_name: `Analysis - ${documentName || "Document"}`,
-        "sprk_documentid@odata.bind": `/sprk_documents(${documentId})`,
+        sprk_name: `Analysis - ${documentName || 'Document'}`,
+        'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
       };
 
       // Add action lookup (required)
       if (selectedActionId) {
-        analysisRecord["sprk_actionid@odata.bind"] =
-          `/sprk_analysisactions(${selectedActionId})`;
+        analysisRecord['sprk_actionid@odata.bind'] = `/sprk_analysisactions(${selectedActionId})`;
       }
 
       // Add playbook lookup (optional)
       // Note: The lookup field is sprk_playbook (not sprk_playbookid)
       // Read as _sprk_playbook_value, write as sprk_Playbook@odata.bind
       if (selectedPlaybook) {
-        analysisRecord["sprk_Playbook@odata.bind"] =
-          `/sprk_analysisplaybooks(${selectedPlaybook.id})`;
+        analysisRecord['sprk_Playbook@odata.bind'] = `/sprk_analysisplaybooks(${selectedPlaybook.id})`;
       }
 
       // Create the analysis record first
-      const result = await webApi.createRecord("sprk_analysis", analysisRecord);
+      const result = await webApi.createRecord('sprk_analysis', analysisRecord);
       const analysisId = result.id;
-      logInfo("AnalysisBuilderApp", `Analysis record created: ${analysisId}`);
+      logInfo('AnalysisBuilderApp', `Analysis record created: ${analysisId}`);
 
       // Associate N:N relationships after record creation using Xrm.WebApi
       // Skills (N:N relationship: sprk_analysis_skill)
@@ -583,20 +536,14 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
               boundParameter: undefined,
               parameterTypes: {},
               operationType: 2, // Associate
-              operationName: "Associate",
+              operationName: 'Associate',
             }),
-            target: { entityType: "sprk_analysis", id: analysisId },
-            relatedEntities: [
-              { entityType: "sprk_analysisskill", id: skillId },
-            ],
-            relationship: "sprk_analysis_skill",
+            target: { entityType: 'sprk_analysis', id: analysisId },
+            relatedEntities: [{ entityType: 'sprk_analysisskill', id: skillId }],
+            relationship: 'sprk_analysis_skill',
           });
         } catch (assocErr) {
-          logError(
-            "AnalysisBuilderApp",
-            `Failed to associate skill ${skillId}`,
-            assocErr,
-          );
+          logError('AnalysisBuilderApp', `Failed to associate skill ${skillId}`, assocErr);
         }
       }
 
@@ -608,20 +555,14 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
               boundParameter: undefined,
               parameterTypes: {},
               operationType: 2,
-              operationName: "Associate",
+              operationName: 'Associate',
             }),
-            target: { entityType: "sprk_analysis", id: analysisId },
-            relatedEntities: [
-              { entityType: "sprk_analysisknowledge", id: knowledgeId },
-            ],
-            relationship: "sprk_analysis_knowledge",
+            target: { entityType: 'sprk_analysis', id: analysisId },
+            relatedEntities: [{ entityType: 'sprk_analysisknowledge', id: knowledgeId }],
+            relationship: 'sprk_analysis_knowledge',
           });
         } catch (assocErr) {
-          logError(
-            "AnalysisBuilderApp",
-            `Failed to associate knowledge ${knowledgeId}`,
-            assocErr,
-          );
+          logError('AnalysisBuilderApp', `Failed to associate knowledge ${knowledgeId}`, assocErr);
         }
       }
 
@@ -633,30 +574,22 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
               boundParameter: undefined,
               parameterTypes: {},
               operationType: 2,
-              operationName: "Associate",
+              operationName: 'Associate',
             }),
-            target: { entityType: "sprk_analysis", id: analysisId },
-            relatedEntities: [{ entityType: "sprk_analysistool", id: toolId }],
-            relationship: "sprk_analysis_tool",
+            target: { entityType: 'sprk_analysis', id: analysisId },
+            relatedEntities: [{ entityType: 'sprk_analysistool', id: toolId }],
+            relationship: 'sprk_analysis_tool',
           });
         } catch (assocErr) {
-          logError(
-            "AnalysisBuilderApp",
-            `Failed to associate tool ${toolId}`,
-            assocErr,
-          );
+          logError('AnalysisBuilderApp', `Failed to associate tool ${toolId}`, assocErr);
         }
       }
 
-      logInfo(
-        "AnalysisBuilderApp",
-        `Analysis created with associations: ${analysisId}`,
-      );
+      logInfo('AnalysisBuilderApp', `Analysis created with associations: ${analysisId}`);
       onExecute(analysisId);
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to create analysis";
-      logError("AnalysisBuilderApp", "Error creating analysis", err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create analysis';
+      logError('AnalysisBuilderApp', 'Error creating analysis', err);
       setError(errorMessage);
     } finally {
       setIsExecuting(false);
@@ -666,44 +599,44 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
   // Build tabs with counts
   const tabs: IScopeTab[] = [
     {
-      id: "action",
-      label: "Action",
+      id: 'action',
+      label: 'Action',
       count: selectedActionId ? 1 : 0,
-      icon: "Play",
+      icon: 'Play',
     },
     {
-      id: "skills",
-      label: "Skills",
+      id: 'skills',
+      label: 'Skills',
       count: selectedSkillIds.length,
-      icon: "Brain",
+      icon: 'Brain',
     },
     {
-      id: "knowledge",
-      label: "Knowledge",
+      id: 'knowledge',
+      label: 'Knowledge',
       count: selectedKnowledgeIds.length,
-      icon: "Library",
+      icon: 'Library',
     },
     {
-      id: "tools",
-      label: "Tools",
+      id: 'tools',
+      label: 'Tools',
       count: selectedToolIds.length,
-      icon: "Wrench",
+      icon: 'Wrench',
     },
     {
-      id: "output",
-      label: "Output",
+      id: 'output',
+      label: 'Output',
       count: selectedOutputFormat ? 1 : 0,
-      icon: "Document",
+      icon: 'Document',
     },
   ];
 
   // Render current tab content
   const renderTabContent = (): React.ReactElement => {
     switch (activeTab) {
-      case "action":
+      case 'action':
         return (
           <ScopeList
-            items={actions.map((a) => ({
+            items={actions.map(a => ({
               ...a,
               isSelected: a.id === selectedActionId,
             }))}
@@ -713,10 +646,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
             multiSelect={false}
           />
         );
-      case "skills":
+      case 'skills':
         return (
           <ScopeList
-            items={skills.map((s) => ({
+            items={skills.map(s => ({
               ...s,
               isSelected: selectedSkillIds.includes(s.id),
             }))}
@@ -726,10 +659,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
             multiSelect={true}
           />
         );
-      case "knowledge":
+      case 'knowledge':
         return (
           <ScopeList
-            items={knowledge.map((k) => ({
+            items={knowledge.map(k => ({
               ...k,
               isSelected: selectedKnowledgeIds.includes(k.id),
             }))}
@@ -739,10 +672,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
             multiSelect={true}
           />
         );
-      case "tools":
+      case 'tools':
         return (
           <ScopeList
-            items={tools.map((t) => ({
+            items={tools.map(t => ({
               ...t,
               isSelected: selectedToolIds.includes(t.id),
             }))}
@@ -752,10 +685,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
             multiSelect={true}
           />
         );
-      case "output":
+      case 'output':
         return (
           <ScopeList
-            items={outputFormats.map((o) => ({
+            items={outputFormats.map(o => ({
               ...o,
               isSelected: o.id === selectedOutputFormat,
             }))}
@@ -802,11 +735,7 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
           />
 
           {/* Scope Tabs */}
-          <ScopeTabs
-            activeTab={activeTab}
-            tabs={tabs}
-            onTabChange={handleTabChange}
-          />
+          <ScopeTabs activeTab={activeTab} tabs={tabs} onTabChange={handleTabChange} />
 
           {/* Tab Content - scrollable */}
           <div className={styles.scopeContent}>{renderTabContent()}</div>
@@ -840,31 +769,31 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (
 function getSamplePlaybooks(): IPlaybook[] {
   return [
     {
-      id: "1",
-      name: "Document Summary",
-      description: "Generate a comprehensive summary",
-      icon: "DocumentText",
+      id: '1',
+      name: 'Document Summary',
+      description: 'Generate a comprehensive summary',
+      icon: 'DocumentText',
       isDefault: true,
     },
     {
-      id: "2",
-      name: "Contract Analysis",
-      description: "Extract key contract terms",
-      icon: "Certificate",
+      id: '2',
+      name: 'Contract Analysis',
+      description: 'Extract key contract terms',
+      icon: 'Certificate',
       isDefault: false,
     },
     {
-      id: "3",
-      name: "Compliance Check",
-      description: "Check regulatory compliance",
-      icon: "Shield",
+      id: '3',
+      name: 'Compliance Check',
+      description: 'Check regulatory compliance',
+      icon: 'Shield',
       isDefault: false,
     },
     {
-      id: "4",
-      name: "Custom Analysis",
-      description: "Build your own analysis",
-      icon: "Settings",
+      id: '4',
+      name: 'Custom Analysis',
+      description: 'Build your own analysis',
+      icon: 'Settings',
       isDefault: false,
     },
   ];
@@ -873,24 +802,24 @@ function getSamplePlaybooks(): IPlaybook[] {
 function getSampleActions(): IAction[] {
   return [
     {
-      id: "1",
-      name: "Summarize Document",
-      description: "Create a concise summary of the document content",
-      icon: "TextDocument",
+      id: '1',
+      name: 'Summarize Document',
+      description: 'Create a concise summary of the document content',
+      icon: 'TextDocument',
       isSelected: false,
     },
     {
-      id: "2",
-      name: "Extract Key Information",
-      description: "Identify and extract important data points",
-      icon: "Filter",
+      id: '2',
+      name: 'Extract Key Information',
+      description: 'Identify and extract important data points',
+      icon: 'Filter',
       isSelected: false,
     },
     {
-      id: "3",
-      name: "Generate Report",
-      description: "Create a structured analysis report",
-      icon: "ReportDocument",
+      id: '3',
+      name: 'Generate Report',
+      description: 'Create a structured analysis report',
+      icon: 'ReportDocument',
       isSelected: false,
     },
   ];
@@ -899,19 +828,19 @@ function getSampleActions(): IAction[] {
 function getSampleSkills(): ISkill[] {
   return [
     {
-      id: "1",
-      name: "Entity Extraction",
-      description: "Identify people, organizations, and locations",
-      icon: "People",
-      type: "extraction",
+      id: '1',
+      name: 'Entity Extraction',
+      description: 'Identify people, organizations, and locations',
+      icon: 'People',
+      type: 'extraction',
       isSelected: false,
     },
     {
-      id: "2",
-      name: "Sentiment Analysis",
-      description: "Determine document tone and sentiment",
-      icon: "Emoji",
-      type: "analysis",
+      id: '2',
+      name: 'Sentiment Analysis',
+      description: 'Determine document tone and sentiment',
+      icon: 'Emoji',
+      type: 'analysis',
       isSelected: false,
     },
   ];
@@ -920,11 +849,11 @@ function getSampleSkills(): ISkill[] {
 function getSampleKnowledge(): IKnowledge[] {
   return [
     {
-      id: "1",
-      name: "Company Policies",
-      description: "Internal policy documents",
-      icon: "Library",
-      source: "sharepoint",
+      id: '1',
+      name: 'Company Policies',
+      description: 'Internal policy documents',
+      icon: 'Library',
+      source: 'sharepoint',
       isSelected: false,
     },
   ];
@@ -933,11 +862,11 @@ function getSampleKnowledge(): IKnowledge[] {
 function getSampleTools(): ITool[] {
   return [
     {
-      id: "1",
-      name: "Web Search",
-      description: "Search the web for related information",
-      icon: "Search",
-      toolType: "search",
+      id: '1',
+      name: 'Web Search',
+      description: 'Search the web for related information',
+      icon: 'Search',
+      toolType: 'search',
       isSelected: false,
     },
   ];

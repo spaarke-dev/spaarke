@@ -18,13 +18,9 @@
  * - ADR-022: React 16 APIs (no hooks from React 18+)
  */
 
-import * as React from "react";
-import {
-  IEventItem,
-  IEventFilterParams,
-  fetchUpcomingEventsWithCount,
-} from "../services/eventFilterService";
-import { IInputs } from "../generated/ManifestTypes";
+import * as React from 'react';
+import { IEventItem, IEventFilterParams, fetchUpcomingEventsWithCount } from '../services/eventFilterService';
+import { IInputs } from '../generated/ManifestTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -81,9 +77,7 @@ const DEFAULT_MAX_ITEMS = 10;
  *
  * Sorts by due date ascending (most urgent first)
  */
-export function useUpcomingEvents(
-  params: IUseUpcomingEventsParams,
-): IUseUpcomingEventsResult {
+export function useUpcomingEvents(params: IUseUpcomingEventsParams): IUseUpcomingEventsResult {
   const {
     context,
     parentRecordId,
@@ -122,7 +116,7 @@ export function useUpcomingEvents(
 
     // Check if webAPI is available
     if (!contextRef.current?.webAPI) {
-      setError("WebAPI not available");
+      setError('WebAPI not available');
       setLoading(false);
       setInitialized(true);
       return;
@@ -139,10 +133,7 @@ export function useUpcomingEvents(
         includeOverdue,
       };
 
-      const result = await fetchUpcomingEventsWithCount(
-        contextRef.current.webAPI,
-        filterParams,
-      );
+      const result = await fetchUpcomingEventsWithCount(contextRef.current.webAPI, filterParams);
 
       // Only update state if still mounted
       if (mountedRef.current) {
@@ -151,31 +142,22 @@ export function useUpcomingEvents(
         setError(null);
       }
     } catch (err) {
-      console.error("[useUpcomingEvents] Error fetching events:", err);
+      console.error('[useUpcomingEvents] Error fetching events:', err);
 
       if (mountedRef.current) {
         // Provide user-friendly error message
         if (err instanceof Error) {
-          if (
-            err.message.includes("401") ||
-            err.message.includes("Unauthorized")
-          ) {
-            setError("Authentication required. Please refresh the page.");
-          } else if (
-            err.message.includes("403") ||
-            err.message.includes("Forbidden")
-          ) {
+          if (err.message.includes('401') || err.message.includes('Unauthorized')) {
+            setError('Authentication required. Please refresh the page.');
+          } else if (err.message.includes('403') || err.message.includes('Forbidden')) {
             setError("You don't have permission to view events.");
-          } else if (
-            err.message.includes("Network") ||
-            err.message.includes("fetch")
-          ) {
-            setError("Unable to connect. Please check your connection.");
+          } else if (err.message.includes('Network') || err.message.includes('fetch')) {
+            setError('Unable to connect. Please check your connection.');
           } else {
-            setError("Failed to load events. Please try again.");
+            setError('Failed to load events. Please try again.');
           }
         } else {
-          setError("An unexpected error occurred.");
+          setError('An unexpected error occurred.');
         }
       }
     } finally {
@@ -226,29 +208,23 @@ export function useUpcomingEvents(
 /**
  * Helper function to determine urgency level for styling
  */
-export function getUrgencyLevel(
-  daysUntilDue: number,
-  isOverdue: boolean,
-): "overdue" | "urgent" | "soon" | "normal" {
-  if (isOverdue) return "overdue";
-  if (daysUntilDue === 0) return "urgent"; // Due today
-  if (daysUntilDue <= 3) return "soon";
-  return "normal";
+export function getUrgencyLevel(daysUntilDue: number, isOverdue: boolean): 'overdue' | 'urgent' | 'soon' | 'normal' {
+  if (isOverdue) return 'overdue';
+  if (daysUntilDue === 0) return 'urgent'; // Due today
+  if (daysUntilDue <= 3) return 'soon';
+  return 'normal';
 }
 
 /**
  * Format days until due for display
  */
-export function formatDaysUntilDue(
-  daysUntilDue: number,
-  isOverdue: boolean,
-): string {
+export function formatDaysUntilDue(daysUntilDue: number, isOverdue: boolean): string {
   if (isOverdue) {
     const overdueDays = Math.abs(daysUntilDue);
-    return overdueDays === 1 ? "1 day overdue" : `${overdueDays} days overdue`;
+    return overdueDays === 1 ? '1 day overdue' : `${overdueDays} days overdue`;
   }
 
-  if (daysUntilDue === 0) return "Due today";
-  if (daysUntilDue === 1) return "Due tomorrow";
+  if (daysUntilDue === 0) return 'Due today';
+  if (daysUntilDue === 1) return 'Due tomorrow';
   return `Due in ${daysUntilDue} days`;
 }

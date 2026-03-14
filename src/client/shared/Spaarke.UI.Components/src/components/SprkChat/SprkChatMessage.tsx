@@ -8,17 +8,10 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  mergeClasses,
-  Text,
-  Spinner,
-} from "@fluentui/react-components";
-import { ISprkChatMessageProps, ICitation } from "./types";
-import { CitationMarker } from "./SprkChatCitationPopover";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner } from '@fluentui/react-components';
+import { ISprkChatMessageProps, ICitation } from './types';
+import { CitationMarker } from './SprkChatCitationPopover';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -26,21 +19,21 @@ import { CitationMarker } from "./SprkChatCitationPopover";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    maxWidth: "80%",
-    ...shorthands.padding("8px", "12px"),
+    display: 'flex',
+    flexDirection: 'column',
+    maxWidth: '80%',
+    ...shorthands.padding('8px', '12px'),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    wordBreak: "break-word",
-    whiteSpace: "pre-wrap",
+    wordBreak: 'break-word',
+    whiteSpace: 'pre-wrap',
   },
   userContainer: {
-    alignSelf: "flex-end",
+    alignSelf: 'flex-end',
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
   },
   assistantContainer: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground1,
   },
@@ -51,18 +44,18 @@ const useStyles = makeStyles({
   timestamp: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    marginTop: "4px",
-    alignSelf: "flex-end",
+    marginTop: '4px',
+    alignSelf: 'flex-end',
   },
   userTimestamp: {
     color: tokens.colorNeutralForegroundOnBrand,
     opacity: 0.7,
   },
   streamingIndicator: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    marginTop: "4px",
+    marginTop: '4px',
   },
 });
 
@@ -78,11 +71,11 @@ function formatTimestamp(timestamp: string): string {
   try {
     const date = new Date(timestamp);
     return date.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
+      hour: '2-digit',
+      minute: '2-digit',
     });
   } catch {
-    return "";
+    return '';
   }
 }
 
@@ -115,10 +108,7 @@ function buildCitationMap(citations: ICitation[]): Map<number, ICitation> {
  * CitationMarker elements. If no citations are provided or no markers match,
  * returns the original text as a single-element array.
  */
-function renderContentWithCitations(
-  text: string,
-  citations: ICitation[] | undefined,
-): React.ReactNode[] {
+function renderContentWithCitations(text: string, citations: ICitation[] | undefined): React.ReactNode[] {
   if (!citations || citations.length === 0) {
     return [text];
   }
@@ -150,7 +140,7 @@ function renderContentWithCitations(
       React.createElement(CitationMarker, {
         key: `citation-${citationId}-${match.index}`,
         citation,
-      }),
+      })
     );
 
     lastIndex = match.index + match[0].length;
@@ -187,24 +177,14 @@ function renderContentWithCitations(
  * />
  * ```
  */
-export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
-  message,
-  isStreaming = false,
-  citations,
-}) => {
+export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({ message, isStreaming = false, citations }) => {
   const styles = useStyles();
-  const isUser = message.role === "User";
-  const isAssistant = message.role === "Assistant";
+  const isUser = message.role === 'User';
+  const isAssistant = message.role === 'Assistant';
 
-  const containerClass = mergeClasses(
-    styles.container,
-    isUser ? styles.userContainer : styles.assistantContainer,
-  );
+  const containerClass = mergeClasses(styles.container, isUser ? styles.userContainer : styles.assistantContainer);
 
-  const timestampClass = mergeClasses(
-    styles.timestamp,
-    isUser ? styles.userTimestamp : undefined,
-  );
+  const timestampClass = mergeClasses(styles.timestamp, isUser ? styles.userTimestamp : undefined);
 
   // For assistant messages with citations, parse [N] markers and render
   // interactive CitationMarker components. User messages are always plain text.
@@ -216,11 +196,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
   }, [message.content, citations, isAssistant, isStreaming]);
 
   return (
-    <div
-      className={containerClass}
-      role="listitem"
-      aria-label={`${message.role} message`}
-    >
+    <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
       <Text className={styles.messageContent}>{renderedContent}</Text>
 
       {isStreaming && !message.content && (
@@ -231,9 +207,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({
       )}
 
       {message.timestamp && !isStreaming && (
-        <span className={timestampClass}>
-          {formatTimestamp(message.timestamp)}
-        </span>
+        <span className={timestampClass}>{formatTimestamp(message.timestamp)}</span>
       )}
     </div>
   );

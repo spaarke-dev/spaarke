@@ -18,7 +18,7 @@
  * ```
  */
 
-import type { ILookupItem } from "../types/LookupTypes";
+import type { ILookupItem } from '../types/LookupTypes';
 
 /**
  * Fuzzy-match an AI-generated display name against Dataverse lookup results.
@@ -35,10 +35,7 @@ import type { ILookupItem } from "../types/LookupTypes";
  * @param candidates - Dataverse lookup results to match against
  * @returns The best matching lookup item, or null if no match above threshold
  */
-export function findBestLookupMatch(
-  aiValue: string,
-  candidates: ILookupItem[],
-): ILookupItem | null {
+export function findBestLookupMatch(aiValue: string, candidates: ILookupItem[]): ILookupItem | null {
   if (candidates.length === 0) return null;
 
   const aiLower = aiValue.toLowerCase().trim();

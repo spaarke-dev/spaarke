@@ -5,24 +5,11 @@
  * for each tab. Supports readOnly mode for locked playbook scopes.
  */
 
-import React, { useState, useCallback } from "react";
-import {
-  TabList,
-  Tab,
-  Badge,
-  Text,
-  Spinner,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import {
-  Play24Regular,
-  BrainCircuit24Regular,
-  Library24Regular,
-  Wrench24Regular,
-} from "@fluentui/react-icons";
-import { ScopeList } from "./ScopeList";
-import type { IAction, ISkill, IKnowledge, ITool, ScopeTabId } from "./types";
+import React, { useState, useCallback } from 'react';
+import { TabList, Tab, Badge, Text, Spinner, makeStyles, tokens } from '@fluentui/react-components';
+import { Play24Regular, BrainCircuit24Regular, Library24Regular, Wrench24Regular } from '@fluentui/react-icons';
+import { ScopeList } from './ScopeList';
+import type { IAction, ISkill, IKnowledge, ITool, ScopeTabId } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -56,10 +43,10 @@ interface ITabConfig {
 }
 
 const TAB_CONFIGS: ITabConfig[] = [
-  { id: "action", label: "Action", icon: <Play24Regular /> },
-  { id: "skills", label: "Skills", icon: <BrainCircuit24Regular /> },
-  { id: "knowledge", label: "Knowledge", icon: <Library24Regular /> },
-  { id: "tools", label: "Tools", icon: <Wrench24Regular /> },
+  { id: 'action', label: 'Action', icon: <Play24Regular /> },
+  { id: 'skills', label: 'Skills', icon: <BrainCircuit24Regular /> },
+  { id: 'knowledge', label: 'Knowledge', icon: <Library24Regular /> },
+  { id: 'tools', label: 'Tools', icon: <Wrench24Regular /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -68,14 +55,14 @@ const TAB_CONFIGS: ITabConfig[] = [
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     minHeight: 0,
   },
   tabBar: {
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
@@ -83,7 +70,7 @@ const useStyles = makeStyles({
   },
   tabContent: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -91,8 +78,8 @@ const useStyles = makeStyles({
     minHeight: 0,
   },
   tabLabel: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   badge: {
@@ -128,25 +115,22 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
   readOnly = false,
 }) => {
   const styles = useStyles();
-  const [activeTab, setActiveTab] = useState<ScopeTabId>("action");
+  const [activeTab, setActiveTab] = useState<ScopeTabId>('action');
 
-  const handleTabSelect = useCallback(
-    (_event: unknown, data: { value: unknown }) => {
-      setActiveTab(data.value as ScopeTabId);
-    },
-    [],
-  );
+  const handleTabSelect = useCallback((_event: unknown, data: { value: unknown }) => {
+    setActiveTab(data.value as ScopeTabId);
+  }, []);
 
   /** Get the selection count for a given tab. */
   const getCount = (tabId: ScopeTabId): number => {
     switch (tabId) {
-      case "action":
+      case 'action':
         return selectedActionIds.length;
-      case "skills":
+      case 'skills':
         return selectedSkillIds.length;
-      case "knowledge":
+      case 'knowledge':
         return selectedKnowledgeIds.length;
-      case "tools":
+      case 'tools':
         return selectedToolIds.length;
     }
   };
@@ -158,7 +142,7 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
     }
 
     switch (activeTab) {
-      case "action":
+      case 'action':
         return (
           <ScopeList
             items={actions}
@@ -170,7 +154,7 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
             emptyMessage="No actions available"
           />
         );
-      case "skills":
+      case 'skills':
         return (
           <ScopeList
             items={skills}
@@ -181,7 +165,7 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
             emptyMessage="No skills available"
           />
         );
-      case "knowledge":
+      case 'knowledge':
         return (
           <ScopeList
             items={knowledge}
@@ -192,7 +176,7 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
             emptyMessage="No knowledge sources available"
           />
         );
-      case "tools":
+      case 'tools':
         return (
           <ScopeList
             items={tools}
@@ -210,31 +194,20 @@ export const ScopeConfigurator: React.FC<IScopeConfiguratorProps> = ({
     <div className={styles.container}>
       {readOnly && (
         <div className={styles.readOnlyBanner}>
-          <Text size={200}>
-            Scope is configured by the selected playbook and cannot be changed.
-          </Text>
+          <Text size={200}>Scope is configured by the selected playbook and cannot be changed.</Text>
         </div>
       )}
 
       <div className={styles.tabBar}>
-        <TabList
-          selectedValue={activeTab}
-          onTabSelect={handleTabSelect}
-          size="medium"
-        >
-          {TAB_CONFIGS.map((tab) => {
+        <TabList selectedValue={activeTab} onTabSelect={handleTabSelect} size="medium">
+          {TAB_CONFIGS.map(tab => {
             const count = getCount(tab.id);
             return (
               <Tab key={tab.id} value={tab.id} icon={tab.icon}>
                 <span className={styles.tabLabel}>
                   {tab.label}
                   {count > 0 && (
-                    <Badge
-                      appearance="filled"
-                      color="brand"
-                      size="small"
-                      className={styles.badge}
-                    >
+                    <Badge appearance="filled" color="brand" size="small" className={styles.badge}>
                       {count}
                     </Badge>
                   )}

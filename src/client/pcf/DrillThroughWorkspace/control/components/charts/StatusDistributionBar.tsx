@@ -4,14 +4,9 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import type { DrillInteraction } from "../../types";
+import * as React from 'react';
+import { makeStyles, tokens, Text, mergeClasses } from '@fluentui/react-components';
+import type { DrillInteraction } from '../../types';
 
 export interface IStatusSegment {
   /** Segment label */
@@ -45,9 +40,9 @@ export interface IStatusDistributionBarProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     gap: tokens.spacingVerticalXS,
   },
   title: {
@@ -56,53 +51,53 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
   },
   barContainer: {
-    display: "flex",
-    width: "100%",
+    display: 'flex',
+    width: '100%',
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground3,
   },
   segment: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: "24px",
-    transition: "opacity 0.2s ease-in-out, filter 0.2s ease-in-out",
-    overflow: "hidden",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '24px',
+    transition: 'opacity 0.2s ease-in-out, filter 0.2s ease-in-out',
+    overflow: 'hidden',
   },
   segmentInteractive: {
-    cursor: "pointer",
-    "&:hover": {
-      filter: "brightness(1.1)",
+    cursor: 'pointer',
+    '&:hover': {
+      filter: 'brightness(1.1)',
     },
-    "&:active": {
-      filter: "brightness(0.95)",
+    '&:active': {
+      filter: 'brightness(0.95)',
     },
   },
   segmentLabel: {
     color: tokens.colorNeutralForegroundOnBrand,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightMedium,
-    textShadow: "0 1px 2px rgba(0,0,0,0.3)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
     padding: `0 ${tokens.spacingHorizontalXS}`,
   },
   legend: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalM,
     marginTop: tokens.spacingVerticalXS,
   },
   legendItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
   },
   legendColor: {
-    width: "12px",
-    height: "12px",
+    width: '12px',
+    height: '12px',
     borderRadius: tokens.borderRadiusSmall,
   },
   legendText: {
@@ -110,10 +105,10 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingVerticalM,
   },
@@ -150,7 +145,7 @@ export const StatusDistributionBar: React.FC<IStatusDistributionBarProps> = ({
     if (interactive && onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: segment.fieldValue,
         label: segment.label,
       });
@@ -158,7 +153,7 @@ export const StatusDistributionBar: React.FC<IStatusDistributionBarProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, segment: IStatusSegment) => {
-    if (interactive && (e.key === "Enter" || e.key === " ")) {
+    if (interactive && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
       handleSegmentClick(segment);
     }
@@ -186,45 +181,31 @@ export const StatusDistributionBar: React.FC<IStatusDistributionBarProps> = ({
         {segments.map((segment, index) => {
           const percentage = total > 0 ? (segment.value / total) * 100 : 0;
           const segmentColor = segment.color || colors[index % colors.length];
-          const displayText = showCounts
-            ? segment.value.toString()
-            : `${percentage.toFixed(0)}%`;
+          const displayText = showCounts ? segment.value.toString() : `${percentage.toFixed(0)}%`;
 
           return (
             <div
               key={`${segment.label}-${index}`}
-              className={mergeClasses(
-                styles.segment,
-                isInteractive && styles.segmentInteractive,
-              )}
+              className={mergeClasses(styles.segment, isInteractive && styles.segmentInteractive)}
               style={{
                 width: `${percentage}%`,
                 backgroundColor: segmentColor,
               }}
-              onClick={
-                isInteractive ? () => handleSegmentClick(segment) : undefined
-              }
-              onKeyDown={
-                isInteractive ? (e) => handleKeyDown(e, segment) : undefined
-              }
+              onClick={isInteractive ? () => handleSegmentClick(segment) : undefined}
+              onKeyDown={isInteractive ? e => handleKeyDown(e, segment) : undefined}
               tabIndex={isInteractive ? 0 : undefined}
-              role={isInteractive ? "button" : undefined}
+              role={isInteractive ? 'button' : undefined}
               aria-label={`${segment.label}: ${segment.value}`}
               title={`${segment.label}: ${segment.value} (${percentage.toFixed(1)}%)`}
             >
-              {showLabels && percentage > 8 && (
-                <span className={styles.segmentLabel}>{displayText}</span>
-              )}
+              {showLabels && percentage > 8 && <span className={styles.segmentLabel}>{displayText}</span>}
             </div>
           );
         })}
       </div>
       <div className={styles.legend}>
         {segments.map((segment, index) => (
-          <div
-            key={`legend-${segment.label}-${index}`}
-            className={styles.legendItem}
-          >
+          <div key={`legend-${segment.label}-${index}`} className={styles.legendItem}>
             <div
               className={styles.legendColor}
               style={{

@@ -3,9 +3,9 @@
  * Used in custom pages where no dataset binding exists
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { IDatasetRecord, IDatasetColumn } from "../types";
-import { IDatasetResult } from "./types";
+import { useState, useEffect, useCallback } from 'react';
+import { IDatasetRecord, IDatasetColumn } from '../types';
+import { IDatasetResult } from './types';
 
 export interface IUseHeadlessModeProps {
   webAPI: ComponentFramework.WebApi;
@@ -36,14 +36,14 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
     (page: number, cookie?: string): string => {
       if (fetchXml) {
         // User-provided FetchXML - inject paging attributes
-        const fetchDoc = new DOMParser().parseFromString(fetchXml, "text/xml");
-        const fetchNode = fetchDoc.querySelector("fetch");
+        const fetchDoc = new DOMParser().parseFromString(fetchXml, 'text/xml');
+        const fetchNode = fetchDoc.querySelector('fetch');
 
         if (fetchNode) {
-          fetchNode.setAttribute("page", page.toString());
-          fetchNode.setAttribute("count", pageSize.toString());
+          fetchNode.setAttribute('page', page.toString());
+          fetchNode.setAttribute('count', pageSize.toString());
           if (cookie) {
-            fetchNode.setAttribute("paging-cookie", cookie);
+            fetchNode.setAttribute('paging-cookie', cookie);
           }
         }
 
@@ -51,7 +51,7 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
       } else {
         // Default FetchXML - retrieve all columns
         return `
-        <fetch page="${page}" count="${pageSize}" ${cookie ? `paging-cookie="${cookie}"` : ""}>
+        <fetch page="${page}" count="${pageSize}" ${cookie ? `paging-cookie="${cookie}"` : ''}>
           <entity name="${entityName}">
             <all-attributes />
           </entity>
@@ -59,7 +59,7 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
       `.trim();
       }
     },
-    [fetchXml, entityName, pageSize],
+    [fetchXml, entityName, pageSize]
   );
 
   // Fetch data from Web API
@@ -72,29 +72,24 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         const query = buildFetchXml(page, cookie);
 
         // Execute FetchXML query
-        const response = await webAPI.retrieveMultipleRecords(
-          entityName,
-          `?fetchXml=${encodeURIComponent(query)}`,
-        );
+        const response = await webAPI.retrieveMultipleRecords(entityName, `?fetchXml=${encodeURIComponent(query)}`);
 
         // Extract records
-        const fetchedRecords: IDatasetRecord[] = response.entities.map(
-          (entity: any) => {
-            const record: IDatasetRecord = {
-              id: entity[`${entityName}id`] || entity.id,
-              entityName,
-            };
+        const fetchedRecords: IDatasetRecord[] = response.entities.map((entity: any) => {
+          const record: IDatasetRecord = {
+            id: entity[`${entityName}id`] || entity.id,
+            entityName,
+          };
 
-            // Copy all entity attributes
-            Object.keys(entity).forEach((key) => {
-              if (key !== `${entityName}id` && !key.startsWith("@")) {
-                record[key] = entity[key];
-              }
-            });
+          // Copy all entity attributes
+          Object.keys(entity).forEach(key => {
+            if (key !== `${entityName}id` && !key.startsWith('@')) {
+              record[key] = entity[key];
+            }
+          });
 
-            return record;
-          },
-        );
+          return record;
+        });
 
         setRecords(fetchedRecords);
 
@@ -102,14 +97,11 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         if (columns.length === 0 && fetchedRecords.length > 0) {
           const firstRecord = fetchedRecords[0];
           const extractedColumns: IDatasetColumn[] = Object.keys(firstRecord)
-            .filter((key) => key !== "id" && key !== "entityName")
-            .map((key) => ({
+            .filter(key => key !== 'id' && key !== 'entityName')
+            .map(key => ({
               name: key,
-              displayName: key
-                .replace(/_/g, " ")
-                .replace(/\b\w/g, (l) => l.toUpperCase()),
-              dataType:
-                typeof firstRecord[key] === "number" ? "number" : "string",
+              displayName: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              dataType: typeof firstRecord[key] === 'number' ? 'number' : 'string',
               isKey: key === `${entityName}id`,
               isPrimary: false,
             }));
@@ -122,19 +114,17 @@ export function useHeadlessMode(props: IUseHeadlessModeProps): IDatasetResult {
         setTotalRecordCount(response.entities.length); // Note: FetchXML doesn't return total count
 
         // Extract paging cookie from response
-        const nextCookie = (response as any)[
-          "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie"
-        ];
+        const nextCookie = (response as any)['@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'];
         setPagingInfo({ pageNumber: page, pagingCookie: nextCookie });
 
         setLoading(false);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch data");
+        setError(err instanceof Error ? err.message : 'Failed to fetch data');
         setRecords([]);
         setLoading(false);
       }
     },
-    [buildFetchXml, entityName, webAPI, columns.length],
+    [buildFetchXml, entityName, webAPI, columns.length]
   );
 
   // Load next page

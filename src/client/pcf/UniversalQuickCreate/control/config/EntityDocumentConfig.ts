@@ -63,13 +63,13 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Validated via metadata query: sprk_Matter (capital M)
    */
   sprk_matter: {
-    entityName: "sprk_matter",
-    lookupFieldName: "sprk_matter",
-    relationshipSchemaName: "sprk_matter_document",
-    navigationPropertyName: "sprk_Matter", // ⚠️ CAPITAL M - from metadata validation
-    containerIdField: "sprk_containerid",
-    displayNameField: "sprk_matternumber",
-    entitySetName: "sprk_matters",
+    entityName: 'sprk_matter',
+    lookupFieldName: 'sprk_matter',
+    relationshipSchemaName: 'sprk_matter_document',
+    navigationPropertyName: 'sprk_Matter', // ⚠️ CAPITAL M - from metadata validation
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_matternumber',
+    entitySetName: 'sprk_matters',
   },
 
   /**
@@ -77,12 +77,12 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Projects with associated documents
    */
   sprk_project: {
-    entityName: "sprk_project",
-    lookupFieldName: "sprk_project",
-    relationshipSchemaName: "sprk_Project_Document_1n", // ⚠️ Actual relationship name in Dataverse
-    containerIdField: "sprk_containerid",
-    displayNameField: "sprk_projectname",
-    entitySetName: "sprk_projects",
+    entityName: 'sprk_project',
+    lookupFieldName: 'sprk_project',
+    relationshipSchemaName: 'sprk_Project_Document_1n', // ⚠️ Actual relationship name in Dataverse
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_projectname',
+    entitySetName: 'sprk_projects',
   },
 
   /**
@@ -90,12 +90,12 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Invoices with associated documents (receipts, supporting docs)
    */
   sprk_invoice: {
-    entityName: "sprk_invoice",
-    lookupFieldName: "sprk_invoice",
-    relationshipSchemaName: "sprk_invoice_document",
-    containerIdField: "sprk_containerid",
-    displayNameField: "sprk_invoicenumber",
-    entitySetName: "sprk_invoices",
+    entityName: 'sprk_invoice',
+    lookupFieldName: 'sprk_invoice',
+    relationshipSchemaName: 'sprk_invoice_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_invoicenumber',
+    entitySetName: 'sprk_invoices',
   },
 
   /**
@@ -103,12 +103,12 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Standard Dynamics account with documents
    */
   account: {
-    entityName: "account",
-    lookupFieldName: "sprk_account",
-    relationshipSchemaName: "account_document",
-    containerIdField: "sprk_containerid",
-    displayNameField: "name",
-    entitySetName: "accounts",
+    entityName: 'account',
+    lookupFieldName: 'sprk_account',
+    relationshipSchemaName: 'account_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'name',
+    entitySetName: 'accounts',
   },
 
   /**
@@ -116,12 +116,12 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Standard Dynamics contact with documents
    */
   contact: {
-    entityName: "contact",
-    lookupFieldName: "sprk_contact",
-    relationshipSchemaName: "contact_document",
-    containerIdField: "sprk_containerid",
-    displayNameField: "fullname",
-    entitySetName: "contacts",
+    entityName: 'contact',
+    lookupFieldName: 'sprk_contact',
+    relationshipSchemaName: 'contact_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'fullname',
+    entitySetName: 'contacts',
   },
 
   /**
@@ -129,12 +129,12 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
    * Email communications with document attachments
    */
   sprk_communication: {
-    entityName: "sprk_communication",
-    lookupFieldName: "sprk_communication",
-    relationshipSchemaName: "sprk_Communication_Document_1n",
-    containerIdField: "sprk_containerid",
-    displayNameField: "sprk_name",
-    entitySetName: "sprk_communications",
+    entityName: 'sprk_communication',
+    lookupFieldName: 'sprk_communication',
+    relationshipSchemaName: 'sprk_Communication_Document_1n',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_name',
+    entitySetName: 'sprk_communications',
   },
 };
 
@@ -153,9 +153,7 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
  * }
  * ```
  */
-export function getEntityDocumentConfig(
-  entityName: string,
-): EntityDocumentConfig | null {
+export function getEntityDocumentConfig(entityName: string): EntityDocumentConfig | null {
   return ENTITY_DOCUMENT_CONFIGS[entityName] || null;
 }
 

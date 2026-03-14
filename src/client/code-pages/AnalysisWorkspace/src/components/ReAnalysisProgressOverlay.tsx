@@ -15,13 +15,7 @@
  * @see ADR-012 - Shared Component Library conventions
  */
 
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  ProgressBar,
-  Text,
-} from "@fluentui/react-components";
+import { makeStyles, mergeClasses, tokens, ProgressBar, Text } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -42,30 +36,30 @@ export interface ReAnalysisProgressOverlayProps {
 
 const useStyles = makeStyles({
   overlay: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: tokens.colorNeutralBackgroundAlpha2,
     zIndex: 10,
-    transition: "opacity 200ms ease-in-out",
-    pointerEvents: "auto",
+    transition: 'opacity 200ms ease-in-out',
+    pointerEvents: 'auto',
   },
   overlayHidden: {
     opacity: 0,
-    pointerEvents: "none",
+    pointerEvents: 'none',
   },
   overlayVisible: {
     opacity: 1,
   },
   card: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusMedium,
@@ -74,27 +68,27 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
-    minWidth: "280px",
-    maxWidth: "400px",
+    minWidth: '280px',
+    maxWidth: '400px',
   },
   title: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
   progressContainer: {
-    width: "100%",
+    width: '100%',
   },
   percentText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     fontFamily: tokens.fontFamilyMonospace,
-    textAlign: "center",
+    textAlign: 'center',
   },
   message: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    textAlign: "center",
-    minHeight: "20px",
+    textAlign: 'center',
+    minHeight: '20px',
   },
 });
 
@@ -114,21 +108,14 @@ export function ReAnalysisProgressOverlay({
   // ProgressBar value is 0-1
   const progressValue = clampedPercent / 100;
 
-  const overlayClass = mergeClasses(
-    styles.overlay,
-    isVisible ? styles.overlayVisible : styles.overlayHidden,
-  );
+  const overlayClass = mergeClasses(styles.overlay, isVisible ? styles.overlayVisible : styles.overlayHidden);
 
   return (
     <div
       className={overlayClass}
       role="status"
       aria-live="polite"
-      aria-label={
-        isVisible
-          ? `Re-analysis in progress: ${clampedPercent}% complete. ${message}`
-          : undefined
-      }
+      aria-label={isVisible ? `Re-analysis in progress: ${clampedPercent}% complete. ${message}` : undefined}
       data-testid="reanalysis-progress-overlay"
     >
       {isVisible && (
@@ -147,7 +134,7 @@ export function ReAnalysisProgressOverlay({
 
           <Text className={styles.percentText}>{clampedPercent}%</Text>
 
-          <Text className={styles.message}>{message || "Processing..."}</Text>
+          <Text className={styles.message}>{message || 'Processing...'}</Text>
         </div>
       )}
     </div>

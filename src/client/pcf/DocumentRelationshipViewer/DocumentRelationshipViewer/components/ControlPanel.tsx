@@ -13,7 +13,7 @@
  * - FR-05: Control Panel specification
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -25,22 +25,22 @@ import {
   Text,
   Divider,
   Badge,
-} from "@fluentui/react-components";
-import { Settings20Regular, Filter20Regular } from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Settings20Regular, Filter20Regular } from '@fluentui/react-icons';
 
 /**
  * Document types available for filtering
  */
 export const DOCUMENT_TYPES = [
-  { key: "pdf", label: "PDF Documents" },
-  { key: "docx", label: "Word Documents" },
-  { key: "xlsx", label: "Excel Spreadsheets" },
-  { key: "pptx", label: "PowerPoint Presentations" },
-  { key: "txt", label: "Text Files" },
-  { key: "other", label: "Other Types" },
+  { key: 'pdf', label: 'PDF Documents' },
+  { key: 'docx', label: 'Word Documents' },
+  { key: 'xlsx', label: 'Excel Spreadsheets' },
+  { key: 'pptx', label: 'PowerPoint Presentations' },
+  { key: 'txt', label: 'Text Files' },
+  { key: 'other', label: 'Other Types' },
 ] as const;
 
-export type DocumentTypeKey = (typeof DOCUMENT_TYPES)[number]["key"];
+export type DocumentTypeKey = (typeof DOCUMENT_TYPES)[number]['key'];
 
 /**
  * Filter settings managed by the control panel
@@ -63,7 +63,7 @@ export const DEFAULT_FILTER_SETTINGS: FilterSettings = {
   similarityThreshold: 0.65,
   depthLimit: 1,
   maxNodesPerLevel: 25,
-  documentTypes: ["pdf", "docx", "xlsx", "pptx", "txt", "other"],
+  documentTypes: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'other'],
 };
 
 /**
@@ -85,17 +85,17 @@ export interface ControlPanelProps {
  */
 const useStyles = makeStyles({
   container: {
-    width: "280px",
-    maxHeight: "100%",
-    overflowY: "auto",
+    width: '280px',
+    maxHeight: '100%',
+    overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow4,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -111,8 +111,8 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalM,
   },
   sectionTitle: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     marginBottom: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground2,
@@ -121,9 +121,9 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalM,
   },
   sliderLabel: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: tokens.spacingVerticalXS,
   },
   sliderValue: {
@@ -131,7 +131,7 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
   },
   slider: {
-    width: "100%",
+    width: '100%',
   },
   sliderHint: {
     fontSize: tokens.fontSizeBase200,
@@ -139,38 +139,30 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXXS,
   },
   checkboxGroup: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   divider: {
     margin: `${tokens.spacingVerticalS} 0`,
   },
   activeFiltersBadge: {
-    marginLeft: "auto",
+    marginLeft: 'auto',
   },
 });
 
 /**
  * ControlPanel component - Provides filter controls for the visualization
  */
-export const ControlPanel: React.FC<ControlPanelProps> = ({
-  settings,
-  onSettingsChange,
-}) => {
+export const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange }) => {
   const styles = useStyles();
 
   // Count active filters (non-default values)
   const activeFiltersCount = React.useMemo(() => {
     let count = 0;
-    if (
-      settings.similarityThreshold !==
-      DEFAULT_FILTER_SETTINGS.similarityThreshold
-    )
-      count++;
+    if (settings.similarityThreshold !== DEFAULT_FILTER_SETTINGS.similarityThreshold) count++;
     if (settings.depthLimit !== DEFAULT_FILTER_SETTINGS.depthLimit) count++;
-    if (settings.maxNodesPerLevel !== DEFAULT_FILTER_SETTINGS.maxNodesPerLevel)
-      count++;
+    if (settings.maxNodesPerLevel !== DEFAULT_FILTER_SETTINGS.maxNodesPerLevel) count++;
     if (settings.documentTypes.length !== DOCUMENT_TYPES.length) count++;
     return count;
   }, [settings]);
@@ -183,7 +175,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         similarityThreshold: data.value / 100, // Convert from percentage
       });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   // Handle depth limit change
@@ -194,7 +186,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         depthLimit: data.value,
       });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   // Handle max nodes change
@@ -205,7 +197,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         maxNodesPerLevel: data.value,
       });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   // Handle document type checkbox change
@@ -213,13 +205,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     (typeKey: DocumentTypeKey, checked: boolean) => {
       const newTypes = checked
         ? [...settings.documentTypes, typeKey]
-        : settings.documentTypes.filter((t) => t !== typeKey);
+        : settings.documentTypes.filter(t => t !== typeKey);
       onSettingsChange({
         ...settings,
         documentTypes: newTypes,
       });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   // Format similarity value for display
@@ -234,12 +226,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <Settings20Regular className={styles.headerIcon} />
         <Text className={styles.headerTitle}>Visualization Settings</Text>
         {activeFiltersCount > 0 && (
-          <Badge
-            className={styles.activeFiltersBadge}
-            appearance="filled"
-            color="brand"
-            size="small"
-          >
+          <Badge className={styles.activeFiltersBadge} appearance="filled" color="brand" size="small">
             {activeFiltersCount} active
           </Badge>
         )}
@@ -256,9 +243,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className={styles.sliderContainer}>
           <div className={styles.sliderLabel}>
             <Label htmlFor="similarity-slider">Minimum Similarity</Label>
-            <Text className={styles.sliderValue}>
-              {formatSimilarity(settings.similarityThreshold)}
-            </Text>
+            <Text className={styles.sliderValue}>{formatSimilarity(settings.similarityThreshold)}</Text>
           </div>
           <Slider
             id="similarity-slider"
@@ -269,9 +254,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             value={Math.round(settings.similarityThreshold * 100)}
             onChange={handleSimilarityChange}
           />
-          <Text className={styles.sliderHint}>
-            Higher values show more similar documents only
-          </Text>
+          <Text className={styles.sliderHint}>Higher values show more similar documents only</Text>
         </div>
       </div>
 
@@ -290,8 +273,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className={styles.sliderLabel}>
             <Label htmlFor="depth-slider">Depth Limit</Label>
             <Text className={styles.sliderValue}>
-              {settings.depthLimit}{" "}
-              {settings.depthLimit === 1 ? "level" : "levels"}
+              {settings.depthLimit} {settings.depthLimit === 1 ? 'level' : 'levels'}
             </Text>
           </div>
           <Slider
@@ -303,18 +285,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             value={settings.depthLimit}
             onChange={handleDepthChange}
           />
-          <Text className={styles.sliderHint}>
-            How many levels of related documents to show
-          </Text>
+          <Text className={styles.sliderHint}>How many levels of related documents to show</Text>
         </div>
 
         {/* Max Nodes */}
         <div className={styles.sliderContainer}>
           <div className={styles.sliderLabel}>
             <Label htmlFor="maxnodes-slider">Max Nodes per Level</Label>
-            <Text className={styles.sliderValue}>
-              {settings.maxNodesPerLevel}
-            </Text>
+            <Text className={styles.sliderValue}>{settings.maxNodesPerLevel}</Text>
           </div>
           <Slider
             id="maxnodes-slider"
@@ -325,9 +303,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             value={settings.maxNodesPerLevel}
             onChange={handleMaxNodesChange}
           />
-          <Text className={styles.sliderHint}>
-            Maximum documents shown at each depth level
-          </Text>
+          <Text className={styles.sliderHint}>Maximum documents shown at each depth level</Text>
         </div>
       </div>
 
@@ -343,14 +319,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         <div className={styles.checkboxGroup}>
-          {DOCUMENT_TYPES.map((type) => (
+          {DOCUMENT_TYPES.map(type => (
             <Checkbox
               key={type.key}
               label={type.label}
               checked={settings.documentTypes.includes(type.key)}
-              onChange={(_ev, data) =>
-                handleDocumentTypeChange(type.key, data.checked === true)
-              }
+              onChange={(_ev, data) => handleDocumentTypeChange(type.key, data.checked === true)}
             />
           ))}
         </div>

@@ -17,15 +17,8 @@
  * All colors use Fluent v9 design tokens per ADR-021 -- no hard-coded colors.
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  MessageBar,
-  MessageBarBody,
-  Divider,
-} from "@fluentui/react-components";
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Divider } from '@fluentui/react-components';
 import type {
   SearchDomain,
   SearchFilters,
@@ -35,26 +28,26 @@ import type {
   SavedSearch,
   DocumentSearchResult,
   RecordSearchResult,
-} from "./types";
-import { RecordEntityTypes } from "./types";
-import { SearchFilterPane } from "./components/SearchFilterPane";
-import { ViewToggleToolbar } from "./components/ViewToggleToolbar";
-import { SearchCommandBar } from "./components/SearchCommandBar";
-import { StatusBar } from "./components/StatusBar";
-import { SearchResultsMap } from "./components/SearchResultsMap";
-import { SearchResultsTreemap } from "./components/SearchResultsTreemap";
-import { SearchResultsTimeline } from "./components/SearchResultsTimeline";
-import { VisualizationSettings } from "./components/VisualizationSettings";
-import { useSavedSearches } from "./hooks/useSavedSearches";
-import { useDocumentActions } from "./hooks/useDocumentActions";
-import { useSemanticSearch } from "./hooks/useSemanticSearch";
-import { useRecordSearch } from "./hooks/useRecordSearch";
-import { useFilterOptions } from "./hooks/useFilterOptions";
-import { useSearchViewDefinitions } from "./hooks/useSearchViewDefinitions";
-import { mapSearchResults } from "./adapters/searchResultAdapter";
-import { openEntityRecord } from "./components/EntityRecordDialog";
-import { DocumentPreviewDialog } from "./components/DocumentPreviewDialog";
-import { SearchResultsGrid } from "./components/SearchResultsGrid";
+} from './types';
+import { RecordEntityTypes } from './types';
+import { SearchFilterPane } from './components/SearchFilterPane';
+import { ViewToggleToolbar } from './components/ViewToggleToolbar';
+import { SearchCommandBar } from './components/SearchCommandBar';
+import { StatusBar } from './components/StatusBar';
+import { SearchResultsMap } from './components/SearchResultsMap';
+import { SearchResultsTreemap } from './components/SearchResultsTreemap';
+import { SearchResultsTimeline } from './components/SearchResultsTimeline';
+import { VisualizationSettings } from './components/VisualizationSettings';
+import { useSavedSearches } from './hooks/useSavedSearches';
+import { useDocumentActions } from './hooks/useDocumentActions';
+import { useSemanticSearch } from './hooks/useSemanticSearch';
+import { useRecordSearch } from './hooks/useRecordSearch';
+import { useFilterOptions } from './hooks/useFilterOptions';
+import { useSearchViewDefinitions } from './hooks/useSearchViewDefinitions';
+import { mapSearchResults } from './adapters/searchResultAdapter';
+import { openEntityRecord } from './components/EntityRecordDialog';
+import { DocumentPreviewDialog } from './components/DocumentPreviewDialog';
+import { SearchResultsGrid } from './components/SearchResultsGrid';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -85,7 +78,7 @@ const DEFAULT_FILTERS: SearchFilters = {
   matterTypes: [],
   dateRange: { from: null, to: null },
   threshold: 50,
-  searchMode: "rrf",
+  searchMode: 'rrf',
 };
 
 /** Maps non-document domains to their Dataverse entity logical names */
@@ -102,29 +95,29 @@ const DOMAIN_RECORD_TYPES: Record<SearchDomain, string[]> = {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100vh",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100vh',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   commandBar: {
-    display: "flex",
-    alignItems: "center",
-    height: "48px",
-    minHeight: "48px",
+    display: 'flex',
+    alignItems: 'center',
+    height: '48px',
+    minHeight: '48px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    height: "36px",
-    minHeight: "36px",
+    display: 'flex',
+    alignItems: 'center',
+    height: '36px',
+    minHeight: '36px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     gap: tokens.spacingHorizontalS,
@@ -132,23 +125,23 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
   contentRow: {
-    display: "flex",
-    flexDirection: "row",
+    display: 'flex',
+    flexDirection: 'row',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   mainArea: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   viewContainer: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   errorBar: {
     paddingTop: tokens.spacingVerticalS,
@@ -157,10 +150,10 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalM,
   },
   idleState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flex: 1,
     gap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
@@ -190,31 +183,24 @@ export const App: React.FC<AppProps> = ({
   const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState<string>(initialQuery);
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [currentSearchName, setCurrentSearchName] = useState<string | null>(
-    null,
-  );
+  const [currentSearchName, setCurrentSearchName] = useState<string | null>(null);
 
   // --- Map view settings ---
-  const [mapColorBy, setMapColorBy] =
-    useState<VisualizationColorBy>("DocumentType");
+  const [mapColorBy, setMapColorBy] = useState<VisualizationColorBy>('DocumentType');
   const [mapMinSimilarity, setMapMinSimilarity] = useState(60);
 
   // --- Treemap view settings ---
-  const [treemapGroupBy, setTreemapGroupBy] =
-    useState<VisualizationColorBy>("MatterType");
+  const [treemapGroupBy, setTreemapGroupBy] = useState<VisualizationColorBy>('MatterType');
   const [treemapShowLabels, setTreemapShowLabels] = useState(true);
 
   // --- Timeline view settings ---
-  const [timelineDateField, setTimelineDateField] =
-    useState<TimelineDateField>("createdAt");
-  const [timelineColorBy, setTimelineColorBy] =
-    useState<VisualizationColorBy>("DocumentType");
+  const [timelineDateField, setTimelineDateField] = useState<TimelineDateField>('createdAt');
+  const [timelineColorBy, setTimelineColorBy] = useState<VisualizationColorBy>('DocumentType');
 
   // --- Document Preview Dialog ---
-  const [previewResult, setPreviewResult] =
-    useState<DocumentSearchResult | null>(null);
+  const [previewResult, setPreviewResult] = useState<DocumentSearchResult | null>(null);
   const [previewPosition, setPreviewPosition] = useState<{
     x: number;
     y: number;
@@ -251,32 +237,21 @@ export const App: React.FC<AppProps> = ({
   } = useFilterOptions();
 
   // --- Saved Searches ---
-  const {
-    savedSearches,
-    isLoading: isSavedSearchesLoading,
-    saveSearch,
-  } = useSavedSearches();
+  const { savedSearches, isLoading: isSavedSearchesLoading, saveSearch } = useSavedSearches();
 
   // --- Document Actions ---
-  const {
-    openInWeb,
-    openInDesktop,
-    download,
-    deleteDocuments,
-    emailLink,
-    sendToIndex,
-  } = useDocumentActions();
+  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex } = useDocumentActions();
 
   // --- Active Domain Derivation ---
-  const isDocDomain = activeDomain === "documents";
+  const isDocDomain = activeDomain === 'documents';
   const rawResults = isDocDomain ? docResults : recordResults;
 
   // Client-side relevance threshold filter — hides results below the slider value
   const activeResults = useMemo(() => {
     const t = filters.threshold;
     if (t <= 0) return rawResults;
-    return rawResults.filter((r) => {
-      const score = "combinedScore" in r ? r.combinedScore : r.confidenceScore;
+    return rawResults.filter(r => {
+      const score = 'combinedScore' in r ? r.combinedScore : r.confidenceScore;
       return score * 100 >= t;
     });
   }, [rawResults, filters.threshold]);
@@ -285,41 +260,32 @@ export const App: React.FC<AppProps> = ({
   const activeHasMore = isDocDomain ? docHasMore : recordHasMore;
   const activeErrorMessage = isDocDomain ? docErrorMessage : recordErrorMessage;
   const activeSearchTime = isDocDomain ? docSearchTime : recordSearchTime;
-  const isSearching = activeSearchState === "loading";
-  const isLoadingMore = activeSearchState === "loadingMore";
+  const isSearching = activeSearchState === 'loading';
+  const isLoadingMore = activeSearchState === 'loadingMore';
 
   // Detect validation-type errors (empty query) vs real errors
-  const isValidationHint = activeErrorMessage
-    ? /query.*(required|empty|missing)/i.test(activeErrorMessage)
-    : false;
+  const isValidationHint = activeErrorMessage ? /query.*(required|empty|missing)/i.test(activeErrorMessage) : false;
 
   // --- Grid View Definitions (from sprk_gridconfiguration, fallback to domainColumns.ts) ---
   const { columns: viewColumns } = useSearchViewDefinitions(activeDomain);
 
   // --- Map search results to IDatasetRecord for UniversalDatasetGrid ---
-  const gridRecords = useMemo(
-    () => mapSearchResults(activeResults, activeDomain),
-    [activeResults, activeDomain],
-  );
+  const gridRecords = useMemo(() => mapSearchResults(activeResults, activeDomain), [activeResults, activeDomain]);
 
   // =============================================
   // Search dispatch — routes to correct hook by domain
   // =============================================
 
   const executeSearch = useCallback(
-    (
-      searchQuery: string,
-      searchFilters: SearchFilters,
-      domain: SearchDomain,
-    ) => {
+    (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
       setSelectedIds([]);
-      if (domain === "documents") {
+      if (domain === 'documents') {
         searchDocuments(searchQuery, searchFilters);
       } else {
         searchRecords(searchQuery, DOMAIN_RECORD_TYPES[domain], searchFilters);
       }
     },
-    [searchDocuments, searchRecords],
+    [searchDocuments, searchRecords]
   );
 
   // =============================================
@@ -332,7 +298,7 @@ export const App: React.FC<AppProps> = ({
       setQuery(searchQuery);
       executeSearch(searchQuery, filters, domain);
     },
-    [filters, executeSearch],
+    [filters, executeSearch]
   );
 
   const handleDomainChange = useCallback((domain: SearchDomain) => {
@@ -350,7 +316,7 @@ export const App: React.FC<AppProps> = ({
       setFilters(searchFilters);
       executeSearch(query, searchFilters, activeDomain);
     },
-    [activeDomain, query, executeSearch],
+    [activeDomain, query, executeSearch]
   );
 
   const handleRefresh = useCallback(() => {
@@ -369,12 +335,9 @@ export const App: React.FC<AppProps> = ({
     setSelectedIds(ids);
   }, []);
 
-  const handleSort = useCallback(
-    (_columnKey: string, _direction: "asc" | "desc") => {
-      // Client-side sort handled by Fluent DataGrid internally
-    },
-    [],
-  );
+  const handleSort = useCallback((_columnKey: string, _direction: 'asc' | 'desc') => {
+    // Client-side sort handled by Fluent DataGrid internally
+  }, []);
 
   const handleDelete = useCallback(
     (ids: string[]) => {
@@ -386,19 +349,15 @@ export const App: React.FC<AppProps> = ({
         }
       });
     },
-    [deleteDocuments, isDocDomain, query, filters, searchDocuments],
+    [deleteDocuments, isDocDomain, query, filters, searchDocuments]
   );
 
   /** Handle click on a result in any visualization view */
   const handleResultClick = useCallback(
-    (
-      resultId: string,
-      domain: SearchDomain,
-      clickPosition?: { x: number; y: number },
-    ) => {
-      if (domain === "documents") {
+    (resultId: string, domain: SearchDomain, clickPosition?: { x: number; y: number }) => {
+      if (domain === 'documents') {
         // For documents: open preview dialog
-        const docResult = docResults.find((r) => r.documentId === resultId);
+        const docResult = docResults.find(r => r.documentId === resultId);
         if (docResult) {
           setPreviewResult(docResult);
           setPreviewPosition(clickPosition ?? null);
@@ -408,7 +367,7 @@ export const App: React.FC<AppProps> = ({
       // For non-documents (or if doc not found): open entity record directly
       openEntityRecord(resultId, domain);
     },
-    [docResults],
+    [docResults]
   );
 
   const handlePreviewClose = useCallback(() => {
@@ -431,11 +390,11 @@ export const App: React.FC<AppProps> = ({
       }
       executeSearch(search.query, search.filters, search.searchDomain);
     },
-    [executeSearch],
+    [executeSearch]
   );
 
   const handleSaveCurrentSearch = useCallback(() => {
-    const name = window.prompt("Enter a name for this saved search:");
+    const name = window.prompt('Enter a name for this saved search:');
     if (!name) return;
     saveSearch({
       name,
@@ -444,8 +403,8 @@ export const App: React.FC<AppProps> = ({
       filters,
       viewMode,
       columns: [],
-      sortColumn: "similarity",
-      sortDirection: "desc",
+      sortColumn: 'similarity',
+      sortDirection: 'desc',
       graphClusterBy: mapColorBy,
     });
     setCurrentSearchName(name);
@@ -462,7 +421,7 @@ export const App: React.FC<AppProps> = ({
 
     // Auto-load saved search by ID from URL params
     if (initialSavedSearchId && !isSavedSearchesLoading) {
-      const match = savedSearches.find((s) => s.id === initialSavedSearchId);
+      const match = savedSearches.find(s => s.id === initialSavedSearchId);
       if (match) {
         autoSearchFired.current = true;
         handleSelectSavedSearch(match);
@@ -500,11 +459,11 @@ export const App: React.FC<AppProps> = ({
           activeDomain={activeDomain}
           onDelete={handleDelete}
           onRefresh={handleRefresh}
-          onEmailLink={(id) => emailLink(id)}
-          onOpenInWeb={(id) => openInWeb(id)}
-          onOpenInDesktop={(id) => openInDesktop(id)}
-          onDownload={(id) => download(id)}
-          onSendToIndex={(ids) => sendToIndex(ids)}
+          onEmailLink={id => emailLink(id)}
+          onOpenInWeb={id => openInWeb(id)}
+          onOpenInDesktop={id => openInDesktop(id)}
+          onDownload={id => download(id)}
+          onSendToIndex={ids => sendToIndex(ids)}
           onSaveSearch={handleSaveCurrentSearch}
         />
       </div>
@@ -512,17 +471,13 @@ export const App: React.FC<AppProps> = ({
       {/* Toolbar row: view toggle + settings dropdown */}
       <div className={styles.toolbar}>
         <ViewToggleToolbar viewMode={viewMode} onViewModeChange={setViewMode} />
-        <Divider vertical style={{ height: "20px" }} />
+        <Divider vertical style={{ height: '20px' }} />
         <VisualizationSettings
           viewMode={viewMode}
           threshold={filters.threshold}
-          onThresholdChange={(value) =>
-            setFilters((prev) => ({ ...prev, threshold: value }))
-          }
+          onThresholdChange={value => setFilters(prev => ({ ...prev, threshold: value }))}
           searchMode={filters.searchMode}
-          onSearchModeChange={(mode) =>
-            setFilters((prev) => ({ ...prev, searchMode: mode }))
-          }
+          onSearchModeChange={mode => setFilters(prev => ({ ...prev, searchMode: mode }))}
           mapColorBy={mapColorBy}
           onMapColorByChange={setMapColorBy}
           mapMinSimilarity={mapMinSimilarity}
@@ -568,32 +523,28 @@ export const App: React.FC<AppProps> = ({
           {/* Error / info message bar */}
           {activeErrorMessage && (
             <div className={styles.errorBar}>
-              <MessageBar intent={isValidationHint ? "info" : "error"}>
+              <MessageBar intent={isValidationHint ? 'info' : 'error'}>
                 <MessageBarBody>
-                  {isValidationHint
-                    ? "Please enter search criteria to get results."
-                    : activeErrorMessage}
+                  {isValidationHint ? 'Please enter search criteria to get results.' : activeErrorMessage}
                 </MessageBarBody>
               </MessageBar>
             </div>
           )}
 
           {/* Idle state — no search executed yet */}
-          {activeSearchState === "idle" && !activeErrorMessage && (
+          {activeSearchState === 'idle' && !activeErrorMessage && (
             <div className={styles.idleState}>
               <Text size={400} weight="semibold">
                 Search across {activeDomain}
               </Text>
-              <Text size={200}>
-                Select a saved search or switch domain tabs to begin
-              </Text>
+              <Text size={200}>Select a saved search or switch domain tabs to begin</Text>
             </div>
           )}
 
           {/* Active results — 4-way view routing */}
-          {activeSearchState !== "idle" && !activeErrorMessage && (
+          {activeSearchState !== 'idle' && !activeErrorMessage && (
             <>
-              {viewMode === "grid" && (
+              {viewMode === 'grid' && (
                 <SearchResultsGrid
                   records={gridRecords}
                   totalCount={activeTotalCount}
@@ -608,15 +559,10 @@ export const App: React.FC<AppProps> = ({
                 />
               )}
 
-              {viewMode === "map" && (
+              {viewMode === 'map' && (
                 <div className={styles.viewContainer}>
                   <SearchResultsMap
-                    results={
-                      activeResults as (
-                        | DocumentSearchResult
-                        | RecordSearchResult
-                      )[]
-                    }
+                    results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
                     colorBy={mapColorBy}
                     minSimilarity={mapMinSimilarity}
                     isLoading={isSearching}
@@ -626,15 +572,10 @@ export const App: React.FC<AppProps> = ({
                 </div>
               )}
 
-              {viewMode === "treemap" && (
+              {viewMode === 'treemap' && (
                 <div className={styles.viewContainer}>
                   <SearchResultsTreemap
-                    results={
-                      activeResults as (
-                        | DocumentSearchResult
-                        | RecordSearchResult
-                      )[]
-                    }
+                    results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
                     groupBy={treemapGroupBy}
                     showLabels={treemapShowLabels}
                     isLoading={isSearching}
@@ -644,15 +585,10 @@ export const App: React.FC<AppProps> = ({
                 </div>
               )}
 
-              {viewMode === "timeline" && (
+              {viewMode === 'timeline' && (
                 <div className={styles.viewContainer}>
                   <SearchResultsTimeline
-                    results={
-                      activeResults as (
-                        | DocumentSearchResult
-                        | RecordSearchResult
-                      )[]
-                    }
+                    results={activeResults as (DocumentSearchResult | RecordSearchResult)[]}
                     dateField={timelineDateField}
                     colorBy={timelineColorBy}
                     isLoading={isSearching}

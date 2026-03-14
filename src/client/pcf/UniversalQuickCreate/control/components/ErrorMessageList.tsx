@@ -9,21 +9,15 @@
  * @version 2.0.0.0
  */
 
-import * as React from "react";
-import {
-  MessageBar,
-  MessageBarBody,
-  MessageBarTitle,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { MessageBar, MessageBarBody, MessageBarTitle, makeStyles, tokens } from '@fluentui/react-components';
 
 /**
  * Component Props
  */
 export interface ErrorMessageListProps {
   /** List of errors */
-  errors: Array<{ fileName: string; error: string }>;
+  errors: { fileName: string; error: string }[];
 }
 
 /**
@@ -31,8 +25,8 @@ export interface ErrorMessageListProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   errorItem: {
@@ -44,9 +38,7 @@ const useStyles = makeStyles({
 /**
  * Error Message List Component
  */
-export const ErrorMessageList: React.FC<ErrorMessageListProps> = ({
-  errors,
-}) => {
+export const ErrorMessageList: React.FC<ErrorMessageListProps> = ({ errors }) => {
   const styles = useStyles();
 
   if (errors.length === 0) {
@@ -57,9 +49,7 @@ export const ErrorMessageList: React.FC<ErrorMessageListProps> = ({
     <MessageBar intent="error">
       <MessageBarBody>
         <MessageBarTitle>
-          {errors.length === 1
-            ? "1 error occurred"
-            : `${errors.length} errors occurred`}
+          {errors.length === 1 ? '1 error occurred' : `${errors.length} errors occurred`}
         </MessageBarTitle>
         <div className={styles.container}>
           {errors.map((error, index) => (

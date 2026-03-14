@@ -15,7 +15,7 @@
  * @version 1.0.0
  */
 
-import { NavMapClient } from "./NavMapClient";
+import { NavMapClient } from './NavMapClient';
 import type {
   IDataverseClient,
   ILogger,
@@ -24,17 +24,15 @@ import type {
   DocumentFormData,
   CreateResult,
   EntityDocumentConfig,
-} from "./types";
-import { consoleLogger } from "./types";
+} from './types';
+import { consoleLogger } from './types';
 
 /**
  * Function that resolves an EntityDocumentConfig for a given entity name.
  * Allows the caller to inject their own config lookup (PCF uses EntityDocumentConfig map,
  * Code Pages may use a different source).
  */
-export type EntityConfigResolver = (
-  entityName: string,
-) => EntityDocumentConfig | null;
+export type EntityConfigResolver = (entityName: string) => EntityDocumentConfig | null;
 
 /**
  * Configuration for DocumentRecordService.
@@ -86,31 +84,21 @@ export class DocumentRecordService {
   async createDocuments(
     files: SpeFileMetadata[],
     parentContext: ParentContext,
-    formData: DocumentFormData,
+    formData: DocumentFormData
   ): Promise<CreateResult[]> {
-    this.logger.info(
-      "DocumentRecordService",
-      `Creating ${files.length} Document records`,
-    );
+    this.logger.info('DocumentRecordService', `Creating ${files.length} Document records`);
 
     const results: CreateResult[] = [];
 
     // Sequential creation
     for (const file of files) {
-      const result = await this.createSingleDocument(
-        file,
-        parentContext,
-        formData,
-      );
+      const result = await this.createSingleDocument(file, parentContext, formData);
       results.push(result);
     }
 
-    const successCount = results.filter((r) => r.success).length;
-    const failureCount = results.filter((r) => !r.success).length;
-    this.logger.info(
-      "DocumentRecordService",
-      `Created ${successCount} records, ${failureCount} failures`,
-    );
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+    this.logger.info('DocumentRecordService', `Created ${successCount} records, ${failureCount} failures`);
 
     return results;
   }
@@ -126,35 +114,21 @@ export class DocumentRecordService {
    */
   async updateSummary(documentId: string, summary: string): Promise<boolean> {
     try {
-      const sanitizedGuid = documentId.replace(/[{}]/g, "").toLowerCase();
+      const sanitizedGuid = documentId.replace(/[{}]/g, '').toLowerCase();
 
       const payload: Record<string, unknown> = {
         sprk_filesummary: summary,
         sprk_filesummarydate: new Date().toISOString(),
       };
 
-      this.logger.info(
-        "DocumentRecordService",
-        `Updating summary for document: ${sanitizedGuid}`,
-      );
+      this.logger.info('DocumentRecordService', `Updating summary for document: ${sanitizedGuid}`);
 
-      await this.dataverseClient.updateRecord(
-        "sprk_document",
-        sanitizedGuid,
-        payload,
-      );
+      await this.dataverseClient.updateRecord('sprk_document', sanitizedGuid, payload);
 
-      this.logger.info(
-        "DocumentRecordService",
-        `Summary updated for document: ${sanitizedGuid}`,
-      );
+      this.logger.info('DocumentRecordService', `Summary updated for document: ${sanitizedGuid}`);
       return true;
     } catch (error) {
-      this.logger.error(
-        "DocumentRecordService",
-        `Failed to update summary for ${documentId}`,
-        error,
-      );
+      this.logger.error('DocumentRecordService', `Failed to update summary for ${documentId}`, error);
       return false;
     }
   }
@@ -172,12 +146,11 @@ export class DocumentRecordService {
   private async createSingleDocument(
     file: SpeFileMetadata,
     parentContext: ParentContext,
-    formData: DocumentFormData,
+    formData: DocumentFormData
   ): Promise<CreateResult> {
     try {
       // Unassociated mode: create document without parent lookup binding
-      const isUnassociated =
-        !parentContext.parentEntityName || !parentContext.parentRecordId;
+      const isUnassociated = !parentContext.parentEntityName || !parentContext.parentRecordId;
       if (isUnassociated) {
         const payload: Record<string, unknown> = {
           sprk_documentname: formData.documentName || file.name,
@@ -188,18 +161,9 @@ export class DocumentRecordService {
           sprk_filepath: file.webUrl || null,
           sprk_documentdescription: formData.description || null,
         };
-        this.logger.info(
-          "DocumentRecordService",
-          `Creating unassociated Document: ${file.name}`,
-        );
-        const result = await this.dataverseClient.createRecord(
-          "sprk_document",
-          payload,
-        );
-        this.logger.info(
-          "DocumentRecordService",
-          `Created unassociated Document record: ${result.id}`,
-        );
+        this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
+        const result = await this.dataverseClient.createRecord('sprk_document', payload);
+        this.logger.info('DocumentRecordService', `Created unassociated Document record: ${result.id}`);
         return {
           success: true,
           fileName: file.name,
@@ -213,40 +177,32 @@ export class DocumentRecordService {
       // Get entity configuration
       const config = this.getEntityConfig(parentContext.parentEntityName);
       if (!config) {
-        throw new Error(
-          `Unsupported entity type: ${parentContext.parentEntityName}`,
-        );
+        throw new Error(`Unsupported entity type: ${parentContext.parentEntityName}`);
       }
 
       // Query navigation property metadata dynamically via BFF API.
       // Falls back to hardcoded config.navigationPropertyName if NavMap is unavailable.
-      this.logger.info(
-        "DocumentRecordService",
-        `Querying navigation metadata for ${parentContext.parentEntityName}`,
-      );
+      this.logger.info('DocumentRecordService', `Querying navigation metadata for ${parentContext.parentEntityName}`);
 
       let navigationPropertyName: string;
       let targetEntitySetName: string;
 
       try {
-        const navMetadata = await this.navMapClient.getLookupNavigation(
-          "sprk_document",
-          config.relationshipSchemaName,
-        );
+        const navMetadata = await this.navMapClient.getLookupNavigation('sprk_document', config.relationshipSchemaName);
         navigationPropertyName = navMetadata.navigationPropertyName;
-        targetEntitySetName = navMetadata.targetEntity + "s";
+        targetEntitySetName = navMetadata.targetEntity + 's';
         this.logger.info(
-          "DocumentRecordService",
-          `Using navigation property: ${navigationPropertyName} (source: ${navMetadata.source})`,
+          'DocumentRecordService',
+          `Using navigation property: ${navigationPropertyName} (source: ${navMetadata.source})`
         );
       } catch (navError) {
         if (config.navigationPropertyName) {
           navigationPropertyName = config.navigationPropertyName;
           targetEntitySetName = config.entitySetName;
           this.logger.warn(
-            "DocumentRecordService",
+            'DocumentRecordService',
             `NavMap failed, using hardcoded fallback: ${navigationPropertyName}`,
-            navError,
+            navError
           );
         } else {
           throw navError;
@@ -259,24 +215,15 @@ export class DocumentRecordService {
         parentContext,
         formData,
         navigationPropertyName,
-        targetEntitySetName,
+        targetEntitySetName
       );
 
-      this.logger.info(
-        "DocumentRecordService",
-        `Creating Document: ${file.name}`,
-      );
+      this.logger.info('DocumentRecordService', `Creating Document: ${file.name}`);
 
       // Create record using IDataverseClient
-      const result = await this.dataverseClient.createRecord(
-        "sprk_document",
-        payload,
-      );
+      const result = await this.dataverseClient.createRecord('sprk_document', payload);
 
-      this.logger.info(
-        "DocumentRecordService",
-        `Created Document record: ${result.id}`,
-      );
+      this.logger.info('DocumentRecordService', `Created Document record: ${result.id}`);
 
       return {
         success: true,
@@ -287,13 +234,8 @@ export class DocumentRecordService {
         itemId: file.id,
       };
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      this.logger.error(
-        "DocumentRecordService",
-        `Failed to create Document for ${file.name}`,
-        error,
-      );
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      this.logger.error('DocumentRecordService', `Failed to create Document for ${file.name}`, error);
 
       return {
         success: false,
@@ -314,12 +256,10 @@ export class DocumentRecordService {
     parentContext: ParentContext,
     formData: DocumentFormData,
     navigationPropertyName: string,
-    entitySetName: string,
+    entitySetName: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
-    const sanitizedGuid = parentContext.parentRecordId
-      .replace(/[{}]/g, "")
-      .toLowerCase();
+    const sanitizedGuid = parentContext.parentRecordId.replace(/[{}]/g, '').toLowerCase();
 
     const payload: Record<string, unknown> = {
       // Document name (use form input or file name as fallback)
@@ -344,8 +284,8 @@ export class DocumentRecordService {
     };
 
     this.logger.info(
-      "DocumentRecordService",
-      `Lookup binding: ${navigationPropertyName}@odata.bind = /${entitySetName}(${sanitizedGuid})`,
+      'DocumentRecordService',
+      `Lookup binding: ${navigationPropertyName}@odata.bind = /${entitySetName}(${sanitizedGuid})`
     );
 
     return payload;

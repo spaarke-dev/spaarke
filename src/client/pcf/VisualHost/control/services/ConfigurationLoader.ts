@@ -6,30 +6,17 @@
  * Task 021 - Visualization Module
  */
 
-import type { IChartDefinition } from "../types";
-import {
-  VisualType,
-  AggregationType,
-  OnClickAction,
-  ValueFormat,
-  ColorSource,
-} from "../types";
-import { logger } from "../utils/logger";
+import type { IChartDefinition } from '../types';
+import { VisualType, AggregationType, OnClickAction, ValueFormat, ColorSource } from '../types';
+import { logger } from '../utils/logger';
 
 /**
  * WebAPI interface for retrieving Dataverse records
  * Abstraction layer to enable testing without ComponentFramework
  */
 export interface IConfigWebApi {
-  retrieveRecord(
-    entityType: string,
-    id: string,
-    options?: string,
-  ): Promise<Record<string, unknown>>;
-  retrieveMultipleRecords(
-    entityType: string,
-    options?: string,
-  ): Promise<{ entities: Array<Record<string, unknown>> }>;
+  retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  retrieveMultipleRecords(entityType: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
 }
 
 /**
@@ -46,54 +33,54 @@ export interface IConfigContext {
 export class ConfigurationNotFoundError extends Error {
   constructor(id: string) {
     super(`Chart definition not found: ${id}`);
-    this.name = "ConfigurationNotFoundError";
+    this.name = 'ConfigurationNotFoundError';
   }
 }
 
 export class ConfigurationLoadError extends Error {
   constructor(
     message: string,
-    public readonly cause?: unknown,
+    public readonly cause?: unknown
   ) {
     super(message);
-    this.name = "ConfigurationLoadError";
+    this.name = 'ConfigurationLoadError';
   }
 }
 
 /**
  * Entity field names for sprk_chartdefinition
  */
-const ENTITY_NAME = "sprk_chartdefinition";
-const ENTITY_SET_NAME = "sprk_chartdefinitions";
+const ENTITY_NAME = 'sprk_chartdefinition';
+const ENTITY_SET_NAME = 'sprk_chartdefinitions';
 
 const FIELDS = {
-  id: "sprk_chartdefinitionid",
-  name: "sprk_name",
-  visualType: "sprk_visualtype",
-  entityLogicalName: "sprk_entitylogicalname",
-  baseViewId: "sprk_baseviewid",
-  aggregationField: "sprk_aggregationfield",
-  aggregationType: "sprk_aggregationtype",
-  groupByField: "sprk_groupbyfield",
-  optionsJson: "sprk_optionsjson",
+  id: 'sprk_chartdefinitionid',
+  name: 'sprk_name',
+  visualType: 'sprk_visualtype',
+  entityLogicalName: 'sprk_entitylogicalname',
+  baseViewId: 'sprk_baseviewid',
+  aggregationField: 'sprk_aggregationfield',
+  aggregationType: 'sprk_aggregationtype',
+  groupByField: 'sprk_groupbyfield',
+  optionsJson: 'sprk_optionsjson',
   // Click action fields
-  onClickAction: "sprk_onclickaction",
-  onClickTarget: "sprk_onclicktarget",
-  onClickRecordField: "sprk_onclickrecordfield",
+  onClickAction: 'sprk_onclickaction',
+  onClickTarget: 'sprk_onclicktarget',
+  onClickRecordField: 'sprk_onclickrecordfield',
   // Card list configuration fields
-  contextFieldName: "sprk_contextfieldname",
-  viewListTabName: "sprk_viewlisttabname",
-  maxDisplayItems: "sprk_maxdisplayitems",
+  contextFieldName: 'sprk_contextfieldname',
+  viewListTabName: 'sprk_viewlisttabname',
+  maxDisplayItems: 'sprk_maxdisplayitems',
   // Drill-through configuration
-  drillThroughTarget: "sprk_drillthroughtarget",
+  drillThroughTarget: 'sprk_drillthroughtarget',
   // FetchXML fields
-  fetchXmlQuery: "sprk_fetchxmlquery",
-  fetchXmlParams: "sprk_fetchxmlparams",
+  fetchXmlQuery: 'sprk_fetchxmlquery',
+  fetchXmlParams: 'sprk_fetchxmlparams',
   // MetricCard configuration fields (v1.2.33)
-  valueFormat: "sprk_valueformat",
-  colorSource: "sprk_colorsource",
+  valueFormat: 'sprk_valueformat',
+  colorSource: 'sprk_colorsource',
   // Card shape (v1.2.44)
-  metricCardShape: "sprk_metriccardshape",
+  metricCardShape: 'sprk_metriccardshape',
 } as const;
 
 /**
@@ -121,7 +108,7 @@ const SELECT_COLUMNS = [
   FIELDS.valueFormat,
   FIELDS.colorSource,
   FIELDS.metricCardShape,
-].join(",");
+].join(',');
 
 /**
  * Cache entry for chart definitions
@@ -154,10 +141,10 @@ function isCacheValid(entry: ICacheEntry): boolean {
 export function clearCache(id?: string): void {
   if (id) {
     cache.delete(id);
-    logger.debug("ConfigurationLoader", `Cache cleared for ${id}`);
+    logger.debug('ConfigurationLoader', `Cache cleared for ${id}`);
   } else {
     cache.clear();
-    logger.debug("ConfigurationLoader", "Cache cleared entirely");
+    logger.debug('ConfigurationLoader', 'Cache cleared entirely');
   }
 }
 
@@ -166,21 +153,21 @@ export function clearCache(id?: string): void {
  * Returns empty object on parse failure
  */
 function parseOptionsJson(jsonString?: string): Record<string, unknown> {
-  if (!jsonString || jsonString.trim() === "") {
+  if (!jsonString || jsonString.trim() === '') {
     return {};
   }
 
   try {
     const parsed = JSON.parse(jsonString);
-    if (typeof parsed !== "object" || parsed === null) {
-      logger.warn("ConfigurationLoader", "optionsJson is not an object", {
+    if (typeof parsed !== 'object' || parsed === null) {
+      logger.warn('ConfigurationLoader', 'optionsJson is not an object', {
         jsonString,
       });
       return {};
     }
     return parsed as Record<string, unknown>;
   } catch (error) {
-    logger.warn("ConfigurationLoader", "Failed to parse optionsJson", {
+    logger.warn('ConfigurationLoader', 'Failed to parse optionsJson', {
       jsonString,
       error,
     });
@@ -192,17 +179,12 @@ function parseOptionsJson(jsonString?: string): Record<string, unknown> {
  * Validate and convert visual type value
  */
 function parseVisualType(value: unknown): VisualType {
-  const numValue =
-    typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
-    logger.warn(
-      "ConfigurationLoader",
-      "Invalid visual type, defaulting to MetricCard",
-      {
-        value,
-      },
-    );
+    logger.warn('ConfigurationLoader', 'Invalid visual type, defaulting to MetricCard', {
+      value,
+    });
     return VisualType.MetricCard;
   }
 
@@ -211,13 +193,9 @@ function parseVisualType(value: unknown): VisualType {
     return numValue as VisualType;
   }
 
-  logger.warn(
-    "ConfigurationLoader",
-    "Unknown visual type, defaulting to MetricCard",
-    {
-      value: numValue,
-    },
-  );
+  logger.warn('ConfigurationLoader', 'Unknown visual type, defaulting to MetricCard', {
+    value: numValue,
+  });
   return VisualType.MetricCard;
 }
 
@@ -229,8 +207,7 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return undefined;
   }
 
-  const numValue =
-    typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
     return undefined;
@@ -241,7 +218,7 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return numValue as AggregationType;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown aggregation type", {
+  logger.warn('ConfigurationLoader', 'Unknown aggregation type', {
     value: numValue,
   });
   return undefined;
@@ -255,8 +232,7 @@ function parseOnClickAction(value: unknown): OnClickAction | undefined {
     return undefined;
   }
 
-  const numValue =
-    typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
     return undefined;
@@ -266,7 +242,7 @@ function parseOnClickAction(value: unknown): OnClickAction | undefined {
     return numValue as OnClickAction;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown click action type", {
+  logger.warn('ConfigurationLoader', 'Unknown click action type', {
     value: numValue,
   });
   return undefined;
@@ -279,15 +255,14 @@ function parseValueFormat(value: unknown): ValueFormat | undefined {
   if (value === null || value === undefined) {
     return undefined;
   }
-  const numValue =
-    typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
   if (isNaN(numValue)) {
     return undefined;
   }
   if (Object.values(ValueFormat).includes(numValue)) {
     return numValue as ValueFormat;
   }
-  logger.warn("ConfigurationLoader", "Unknown value format", {
+  logger.warn('ConfigurationLoader', 'Unknown value format', {
     value: numValue,
   });
   return undefined;
@@ -300,15 +275,14 @@ function parseColorSource(value: unknown): ColorSource | undefined {
   if (value === null || value === undefined) {
     return undefined;
   }
-  const numValue =
-    typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
   if (isNaN(numValue)) {
     return undefined;
   }
   if (Object.values(ColorSource).includes(numValue)) {
     return numValue as ColorSource;
   }
-  logger.warn("ConfigurationLoader", "Unknown color source", {
+  logger.warn('ConfigurationLoader', 'Unknown color source', {
     value: numValue,
   });
   return undefined;
@@ -317,23 +291,14 @@ function parseColorSource(value: unknown): ColorSource | undefined {
 /**
  * Map Dataverse record to IChartDefinition
  */
-function mapToChartDefinition(
-  record: Record<string, unknown>,
-): IChartDefinition {
+function mapToChartDefinition(record: Record<string, unknown>): IChartDefinition {
   const definition: IChartDefinition = {
     sprk_chartdefinitionid: record[FIELDS.id] as string,
-    sprk_name: (record[FIELDS.name] as string) || "Untitled Chart",
+    sprk_name: (record[FIELDS.name] as string) || 'Untitled Chart',
     sprk_visualtype: parseVisualType(record[FIELDS.visualType]),
-    sprk_entitylogicalname: record[FIELDS.entityLogicalName] as
-      | string
-      | undefined,
-    sprk_baseviewid:
-      (record["_sprk_baseviewid_value"] as string) ||
-      (record[FIELDS.baseViewId] as string) ||
-      undefined,
-    sprk_aggregationfield: record[FIELDS.aggregationField] as
-      | string
-      | undefined,
+    sprk_entitylogicalname: record[FIELDS.entityLogicalName] as string | undefined,
+    sprk_baseviewid: (record['_sprk_baseviewid_value'] as string) || (record[FIELDS.baseViewId] as string) || undefined,
+    sprk_aggregationfield: record[FIELDS.aggregationField] as string | undefined,
     sprk_aggregationtype: parseAggregationType(record[FIELDS.aggregationType]),
     sprk_groupbyfield: record[FIELDS.groupByField] as string | undefined,
     sprk_optionsjson: record[FIELDS.optionsJson] as string | undefined,
@@ -343,19 +308,13 @@ function mapToChartDefinition(
     // Click action fields
     sprk_onclickaction: parseOnClickAction(record[FIELDS.onClickAction]),
     sprk_onclicktarget: record[FIELDS.onClickTarget] as string | undefined,
-    sprk_onclickrecordfield: record[FIELDS.onClickRecordField] as
-      | string
-      | undefined,
+    sprk_onclickrecordfield: record[FIELDS.onClickRecordField] as string | undefined,
     // Card list configuration fields
-    sprk_contextfieldname: record[FIELDS.contextFieldName] as
-      | string
-      | undefined,
+    sprk_contextfieldname: record[FIELDS.contextFieldName] as string | undefined,
     sprk_viewlisttabname: record[FIELDS.viewListTabName] as string | undefined,
     sprk_maxdisplayitems: record[FIELDS.maxDisplayItems] as number | undefined,
     // Drill-through configuration
-    sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as
-      | string
-      | undefined,
+    sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as string | undefined,
     // FetchXML fields
     sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
     sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,
@@ -373,8 +332,8 @@ function mapToChartDefinition(
 
   // Diagnostic: log view ID resolution
   logger.info(
-    "ConfigurationLoader",
-    `View ID resolution: _sprk_baseviewid_value=${record["_sprk_baseviewid_value"] || "(empty)"}, sprk_baseviewid=${record[FIELDS.baseViewId] || "(empty)"} → resolved=${definition.sprk_baseviewid || "(none)"}`,
+    'ConfigurationLoader',
+    `View ID resolution: _sprk_baseviewid_value=${record['_sprk_baseviewid_value'] || '(empty)'}, sprk_baseviewid=${record[FIELDS.baseViewId] || '(empty)'} → resolved=${definition.sprk_baseviewid || '(none)'}`
   );
 
   return definition;
@@ -393,37 +352,30 @@ function mapToChartDefinition(
 export async function loadChartDefinition(
   context: IConfigContext,
   id: string,
-  skipCache = false,
+  skipCache = false
 ): Promise<IChartDefinition> {
   // Validate input
-  if (!id || id.trim() === "") {
-    throw new ConfigurationLoadError("Chart definition ID is required");
+  if (!id || id.trim() === '') {
+    throw new ConfigurationLoadError('Chart definition ID is required');
   }
 
   // Normalize GUID format (remove braces if present)
-  const normalizedId = id.replace(/[{}]/g, "").toLowerCase();
+  const normalizedId = id.replace(/[{}]/g, '').toLowerCase();
 
-  logger.debug(
-    "ConfigurationLoader",
-    `Loading chart definition: ${normalizedId}`,
-  );
+  logger.debug('ConfigurationLoader', `Loading chart definition: ${normalizedId}`);
 
   // Check cache first (unless skipCache is true)
   if (!skipCache) {
     const cached = cache.get(normalizedId);
     if (cached && isCacheValid(cached)) {
-      logger.debug("ConfigurationLoader", `Cache hit for ${normalizedId}`);
+      logger.debug('ConfigurationLoader', `Cache hit for ${normalizedId}`);
       return cached.definition;
     }
   }
 
   try {
     // Use WebAPI to retrieve the record
-    const record = await context.webAPI.retrieveRecord(
-      ENTITY_NAME,
-      normalizedId,
-      `?$select=${SELECT_COLUMNS}`,
-    );
+    const record = await context.webAPI.retrieveRecord(ENTITY_NAME, normalizedId, `?$select=${SELECT_COLUMNS}`);
 
     // Map to typed interface
     const definition = mapToChartDefinition(record);
@@ -434,15 +386,11 @@ export async function loadChartDefinition(
       timestamp: Date.now(),
     });
 
-    logger.info(
-      "ConfigurationLoader",
-      `Loaded chart definition: ${definition.sprk_name}`,
-      {
-        id: normalizedId,
-        visualType: definition.sprk_visualtype,
-        entity: definition.sprk_entitylogicalname,
-      },
-    );
+    logger.info('ConfigurationLoader', `Loaded chart definition: ${definition.sprk_name}`, {
+      id: normalizedId,
+      visualType: definition.sprk_visualtype,
+      entity: definition.sprk_entitylogicalname,
+    });
 
     return definition;
   } catch (error: unknown) {
@@ -451,27 +399,17 @@ export async function loadChartDefinition(
 
     // Check for "not found" type errors
     if (
-      errorMessage.includes("does not exist") ||
-      errorMessage.includes("not found") ||
-      errorMessage.includes("0x80040217") // Dataverse object not found
+      errorMessage.includes('does not exist') ||
+      errorMessage.includes('not found') ||
+      errorMessage.includes('0x80040217') // Dataverse object not found
     ) {
-      logger.warn(
-        "ConfigurationLoader",
-        `Chart definition not found: ${normalizedId}`,
-      );
+      logger.warn('ConfigurationLoader', `Chart definition not found: ${normalizedId}`);
       throw new ConfigurationNotFoundError(normalizedId);
     }
 
     // Other errors
-    logger.error(
-      "ConfigurationLoader",
-      `Failed to load chart definition: ${normalizedId}`,
-      error,
-    );
-    throw new ConfigurationLoadError(
-      `Failed to load chart definition: ${errorMessage}`,
-      error,
-    );
+    logger.error('ConfigurationLoader', `Failed to load chart definition: ${normalizedId}`, error);
+    throw new ConfigurationLoadError(`Failed to load chart definition: ${errorMessage}`, error);
   }
 }
 
@@ -486,28 +424,22 @@ export async function loadChartDefinition(
 export async function loadChartDefinitions(
   context: IConfigContext,
   ids: string[],
-  skipCache = false,
-): Promise<Array<IChartDefinition | Error>> {
-  logger.debug(
-    "ConfigurationLoader",
-    `Loading ${ids.length} chart definitions`,
-  );
+  skipCache = false
+): Promise<(IChartDefinition | Error)[]> {
+  logger.debug('ConfigurationLoader', `Loading ${ids.length} chart definitions`);
 
   const results = await Promise.all(
-    ids.map(async (id) => {
+    ids.map(async id => {
       try {
         return await loadChartDefinition(context, id, skipCache);
       } catch (error) {
         return error instanceof Error ? error : new Error(String(error));
       }
-    }),
+    })
   );
 
-  const successCount = results.filter((r) => !(r instanceof Error)).length;
-  logger.info(
-    "ConfigurationLoader",
-    `Loaded ${successCount}/${ids.length} chart definitions`,
-  );
+  const successCount = results.filter(r => !(r instanceof Error)).length;
+  logger.info('ConfigurationLoader', `Loaded ${successCount}/${ids.length} chart definitions`);
 
   return results;
 }
@@ -519,11 +451,8 @@ export async function loadChartDefinitions(
  * @param filter - OData filter expression (e.g., "sprk_visualtype eq 100000001")
  * @returns Promise resolving to array of IChartDefinition
  */
-export async function queryChartDefinitions(
-  context: IConfigContext,
-  filter?: string,
-): Promise<IChartDefinition[]> {
-  logger.debug("ConfigurationLoader", "Querying chart definitions", { filter });
+export async function queryChartDefinitions(context: IConfigContext, filter?: string): Promise<IChartDefinition[]> {
+  logger.debug('ConfigurationLoader', 'Querying chart definitions', { filter });
 
   try {
     let queryOptions = `?$select=${SELECT_COLUMNS}`;
@@ -531,15 +460,12 @@ export async function queryChartDefinitions(
       queryOptions += `&$filter=${encodeURIComponent(filter)}`;
     }
 
-    const result = await context.webAPI.retrieveMultipleRecords(
-      ENTITY_NAME,
-      queryOptions,
-    );
+    const result = await context.webAPI.retrieveMultipleRecords(ENTITY_NAME, queryOptions);
 
     const definitions = result.entities.map(mapToChartDefinition);
 
     // Update cache for all loaded definitions
-    definitions.forEach((def) => {
+    definitions.forEach(def => {
       const normalizedId = def.sprk_chartdefinitionid.toLowerCase();
       cache.set(normalizedId, {
         definition: def,
@@ -547,22 +473,12 @@ export async function queryChartDefinitions(
       });
     });
 
-    logger.info(
-      "ConfigurationLoader",
-      `Query returned ${definitions.length} chart definitions`,
-    );
+    logger.info('ConfigurationLoader', `Query returned ${definitions.length} chart definitions`);
     return definitions;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(
-      "ConfigurationLoader",
-      "Failed to query chart definitions",
-      error,
-    );
-    throw new ConfigurationLoadError(
-      `Failed to query chart definitions: ${errorMessage}`,
-      error,
-    );
+    logger.error('ConfigurationLoader', 'Failed to query chart definitions', error);
+    throw new ConfigurationLoadError(`Failed to query chart definitions: ${errorMessage}`, error);
   }
 }
 
@@ -570,8 +486,6 @@ export async function queryChartDefinitions(
  * Get parsed options from a chart definition
  * Convenience method to parse optionsJson field
  */
-export function getChartOptions(
-  definition: IChartDefinition,
-): Record<string, unknown> {
+export function getChartOptions(definition: IChartDefinition): Record<string, unknown> {
   return parseOptionsJson(definition.sprk_optionsjson);
 }

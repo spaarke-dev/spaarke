@@ -12,18 +12,10 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import {
-  Spinner,
-  Text,
-  Badge,
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { Checkmark12Regular } from "@fluentui/react-icons";
-import { useAiAssistantStore } from "../../stores/aiAssistantStore";
+import * as React from 'react';
+import { Spinner, Text, Badge, makeStyles, tokens, shorthands, mergeClasses } from '@fluentui/react-components';
+import { Checkmark12Regular } from '@fluentui/react-icons';
+import { useAiAssistantStore } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -31,13 +23,13 @@ import { useAiAssistantStore } from "../../stores/aiAssistantStore";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
   },
   containerActive: {
     backgroundColor: tokens.colorBrandBackground2,
@@ -48,33 +40,33 @@ const useStyles = makeStyles({
     ...shorthands.borderColor(tokens.colorPaletteGreenBorder1),
   },
   hidden: {
-    display: "none",
+    display: 'none',
   },
   spinnerContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "20px",
-    height: "20px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
   },
   textContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     flex: 1,
     minWidth: 0,
   },
   statusText: {
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    ...shorthands.overflow("hidden"),
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+    ...shorthands.overflow('hidden'),
   },
   stepText: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    ...shorthands.overflow("hidden"),
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+    ...shorthands.overflow('hidden'),
   },
   badge: {
     flexShrink: 0,
@@ -138,8 +130,7 @@ export const OperationFeedback: React.FC<OperationFeedbackProps> = ({
   }, [isStreaming, showCompleteState, completeDuration]);
 
   // Determine visibility
-  const isVisible =
-    visible !== undefined ? visible : isStreaming || showComplete;
+  const isVisible = visible !== undefined ? visible : isStreaming || showComplete;
 
   // Don't render if not visible
   if (!isVisible) {
@@ -147,21 +138,18 @@ export const OperationFeedback: React.FC<OperationFeedbackProps> = ({
   }
 
   // Determine display text
-  const displayStatus =
-    statusText ?? (showComplete ? "Complete!" : "Processing...");
+  const displayStatus = statusText ?? (showComplete ? 'Complete!' : 'Processing...');
   const displayStep =
     stepText ??
     streamingState.currentStep ??
-    (showComplete
-      ? `${streamingState.operationCount} changes applied`
-      : "Analyzing your request...");
+    (showComplete ? `${streamingState.operationCount} changes applied` : 'Analyzing your request...');
 
   return (
     <div
       className={mergeClasses(
         styles.container,
         isStreaming && styles.containerActive,
-        showComplete && styles.containerComplete,
+        showComplete && styles.containerComplete
       )}
       role="status"
       aria-live="polite"
@@ -169,11 +157,7 @@ export const OperationFeedback: React.FC<OperationFeedbackProps> = ({
     >
       {/* Spinner or complete icon */}
       <div className={styles.spinnerContainer}>
-        {showComplete ? (
-          <Checkmark12Regular className={styles.completeIcon} />
-        ) : (
-          <Spinner size="tiny" />
-        )}
+        {showComplete ? <Checkmark12Regular className={styles.completeIcon} /> : <Spinner size="tiny" />}
       </div>
 
       {/* Status text */}
@@ -192,7 +176,7 @@ export const OperationFeedback: React.FC<OperationFeedbackProps> = ({
       {showBadge && streamingState.operationCount > 0 && (
         <Badge
           appearance="filled"
-          color={showComplete ? "success" : "informative"}
+          color={showComplete ? 'success' : 'informative'}
           size="small"
           className={styles.badge}
         >

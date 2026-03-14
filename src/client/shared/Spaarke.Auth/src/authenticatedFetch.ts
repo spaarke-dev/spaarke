@@ -1,6 +1,6 @@
-import type { IProblemDetails } from "./types";
-import { ApiError, AuthError } from "./errors";
-import { getAuthProvider } from "./initAuth";
+import type { IProblemDetails } from './types';
+import { ApiError, AuthError } from './errors';
+import { getAuthProvider } from './initAuth';
 
 /** Exponential backoff base delay (ms). */
 const RETRY_BASE_MS = 500;
@@ -23,10 +23,7 @@ const MAX_RETRIES = 3;
  * @throws ApiError for non-2xx responses with ProblemDetails
  * @throws AuthError when token acquisition fails after retries
  */
-export async function authenticatedFetch(
-  url: string,
-  init?: RequestInit,
-): Promise<Response> {
+export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
   const provider = getAuthProvider();
 
   // Resolve relative URLs against the configured BFF base URL
@@ -38,7 +35,7 @@ export async function authenticatedFetch(
     const token = await provider.getAccessToken();
     const headers = new Headers(init?.headers);
     if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+      headers.set('Authorization', `Bearer ${token}`);
     }
 
     lastResponse = await fetch(resolvedUrl, { ...init, headers });
@@ -62,55 +59,41 @@ export async function authenticatedFetch(
 
   // All retries exhausted or non-retryable error
   if (!lastResponse) {
-    throw new AuthError("No response received", "no_response");
+    throw new AuthError('No response received', 'no_response');
   }
 
   if (lastResponse.status === 401) {
-    throw new AuthError(
-      "Authentication failed after all retry attempts",
-      "auth_exhausted",
-    );
+    throw new AuthError('Authentication failed after all retry attempts', 'auth_exhausted');
   }
 
   // Try to parse RFC 7807 ProblemDetails
   const problemDetails = await tryParseProblemDetails(lastResponse);
   throw new ApiError(
-    problemDetails?.detail ??
-      problemDetails?.title ??
-      `HTTP ${lastResponse.status}`,
+    problemDetails?.detail ?? problemDetails?.title ?? `HTTP ${lastResponse.status}`,
     lastResponse.status,
-    problemDetails,
+    problemDetails
   );
 }
 
 /** Resolve a potentially relative URL against the BFF base URL. */
 function resolveUrl(url: string, baseUrl: string): string {
-  if (url.startsWith("http://") || url.startsWith("https://")) {
+  if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
   if (!baseUrl) return url;
 
-  const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-  const path = url.startsWith("/") ? url : `/${url}`;
+  const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  const path = url.startsWith('/') ? url : `/${url}`;
   return `${base}${path}`;
 }
 
 /** Attempt to parse a response body as RFC 7807 ProblemDetails. */
-async function tryParseProblemDetails(
-  response: Response,
-): Promise<IProblemDetails | null> {
+async function tryParseProblemDetails(response: Response): Promise<IProblemDetails | null> {
   try {
-    const contentType = response.headers.get("content-type") ?? "";
-    if (
-      contentType.includes("application/json") ||
-      contentType.includes("application/problem+json")
-    ) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const body = await response.json();
-      if (
-        body &&
-        typeof body === "object" &&
-        ("title" in body || "status" in body)
-      ) {
+      if (body && typeof body === 'object' && ('title' in body || 'status' in body)) {
         return body as IProblemDetails;
       }
     }
@@ -121,5 +104,5 @@ async function tryParseProblemDetails(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

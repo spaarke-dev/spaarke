@@ -3,25 +3,18 @@
  * Catches React errors and displays user-friendly error message
  */
 
-import * as React from "react";
-import {
-  MessageBar,
-  MessageBarBody,
-  MessageBarTitle,
-  Button,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { MessageBar, MessageBarBody, MessageBarTitle, Button, makeStyles, tokens } from '@fluentui/react-components';
+import { logger } from '../utils/logger';
 
 const useStyles = makeStyles({
   container: {
     padding: tokens.spacingVerticalL,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '200px',
     gap: tokens.spacingVerticalM,
   },
 });
@@ -35,10 +28,7 @@ interface IErrorBoundaryProps {
   children: React.ReactNode;
 }
 
-export class ErrorBoundary extends React.Component<
-  IErrorBoundaryProps,
-  IErrorBoundaryState
-> {
+export class ErrorBoundary extends React.Component<IErrorBoundaryProps, IErrorBoundaryState> {
   constructor(props: IErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -49,7 +39,7 @@ export class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    logger.error("ErrorBoundary", "Caught error", {
+    logger.error('ErrorBoundary', 'Caught error', {
       error: error.message,
       stack: error.stack,
       componentStack: errorInfo.componentStack,
@@ -81,8 +71,8 @@ const ErrorFallback: React.FC<IErrorFallbackProps> = ({ onRetry }) => {
       <MessageBar intent="error">
         <MessageBarBody>
           <MessageBarTitle>Something went wrong</MessageBarTitle>
-          An error occurred while rendering the chart. Please try again or
-          contact your administrator if the problem persists.
+          An error occurred while rendering the chart. Please try again or contact your administrator if the problem
+          persists.
         </MessageBarBody>
       </MessageBar>
       <Button appearance="primary" onClick={onRetry}>

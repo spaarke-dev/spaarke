@@ -18,7 +18,7 @@
  * @see ADR-012 - Shared component library (useDocumentHistory)
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect } from 'react';
 import {
   Toolbar,
   ToolbarButton,
@@ -27,7 +27,7 @@ import {
   Spinner,
   makeStyles,
   tokens,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   SaveRegular,
   ArrowExportRegular,
@@ -36,8 +36,8 @@ import {
   ArrowRedoRegular,
   CheckmarkRegular,
   WarningRegular,
-} from "@fluentui/react-icons";
-import type { SaveState, ExportState, ExportFormat } from "../types";
+} from '@fluentui/react-icons';
+import type { SaveState, ExportState, ExportFormat } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,15 +83,15 @@ const useStyles = makeStyles({
   toolbar: {
     paddingTop: 0,
     paddingBottom: 0,
-    minHeight: "32px",
+    minHeight: '32px',
   },
   saveStatusIcon: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
   },
   spinnerIcon: {
-    width: "16px",
-    height: "16px",
+    width: '16px',
+    height: '16px',
   },
   savedIcon: {
     color: tokens.colorPaletteGreenForeground1,
@@ -127,12 +127,12 @@ export function AnalysisToolbar({
 
     try {
       // Try modern Clipboard API with both MIME types
-      if (navigator.clipboard && typeof ClipboardItem !== "undefined") {
-        const htmlBlob = new Blob([html], { type: "text/html" });
-        const textBlob = new Blob([stripHtml(html)], { type: "text/plain" });
+      if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        const htmlBlob = new Blob([html], { type: 'text/html' });
+        const textBlob = new Blob([stripHtml(html)], { type: 'text/plain' });
         const item = new ClipboardItem({
-          "text/html": htmlBlob,
-          "text/plain": textBlob,
+          'text/html': htmlBlob,
+          'text/plain': textBlob,
         });
         await navigator.clipboard.write([item]);
       } else {
@@ -143,16 +143,16 @@ export function AnalysisToolbar({
     } catch {
       // Last resort fallback: execCommand (deprecated but widely supported)
       try {
-        const textarea = document.createElement("textarea");
+        const textarea = document.createElement('textarea');
         textarea.value = stripHtml(html);
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
         document.body.appendChild(textarea);
         textarea.select();
-        document.execCommand("copy");
+        document.execCommand('copy');
         document.body.removeChild(textarea);
       } catch {
-        console.error("[AnalysisToolbar] Copy to clipboard failed");
+        console.error('[AnalysisToolbar] Copy to clipboard failed');
       }
     }
   }, [getEditorHtml]);
@@ -163,14 +163,14 @@ export function AnalysisToolbar({
       const isCtrl = event.ctrlKey || event.metaKey;
 
       // Ctrl+S — Force save
-      if (isCtrl && event.key === "s") {
+      if (isCtrl && event.key === 's') {
         event.preventDefault();
         onForceSave();
         return;
       }
 
       // Ctrl+Shift+C — Copy analysis to clipboard
-      if (isCtrl && event.shiftKey && event.key === "C") {
+      if (isCtrl && event.shiftKey && event.key === 'C') {
         event.preventDefault();
         handleCopy();
         return;
@@ -179,7 +179,7 @@ export function AnalysisToolbar({
       // Ctrl+Z — Undo (document-level)
       // Only fire when the event target is not inside a contentEditable
       // (the editor has its own Lexical undo for text-level changes)
-      if (isCtrl && !event.shiftKey && event.key === "z") {
+      if (isCtrl && !event.shiftKey && event.key === 'z') {
         const target = event.target as HTMLElement | null;
         if (target && !isInsideContentEditable(target)) {
           event.preventDefault();
@@ -189,7 +189,7 @@ export function AnalysisToolbar({
       }
 
       // Ctrl+Y — Redo (document-level)
-      if (isCtrl && event.key === "y") {
+      if (isCtrl && event.key === 'y') {
         const target = event.target as HTMLElement | null;
         if (target && !isInsideContentEditable(target)) {
           event.preventDefault();
@@ -199,8 +199,8 @@ export function AnalysisToolbar({
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onForceSave, handleCopy, onUndo, onRedo]);
 
   // ---- Save button icon based on state ----
@@ -214,7 +214,7 @@ export function AnalysisToolbar({
         <ToolbarButton
           icon={saveIcon}
           onClick={onForceSave}
-          disabled={saveState === "saving"}
+          disabled={saveState === 'saving'}
           aria-label={saveTooltip}
         />
       </Tooltip>
@@ -223,44 +223,30 @@ export function AnalysisToolbar({
       <Tooltip content="Export to Word" relationship="label">
         <ToolbarButton
           icon={<ArrowExportRegular />}
-          onClick={() => onExport("docx")}
-          disabled={exportState === "exporting"}
+          onClick={() => onExport('docx')}
+          disabled={exportState === 'exporting'}
           aria-label="Export to Word"
         />
       </Tooltip>
 
       {/* Copy */}
       <Tooltip content="Copy to clipboard (Ctrl+Shift+C)" relationship="label">
-        <ToolbarButton
-          icon={<CopyRegular />}
-          onClick={handleCopy}
-          aria-label="Copy to clipboard"
-        />
+        <ToolbarButton icon={<CopyRegular />} onClick={handleCopy} aria-label="Copy to clipboard" />
       </Tooltip>
 
       <ToolbarDivider />
 
       {/* Undo */}
       <Tooltip
-        content={`Undo (Ctrl+Z)${historyLength > 0 ? ` — ${historyLength} snapshots` : ""}`}
+        content={`Undo (Ctrl+Z)${historyLength > 0 ? ` — ${historyLength} snapshots` : ''}`}
         relationship="label"
       >
-        <ToolbarButton
-          icon={<ArrowUndoRegular />}
-          onClick={onUndo}
-          disabled={!canUndo}
-          aria-label="Undo"
-        />
+        <ToolbarButton icon={<ArrowUndoRegular />} onClick={onUndo} disabled={!canUndo} aria-label="Undo" />
       </Tooltip>
 
       {/* Redo */}
       <Tooltip content="Redo (Ctrl+Y)" relationship="label">
-        <ToolbarButton
-          icon={<ArrowRedoRegular />}
-          onClick={onRedo}
-          disabled={!canRedo}
-          aria-label="Redo"
-        />
+        <ToolbarButton icon={<ArrowRedoRegular />} onClick={onRedo} disabled={!canRedo} aria-label="Redo" />
       </Tooltip>
     </Toolbar>
   );
@@ -273,22 +259,19 @@ export function AnalysisToolbar({
 /**
  * Get the appropriate icon element for the current save state.
  */
-function getSaveIcon(
-  state: SaveState,
-  styles: ReturnType<typeof useStyles>,
-): JSX.Element {
+function getSaveIcon(state: SaveState, styles: ReturnType<typeof useStyles>): JSX.Element {
   switch (state) {
-    case "saving":
+    case 'saving':
       return (
         <span className={styles.saveStatusIcon}>
           <Spinner className={styles.spinnerIcon} size="tiny" />
         </span>
       );
-    case "saved":
+    case 'saved':
       return <CheckmarkRegular className={styles.savedIcon} />;
-    case "error":
+    case 'error':
       return <WarningRegular className={styles.errorIcon} />;
-    case "idle":
+    case 'idle':
     default:
       return <SaveRegular />;
   }
@@ -299,15 +282,15 @@ function getSaveIcon(
  */
 function getSaveTooltip(state: SaveState, error: string | null): string {
   switch (state) {
-    case "saving":
-      return "Saving...";
-    case "saved":
-      return "Saved (Ctrl+S)";
-    case "error":
-      return `Save failed: ${error ?? "Unknown error"} (Ctrl+S to retry)`;
-    case "idle":
+    case 'saving':
+      return 'Saving...';
+    case 'saved':
+      return 'Saved (Ctrl+S)';
+    case 'error':
+      return `Save failed: ${error ?? 'Unknown error'} (Ctrl+S to retry)`;
+    case 'idle':
     default:
-      return "Save (Ctrl+S)";
+      return 'Save (Ctrl+S)';
   }
 }
 
@@ -315,9 +298,9 @@ function getSaveTooltip(state: SaveState, error: string | null): string {
  * Strip HTML tags from a string to produce plain text.
  */
 function stripHtml(html: string): string {
-  const div = document.createElement("div");
+  const div = document.createElement('div');
   div.innerHTML = html;
-  return div.textContent ?? div.innerText ?? "";
+  return div.textContent ?? div.innerText ?? '';
 }
 
 /**
@@ -327,7 +310,7 @@ function stripHtml(html: string): string {
 function isInsideContentEditable(element: HTMLElement): boolean {
   let current: HTMLElement | null = element;
   while (current) {
-    if (current.contentEditable === "true") {
+    if (current.contentEditable === 'true') {
       return true;
     }
     current = current.parentElement;

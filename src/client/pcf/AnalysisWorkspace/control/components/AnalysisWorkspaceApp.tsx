@@ -10,7 +10,7 @@
  * 3. Right: Conversation Panel (AI Chat with SSE streaming)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,7 +21,7 @@ import {
   Button,
   Badge,
   Textarea,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ChatRegular,
   SaveRegular,
@@ -33,21 +33,21 @@ import {
   ChevronRight20Regular,
   ChevronLeft20Regular,
   ArrowSync24Regular,
-} from "@fluentui/react-icons";
-import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
-import { logInfo, logError } from "../utils/logger";
-import { markdownToHtml, isMarkdown } from "../utils/markdownToHtml";
-import { RichTextEditor } from "./RichTextEditor";
-import { SourceDocumentViewer } from "./SourceDocumentViewer";
-import { ResumeSessionDialog } from "./ResumeSessionDialog";
-import { useSseStream } from "../hooks/useSseStream";
-import { getAuthProvider } from "@spaarke/auth";
-import { SprkChat } from "@spaarke/ui-components/dist/components/SprkChat";
-import type { IChatSession } from "@spaarke/ui-components/dist/components/SprkChat";
+} from '@fluentui/react-icons';
+import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from '../types';
+import { logInfo, logError } from '../utils/logger';
+import { markdownToHtml, isMarkdown } from '../utils/markdownToHtml';
+import { RichTextEditor } from './RichTextEditor';
+import { SourceDocumentViewer } from './SourceDocumentViewer';
+import { ResumeSessionDialog } from './ResumeSessionDialog';
+import { useSseStream } from '../hooks/useSseStream';
+import { getAuthProvider } from '@spaarke/auth';
+import { SprkChat } from '@spaarke/ui-components/dist/components/SprkChat';
+import type { IChatSession } from '@spaarke/ui-components/dist/components/SprkChat';
 
 // Build info for version footer
-const VERSION = "1.3.5";
-const BUILD_DATE = "2026-02-24";
+const VERSION = '1.3.5';
+const BUILD_DATE = '2026-02-24';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -55,131 +55,131 @@ const BUILD_DATE = "2026-02-24";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     // Use viewport height minus header space (~180px for Dataverse form header/tabs)
     // This ensures the control fills available vertical space
-    height: "calc(100vh - 180px)",
-    minHeight: "500px", // Ensure minimum height for usability
-    width: "100%",
+    height: 'calc(100vh - 180px)',
+    minHeight: '500px', // Ensure minimum height for usability
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   content: {
-    display: "flex",
+    display: 'flex',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   // Left Panel - Analysis Output (resizable)
   leftPanel: {
-    flex: "1 1 40%",
-    minWidth: "250px",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    position: "relative" as const,
+    flex: '1 1 40%',
+    minWidth: '250px',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    position: 'relative' as const,
   },
   // Center Panel - Source Document (resizable, collapsible)
   centerPanel: {
-    flex: "1 1 35%",
-    minWidth: "200px",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    position: "relative" as const,
-    transition: "flex-basis 0.2s ease, min-width 0.2s ease, opacity 0.2s ease",
+    flex: '1 1 35%',
+    minWidth: '200px',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    position: 'relative' as const,
+    transition: 'flex-basis 0.2s ease, min-width 0.2s ease, opacity 0.2s ease',
   },
   // Right Panel - Conversation (collapsible)
   rightPanel: {
-    flex: "0 0 350px",
-    minWidth: "300px",
-    maxWidth: "450px",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    transition: "flex-basis 0.2s ease, min-width 0.2s ease, opacity 0.2s ease",
+    flex: '0 0 350px',
+    minWidth: '300px',
+    maxWidth: '450px',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    transition: 'flex-basis 0.2s ease, min-width 0.2s ease, opacity 0.2s ease',
   },
   rightPanelCollapsed: {
-    flex: "0 0 0px",
-    minWidth: "0px",
-    maxWidth: "0px",
+    flex: '0 0 0px',
+    minWidth: '0px',
+    maxWidth: '0px',
     opacity: 0,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   centerPanelCollapsed: {
-    flex: "0 0 0px",
-    minWidth: "0px",
+    flex: '0 0 0px',
+    minWidth: '0px',
     opacity: 0,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   // Resize handle between panels
   resizeHandle: {
-    width: "4px",
-    cursor: "col-resize",
+    width: '4px',
+    cursor: 'col-resize',
     backgroundColor: tokens.colorNeutralStroke1,
-    transition: "background-color 0.15s ease",
-    "&:hover": {
+    transition: 'background-color 0.15s ease',
+    '&:hover': {
       backgroundColor: tokens.colorBrandBackground,
     },
-    "&:active": {
+    '&:active': {
       backgroundColor: tokens.colorBrandBackgroundPressed,
     },
   },
   panelHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground3,
-    minHeight: "40px",
+    minHeight: '40px',
   },
   panelHeaderLeft: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   panelHeaderActions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
     // Prevent layout shifts on hover by ensuring consistent dimensions
-    "& button": {
-      minWidth: "32px",
-      minHeight: "32px",
+    '& button': {
+      minWidth: '32px',
+      minHeight: '32px',
     },
   },
   editorContainer: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalM,
   },
   documentPreview: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   documentPreviewEmpty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
     gap: tokens.spacingVerticalM,
   },
   chatContainer: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
   chatMessages: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalM,
   },
   chatMessage: {
@@ -189,11 +189,11 @@ const useStyles = makeStyles({
   },
   chatMessageUser: {
     backgroundColor: tokens.colorBrandBackground2,
-    marginLeft: "20%",
+    marginLeft: '20%',
   },
   chatMessageAssistant: {
     backgroundColor: tokens.colorNeutralBackground3,
-    marginRight: "10%",
+    marginRight: '10%',
   },
   chatMessageRole: {
     fontSize: tokens.fontSizeBase200,
@@ -203,8 +203,8 @@ const useStyles = makeStyles({
   },
   chatMessageContent: {
     fontSize: tokens.fontSizeBase300,
-    lineHeight: "1.5",
-    whiteSpace: "pre-wrap" as const,
+    lineHeight: '1.5',
+    whiteSpace: 'pre-wrap' as const,
   },
   chatInputContainer: {
     padding: tokens.spacingHorizontalM,
@@ -212,32 +212,32 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
   chatInputWrapper: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    alignItems: "flex-end",
+    alignItems: 'flex-end',
   },
   chatTextarea: {
     flex: 1,
   },
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalL,
   },
   errorContainer: {
     padding: tokens.spacingHorizontalL,
   },
   statusIndicator: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingHorizontalS,
-    minHeight: "24px",
+    minHeight: '24px',
   },
   savedIndicator: {
     color: tokens.colorStatusSuccessForeground1,
@@ -248,57 +248,57 @@ const useStyles = makeStyles({
   versionFooter: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center" as const,
+    textAlign: 'center' as const,
     padding: tokens.spacingVerticalXS,
     borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground2,
   },
   streamingIndicator: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     padding: tokens.spacingHorizontalS,
     color: tokens.colorBrandForeground1,
-    minHeight: "24px",
+    minHeight: '24px',
   },
   sprkChatWrapper: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
   // Choice Dialog Styles (ADR-023)
   choiceDialogContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   choiceOptionsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
   },
   choiceOptionButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
     gap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalM,
-    width: "100%",
-    textAlign: "left" as const,
-    minHeight: "64px",
+    width: '100%',
+    textAlign: 'left' as const,
+    minHeight: '64px',
   },
   choiceOptionIcon: {
-    fontSize: "24px",
+    fontSize: '24px',
     color: tokens.colorBrandForeground1,
     flexShrink: 0,
   },
   choiceOptionText: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   choiceOptionTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -319,17 +319,12 @@ const useStyles = makeStyles({
  * Check if WebAPI is available (not in design-time/editor mode)
  * Custom Page editor doesn't implement WebAPI methods
  */
-function isWebApiAvailable(
-  webApi: ComponentFramework.WebApi | undefined,
-): boolean {
+function isWebApiAvailable(webApi: ComponentFramework.WebApi | undefined): boolean {
   if (!webApi) return false;
 
   try {
     // Check if methods are real implementations
-    if (
-      typeof webApi.retrieveRecord !== "function" ||
-      typeof webApi.updateRecord !== "function"
-    ) {
+    if (typeof webApi.retrieveRecord !== 'function' || typeof webApi.updateRecord !== 'function') {
       return false;
     }
     return true;
@@ -345,29 +340,26 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
   }
-  if (typeof err === "string") {
+  if (typeof err === 'string') {
     return err;
   }
-  if (err && typeof err === "object") {
+  if (err && typeof err === 'object') {
     // WebAPI error object
     const errObj = err as Record<string, unknown>;
-    if (typeof errObj.message === "string") {
+    if (typeof errObj.message === 'string') {
       return errObj.message;
     }
-    if (
-      typeof errObj.errorCode === "string" ||
-      typeof errObj.errorCode === "number"
-    ) {
-      return `Error ${errObj.errorCode}: ${errObj.message || "Unknown error"}`;
+    if (typeof errObj.errorCode === 'string' || typeof errObj.errorCode === 'number') {
+      return `Error ${errObj.errorCode}: ${errObj.message || 'Unknown error'}`;
     }
     // Try to stringify if all else fails
     try {
       return JSON.stringify(err);
     } catch {
-      return "Unknown error occurred";
+      return 'Unknown error occurred';
     }
   }
-  return "Unknown error occurred";
+  return 'Unknown error occurred';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -394,50 +386,38 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [_analysis, setAnalysis] = React.useState<IAnalysis | null>(null);
-  const [workingDocument, setWorkingDocument] = React.useState("");
+  const [workingDocument, setWorkingDocument] = React.useState('');
   const [chatMessages, setChatMessages] = React.useState<IChatMessage[]>([]);
   const [isDirty, setIsDirty] = React.useState(false);
   const [isChatDirty, setIsChatDirty] = React.useState(false); // Tracks unsaved chat changes
   const [lastSaved, setLastSaved] = React.useState<Date | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [streamingResponse, setStreamingResponse] = React.useState("");
-  const [isConversationPanelVisible, setIsConversationPanelVisible] =
-    React.useState(true);
-  const [isDocumentPanelVisible, setIsDocumentPanelVisible] =
-    React.useState(true);
+  const [streamingResponse, setStreamingResponse] = React.useState('');
+  const [isConversationPanelVisible, setIsConversationPanelVisible] = React.useState(true);
+  const [isDocumentPanelVisible, setIsDocumentPanelVisible] = React.useState(true);
 
   // Session management state
   const [isSessionResumed, setIsSessionResumed] = React.useState(false);
   const [isResumingSession, setIsResumingSession] = React.useState(false);
   const [showResumeDialog, setShowResumeDialog] = React.useState(false);
-  const [pendingChatHistory, setPendingChatHistory] = React.useState<
-    IChatMessage[] | null
-  >(null);
+  const [pendingChatHistory, setPendingChatHistory] = React.useState<IChatMessage[] | null>(null);
 
   // Panel resize state
-  const [leftPanelWidth, setLeftPanelWidth] = React.useState<number | null>(
-    null,
-  );
-  const [centerPanelWidth, setCenterPanelWidth] = React.useState<number | null>(
-    null,
-  );
+  const [leftPanelWidth, setLeftPanelWidth] = React.useState<number | null>(null);
+  const [centerPanelWidth, setCenterPanelWidth] = React.useState<number | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const leftPanelRef = React.useRef<HTMLDivElement>(null);
   const centerPanelRef = React.useRef<HTMLDivElement>(null);
-  const isDraggingRef = React.useRef<"left-center" | "center-right" | null>(
-    null,
-  );
+  const isDraggingRef = React.useRef<'left-center' | 'center-right' | null>(null);
   const dragStartXRef = React.useRef<number>(0);
   const dragStartWidthRef = React.useRef<number>(0);
 
   // Resolved document fields from expanded relationship
   // Note: documentId prop may be empty - we resolve the actual document ID from the Analysis record
-  const [resolvedDocumentId, setResolvedDocumentId] =
-    React.useState(documentId);
-  const [resolvedContainerId, setResolvedContainerId] =
-    React.useState(containerId);
+  const [resolvedDocumentId, setResolvedDocumentId] = React.useState(documentId);
+  const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId);
   const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
-  const [resolvedDocumentName, setResolvedDocumentName] = React.useState("");
+  const [resolvedDocumentName, setResolvedDocumentName] = React.useState('');
 
   // Playbook info (loaded from analysis record)
   const [playbookId, setPlaybookId] = React.useState<string | null>(null);
@@ -449,15 +429,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   const chatMessagesRef = React.useRef<IChatMessage[]>([]);
 
   // SprkChat state (new chat system - used when useLegacyChat=false)
-  const [sprkChatAccessToken, setSprkChatAccessToken] =
-    React.useState<string>("");
-  const [sprkChatSessionId, setSprkChatSessionId] = React.useState<
-    string | undefined
-  >(undefined);
+  const [sprkChatAccessToken, setSprkChatAccessToken] = React.useState<string>('');
+  const [sprkChatSessionId, setSprkChatSessionId] = React.useState<string | undefined>(undefined);
 
   // Initial execution state - tracks if we're running the first AI analysis
   const [isExecuting, setIsExecuting] = React.useState(false);
-  const [executionProgress, setExecutionProgress] = React.useState("");
+  const [executionProgress, setExecutionProgress] = React.useState('');
 
   // Pending execution - stores analysis data when auth wasn't ready at load time
   const [pendingExecution, setPendingExecution] = React.useState<{
@@ -470,12 +447,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     try {
       getAuthProvider(); // Will throw if not initialized
       setIsAuthInitialized(true);
-      logInfo("AnalysisWorkspaceApp", "@spaarke/auth provider available");
+      logInfo('AnalysisWorkspaceApp', '@spaarke/auth provider available');
     } catch {
-      logError(
-        "AnalysisWorkspaceApp",
-        "@spaarke/auth not yet initialized, waiting...",
-      );
+      logError('AnalysisWorkspaceApp', '@spaarke/auth not yet initialized, waiting...');
       // Auth may not be ready yet (async init in index.ts).
       // The parent will re-render with isAuthReady=true once initializeAuth completes.
       // Check props.isAuthReady on re-render.
@@ -497,14 +471,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         const token = await getAccessToken();
         if (isMounted) {
           setSprkChatAccessToken(token);
-          logInfo("AnalysisWorkspaceApp", "SprkChat access token acquired");
+          logInfo('AnalysisWorkspaceApp', 'SprkChat access token acquired');
         }
       } catch (err) {
-        logError(
-          "AnalysisWorkspaceApp",
-          "Failed to acquire SprkChat access token",
-          err,
-        );
+        logError('AnalysisWorkspaceApp', 'Failed to acquire SprkChat access token', err);
       }
     };
     acquireToken();
@@ -517,48 +487,42 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   }, [isAuthInitialized, useLegacyChat, getAccessToken]);
 
   // SprkChat session created handler
-  const handleSprkChatSessionCreated = React.useCallback(
-    (session: IChatSession) => {
-      logInfo(
-        "AnalysisWorkspaceApp",
-        `SprkChat session created: ${session.sessionId}`,
-      );
-      setSprkChatSessionId(session.sessionId);
-    },
-    [],
-  );
+  const handleSprkChatSessionCreated = React.useCallback((session: IChatSession) => {
+    logInfo('AnalysisWorkspaceApp', `SprkChat session created: ${session.sessionId}`);
+    setSprkChatSessionId(session.sessionId);
+  }, []);
 
   // SSE Stream Hook for AI Chat (legacy)
   const [sseState, sseActions] = useSseStream({
     apiBaseUrl,
     analysisId,
     getAccessToken: isAuthInitialized ? getAccessToken : undefined,
-    onToken: (token) => {
-      setStreamingResponse((prev) => prev + token);
+    onToken: token => {
+      setStreamingResponse(prev => prev + token);
     },
-    onComplete: (fullResponse) => {
+    onComplete: fullResponse => {
       // Add assistant message to chat history
       const assistantMessage: IChatMessage = {
         id: `msg-${Date.now()}`,
-        role: "assistant",
+        role: 'assistant',
         content: fullResponse,
         timestamp: new Date().toISOString(),
       };
-      setChatMessages((prev) => [...prev, assistantMessage]);
-      setStreamingResponse("");
+      setChatMessages(prev => [...prev, assistantMessage]);
+      setStreamingResponse('');
       setIsChatDirty(true); // Mark chat as dirty to trigger auto-save
     },
-    onError: (err) => {
-      logError("AnalysisWorkspaceApp", "SSE stream error", err);
+    onError: err => {
+      logError('AnalysisWorkspaceApp', 'SSE stream error', err);
       // Add error message to chat
       const errorMessage: IChatMessage = {
         id: `msg-${Date.now()}`,
-        role: "assistant",
+        role: 'assistant',
         content: `Sorry, I encountered an error: ${err.message}. Please try again.`,
         timestamp: new Date().toISOString(),
       };
-      setChatMessages((prev) => [...prev, errorMessage]);
-      setStreamingResponse("");
+      setChatMessages(prev => [...prev, errorMessage]);
+      setStreamingResponse('');
     },
   });
 
@@ -569,18 +533,16 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   const executeAnalysis = React.useCallback(
     async (analysis: IAnalysis, docId: string): Promise<void> => {
       if (!analysis._sprk_actionid_value) {
-        logError("AnalysisWorkspaceApp", "Cannot execute: no action ID set");
-        setError(
-          "Cannot execute analysis: no action selected. Please edit the analysis and select an action.",
-        );
+        logError('AnalysisWorkspaceApp', 'Cannot execute: no action ID set');
+        setError('Cannot execute analysis: no action selected. Please edit the analysis and select an action.');
         return;
       }
 
       setIsExecuting(true);
-      setExecutionProgress("Starting analysis...");
+      setExecutionProgress('Starting analysis...');
       logInfo(
-        "AnalysisWorkspaceApp",
-        `Executing analysis for document ${docId} with action ${analysis._sprk_actionid_value}`,
+        'AnalysisWorkspaceApp',
+        `Executing analysis for document ${docId} with action ${analysis._sprk_actionid_value}`
       );
 
       try {
@@ -591,14 +553,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
           const token = await provider.getAccessToken();
           authHeaders = { Authorization: `Bearer ${token}` };
         } catch (authErr) {
-          logError(
-            "AnalysisWorkspaceApp",
-            "Failed to acquire auth token for execute",
-            authErr,
-          );
-          throw new Error(
-            "Authentication failed. Please refresh and try again.",
-          );
+          logError('AnalysisWorkspaceApp', 'Failed to acquire auth token for execute', authErr);
+          throw new Error('Authentication failed. Please refresh and try again.');
         }
 
         // Build request body matching AnalysisExecuteRequest
@@ -614,56 +570,48 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         // Add playbook ID if present (scopes will be resolved from playbook N:N relationships)
         if (playbookId) {
           requestBody.playbookId = playbookId;
-          logInfo(
-            "AnalysisWorkspaceApp",
-            `Including playbook ${playbookId} in execute request`,
-          );
+          logInfo('AnalysisWorkspaceApp', `Including playbook ${playbookId} in execute request`);
         }
 
-        logInfo("AnalysisWorkspaceApp", "Execute request body", requestBody);
+        logInfo('AnalysisWorkspaceApp', 'Execute request body', requestBody);
 
         // Normalize apiBaseUrl - remove trailing /api if present
-        const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+        const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, '');
 
         // Make fetch request to execute endpoint with SSE
-        const response = await fetch(
-          `${normalizedBaseUrl}/api/ai/analysis/execute`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "text/event-stream",
-              ...authHeaders,
-            },
-            body: JSON.stringify(requestBody),
+        const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/execute`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            ...authHeaders,
           },
-        );
+          body: JSON.stringify(requestBody),
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(
-            `HTTP ${response.status}: ${errorText || response.statusText}`,
-          );
+          throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
         }
 
         // Get reader for streaming
         const reader = response.body?.getReader();
         if (!reader) {
-          throw new Error("Response body is not readable");
+          throw new Error('Response body is not readable');
         }
 
         const decoder = new TextDecoder();
-        let accumulatedText = "";
-        let buffer = "";
+        let accumulatedText = '';
+        let buffer = '';
 
-        setExecutionProgress("Analyzing document...");
+        setExecutionProgress('Analyzing document...');
 
         // Read stream
         while (true) {
           const { done, value } = await reader.read();
 
           if (done) {
-            logInfo("AnalysisWorkspaceApp", "Execute stream completed");
+            logInfo('AnalysisWorkspaceApp', 'Execute stream completed');
             break;
           }
 
@@ -671,48 +619,41 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
           buffer += decoder.decode(value, { stream: true });
 
           // Process SSE events
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
           for (const line of lines) {
-            if (line.startsWith("data: ")) {
+            if (line.startsWith('data: ')) {
               const data = line.slice(6).trim();
-              if (data === "[DONE]") continue;
+              if (data === '[DONE]') continue;
 
               try {
                 const parsed = JSON.parse(data);
 
-                if (parsed.type === "metadata") {
-                  setExecutionProgress(
-                    `Analyzing: ${parsed.documentName || "document"}...`,
-                  );
+                if (parsed.type === 'metadata') {
+                  setExecutionProgress(`Analyzing: ${parsed.documentName || 'document'}...`);
                 }
 
-                if (parsed.type === "chunk" && parsed.content) {
+                if (parsed.type === 'chunk' && parsed.content) {
                   accumulatedText += parsed.content;
                   // Convert markdown to HTML for RichTextEditor display
                   const htmlContent = markdownToHtml(accumulatedText);
                   setWorkingDocument(htmlContent);
                 }
 
-                if (parsed.type === "error" || parsed.error) {
-                  throw new Error(
-                    parsed.error || "Unknown error during analysis",
-                  );
+                if (parsed.type === 'error' || parsed.error) {
+                  throw new Error(parsed.error || 'Unknown error during analysis');
                 }
 
-                if (parsed.type === "done") {
-                  logInfo("AnalysisWorkspaceApp", "Execute completed", parsed);
+                if (parsed.type === 'done') {
+                  logInfo('AnalysisWorkspaceApp', 'Execute completed', parsed);
                 }
               } catch (parseError) {
-                if (
-                  parseError instanceof Error &&
-                  !parseError.message.includes("Unexpected token")
-                ) {
+                if (parseError instanceof Error && !parseError.message.includes('Unexpected token')) {
                   throw parseError;
                 }
                 // Non-JSON data, treat as content
-                if (data && data !== "[DONE]") {
+                if (data && data !== '[DONE]') {
                   accumulatedText += data;
                   // Convert markdown to HTML for RichTextEditor display
                   const htmlContent = markdownToHtml(accumulatedText);
@@ -725,13 +666,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
         // Save the working document to Dataverse (as HTML for RichTextEditor compatibility)
         if (accumulatedText && isWebApiAvailable(webApi)) {
-          logInfo(
-            "AnalysisWorkspaceApp",
-            "Saving executed analysis to Dataverse",
-          );
+          logInfo('AnalysisWorkspaceApp', 'Saving executed analysis to Dataverse');
           // Convert final markdown to HTML before saving
           const finalHtml = markdownToHtml(accumulatedText);
-          await webApi.updateRecord("sprk_analysis", analysisId, {
+          await webApi.updateRecord('sprk_analysis', analysisId, {
             sprk_workingdocument: finalHtml,
             statuscode: 100000001, // In Progress
           });
@@ -739,21 +677,18 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
           setLastSaved(new Date());
         }
 
-        setExecutionProgress("");
-        logInfo(
-          "AnalysisWorkspaceApp",
-          `Analysis execution completed: ${accumulatedText.length} chars`,
-        );
+        setExecutionProgress('');
+        logInfo('AnalysisWorkspaceApp', `Analysis execution completed: ${accumulatedText.length} chars`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        logError("AnalysisWorkspaceApp", "Analysis execution failed", err);
+        logError('AnalysisWorkspaceApp', 'Analysis execution failed', err);
         setError(`Analysis failed: ${errorMessage}`);
-        setExecutionProgress("");
+        setExecutionProgress('');
       } finally {
         setIsExecuting(false);
       }
     },
-    [apiBaseUrl, analysisId, webApi, playbookId],
+    [apiBaseUrl, analysisId, webApi, playbookId]
   );
 
   // Load analysis data on mount
@@ -764,10 +699,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   // Execute pending analysis when auth becomes available
   React.useEffect(() => {
     if (isAuthInitialized && pendingExecution && !isExecuting) {
-      logInfo(
-        "AnalysisWorkspaceApp",
-        "Auth now initialized, executing pending analysis",
-      );
+      logInfo('AnalysisWorkspaceApp', 'Auth now initialized, executing pending analysis');
       setIsLoading(false);
       executeAnalysis(pendingExecution.analysis, pendingExecution.docId);
       setPendingExecution(null); // Clear pending
@@ -795,10 +727,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     if (!isChatDirty) return;
 
     const timer = setTimeout(() => {
-      logInfo(
-        "AnalysisWorkspaceApp",
-        `Auto-saving chat history (${chatMessages.length} messages)`,
-      );
+      logInfo('AnalysisWorkspaceApp', `Auto-saving chat history (${chatMessages.length} messages)`);
       saveAnalysisState();
     }, 2000); // Save 2 seconds after chat changes
     return () => clearTimeout(timer);
@@ -815,11 +744,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
   // Panel resize handlers - use refs to track initial state to avoid stale closure issues
   const handleResizeMouseDown =
-    (
-      handle: "left-center" | "center-right",
-      panelElement: HTMLElement | null,
-    ) =>
-    (e: React.MouseEvent) => {
+    (handle: 'left-center' | 'center-right', panelElement: HTMLElement | null) => (e: React.MouseEvent) => {
       e.preventDefault();
       if (!panelElement) return;
 
@@ -827,10 +752,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
       dragStartXRef.current = e.clientX;
       dragStartWidthRef.current = panelElement.getBoundingClientRect().width;
 
-      document.addEventListener("mousemove", handleResizeMouseMove);
-      document.addEventListener("mouseup", handleResizeMouseUp);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
+      document.addEventListener('mousemove', handleResizeMouseMove);
+      document.addEventListener('mouseup', handleResizeMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
     };
 
   const handleResizeMouseMove = (e: MouseEvent) => {
@@ -846,17 +771,15 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const MIN_RIGHT = 300;
     const HANDLE_WIDTH = 8; // 2 handles × 4px each
 
-    if (isDraggingRef.current === "left-center") {
+    if (isDraggingRef.current === 'left-center') {
       // Resize left panel - must leave room for center + right + handles
       const maxLeft = containerWidth - MIN_CENTER - MIN_RIGHT - HANDLE_WIDTH;
       const newWidth = Math.max(MIN_LEFT, Math.min(rawWidth, maxLeft));
       setLeftPanelWidth(newWidth);
-    } else if (isDraggingRef.current === "center-right") {
+    } else if (isDraggingRef.current === 'center-right') {
       // Resize center panel - must leave room for right panel + handle
-      const currentLeftWidth =
-        leftPanelRef.current?.getBoundingClientRect().width || MIN_LEFT;
-      const maxCenter =
-        containerWidth - currentLeftWidth - MIN_RIGHT - HANDLE_WIDTH;
+      const currentLeftWidth = leftPanelRef.current?.getBoundingClientRect().width || MIN_LEFT;
+      const maxCenter = containerWidth - currentLeftWidth - MIN_RIGHT - HANDLE_WIDTH;
       const newWidth = Math.max(MIN_CENTER, Math.min(rawWidth, maxCenter));
       setCenterPanelWidth(newWidth);
     }
@@ -864,17 +787,17 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
   const handleResizeMouseUp = () => {
     isDraggingRef.current = null;
-    document.removeEventListener("mousemove", handleResizeMouseMove);
-    document.removeEventListener("mouseup", handleResizeMouseUp);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    document.removeEventListener('mousemove', handleResizeMouseMove);
+    document.removeEventListener('mouseup', handleResizeMouseUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   };
 
   // Cleanup resize listeners on unmount
   React.useEffect(() => {
     return () => {
-      document.removeEventListener("mousemove", handleResizeMouseMove);
-      document.removeEventListener("mouseup", handleResizeMouseUp);
+      document.removeEventListener('mousemove', handleResizeMouseMove);
+      document.removeEventListener('mouseup', handleResizeMouseUp);
     };
   }, []);
 
@@ -887,22 +810,22 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
       setIsLoading(true);
       setError(null);
 
-      logInfo("AnalysisWorkspaceApp", `Loading analysis: ${analysisId}`);
+      logInfo('AnalysisWorkspaceApp', `Loading analysis: ${analysisId}`);
 
       if (!analysisId) {
         // New record - show helpful message instead of error
-        logInfo("AnalysisWorkspaceApp", "New record - no analysis ID yet");
+        logInfo('AnalysisWorkspaceApp', 'New record - no analysis ID yet');
         setAnalysis({
-          sprk_analysisid: "",
-          sprk_name: "New Analysis",
+          sprk_analysisid: '',
+          sprk_name: 'New Analysis',
           sprk_documentid: documentId,
           statuscode: 1, // Draft
-          sprk_workingdocument: "",
+          sprk_workingdocument: '',
           createdon: new Date().toISOString(),
           modifiedon: new Date().toISOString(),
         } as IAnalysis);
         setWorkingDocument(
-          "# New Analysis\n\n**Save the record first** to begin your analysis.\n\n1. Fill in the required fields (Name, Document, Action)\n2. Click **Save**\n3. Then click **Execute Analysis** to start",
+          '# New Analysis\n\n**Save the record first** to begin your analysis.\n\n1. Fill in the required fields (Name, Document, Action)\n2. Click **Save**\n3. Then click **Execute Analysis** to start'
         );
         setIsLoading(false);
         return;
@@ -910,56 +833,45 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
       // Check if WebAPI is available (not in design-time/editor mode)
       if (!isWebApiAvailable(webApi)) {
-        logInfo(
-          "AnalysisWorkspaceApp",
-          "Design-time mode - showing placeholder",
-        );
+        logInfo('AnalysisWorkspaceApp', 'Design-time mode - showing placeholder');
         setAnalysis({
-          sprk_analysisid: "design-time-placeholder",
-          sprk_name: "Analysis Preview (Design Mode)",
+          sprk_analysisid: 'design-time-placeholder',
+          sprk_name: 'Analysis Preview (Design Mode)',
           sprk_documentid: documentId,
           statuscode: 1, // Draft (standard statuscode field)
           sprk_workingdocument:
-            "# Design Mode Preview\n\nThis is a preview in the Custom Page editor.\n\nThe actual analysis content will load at runtime.",
+            '# Design Mode Preview\n\nThis is a preview in the Custom Page editor.\n\nThe actual analysis content will load at runtime.',
           createdon: new Date().toISOString(),
           modifiedon: new Date().toISOString(),
         } as IAnalysis);
-        setWorkingDocument(
-          "# Design Mode Preview\n\nThis is a preview in the Custom Page editor.",
-        );
+        setWorkingDocument('# Design Mode Preview\n\nThis is a preview in the Custom Page editor.');
         return;
       }
 
       // Fetch analysis record from Dataverse (include fields needed for execute)
       // Note: Lookup fields use _fieldname_value format in OData responses
       const result = await webApi.retrieveRecord(
-        "sprk_analysis",
+        'sprk_analysis',
         analysisId,
-        "?$select=sprk_name,statuscode,sprk_workingdocument,sprk_chathistory,_sprk_actionid_value,_sprk_playbook_value,createdon,modifiedon,_sprk_documentid_value",
+        '?$select=sprk_name,statuscode,sprk_workingdocument,sprk_chathistory,_sprk_actionid_value,_sprk_playbook_value,createdon,modifiedon,_sprk_documentid_value'
       );
 
-      logInfo("AnalysisWorkspaceApp", "Analysis loaded", result);
+      logInfo('AnalysisWorkspaceApp', 'Analysis loaded', result);
       logInfo(
-        "AnalysisWorkspaceApp",
-        `Chat history field: ${result.sprk_chathistory ? `exists (${result.sprk_chathistory.length} chars)` : "null/undefined"}`,
+        'AnalysisWorkspaceApp',
+        `Chat history field: ${result.sprk_chathistory ? `exists (${result.sprk_chathistory.length} chars)` : 'null/undefined'}`
       );
 
       // Store playbook ID if present (for execute request)
       if (result._sprk_playbook_value) {
         setPlaybookId(result._sprk_playbook_value);
-        logInfo(
-          "AnalysisWorkspaceApp",
-          `Playbook loaded: ${result._sprk_playbook_value}`,
-        );
+        logInfo('AnalysisWorkspaceApp', `Playbook loaded: ${result._sprk_playbook_value}`);
       }
 
       setAnalysis(result as unknown as IAnalysis);
       // Load working document - convert markdown to HTML if needed for RichTextEditor
-      const savedContent = result.sprk_workingdocument || "";
-      const displayContent =
-        savedContent && isMarkdown(savedContent)
-          ? markdownToHtml(savedContent)
-          : savedContent;
+      const savedContent = result.sprk_workingdocument || '';
+      const displayContent = savedContent && isMarkdown(savedContent) ? markdownToHtml(savedContent) : savedContent;
       setWorkingDocument(displayContent);
 
       // Fetch document details separately if we have a document ID
@@ -973,9 +885,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
           // Document entity field names: sprk_containerid, sprk_graphitemid/sprk_driveitemid
           // sprk_filename is used for display name (not sprk_name)
           const docResult = await webApi.retrieveRecord(
-            "sprk_document",
+            'sprk_document',
             docId,
-            "?$select=sprk_documentname,sprk_graphdriveid,sprk_graphitemid",
+            '?$select=sprk_documentname,sprk_graphdriveid,sprk_graphitemid'
           );
           if (docResult.sprk_graphdriveid) {
             setResolvedContainerId(docResult.sprk_graphdriveid);
@@ -987,15 +899,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             setResolvedDocumentName(docResult.sprk_documentname);
           }
           logInfo(
-            "AnalysisWorkspaceApp",
-            `Document fields resolved: docId=${docId}, container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`,
+            'AnalysisWorkspaceApp',
+            `Document fields resolved: docId=${docId}, container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`
           );
         } catch (docErr) {
-          logError(
-            "AnalysisWorkspaceApp",
-            "Failed to load document details",
-            docErr,
-          );
+          logError('AnalysisWorkspaceApp', 'Failed to load document details', docErr);
         }
 
         // Parse chat history FIRST - if exists, show choice dialog (ADR-023)
@@ -1010,30 +918,20 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
               setPendingChatHistory(parsed);
               setShowResumeDialog(true);
               hasChatHistory = true;
-              logInfo(
-                "AnalysisWorkspaceApp",
-                `Found ${parsed.length} chat messages, showing resume dialog`,
-              );
+              logInfo('AnalysisWorkspaceApp', `Found ${parsed.length} chat messages, showing resume dialog`);
             } else {
               logInfo(
-                "AnalysisWorkspaceApp",
-                `Chat history parsed but empty or not array: ${JSON.stringify(parsed)}, enabling chat`,
+                'AnalysisWorkspaceApp',
+                `Chat history parsed but empty or not array: ${JSON.stringify(parsed)}, enabling chat`
               );
               setIsSessionResumed(true);
             }
           } catch (e) {
-            logError(
-              "AnalysisWorkspaceApp",
-              "Failed to parse chat history, enabling chat anyway",
-              e,
-            );
+            logError('AnalysisWorkspaceApp', 'Failed to parse chat history, enabling chat anyway', e);
             setIsSessionResumed(true);
           }
         } else {
-          logInfo(
-            "AnalysisWorkspaceApp",
-            "No chat history in analysis record, auto-resuming session",
-          );
+          logInfo('AnalysisWorkspaceApp', 'No chat history in analysis record, auto-resuming session');
           // No previous chat history - auto-resume session so chat is immediately usable
           setIsSessionResumed(true);
         }
@@ -1048,22 +946,20 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         // - AnalysisWorkspace should auto-execute when opened
         if (!hasChatHistory) {
           const isDraft = result.statuscode === 1; // Analysis record statuscode: 1 = Draft
-          const hasEmptyWorkingDoc =
-            !result.sprk_workingdocument ||
-            result.sprk_workingdocument.trim() === "";
+          const hasEmptyWorkingDoc = !result.sprk_workingdocument || result.sprk_workingdocument.trim() === '';
           // Note: Lookup fields use _fieldname_value format in OData responses
           const actionId = result._sprk_actionid_value;
           const hasAction = !!actionId;
 
           logInfo(
-            "AnalysisWorkspaceApp",
-            `Execute check: statuscode=${result.statuscode} (isDraft=${isDraft}), hasEmptyWorkingDoc=${hasEmptyWorkingDoc}, actionId=${actionId} (hasAction=${hasAction})`,
+            'AnalysisWorkspaceApp',
+            `Execute check: statuscode=${result.statuscode} (isDraft=${isDraft}), hasEmptyWorkingDoc=${hasEmptyWorkingDoc}, actionId=${actionId} (hasAction=${hasAction})`
           );
 
           if (isDraft && hasEmptyWorkingDoc && hasAction) {
             logInfo(
-              "AnalysisWorkspaceApp",
-              `Draft analysis with empty working document - auth ready: ${isAuthInitialized}`,
+              'AnalysisWorkspaceApp',
+              `Draft analysis with empty working document - auth ready: ${isAuthInitialized}`
             );
 
             if (isAuthInitialized) {
@@ -1073,10 +969,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
               return;
             } else {
               // Auth not ready, store for later execution
-              logInfo(
-                "AnalysisWorkspaceApp",
-                "Auth not initialized yet, storing pending execution",
-              );
+              logInfo('AnalysisWorkspaceApp', 'Auth not initialized yet, storing pending execution');
               setPendingExecution({
                 analysis: result as unknown as IAnalysis,
                 docId,
@@ -1090,24 +983,21 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     } catch (err) {
       // Handle "not implemented" errors from design-time environment
       const errorMessage = getErrorMessage(err);
-      if (errorMessage.toLowerCase().includes("not implemented")) {
-        logInfo("AnalysisWorkspaceApp", "Design-time mode detected via error");
+      if (errorMessage.toLowerCase().includes('not implemented')) {
+        logInfo('AnalysisWorkspaceApp', 'Design-time mode detected via error');
         setAnalysis({
-          sprk_analysisid: "design-time-placeholder",
-          sprk_name: "Analysis Preview (Design Mode)",
+          sprk_analysisid: 'design-time-placeholder',
+          sprk_name: 'Analysis Preview (Design Mode)',
           sprk_documentid: documentId,
           statuscode: 1, // Draft (standard statuscode field)
-          sprk_workingdocument:
-            "# Design Mode Preview\n\nThis is a preview in the Custom Page editor.",
+          sprk_workingdocument: '# Design Mode Preview\n\nThis is a preview in the Custom Page editor.',
           createdon: new Date().toISOString(),
           modifiedon: new Date().toISOString(),
         } as IAnalysis);
-        setWorkingDocument(
-          "# Design Mode Preview\n\nThis is a preview in the Custom Page editor.",
-        );
+        setWorkingDocument('# Design Mode Preview\n\nThis is a preview in the Custom Page editor.');
         return;
       }
-      logError("AnalysisWorkspaceApp", "Failed to load analysis", err);
+      logError('AnalysisWorkspaceApp', 'Failed to load analysis', err);
       setError(`Failed to load analysis: ${errorMessage}`);
     } finally {
       setIsLoading(false);
@@ -1120,10 +1010,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
    */
   const resumeSession = async (includeChatHistory: boolean) => {
     if (!analysisId || !resolvedDocumentId) {
-      logInfo(
-        "AnalysisWorkspaceApp",
-        "Cannot resume - missing analysisId or documentId",
-      );
+      logInfo('AnalysisWorkspaceApp', 'Cannot resume - missing analysisId or documentId');
       setIsSessionResumed(true); // Allow chat anyway for new records
       return;
     }
@@ -1132,8 +1019,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // React state closures can become stale during async operations
     const historyToLoad = includeChatHistory ? pendingChatHistory : null;
     logInfo(
-      "AnalysisWorkspaceApp",
-      `Resume session: includeChatHistory=${includeChatHistory}, historyToLoad has ${historyToLoad?.length ?? 0} messages`,
+      'AnalysisWorkspaceApp',
+      `Resume session: includeChatHistory=${includeChatHistory}, historyToLoad has ${historyToLoad?.length ?? 0} messages`
     );
 
     setIsResumingSession(true);
@@ -1142,45 +1029,38 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     try {
       // Build request headers with authentication
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json",
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
       };
 
       if (getAccessToken) {
         try {
           const accessToken = await getAccessToken();
-          headers["Authorization"] = `Bearer ${accessToken}`;
+          headers['Authorization'] = `Bearer ${accessToken}`;
         } catch (tokenError) {
-          logError(
-            "AnalysisWorkspaceApp",
-            "Failed to acquire access token for resume",
-            tokenError,
-          );
-          throw new Error("Authentication failed");
+          logError('AnalysisWorkspaceApp', 'Failed to acquire access token for resume', tokenError);
+          throw new Error('Authentication failed');
         }
       }
 
       // Build request body
       const requestBody = {
         documentId: resolvedDocumentId,
-        documentName: resolvedDocumentName || "Unknown",
+        documentName: resolvedDocumentName || 'Unknown',
         workingDocument: workingDocument,
         chatHistory: historyToLoad,
         includeChatHistory,
       };
 
       // Call the resume endpoint
-      const baseUrl = apiBaseUrl.replace(/\/+$/, "");
-      const apiPath = baseUrl.endsWith("/api") ? "" : "/api";
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+      const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
       const url = `${baseUrl}${apiPath}/ai/analysis/${analysisId}/resume`;
 
-      logInfo(
-        "AnalysisWorkspaceApp",
-        `Calling resume API: ${url}, includeChatHistory=${includeChatHistory}`,
-      );
+      logInfo('AnalysisWorkspaceApp', `Calling resume API: ${url}, includeChatHistory=${includeChatHistory}`);
 
       const response = await fetch(url, {
-        method: "POST",
+        method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
       });
@@ -1191,38 +1071,26 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
       }
 
       const result = await response.json();
-      logInfo(
-        "AnalysisWorkspaceApp",
-        `Session resumed: ${result.chatMessagesRestored} messages restored`,
-      );
+      logInfo('AnalysisWorkspaceApp', `Session resumed: ${result.chatMessagesRestored} messages restored`);
 
       // Load chat history into UI if resuming with history
       if (historyToLoad && historyToLoad.length > 0) {
-        logInfo(
-          "AnalysisWorkspaceApp",
-          `Loading ${historyToLoad.length} chat messages into UI`,
-        );
+        logInfo('AnalysisWorkspaceApp', `Loading ${historyToLoad.length} chat messages into UI`);
         setChatMessages(historyToLoad);
       } else {
         // Starting fresh - clear chat messages
-        logInfo(
-          "AnalysisWorkspaceApp",
-          "Starting fresh - clearing chat messages",
-        );
+        logInfo('AnalysisWorkspaceApp', 'Starting fresh - clearing chat messages');
         setChatMessages([]);
       }
 
       setIsSessionResumed(true);
       setPendingChatHistory(null);
     } catch (err) {
-      logError("AnalysisWorkspaceApp", "Failed to resume session", err);
+      logError('AnalysisWorkspaceApp', 'Failed to resume session', err);
       // Still allow chat even if resume fails - the error will show on first message
       // Also load chat history into UI if user wanted to resume with history
       if (historyToLoad && historyToLoad.length > 0) {
-        logInfo(
-          "AnalysisWorkspaceApp",
-          `Loading ${historyToLoad.length} chat messages despite API error`,
-        );
+        logInfo('AnalysisWorkspaceApp', `Loading ${historyToLoad.length} chat messages despite API error`);
         setChatMessages(historyToLoad);
       }
       setIsSessionResumed(true);
@@ -1259,7 +1127,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
     // Skip save in design-time mode
     if (!isWebApiAvailable(webApi)) {
-      logInfo("AnalysisWorkspaceApp", "Design-time mode - save skipped");
+      logInfo('AnalysisWorkspaceApp', 'Design-time mode - save skipped');
       setIsDirty(false);
       setIsChatDirty(false);
       setLastSaved(new Date());
@@ -1268,12 +1136,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
     try {
       setIsSaving(true);
-      logInfo(
-        "AnalysisWorkspaceApp",
-        "Saving analysis state (working document + chat history)",
-      );
+      logInfo('AnalysisWorkspaceApp', 'Saving analysis state (working document + chat history)');
 
-      await webApi.updateRecord("sprk_analysis", analysisId, {
+      await webApi.updateRecord('sprk_analysis', analysisId, {
         sprk_workingdocument: workingDocument,
         sprk_chathistory: JSON.stringify(chatMessagesRef.current),
       });
@@ -1281,17 +1146,17 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
       setIsDirty(false);
       setIsChatDirty(false);
       setLastSaved(new Date());
-      logInfo("AnalysisWorkspaceApp", "Analysis state saved");
+      logInfo('AnalysisWorkspaceApp', 'Analysis state saved');
     } catch (err) {
       // Handle "not implemented" errors from design-time environment
       const errorMessage = err instanceof Error ? err.message : String(err);
-      if (errorMessage.toLowerCase().includes("not implemented")) {
-        logInfo("AnalysisWorkspaceApp", "Design-time mode - save skipped");
+      if (errorMessage.toLowerCase().includes('not implemented')) {
+        logInfo('AnalysisWorkspaceApp', 'Design-time mode - save skipped');
         setIsDirty(false);
         setIsChatDirty(false);
         return;
       }
-      logError("AnalysisWorkspaceApp", "Failed to save analysis state", err);
+      logError('AnalysisWorkspaceApp', 'Failed to save analysis state', err);
     } finally {
       setIsSaving(false);
     }
@@ -1319,11 +1184,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
     const docId = resolvedDocumentId;
     if (!docId) {
-      setError("Cannot re-execute: no document associated with this analysis.");
+      setError('Cannot re-execute: no document associated with this analysis.');
       return;
     }
 
-    logInfo("AnalysisWorkspaceApp", "User triggered re-execution of analysis");
+    logInfo('AnalysisWorkspaceApp', 'User triggered re-execution of analysis');
     await executeAnalysis(_analysis, docId);
   };
 
@@ -1338,22 +1203,22 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   const getStatusString = (status: number): string => {
     switch (status) {
       case 1:
-        return "Draft";
+        return 'Draft';
       case 100000001:
-        return "In Progress";
+        return 'In Progress';
       case 100000002:
-        return "In Review";
+        return 'In Review';
       case 2:
-        return "Closed";
+        return 'Closed';
       case 100000003:
-        return "Completed";
+        return 'Completed';
       default:
-        return "Unknown";
+        return 'Unknown';
     }
   };
 
   const formatLastSaved = (): string => {
-    if (!lastSaved) return "";
+    if (!lastSaved) return '';
     return `Last saved: ${lastSaved.toLocaleTimeString()}`;
   };
 
@@ -1361,27 +1226,27 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   // Chat Handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  const [chatInput, setChatInput] = React.useState("");
+  const [chatInput, setChatInput] = React.useState('');
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || sseState.isStreaming) return;
 
     const userMessage: IChatMessage = {
       id: `msg-${Date.now()}`,
-      role: "user",
+      role: 'user',
       content: chatInput.trim(),
       timestamp: new Date().toISOString(),
     };
 
-    setChatMessages((prev) => [...prev, userMessage]);
+    setChatMessages(prev => [...prev, userMessage]);
     const messageText = chatInput.trim();
-    setChatInput("");
+    setChatInput('');
     setIsChatDirty(true); // Mark chat as dirty to trigger auto-save
 
-    logInfo("AnalysisWorkspaceApp", "Chat message sent", userMessage);
+    logInfo('AnalysisWorkspaceApp', 'Chat message sent', userMessage);
 
     // Build chat history for context
-    const history = chatMessages.map((msg) => ({
+    const history = chatMessages.map(msg => ({
       role: msg.role,
       content: msg.content,
     }));
@@ -1391,7 +1256,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   };
 
   const handleChatKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -1433,9 +1298,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         <div
           ref={leftPanelRef}
           className={styles.leftPanel}
-          style={
-            leftPanelWidth ? { flex: `0 0 ${leftPanelWidth}px` } : undefined
-          }
+          style={leftPanelWidth ? { flex: `0 0 ${leftPanelWidth}px` } : undefined}
         >
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderLeft}>
@@ -1443,13 +1306,13 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
               {isExecuting ? (
                 <span className={styles.streamingIndicator}>
                   <Spinner size="tiny" />
-                  <Text size={200}>{executionProgress || "Analyzing..."}</Text>
+                  <Text size={200}>{executionProgress || 'Analyzing...'}</Text>
                 </span>
               ) : (
                 <span
                   className={`${styles.statusIndicator} ${isDirty ? styles.unsavedIndicator : styles.savedIndicator}`}
                 >
-                  {isDirty ? "• Unsaved" : formatLastSaved()}
+                  {isDirty ? '• Unsaved' : formatLastSaved()}
                 </span>
               )}
             </div>
@@ -1489,24 +1352,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 aria-label="Download"
               />
               <Button
-                icon={
-                  isDocumentPanelVisible ? (
-                    <ChevronRight20Regular />
-                  ) : (
-                    <ChevronLeft20Regular />
-                  )
-                }
+                icon={isDocumentPanelVisible ? <ChevronRight20Regular /> : <ChevronLeft20Regular />}
                 appearance="subtle"
                 size="small"
-                onClick={() =>
-                  setIsDocumentPanelVisible(!isDocumentPanelVisible)
-                }
-                title={
-                  isDocumentPanelVisible ? "Hide document" : "Show document"
-                }
-                aria-label={
-                  isDocumentPanelVisible ? "Hide document" : "Show document"
-                }
+                onClick={() => setIsDocumentPanelVisible(!isDocumentPanelVisible)}
+                title={isDocumentPanelVisible ? 'Hide document' : 'Show document'}
+                aria-label={isDocumentPanelVisible ? 'Hide document' : 'Show document'}
               />
             </div>
           </div>
@@ -1525,55 +1376,30 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         {isDocumentPanelVisible && (
           <div
             className={styles.resizeHandle}
-            onMouseDown={handleResizeMouseDown(
-              "left-center",
-              leftPanelRef.current,
-            )}
+            onMouseDown={handleResizeMouseDown('left-center', leftPanelRef.current)}
           />
         )}
 
         {/* CENTER PANEL - Original Document Preview (collapsible) */}
         <div
           ref={centerPanelRef}
-          className={`${styles.centerPanel} ${!isDocumentPanelVisible ? styles.centerPanelCollapsed : ""}`}
-          style={
-            centerPanelWidth && isDocumentPanelVisible
-              ? { flex: `0 0 ${centerPanelWidth}px` }
-              : undefined
-          }
+          className={`${styles.centerPanel} ${!isDocumentPanelVisible ? styles.centerPanelCollapsed : ''}`}
+          style={centerPanelWidth && isDocumentPanelVisible ? { flex: `0 0 ${centerPanelWidth}px` } : undefined}
         >
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderLeft}>
               <Text weight="semibold">
-                {resolvedDocumentName
-                  ? resolvedDocumentName.toUpperCase()
-                  : "ORIGINAL DOCUMENT"}
+                {resolvedDocumentName ? resolvedDocumentName.toUpperCase() : 'ORIGINAL DOCUMENT'}
               </Text>
             </div>
             <div className={styles.panelHeaderActions}>
               <Button
-                icon={
-                  isConversationPanelVisible ? (
-                    <ChevronDoubleRight20Regular />
-                  ) : (
-                    <ChevronDoubleLeft20Regular />
-                  )
-                }
+                icon={isConversationPanelVisible ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}
                 appearance="subtle"
                 size="small"
-                onClick={() =>
-                  setIsConversationPanelVisible(!isConversationPanelVisible)
-                }
-                title={
-                  isConversationPanelVisible
-                    ? "Hide conversation"
-                    : "Show conversation"
-                }
-                aria-label={
-                  isConversationPanelVisible
-                    ? "Hide conversation"
-                    : "Show conversation"
-                }
+                onClick={() => setIsConversationPanelVisible(!isConversationPanelVisible)}
+                title={isConversationPanelVisible ? 'Hide conversation' : 'Show conversation'}
+                aria-label={isConversationPanelVisible ? 'Hide conversation' : 'Show conversation'}
               />
             </div>
           </div>
@@ -1592,17 +1418,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         {isConversationPanelVisible && isDocumentPanelVisible && (
           <div
             className={styles.resizeHandle}
-            onMouseDown={handleResizeMouseDown(
-              "center-right",
-              centerPanelRef.current,
-            )}
+            onMouseDown={handleResizeMouseDown('center-right', centerPanelRef.current)}
           />
         )}
 
         {/* RIGHT PANEL - Conversation / AI Chat (collapsible) */}
-        <div
-          className={`${styles.rightPanel} ${!isConversationPanelVisible ? styles.rightPanelCollapsed : ""}`}
-        >
+        <div className={`${styles.rightPanel} ${!isConversationPanelVisible ? styles.rightPanelCollapsed : ''}`}>
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderLeft}>
               <Text weight="semibold">CONVERSATION</Text>
@@ -1620,45 +1441,35 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 {chatMessages.length === 0 ? (
                   <div
                     style={{
-                      textAlign: "center",
-                      padding: "24px",
+                      textAlign: 'center',
+                      padding: '24px',
                       color: tokens.colorNeutralForeground3,
                     }}
                   >
-                    <ChatRegular
-                      style={{ fontSize: "32px", marginBottom: "12px" }}
-                    />
+                    <ChatRegular style={{ fontSize: '32px', marginBottom: '12px' }} />
                     <Text block size={300}>
                       Start a conversation
                     </Text>
-                    <Text block size={200} style={{ marginTop: "8px" }}>
+                    <Text block size={200} style={{ marginTop: '8px' }}>
                       Ask questions or request changes to refine your analysis
                     </Text>
                   </div>
                 ) : (
-                  chatMessages.map((msg) => (
+                  chatMessages.map(msg => (
                     <div
                       key={msg.id}
                       className={`${styles.chatMessage} ${
-                        msg.role === "user"
-                          ? styles.chatMessageUser
-                          : styles.chatMessageAssistant
+                        msg.role === 'user' ? styles.chatMessageUser : styles.chatMessageAssistant
                       }`}
                     >
-                      <div className={styles.chatMessageRole}>
-                        {msg.role === "user" ? "You" : "AI Assistant"}
-                      </div>
-                      <div className={styles.chatMessageContent}>
-                        {msg.content}
-                      </div>
+                      <div className={styles.chatMessageRole}>{msg.role === 'user' ? 'You' : 'AI Assistant'}</div>
+                      <div className={styles.chatMessageContent}>{msg.content}</div>
                     </div>
                   ))
                 )}
                 {/* Streaming response - show in real-time */}
                 {sseState.isStreaming && (
-                  <div
-                    className={`${styles.chatMessage} ${styles.chatMessageAssistant}`}
-                  >
+                  <div className={`${styles.chatMessage} ${styles.chatMessageAssistant}`}>
                     <div className={styles.chatMessageRole}>AI Assistant</div>
                     <div className={styles.chatMessageContent}>
                       {streamingResponse || (
@@ -1675,11 +1486,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 {isResumingSession ? (
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      padding: "12px",
-                      justifyContent: "center",
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '12px',
+                      justifyContent: 'center',
                     }}
                   >
                     <Spinner size="tiny" />
@@ -1688,8 +1499,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 ) : !isSessionResumed && showResumeDialog ? (
                   <div
                     style={{
-                      padding: "12px",
-                      textAlign: "center",
+                      padding: '12px',
+                      textAlign: 'center',
                       color: tokens.colorNeutralForeground3,
                     }}
                   >
@@ -1699,11 +1510,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                   <div className={styles.chatInputWrapper}>
                     <Textarea
                       className={styles.chatTextarea}
-                      placeholder={
-                        isSessionResumed
-                          ? "Type a message..."
-                          : "Waiting for session..."
-                      }
+                      placeholder={isSessionResumed ? 'Type a message...' : 'Waiting for session...'}
                       value={chatInput}
                       onChange={(_e, data) => setChatInput(data.value)}
                       onKeyDown={handleChatKeyDown}
@@ -1715,11 +1522,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                       icon={<Send24Regular />}
                       appearance="primary"
                       onClick={handleSendMessage}
-                      disabled={
-                        !chatInput.trim() ||
-                        sseState.isStreaming ||
-                        !isSessionResumed
-                      }
+                      disabled={!chatInput.trim() || sseState.isStreaming || !isSessionResumed}
                     />
                   </div>
                 )}
@@ -1731,10 +1534,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
               <SprkChat
                 sessionId={sprkChatSessionId}
                 documentId={resolvedDocumentId}
-                playbookId={playbookId || ""}
-                apiBaseUrl={apiBaseUrl
-                  .replace(/\/+$/, "")
-                  .replace(/\/api\/?$/, "")}
+                playbookId={playbookId || ''}
+                apiBaseUrl={apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '')}
                 accessToken={sprkChatAccessToken}
                 onSessionCreated={handleSprkChatSessionCreated}
               />

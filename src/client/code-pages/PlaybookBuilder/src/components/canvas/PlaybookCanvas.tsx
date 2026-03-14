@@ -14,27 +14,19 @@
  * ADR-021: All colors use Fluent design tokens (dark mode support).
  */
 
-import React, { useCallback, useRef, type DragEvent } from "react";
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  useReactFlow,
-  BackgroundVariant,
-  type Node,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import { useCanvasStore } from "../../stores/canvasStore";
-import { useThemeDetection } from "../../hooks/useThemeDetection";
-import { nodeTypes } from "../nodes";
-import { edgeTypes } from "../edges";
-import type { PlaybookNodeType, PlaybookNodeData } from "../../types/canvas";
+import React, { useCallback, useRef, type DragEvent } from 'react';
+import { ReactFlow, Background, Controls, MiniMap, useReactFlow, BackgroundVariant, type Node } from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { useCanvasStore } from '../../stores/canvasStore';
+import { useThemeDetection } from '../../hooks/useThemeDetection';
+import { nodeTypes } from '../nodes';
+import { edgeTypes } from '../edges';
+import type { PlaybookNodeType, PlaybookNodeData } from '../../types/canvas';
 
 const useStyles = makeStyles({
   container: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
@@ -56,20 +48,20 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
   const { screenToFlowPosition } = useReactFlow();
 
   // Get state and actions from store
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
-  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
-  const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
-  const onConnect = useCanvasStore((s) => s.onConnect);
-  const selectNode = useCanvasStore((s) => s.selectNode);
-  const onDrop = useCanvasStore((s) => s.onDrop);
+  const nodes = useCanvasStore(s => s.nodes);
+  const edges = useCanvasStore(s => s.edges);
+  const onNodesChange = useCanvasStore(s => s.onNodesChange);
+  const onEdgesChange = useCanvasStore(s => s.onEdgesChange);
+  const onConnect = useCanvasStore(s => s.onConnect);
+  const selectNode = useCanvasStore(s => s.selectNode);
+  const onDrop = useCanvasStore(s => s.onDrop);
 
   // Handle node selection
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       selectNode(node.id);
     },
-    [selectNode],
+    [selectNode]
   );
 
   // Handle click on canvas background (deselect)
@@ -80,7 +72,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
   // Handle drag over for drop target
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
+    event.dataTransfer.dropEffect = 'move';
   }, []);
 
   // Handle drop from node palette
@@ -89,7 +81,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
       event.preventDefault();
 
       // Get node data from drag event
-      const nodeTypeData = event.dataTransfer.getData("application/reactflow");
+      const nodeTypeData = event.dataTransfer.getData('application/reactflow');
       if (!nodeTypeData) return;
 
       try {
@@ -106,16 +98,16 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
 
         onDrop(position, type, label);
       } catch (e) {
-        console.error("Failed to parse dropped node data:", e);
+        console.error('Failed to parse dropped node data:', e);
       }
     },
-    [onDrop, screenToFlowPosition],
+    [onDrop, screenToFlowPosition]
   );
 
   return (
     <div ref={reactFlowWrapper} className={styles.container}>
       <ReactFlow
-        colorMode={isDark ? "dark" : "light"}
+        colorMode={isDark ? 'dark' : 'light'}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -131,7 +123,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
         snapToGrid
         snapGrid={[16, 16]}
         defaultEdgeOptions={{
-          type: "smoothstep",
+          type: 'smoothstep',
           animated: true,
         }}
         deleteKeyCode="Delete"
@@ -140,30 +132,25 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
         maxZoom={2}
         attributionPosition="bottom-left"
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={16}
-          size={1}
-          color={tokens.colorNeutralStroke2}
-        />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color={tokens.colorNeutralStroke2} />
         <Controls showZoom showFitView showInteractive />
         <MiniMap
           nodeColor={(node: Node<PlaybookNodeData>) => {
             switch (node.data?.type) {
-              case "start":
+              case 'start':
                 return tokens.colorNeutralBackground5;
-              case "aiAnalysis":
-              case "aiCompletion":
+              case 'aiAnalysis':
+              case 'aiCompletion':
                 return tokens.colorBrandBackground;
-              case "condition":
+              case 'condition':
                 return tokens.colorPaletteYellowBackground3;
-              case "deliverOutput":
-              case "deliverToIndex":
+              case 'deliverOutput':
+              case 'deliverToIndex':
                 return tokens.colorPaletteGreenBackground3;
-              case "createTask":
-              case "sendEmail":
+              case 'createTask':
+              case 'sendEmail':
                 return tokens.colorPaletteBerryBackground2;
-              case "wait":
+              case 'wait':
                 return tokens.colorPaletteMagentaBackground2;
               default:
                 return tokens.colorNeutralBackground3;
@@ -191,7 +178,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
  * <PlaybookCanvas />
  * ```
  */
-export { ReactFlowProvider } from "@xyflow/react";
+export { ReactFlowProvider } from '@xyflow/react';
 
 export const PlaybookCanvas = React.memo(function PlaybookCanvas() {
   // Note: ReactFlowProvider must be provided by the parent layout component.

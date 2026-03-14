@@ -4,8 +4,8 @@
  * Each format function converts a numeric value to a display string.
  */
 
-import type { ValueFormatType } from "../types";
-import { gradeValueToLetter } from "./gradeUtils";
+import type { ValueFormatType } from '../types';
+import { gradeValueToLetter } from './gradeUtils';
 
 /**
  * Format a short number with K/M suffixes (e.g., 1000 → "1K", 1500000 → "1.5M")
@@ -46,7 +46,7 @@ export function formatDecimal(value: number): string {
  */
 export function formatCurrency(value: number): string {
   const abs = Math.abs(value);
-  const formatted = abs.toLocaleString("en-US", {
+  const formatted = abs.toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
@@ -74,24 +74,24 @@ export function formatSignedPercentage(value: number): string {
 export function formatValue(
   value: number | null | undefined,
   format: ValueFormatType,
-  nullDisplay: string = "—",
+  nullDisplay = '—'
 ): string {
   if (value === null || value === undefined) return nullDisplay;
 
   switch (format) {
-    case "letterGrade":
+    case 'letterGrade':
       return gradeValueToLetter(value);
-    case "percentage":
+    case 'percentage':
       return formatPercentage(value);
-    case "wholeNumber":
+    case 'wholeNumber':
       return formatWholeNumber(value);
-    case "decimal":
+    case 'decimal':
       return formatDecimal(value);
-    case "currency":
+    case 'currency':
       return formatCurrency(value);
-    case "signedPercentage":
+    case 'signedPercentage':
       return formatSignedPercentage(value);
-    case "shortNumber":
+    case 'shortNumber':
     default:
       return formatShortNumber(value);
   }

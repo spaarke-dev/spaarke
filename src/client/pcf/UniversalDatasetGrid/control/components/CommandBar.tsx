@@ -4,22 +4,16 @@
  * Pure React component - no wrapper class needed with single React root
  */
 
-import * as React from "react";
-import {
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
-  Tooltip,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { Toolbar, ToolbarButton, ToolbarDivider, Tooltip, tokens } from '@fluentui/react-components';
 import {
   Add24Regular,
   Delete24Regular,
   ArrowUpload24Regular,
   ArrowDownload24Regular,
   ArrowClockwise24Regular,
-} from "@fluentui/react-icons";
-import { GridConfiguration } from "../types";
+} from '@fluentui/react-icons';
+import { GridConfiguration } from '../types';
 
 /**
  * Props for CommandBar.
@@ -54,7 +48,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   onCommandExecute,
   onRefresh,
 }) => {
-  console.log("[CommandBar] Component rendering", {
+  console.log('[CommandBar] Component rendering', {
     selectedRecordIds,
     selectedRecordCount: selectedRecordIds.length,
     selectedRecordsCount: selectedRecords.length,
@@ -65,12 +59,11 @@ export const CommandBar: React.FC<CommandBarProps> = ({
 
   // Get hasFile status from the selected record
   const hasFileValue = selectedRecord?.getValue(config.fieldMappings.hasFile);
-  const hasFile =
-    hasFileValue === true || hasFileValue === 1 || hasFileValue === "1";
+  const hasFile = hasFileValue === true || hasFileValue === 1 || hasFileValue === '1';
 
   // Debug logging
   if (selectedRecord) {
-    console.log("[CommandBar] Selected record debug:", {
+    console.log('[CommandBar] Selected record debug:', {
       recordId: selectedRecord.getRecordId(),
       hasFileFieldName: config.fieldMappings.hasFile,
       hasFileRawValue: hasFileValue,
@@ -82,11 +75,11 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     <div>
       <div
         style={{
-          backgroundColor: "red",
-          color: "white",
-          padding: "10px",
-          fontSize: "20px",
-          fontWeight: "bold",
+          backgroundColor: 'red',
+          color: 'white',
+          padding: '10px',
+          fontSize: '20px',
+          fontWeight: 'bold',
         }}
       >
         🔴 VERSION 2.1.4 - BFF API SCOPE FIXED 🔴
@@ -99,15 +92,12 @@ export const CommandBar: React.FC<CommandBarProps> = ({
         }}
       >
         {/* Add File Button */}
-        <Tooltip
-          content="Upload a file to the selected document"
-          relationship="label"
-        >
+        <Tooltip content="Upload a file to the selected document" relationship="label">
           <ToolbarButton
             appearance="primary"
             icon={<Add24Regular />}
             disabled={false}
-            onClick={() => onCommandExecute("addFile")}
+            onClick={() => onCommandExecute('addFile')}
           >
             Add File
           </ToolbarButton>
@@ -116,28 +106,18 @@ export const CommandBar: React.FC<CommandBarProps> = ({
         <ToolbarDivider />
 
         {/* Remove File Button */}
-        <Tooltip
-          content="Delete the file from the selected document"
-          relationship="label"
-        >
-          <ToolbarButton
-            icon={<Delete24Regular />}
-            disabled={false}
-            onClick={() => onCommandExecute("removeFile")}
-          >
+        <Tooltip content="Delete the file from the selected document" relationship="label">
+          <ToolbarButton icon={<Delete24Regular />} disabled={false} onClick={() => onCommandExecute('removeFile')}>
             Remove File
           </ToolbarButton>
         </Tooltip>
 
         {/* Update File Button */}
-        <Tooltip
-          content="Replace the file in the selected document"
-          relationship="label"
-        >
+        <Tooltip content="Replace the file in the selected document" relationship="label">
           <ToolbarButton
             icon={<ArrowUpload24Regular />}
             disabled={false}
-            onClick={() => onCommandExecute("updateFile")}
+            onClick={() => onCommandExecute('updateFile')}
           >
             Update File
           </ToolbarButton>
@@ -148,7 +128,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           <ToolbarButton
             icon={<ArrowDownload24Regular />}
             disabled={false}
-            onClick={() => onCommandExecute("downloadFile")}
+            onClick={() => onCommandExecute('downloadFile')}
           >
             Download
           </ToolbarButton>
@@ -164,18 +144,16 @@ export const CommandBar: React.FC<CommandBarProps> = ({
         </Tooltip>
 
         {/* Selection Counter - Always rendered to prevent layout shift */}
-        <ToolbarDivider
-          style={{ visibility: selectedCount > 0 ? "visible" : "hidden" }}
-        />
+        <ToolbarDivider style={{ visibility: selectedCount > 0 ? 'visible' : 'hidden' }} />
         <div
           style={{
             padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
             color: tokens.colorNeutralForeground2,
-            visibility: selectedCount > 0 ? "visible" : "hidden",
-            minWidth: "100px", // Reserve space to prevent horizontal shift
+            visibility: selectedCount > 0 ? 'visible' : 'hidden',
+            minWidth: '100px', // Reserve space to prevent horizontal shift
           }}
         >
-          {selectedCount > 0 ? `${selectedCount} selected` : "\u00A0"}
+          {selectedCount > 0 ? `${selectedCount} selected` : '\u00A0'}
         </div>
       </Toolbar>
     </div>

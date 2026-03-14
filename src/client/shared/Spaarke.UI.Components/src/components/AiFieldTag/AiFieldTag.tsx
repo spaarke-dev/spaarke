@@ -13,14 +13,9 @@
  * via Fluent v9 semantic tokens — zero hardcoded colors.
  */
 
-import * as React from "react";
-import {
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { SparkleRegular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { SparkleRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -33,22 +28,22 @@ const useStyles = makeStyles({
    * mode because Fluent token resolution handles the mapping automatically.
    */
   tag: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
-    paddingTop: "1px",
-    paddingBottom: "1px",
+    paddingTop: '1px',
+    paddingBottom: '1px',
     paddingLeft: tokens.spacingHorizontalXS,
     paddingRight: tokens.spacingHorizontalXS,
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground2,
     // Keep it vertically centred with adjacent label text
-    verticalAlign: "middle",
+    verticalAlign: 'middle',
     // Slightly bump up from baseline so it sits next to label text cleanly
     marginLeft: tokens.spacingHorizontalXS,
     // Prevent wrapping of icon + label inside the pill
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
     lineHeight: 1,
     // Ensure crisp rendering of the small icon
     flexShrink: 0,
@@ -56,16 +51,16 @@ const useStyles = makeStyles({
 
   icon: {
     // 12px feels right alongside caption-sized text without overpowering the label
-    fontSize: "12px",
-    display: "flex",
-    alignItems: "center",
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
   },
 
   label: {
     // caption / very small text so the tag doesn't dominate the field label
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
-    lineHeight: "1",
+    lineHeight: '1',
   },
 });
 

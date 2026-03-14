@@ -11,7 +11,7 @@ export enum LogLevel {
 }
 
 class Logger {
-  private prefix = "[UniversalDatasetGrid]";
+  private prefix = '[UniversalDatasetGrid]';
   private logLevel: LogLevel = LogLevel.INFO;
 
   /**
@@ -51,12 +51,7 @@ class Logger {
   /**
    * Log error message
    */
-  public error(
-    component: string,
-    message: string,
-    error?: Error | unknown,
-    ...args: unknown[]
-  ): void {
+  public error(component: string, message: string, error?: Error | unknown, ...args: unknown[]): void {
     if (this.logLevel <= LogLevel.ERROR) {
       console.error(`${this.prefix}[${component}] ${message}`, error, ...args);
     }

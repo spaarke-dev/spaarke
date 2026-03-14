@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom" />
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom';
 
 // Mock ResizeObserver for components that use it
 class ResizeObserverMock {
@@ -11,9 +11,9 @@ class ResizeObserverMock {
 global.ResizeObserver = ResizeObserverMock;
 
 // Mock matchMedia for theme detection
-Object.defineProperty(window, "matchMedia", {
+Object.defineProperty(window, 'matchMedia', {
   writable: true,
-  value: jest.fn().mockImplementation((query) => ({
+  value: jest.fn().mockImplementation(query => ({
     matches: false,
     media: query,
     onchange: null,
@@ -26,13 +26,13 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 // Mock SVG text methods for @fluentui/react-charting
-if (typeof SVGElement !== "undefined") {
-  Object.defineProperty(SVGElement.prototype, "getComputedTextLength", {
+if (typeof SVGElement !== 'undefined') {
+  Object.defineProperty(SVGElement.prototype, 'getComputedTextLength', {
     writable: true,
     value: jest.fn().mockReturnValue(100),
   });
 
-  Object.defineProperty(SVGElement.prototype, "getBBox", {
+  Object.defineProperty(SVGElement.prototype, 'getBBox', {
     writable: true,
     value: jest.fn().mockReturnValue({
       x: 0,
@@ -42,12 +42,12 @@ if (typeof SVGElement !== "undefined") {
     }),
   });
 
-  Object.defineProperty(SVGElement.prototype, "getTotalLength", {
+  Object.defineProperty(SVGElement.prototype, 'getTotalLength', {
     writable: true,
     value: jest.fn().mockReturnValue(100),
   });
 
-  Object.defineProperty(SVGElement.prototype, "getPointAtLength", {
+  Object.defineProperty(SVGElement.prototype, 'getPointAtLength', {
     writable: true,
     value: jest.fn().mockReturnValue({ x: 0, y: 0 }),
   });

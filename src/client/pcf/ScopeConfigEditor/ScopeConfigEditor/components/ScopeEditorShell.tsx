@@ -8,15 +8,8 @@
  * ADR-022: React 16 APIs. No createRoot.
  */
 
-import * as React from "react";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Theme,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { FluentProvider, webLightTheme, webDarkTheme, Theme, makeStyles, tokens } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -34,10 +27,10 @@ export interface IScopeEditorShellProps {
 
 const useStyles = makeStyles({
   shell: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    minHeight: "120px",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    minHeight: '120px',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     fontFamily: tokens.fontFamilyBase,
@@ -52,18 +45,12 @@ const useStyles = makeStyles({
 function detectDarkMode(): boolean {
   try {
     const href = window.location.href;
-    if (
-      href.includes("themeOption%3Ddarkmode") ||
-      href.includes("themeOption=darkmode")
-    ) {
+    if (href.includes('themeOption%3Ddarkmode') || href.includes('themeOption=darkmode')) {
       return true;
     }
     try {
       const parentHref = window.parent?.location?.href;
-      if (
-        parentHref?.includes("themeOption%3Ddarkmode") ||
-        parentHref?.includes("themeOption=darkmode")
-      ) {
+      if (parentHref?.includes('themeOption%3Ddarkmode') || parentHref?.includes('themeOption=darkmode')) {
         return true;
       }
     } catch {
@@ -82,17 +69,12 @@ function detectDarkMode(): boolean {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ShellContent: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+const ShellContent: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const styles = useStyles();
   return <div className={styles.shell}>{children}</div>;
 };
 
-export const ScopeEditorShell: React.FC<IScopeEditorShellProps> = ({
-  isDark,
-  children,
-}) => {
+export const ScopeEditorShell: React.FC<IScopeEditorShellProps> = ({ isDark, children }) => {
   const [theme, setTheme] = React.useState<Theme>(() => {
     const dark = isDark !== undefined ? isDark : detectDarkMode();
     return dark ? webDarkTheme : webLightTheme;
@@ -109,14 +91,14 @@ export const ScopeEditorShell: React.FC<IScopeEditorShellProps> = ({
   React.useEffect(() => {
     if (isDark !== undefined) return;
 
-    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (typeof window === 'undefined' || !window.matchMedia) return;
 
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = (e: MediaQueryListEvent) => {
       setTheme(e.matches ? webDarkTheme : webLightTheme);
     };
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, [isDark]);
 
   return (

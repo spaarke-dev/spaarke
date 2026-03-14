@@ -36,7 +36,7 @@ export type {
   IContentMetadata,
   ContentFormat,
   HostFeature,
-} from "./IHostAdapter";
+} from './IHostAdapter';
 
 // Types
 export type {
@@ -55,8 +55,8 @@ export type {
   ItemMetadata,
   EmailMetadata,
   DocumentMetadata,
-} from "./types";
+} from './types';
 
 // Factory
-export { HostAdapterFactory, isHostAdapterError } from "./HostAdapterFactory";
-export { default as hostAdapterFactory } from "./HostAdapterFactory";
+export { HostAdapterFactory, isHostAdapterError } from './HostAdapterFactory';
+export { default as hostAdapterFactory } from './HostAdapterFactory';

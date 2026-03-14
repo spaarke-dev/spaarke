@@ -16,7 +16,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -32,11 +32,8 @@ import {
   Badge,
   Tooltip,
   SearchBox,
-} from "@fluentui/react-components";
-import type {
-  SearchBoxChangeEvent,
-  InputOnChangeData,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
+import type { SearchBoxChangeEvent, InputOnChangeData } from '@fluentui/react-components';
 import {
   Filter20Regular,
   FilterDismiss20Regular,
@@ -44,9 +41,9 @@ import {
   ArrowSync20Regular,
   Search20Regular,
   Dismiss20Regular,
-} from "@fluentui/react-icons";
-import { DocumentGraph } from "./components/DocumentGraph";
-import { RelationshipGrid, type GridRow } from "./components/RelationshipGrid";
+} from '@fluentui/react-icons';
+import { DocumentGraph } from './components/DocumentGraph';
+import { RelationshipGrid, type GridRow } from './components/RelationshipGrid';
 // Network and Timeline views available but not in toolbar yet:
 // import { RelationshipNetwork } from "./components/RelationshipNetwork";
 // import { RelationshipTimeline } from "./components/RelationshipTimeline";
@@ -56,27 +53,18 @@ import {
   DOCUMENT_TYPES,
   RELATIONSHIP_TYPES,
   type FilterSettings,
-} from "./components/ControlPanel";
+} from './components/ControlPanel';
 // NodeActionBar removed — node click now opens FilePreviewDialog
-import {
-  useVisualizationApi,
-  formatVisualizationError,
-} from "./hooks/useVisualizationApi";
-import { initializeAuth, getToken } from "./services/authInit";
-import { exportToCsv } from "./services/CsvExportService";
-import { authenticatedFetch } from "./services/authInit";
-import { FilePreviewDialog } from "./components/FilePreviewDialog";
-import type { DocumentNode } from "./types/graph";
+import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
+import { initializeAuth, getToken } from './services/authInit';
+import { exportToCsv } from './services/CsvExportService';
+import { authenticatedFetch } from './services/authInit';
+import { FilePreviewDialog } from './components/FilePreviewDialog';
+import type { DocumentNode } from './types/graph';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
 const TableViewIcon: React.FC = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 20 20"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
       d="M3 4.5C3 3.67 3.67 3 4.5 3h11c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-11C3.67 17 3 16.33 3 15.5v-11zM4.5 4a.5.5 0 00-.5.5V7h12V4.5a.5.5 0 00-.5-.5h-11zM16 8H4v3h12V8zm0 4H4v3.5a.5.5 0 00.5.5h11a.5.5 0 00.5-.5V12z"
       fill="currentColor"
@@ -87,46 +75,19 @@ const TableViewIcon: React.FC = () => (
 
 /** Inline SVG icon: graph/network view (matches Fluent 20px icon style) */
 const GraphViewIcon: React.FC = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 20 20"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
     <circle cx="10" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.2" />
     <circle cx="5" cy="14" r="2.5" stroke="currentColor" strokeWidth="1.2" />
     <circle cx="15" cy="14" r="2.5" stroke="currentColor" strokeWidth="1.2" />
-    <line
-      x1="10"
-      y1="7.5"
-      x2="6.5"
-      y2="11.5"
-      stroke="currentColor"
-      strokeWidth="1.2"
-    />
-    <line
-      x1="10"
-      y1="7.5"
-      x2="13.5"
-      y2="11.5"
-      stroke="currentColor"
-      strokeWidth="1.2"
-    />
-    <line
-      x1="7.5"
-      y1="14"
-      x2="12.5"
-      y2="14"
-      stroke="currentColor"
-      strokeWidth="1.2"
-    />
+    <line x1="10" y1="7.5" x2="6.5" y2="11.5" stroke="currentColor" strokeWidth="1.2" />
+    <line x1="10" y1="7.5" x2="13.5" y2="11.5" stroke="currentColor" strokeWidth="1.2" />
+    <line x1="7.5" y1="14" x2="12.5" y2="14" stroke="currentColor" strokeWidth="1.2" />
   </svg>
 );
 
-const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
-type ViewMode = "graph" | "grid" | "network" | "timeline";
+type ViewMode = 'graph' | 'grid' | 'network' | 'timeline';
 
 interface AppProps {
   params: URLSearchParams;
@@ -135,19 +96,19 @@ interface AppProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100vh",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100vh',
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
-    padding: "10px",
-    boxSizing: "border-box",
+    overflow: 'hidden',
+    padding: '10px',
+    boxSizing: 'border-box',
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    height: "47px",
+    display: 'flex',
+    alignItems: 'center',
+    height: '47px',
     padding: `0 ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
@@ -155,29 +116,29 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   main: {
-    display: "flex",
-    flex: "1 1 0",
+    display: 'flex',
+    flex: '1 1 0',
     minHeight: 0,
-    overflow: "hidden",
-    position: "relative",
+    overflow: 'hidden',
+    position: 'relative',
   },
   filterPanel: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalM,
     right: tokens.spacingHorizontalM,
     zIndex: 50,
-    maxHeight: "calc(100% - 32px)",
-    overflowY: "auto",
+    maxHeight: 'calc(100% - 32px)',
+    overflowY: 'auto',
   },
   content: {
-    flex: "1 1 0",
-    overflow: "hidden",
-    position: "relative",
+    flex: '1 1 0',
+    overflow: 'hidden',
+    position: 'relative',
     minHeight: 0,
   },
   footer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalM}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -189,11 +150,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   centerState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalXXL,
   },
@@ -201,11 +162,11 @@ const useStyles = makeStyles({
     margin: tokens.spacingVerticalM,
   },
   viewToggle: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
   viewButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   activeViewButton: {
     backgroundColor: tokens.colorBrandBackground2,
@@ -215,12 +176,12 @@ const useStyles = makeStyles({
     flex: 1,
   },
   searchContainer: {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
   },
   searchBox: {
-    width: "400px",
+    width: '400px',
   },
 });
 
@@ -228,9 +189,9 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
   const styles = useStyles();
 
   // Parse URL params
-  const documentId = params.get("documentId") ?? "";
-  const tenantId = params.get("tenantId") ?? "";
-  const apiBaseUrl = params.get("apiBaseUrl") ?? DEFAULT_API_BASE_URL;
+  const documentId = params.get('documentId') ?? '';
+  const tenantId = params.get('tenantId') ?? '';
+  const apiBaseUrl = params.get('apiBaseUrl') ?? DEFAULT_API_BASE_URL;
 
   // Auth state
   const [accessToken, setAccessToken] = useState<string | undefined>(undefined);
@@ -238,30 +199,24 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
   const [isAuthInitializing, setIsAuthInitializing] = useState(true);
 
   // UI state
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [showFilterPanel, setShowFilterPanel] = useState(true);
-  const [filters, setFilters] = useState<FilterSettings>(
-    DEFAULT_FILTER_SETTINGS,
-  );
+  const [filters, setFilters] = useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
   const [selectedNode, setSelectedNode] = useState<DocumentNode | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const filteredRowsRef = useRef<GridRow[]>([]);
 
   // File preview dialog state
-  const [previewDocumentId, setPreviewDocumentId] = useState<string | null>(
-    null,
-  );
-  const [previewDocumentName, setPreviewDocumentName] = useState<string>("");
+  const [previewDocumentId, setPreviewDocumentId] = useState<string | null>(null);
+  const [previewDocumentName, setPreviewDocumentName] = useState<string>('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewInWorkspace, setPreviewInWorkspace] = useState(false);
 
   // Preview URL cache with TTL — avoids re-fetching on repeated preview of same document.
   // SPE preview URLs expire after ~15 min; we use 10 min TTL to avoid stale URLs.
   // Max 50 entries (LRU eviction by insertion order).
-  const previewUrlCacheRef = useRef<Map<string, { url: string; ts: number }>>(
-    new Map(),
-  );
+  const previewUrlCacheRef = useRef<Map<string, { url: string; ts: number }>>(new Map());
   const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   const CACHE_MAX_SIZE = 50;
 
@@ -271,15 +226,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
 
     initializeAuth()
       .then(() => getToken())
-      .then((token) => {
+      .then(token => {
         if (!cancelled) setAccessToken(token);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          console.error("[App] Auth failed:", err);
-          setAuthError(
-            err instanceof Error ? err.message : "Authentication failed",
-          );
+          console.error('[App] Auth failed:', err);
+          setAuthError(err instanceof Error ? err.message : 'Authentication failed');
         }
       })
       .finally(() => {
@@ -296,42 +249,36 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
   // apply a filter — the AI Search index uses business type names (Contract, Invoice)
   // not file extensions (pdf, docx), so sending all extensions would match nothing.
   const effectiveDocumentTypes =
-    filters.documentTypes.length < DOCUMENT_TYPES.length
-      ? filters.documentTypes
-      : undefined;
+    filters.documentTypes.length < DOCUMENT_TYPES.length ? filters.documentTypes : undefined;
 
   // Fetch visualization data
-  const { nodes, edges, metadata, isLoading, error, refetch } =
-    useVisualizationApi({
-      apiBaseUrl,
-      documentId,
-      tenantId,
-      accessToken,
-      threshold: filters.similarityThreshold,
-      limit: filters.maxNodesPerLevel,
-      depth: filters.depthLimit,
-      documentTypes: effectiveDocumentTypes,
-      enabled: !isAuthInitializing && !!documentId && !!tenantId,
-    });
+  const { nodes, edges, metadata, isLoading, error, refetch } = useVisualizationApi({
+    apiBaseUrl,
+    documentId,
+    tenantId,
+    accessToken,
+    threshold: filters.similarityThreshold,
+    limit: filters.maxNodesPerLevel,
+    depth: filters.depthLimit,
+    documentTypes: effectiveDocumentTypes,
+    enabled: !isAuthInitializing && !!documentId && !!tenantId,
+  });
 
   const handleNodeSelect = useCallback((node: DocumentNode) => {
     setSelectedNode(node);
     // Open FilePreviewDialog for the selected node
     if (node.data.documentId) {
       setPreviewDocumentId(node.data.documentId);
-      setPreviewDocumentName(node.data.name ?? "Document");
+      setPreviewDocumentName(node.data.name ?? 'Document');
       setIsPreviewOpen(true);
     }
   }, []);
 
-  const handleRowClick = useCallback(
-    (documentId: string, documentName: string) => {
-      setPreviewDocumentId(documentId);
-      setPreviewDocumentName(documentName);
-      setIsPreviewOpen(true);
-    },
-    [],
-  );
+  const handleRowClick = useCallback((documentId: string, documentName: string) => {
+    setPreviewDocumentId(documentId);
+    setPreviewDocumentName(documentName);
+    setIsPreviewOpen(true);
+  }, []);
 
   const handlePreviewClose = useCallback(() => {
     setIsPreviewOpen(false);
@@ -366,9 +313,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
       if (!docId || getCachedUrl(docId)) return;
       void (async () => {
         try {
-          const res = await authenticatedFetch(
-            `${apiBaseUrl}/api/documents/${docId}/preview-url`,
-          );
+          const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${docId}/preview-url`);
           if (!res.ok) return;
           const data = await res.json();
           const url = data.previewUrl ?? data.url;
@@ -378,7 +323,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         }
       })();
     },
-    [apiBaseUrl, getCachedUrl, setCachedUrl],
+    [apiBaseUrl, getCachedUrl, setCachedUrl]
   );
 
   // FilePreviewDialog callbacks — checks cache first
@@ -388,36 +333,31 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const cached = getCachedUrl(previewDocumentId);
     if (cached) return cached;
     try {
-      const res = await authenticatedFetch(
-        `${apiBaseUrl}/api/documents/${previewDocumentId}/preview-url`,
-      );
+      const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${previewDocumentId}/preview-url`);
       if (!res.ok) return null;
       const data = await res.json();
       const url = data.previewUrl ?? data.url ?? null;
       if (url) setCachedUrl(previewDocumentId, url);
       return url;
     } catch {
-      console.error(
-        "[FilePreview] Failed to get preview URL:",
-        previewDocumentId,
-      );
+      console.error('[FilePreview] Failed to get preview URL:', previewDocumentId);
       return null;
     }
   }, [previewDocumentId, apiBaseUrl, getCachedUrl, setCachedUrl]);
 
   const handleOpenFile = useCallback(
-    (mode: "desktop" | "web") => {
+    (mode: 'desktop' | 'web') => {
       if (!previewDocumentId) return;
       void (async () => {
         try {
           const res = await authenticatedFetch(
-            `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/open-links`,
+            `${apiBaseUrl}/api/documents/${encodeURIComponent(previewDocumentId)}/open-links`
           );
           if (!res.ok) return;
           const links = await res.json();
           // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
           if (links.desktopUrl) {
-            window.open(links.desktopUrl, "_self");
+            window.open(links.desktopUrl, '_self');
             return;
           }
           // No desktop protocol — download via BFF /content endpoint and let OS open
@@ -429,9 +369,9 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
             if (response.ok) {
               const blob = await response.blob();
               const objectUrl = URL.createObjectURL(blob);
-              const a = document.createElement("a");
+              const a = document.createElement('a');
               a.href = objectUrl;
-              a.download = links.fileName ?? previewDocumentName ?? "document";
+              a.download = links.fileName ?? previewDocumentName ?? 'document';
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -439,21 +379,18 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
               return;
             }
           } catch (err) {
-            console.error("[FilePreview] Download failed, falling back:", err);
+            console.error('[FilePreview] Download failed, falling back:', err);
           }
           // Final fallback to webUrl
           if (links.webUrl) {
-            window.open(links.webUrl, "_blank", "noopener,noreferrer");
+            window.open(links.webUrl, '_blank', 'noopener,noreferrer');
           }
         } catch {
-          console.error(
-            "[FilePreview] Failed to get open links:",
-            previewDocumentId,
-          );
+          console.error('[FilePreview] Failed to get open links:', previewDocumentId);
         }
       })();
     },
-    [previewDocumentId, previewDocumentName, apiBaseUrl],
+    [previewDocumentId, previewDocumentName, apiBaseUrl]
   );
 
   const handleOpenRecord = useCallback(() => {
@@ -462,38 +399,31 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     const xrm = (window as any).Xrm;
     if (xrm?.Navigation?.openForm) {
       xrm.Navigation.openForm({
-        entityName: "sprk_document",
+        entityName: 'sprk_document',
         entityId: previewDocumentId,
       });
     } else {
-      const clientUrl =
-        xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ??
-        window.location.origin;
-      window.open(
-        `${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`,
-        "_blank",
-      );
+      const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+      window.open(`${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`, '_blank');
     }
   }, [previewDocumentId]);
 
   const handleEmailDocument = useCallback(() => {
     // Email not yet implemented in viewer context — stub
-    console.log("[FilePreview] Email not implemented for viewer context");
+    console.log('[FilePreview] Email not implemented for viewer context');
   }, []);
 
   const handleCopyLink = useCallback(() => {
     if (!previewDocumentId) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrm = (window as any).Xrm;
-    const clientUrl =
-      xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ??
-      window.location.origin;
+    const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
     const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`;
     void navigator.clipboard.writeText(url);
   }, [previewDocumentId]);
 
   const handleToggleWorkspace = useCallback(() => {
-    setPreviewInWorkspace((prev) => !prev);
+    setPreviewInWorkspace(prev => !prev);
   }, []);
 
   const handleFilterChange = useCallback((newFilters: FilterSettings) => {
@@ -501,20 +431,17 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     setSelectedNode(null);
   }, []);
 
-  const handleSearchChange = useCallback(
-    (_ev: SearchBoxChangeEvent, data: InputOnChangeData) => {
-      setSearchQuery(data.value);
-    },
-    [],
-  );
+  const handleSearchChange = useCallback((_ev: SearchBoxChangeEvent, data: InputOnChangeData) => {
+    setSearchQuery(data.value);
+  }, []);
 
   const handleFilteredRowsChange = useCallback((rows: GridRow[]) => {
     filteredRowsRef.current = rows;
   }, []);
 
   const handleExport = useCallback(() => {
-    const sourceNode = nodes.find((n) => n.data.isSource);
-    const sourceName = sourceNode?.data.name ?? "document";
+    const sourceNode = nodes.find(n => n.data.isSource);
+    const sourceName = sourceNode?.data.name ?? 'document';
     exportToCsv(filteredRowsRef.current, sourceName);
   }, [nodes]);
 
@@ -528,31 +455,31 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
   // Map document type checkbox keys to file extensions they cover
   const docTypeExtensions = React.useMemo(() => {
     const map: Record<string, string[]> = {
-      pdf: ["pdf"],
-      docx: ["docx", "doc", "rtf"],
-      xlsx: ["xlsx", "xls", "csv"],
-      pptx: ["pptx", "ppt"],
-      txt: ["txt"],
+      pdf: ['pdf'],
+      docx: ['docx', 'doc', 'rtf'],
+      xlsx: ['xlsx', 'xls', 'csv'],
+      pptx: ['pptx', 'ppt'],
+      txt: ['txt'],
       other: [
-        "msg",
-        "eml",
-        "html",
-        "htm",
-        "xml",
-        "json",
-        "zip",
-        "rar",
-        "7z",
-        "jpg",
-        "jpeg",
-        "png",
-        "gif",
-        "svg",
-        "mp4",
-        "avi",
-        "mov",
-        "unknown",
-        "file",
+        'msg',
+        'eml',
+        'html',
+        'htm',
+        'xml',
+        'json',
+        'zip',
+        'rar',
+        '7z',
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'svg',
+        'mp4',
+        'avi',
+        'mov',
+        'unknown',
+        'file',
       ],
     };
     const allowed = new Set<string>();
@@ -562,16 +489,14 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
     return allowed;
   }, [filters.documentTypes]);
 
-  const allDocTypesSelected =
-    filters.documentTypes.length >= DOCUMENT_TYPES.length;
-  const allRelTypesSelected =
-    filters.relationshipTypes.length >= RELATIONSHIP_TYPES.length;
+  const allDocTypesSelected = filters.documentTypes.length >= DOCUMENT_TYPES.length;
+  const allRelTypesSelected = filters.relationshipTypes.length >= RELATIONSHIP_TYPES.length;
 
   // Step 1: Filter edges by relationship type
   const typeFilteredEdges = React.useMemo(() => {
     if (allRelTypesSelected) return edges;
     const allowedRels = new Set<string>(filters.relationshipTypes);
-    return edges.filter((e) => {
+    return edges.filter(e => {
       const relType = e.data?.relationshipType;
       return relType ? allowedRels.has(relType) : true;
     });
@@ -585,47 +510,35 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
       connectedIds.add(e.source);
       connectedIds.add(e.target);
     }
-    return nodes.filter((n) => {
+    return nodes.filter(n => {
       // Always keep source node
       if (n.data.isSource) return true;
       // Filter by document type (file extension)
       if (!allDocTypesSelected) {
-        const ft = (n.data.fileType ?? "unknown").toLowerCase();
+        const ft = (n.data.fileType ?? 'unknown').toLowerCase();
         if (!docTypeExtensions.has(ft)) return false;
       }
       // If relationship types are filtered, only keep nodes still connected
       if (!allRelTypesSelected && !connectedIds.has(n.id)) return false;
       return true;
     });
-  }, [
-    nodes,
-    typeFilteredEdges,
-    allDocTypesSelected,
-    allRelTypesSelected,
-    docTypeExtensions,
-  ]);
+  }, [nodes, typeFilteredEdges, allDocTypesSelected, allRelTypesSelected, docTypeExtensions]);
 
   // Step 3: Apply search query filter on top
   const filteredGraphNodes = React.useMemo(() => {
     const base = typeFilteredNodes;
-    if (!searchQuery || searchQuery.trim() === "") return base;
+    if (!searchQuery || searchQuery.trim() === '') return base;
     const query = searchQuery.toLowerCase();
-    return base.filter(
-      (n) => n.data.isSource || n.data.name.toLowerCase().includes(query),
-    );
+    return base.filter(n => n.data.isSource || n.data.name.toLowerCase().includes(query));
   }, [typeFilteredNodes, searchQuery]);
 
   const filteredGraphEdges = React.useMemo(() => {
     const base = typeFilteredEdges;
-    const visibleIds = new Set(filteredGraphNodes.map((n) => n.id));
-    return base.filter(
-      (e) => visibleIds.has(e.source) && visibleIds.has(e.target),
-    );
+    const visibleIds = new Set(filteredGraphNodes.map(n => n.id));
+    return base.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target));
   }, [typeFilteredEdges, filteredGraphNodes]);
 
-  const relatedCount = filteredGraphNodes.filter(
-    (n) => !n.data.isSource,
-  ).length;
+  const relatedCount = filteredGraphNodes.filter(n => !n.data.isSource).length;
   const edgeCount = filteredGraphEdges.length;
 
   // Missing params error
@@ -636,12 +549,9 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
           <Text size={500} weight="semibold">
             Missing Parameters
           </Text>
-          <Text>
-            This page requires documentId and tenantId URL parameters.
-          </Text>
+          <Text>This page requires documentId and tenantId URL parameters.</Text>
           <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-            documentId: {documentId || "(missing)"} • tenantId:{" "}
-            {tenantId || "(missing)"}
+            documentId: {documentId || '(missing)'} • tenantId: {tenantId || '(missing)'}
           </Text>
         </div>
       </div>
@@ -691,16 +601,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
                 icon={<Dismiss20Regular />}
                 onClick={() => {
                   setIsSearchExpanded(false);
-                  setSearchQuery("");
+                  setSearchQuery('');
                 }}
                 aria-label="Close search"
               />
             </>
           ) : (
-            <Tooltip
-              content="Filter the list of documents"
-              relationship="label"
-            >
+            <Tooltip content="Filter the list of documents" relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -711,7 +618,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
             </Tooltip>
           )}
         </div>
-        {viewMode === "grid" && (
+        {viewMode === 'grid' && (
           <Tooltip content="Export the list of documents" relationship="label">
             <Button
               appearance="subtle"
@@ -731,40 +638,32 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         <div className={styles.viewToggle}>
           <Tooltip content="View documents in grid" relationship="label">
             <Button
-              className={`${styles.viewButton} ${viewMode === "grid" ? styles.activeViewButton : ""}`}
-              appearance={viewMode === "grid" ? "primary" : "subtle"}
+              className={`${styles.viewButton} ${viewMode === 'grid' ? styles.activeViewButton : ''}`}
+              appearance={viewMode === 'grid' ? 'primary' : 'subtle'}
               size="small"
               icon={<TableViewIcon />}
-              onClick={() => setViewMode("grid")}
+              onClick={() => setViewMode('grid')}
               aria-label="View documents in grid"
-              aria-pressed={viewMode === "grid"}
+              aria-pressed={viewMode === 'grid'}
             />
           </Tooltip>
-          <Tooltip
-            content="View documents in node graph visual"
-            relationship="label"
-          >
+          <Tooltip content="View documents in node graph visual" relationship="label">
             <Button
-              className={`${styles.viewButton} ${viewMode === "graph" ? styles.activeViewButton : ""}`}
-              appearance={viewMode === "graph" ? "primary" : "subtle"}
+              className={`${styles.viewButton} ${viewMode === 'graph' ? styles.activeViewButton : ''}`}
+              appearance={viewMode === 'graph' ? 'primary' : 'subtle'}
               size="small"
               icon={<GraphViewIcon />}
-              onClick={() => setViewMode("graph")}
+              onClick={() => setViewMode('graph')}
               aria-label="View documents in node graph visual"
-              aria-pressed={viewMode === "graph"}
+              aria-pressed={viewMode === 'graph'}
             />
           </Tooltip>
         </div>
-        <Tooltip
-          content={showFilterPanel ? "Hide settings" : "Show settings"}
-          relationship="label"
-        >
+        <Tooltip content={showFilterPanel ? 'Hide settings' : 'Show settings'} relationship="label">
           <Button
             appearance="subtle"
             size="small"
-            icon={
-              showFilterPanel ? <FilterDismiss20Regular /> : <Filter20Regular />
-            }
+            icon={showFilterPanel ? <FilterDismiss20Regular /> : <Filter20Regular />}
             onClick={() => setShowFilterPanel(!showFilterPanel)}
             aria-label="Toggle settings"
             aria-pressed={showFilterPanel}
@@ -776,9 +675,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
       {(authError ?? (error && !isLoading)) && (
         <MessageBar className={styles.errorBar} intent="error">
           <MessageBarBody>
-            <MessageBarTitle>
-              {authError ? "Authentication Error" : "Load Error"}
-            </MessageBarTitle>
+            <MessageBarTitle>{authError ? 'Authentication Error' : 'Load Error'}</MessageBarTitle>
             {authError ?? formatVisualizationError(error)}
           </MessageBarBody>
         </MessageBar>
@@ -789,11 +686,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
         {/* Filter panel (floating, graph view only in this position) */}
         {showFilterPanel && (
           <div className={styles.filterPanel}>
-            <ControlPanel
-              settings={filters}
-              onSettingsChange={handleFilterChange}
-              viewMode={viewMode}
-            />
+            <ControlPanel settings={filters} onSettingsChange={handleFilterChange} viewMode={viewMode} />
           </div>
         )}
 
@@ -802,7 +695,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
             <div className={styles.centerState}>
               <Spinner size="large" label="Loading document relationships..." />
             </div>
-          ) : viewMode === "graph" ? (
+          ) : viewMode === 'graph' ? (
             <DocumentGraph
               nodes={filteredGraphNodes}
               edges={filteredGraphEdges}
@@ -810,7 +703,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
               onNodeSelect={handleNodeSelect}
               showMinimap
             />
-          ) : viewMode === "grid" ? (
+          ) : viewMode === 'grid' ? (
             <RelationshipGrid
               nodes={filteredGraphNodes}
               isDarkMode={isDarkMode}
@@ -825,17 +718,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
 
       {/* Footer stats */}
       <div className={styles.footer}>
-        <Text className={styles.footerText}>
-          {relatedCount} related documents
-        </Text>
+        <Text className={styles.footerText}>{relatedCount} related documents</Text>
         <Text className={styles.footerText}>•</Text>
         <Text className={styles.footerText}>{edgeCount} edges</Text>
         {metadata && (
           <>
             <Text className={styles.footerText}>•</Text>
-            <Text className={styles.footerText}>
-              {metadata.searchLatencyMs}ms
-            </Text>
+            <Text className={styles.footerText}>{metadata.searchLatencyMs}ms</Text>
             {metadata.cacheHit && (
               <>
                 <Text className={styles.footerText}>•</Text>
@@ -846,7 +735,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
             )}
           </>
         )}
-        <Text className={styles.footerText} style={{ marginLeft: "auto" }}>
+        <Text className={styles.footerText} style={{ marginLeft: 'auto' }}>
           DocumentRelationshipViewer v1.0.0
         </Text>
       </div>

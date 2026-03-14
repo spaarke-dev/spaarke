@@ -7,7 +7,7 @@
  * Standards: ADR-023 Choice Dialog Pattern, ADR-021 Fluent UI v9
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -19,7 +19,7 @@ import {
   Text,
   makeStyles,
   tokens,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -67,36 +67,36 @@ export interface IChoiceDialogProps {
 
 const useStyles = makeStyles({
   content: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   optionsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
   },
   optionButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
     gap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalM,
-    width: "100%",
-    textAlign: "left",
-    minHeight: "64px", // Accessibility: minimum touch target
+    width: '100%',
+    textAlign: 'left',
+    minHeight: '64px', // Accessibility: minimum touch target
   },
   optionIcon: {
-    fontSize: "24px",
+    fontSize: '24px',
     color: tokens.colorBrandForeground1,
     flexShrink: 0, // Prevent icon from shrinking
   },
   optionText: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    overflow: "hidden", // Handle long text
+    overflow: 'hidden', // Handle long text
   },
   optionTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -140,7 +140,7 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
   options,
   onSelect,
   onDismiss,
-  cancelText = "Cancel",
+  cancelText = 'Cancel',
 }) => {
   const styles = useStyles();
 
@@ -148,7 +148,7 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
     (optionId: string) => {
       onSelect(optionId);
     },
-    [onSelect],
+    [onSelect]
   );
 
   return (
@@ -157,10 +157,10 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
         <DialogBody>
           <DialogTitle>{title}</DialogTitle>
           <DialogContent className={styles.content}>
-            {typeof message === "string" ? <Text>{message}</Text> : message}
+            {typeof message === 'string' ? <Text>{message}</Text> : message}
 
             <div className={styles.optionsContainer}>
-              {options.map((option) => (
+              {options.map(option => (
                 <Button
                   key={option.id}
                   appearance="outline"
@@ -172,10 +172,7 @@ export const ChoiceDialog: React.FC<IChoiceDialogProps> = ({
                   <span className={styles.optionIcon}>{option.icon}</span>
                   <div className={styles.optionText}>
                     <span className={styles.optionTitle}>{option.title}</span>
-                    <span
-                      id={`option-desc-${option.id}`}
-                      className={styles.optionDescription}
-                    >
+                    <span id={`option-desc-${option.id}`} className={styles.optionDescription}>
                       {option.description}
                     </span>
                   </div>

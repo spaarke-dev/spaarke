@@ -40,7 +40,7 @@ export interface IColumnDefinition {
   /** For lookup columns - target entity logical name */
   lookupEntityLogicalName?: string;
   /** Sort order if column is sorted */
-  sortOrder?: "asc" | "desc";
+  sortOrder?: 'asc' | 'desc';
   /** Column index from layoutxml */
   index?: number;
 }
@@ -49,21 +49,21 @@ export interface IColumnDefinition {
  * Supported column data types
  */
 export type ColumnDataType =
-  | "string"
-  | "integer"
-  | "decimal"
-  | "money"
-  | "datetime"
-  | "date"
-  | "boolean"
-  | "lookup"
-  | "optionset"
-  | "status"
-  | "owner"
-  | "memo"
-  | "uniqueidentifier"
-  | "image"
-  | "file";
+  | 'string'
+  | 'integer'
+  | 'decimal'
+  | 'money'
+  | 'datetime'
+  | 'date'
+  | 'boolean'
+  | 'lookup'
+  | 'optionset'
+  | 'status'
+  | 'owner'
+  | 'memo'
+  | 'uniqueidentifier'
+  | 'image'
+  | 'file';
 
 /**
  * Parsed view definition from savedquery or sprk_gridconfiguration
@@ -95,9 +95,9 @@ export interface IViewDefinition {
  * View type indicating source
  */
 export type ViewType =
-  | "savedquery" // System view from savedquery entity
-  | "userquery" // Personal view from userquery entity
-  | "custom"; // Custom view from sprk_gridconfiguration
+  | 'savedquery' // System view from savedquery entity
+  | 'userquery' // Personal view from userquery entity
+  | 'custom'; // Custom view from sprk_gridconfiguration
 
 /**
  * Options for FetchXML execution
@@ -133,38 +133,38 @@ export interface IFilterCondition {
  * FetchXML condition operators
  */
 export type FetchXmlOperator =
-  | "eq"
-  | "ne"
-  | "gt"
-  | "ge"
-  | "lt"
-  | "le"
-  | "like"
-  | "not-like"
-  | "in"
-  | "not-in"
-  | "between"
-  | "not-between"
-  | "null"
-  | "not-null"
-  | "on"
-  | "on-or-before"
-  | "on-or-after"
-  | "today"
-  | "yesterday"
-  | "tomorrow"
-  | "last-x-days"
-  | "next-x-days"
-  | "this-week"
-  | "this-month"
-  | "this-year";
+  | 'eq'
+  | 'ne'
+  | 'gt'
+  | 'ge'
+  | 'lt'
+  | 'le'
+  | 'like'
+  | 'not-like'
+  | 'in'
+  | 'not-in'
+  | 'between'
+  | 'not-between'
+  | 'null'
+  | 'not-null'
+  | 'on'
+  | 'on-or-before'
+  | 'on-or-after'
+  | 'today'
+  | 'yesterday'
+  | 'tomorrow'
+  | 'last-x-days'
+  | 'next-x-days'
+  | 'this-week'
+  | 'this-month'
+  | 'this-year';
 
 /**
  * Filter group for merging (AND/OR logic)
  */
 export interface IFilterGroup {
   /** Filter type: and/or */
-  type: "and" | "or";
+  type: 'and' | 'or';
   /** Conditions in this group */
   conditions: IFilterCondition[];
   /** Nested filter groups */

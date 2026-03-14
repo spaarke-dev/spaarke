@@ -13,15 +13,8 @@
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  Button,
-  Spinner,
-  Text,
-  tokens,
-} from "@fluentui/react-components";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { makeStyles, mergeClasses, Button, Spinner, Text, tokens } from '@fluentui/react-components';
 import {
   DocumentRegular,
   ChevronLeftRegular,
@@ -29,8 +22,8 @@ import {
   ArrowClockwiseRegular,
   OpenRegular,
   ErrorCircle20Regular,
-} from "@fluentui/react-icons";
-import type { DocumentMetadata, AnalysisError } from "../types";
+} from '@fluentui/react-icons';
+import type { DocumentMetadata, AnalysisError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -64,109 +57,109 @@ const IFRAME_LOAD_TIMEOUT_MS = 15_000;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   rootCollapsed: {
-    width: "36px",
-    minWidth: "36px",
-    maxWidth: "36px",
+    width: '36px',
+    minWidth: '36px',
+    maxWidth: '36px',
     flexShrink: 0,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground3,
-    minHeight: "40px",
+    minHeight: '40px',
     flexShrink: 0,
   },
   headerCollapsed: {
-    flexDirection: "column",
-    justifyContent: "flex-start",
-    alignItems: "center",
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
     paddingLeft: tokens.spacingHorizontalXS,
     paddingRight: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalS,
-    borderBottom: "none",
+    borderBottom: 'none',
     borderLeft: `1px solid ${tokens.colorNeutralStroke1}`,
-    height: "100%",
+    height: '100%',
   },
   headerTitle: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   headerActions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
   docName: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    maxWidth: "200px",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '200px',
   },
   viewerContent: {
     flex: 1,
-    overflow: "hidden",
-    position: "relative",
+    overflow: 'hidden',
+    position: 'relative',
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   emptyIcon: {
-    fontSize: "48px",
+    fontSize: '48px',
   },
   loadingState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
   },
   errorState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
-    textAlign: "center",
+    textAlign: 'center',
   },
   errorIcon: {
     color: tokens.colorPaletteRedForeground1,
-    fontSize: "48px",
+    fontSize: '48px',
   },
   iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
+    width: '100%',
+    height: '100%',
+    border: 'none',
   },
   iframeLoading: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
   },
 });
 
@@ -206,7 +199,7 @@ export function SourceViewerPanel({
       // Set a timeout for iframe loading
       timeoutRef.current = setTimeout(() => {
         setIsIframeLoading(false);
-        setIframeError("Document preview timed out. Please try again.");
+        setIframeError('Document preview timed out. Please try again.');
       }, IFRAME_LOAD_TIMEOUT_MS);
     }
   }, [documentMetadata?.viewUrl]);
@@ -225,12 +218,12 @@ export function SourceViewerPanel({
       timeoutRef.current = null;
     }
     setIsIframeLoading(false);
-    setIframeError("Failed to load document preview.");
+    setIframeError('Failed to load document preview.');
   }, []);
 
   const handleOpenInNewTab = useCallback(() => {
     if (documentMetadata?.viewUrl) {
-      window.open(documentMetadata.viewUrl, "_blank", "noopener,noreferrer");
+      window.open(documentMetadata.viewUrl, '_blank', 'noopener,noreferrer');
     }
   }, [documentMetadata?.viewUrl]);
 
@@ -304,7 +297,7 @@ export function SourceViewerPanel({
         )}
         <iframe
           className={styles.iframe}
-          style={{ visibility: isIframeLoading ? "hidden" : "visible" }}
+          style={{ visibility: isIframeLoading ? 'hidden' : 'visible' }}
           src={documentMetadata.viewUrl}
           title={`Document Preview: ${documentMetadata.name}`}
           sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
@@ -320,8 +313,7 @@ export function SourceViewerPanel({
         <DocumentRegular className={styles.emptyIcon} />
         <Text weight="semibold">No document loaded</Text>
         <Text size={200}>
-          The source document viewer will display the original document for
-          reference during analysis.
+          The source document viewer will display the original document for reference during analysis.
         </Text>
       </div>
     );
@@ -335,11 +327,7 @@ export function SourceViewerPanel({
         <div className={styles.headerTitle}>
           <Text weight="semibold">SOURCE DOCUMENT</Text>
           {documentMetadata?.name && (
-            <Text
-              size={200}
-              className={styles.docName}
-              title={documentMetadata.name}
-            >
+            <Text size={200} className={styles.docName} title={documentMetadata.name}>
               {documentMetadata.name}
             </Text>
           )}

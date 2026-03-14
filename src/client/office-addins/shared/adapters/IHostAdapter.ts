@@ -30,7 +30,7 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
-} from "./types";
+} from './types';
 
 /**
  * Interface for host-specific operations in Office add-ins.
@@ -81,7 +81,7 @@ export interface IHostAdapter {
    * @param preferredType - Preferred content type ('html' or 'text'). Defaults to 'html'.
    * @returns Promise resolving to the body content with type indicator
    */
-  getBody(preferredType?: "html" | "text"): Promise<BodyContent>;
+  getBody(preferredType?: 'html' | 'text'): Promise<BodyContent>;
 
   /**
    * Get the attachments from the current item.
@@ -185,11 +185,7 @@ export interface IHostAdapter {
    * @param contentType - MIME type of the file
    * @returns Promise resolving to the result of the attachment
    */
-  attachFile(
-    content: string,
-    fileName: string,
-    contentType: string,
-  ): Promise<AttachFileResult>;
+  attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult>;
 }
 
 /**
@@ -200,7 +196,7 @@ export interface IHostContext {
   /** Unique identifier for the item */
   itemId?: string;
   /** Type of item (email, document, etc.) */
-  itemType: "email" | "document" | "unknown";
+  itemType: 'email' | 'document' | 'unknown';
   /** Display name or subject */
   displayName: string;
   /** Additional metadata depending on host */
@@ -227,7 +223,7 @@ export interface IContentData {
 /**
  * Content format types supported by the add-ins.
  */
-export type ContentFormat = "html" | "text" | "pdf" | "eml" | "docx" | "binary";
+export type ContentFormat = 'html' | 'text' | 'pdf' | 'eml' | 'docx' | 'binary';
 
 /**
  * Metadata associated with content.
@@ -252,9 +248,9 @@ export interface IContentMetadata {
  * @deprecated Use IHostAdapter.getCapabilities() instead.
  */
 export type HostFeature =
-  | "save-as-pdf"
-  | "save-as-eml"
-  | "attachments"
-  | "quick-create"
-  | "entity-association"
-  | "share-links";
+  | 'save-as-pdf'
+  | 'save-as-eml'
+  | 'attachments'
+  | 'quick-create'
+  | 'entity-association'
+  | 'share-links';

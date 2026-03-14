@@ -6,10 +6,10 @@
  * - getEdgeCenter is removed; use labelX/labelY from getBezierPath
  */
 
-import React from "react";
-import { type EdgeProps, getBezierPath } from "@xyflow/react";
-import { tokens } from "@fluentui/react-components";
-import type { DocumentEdge as TDocumentEdge } from "../types/graph";
+import React from 'react';
+import { type EdgeProps, getBezierPath } from '@xyflow/react';
+import { tokens } from '@fluentui/react-components';
+import type { DocumentEdge as TDocumentEdge } from '../types/graph';
 
 interface EdgeStyle {
   strokeWidth: number;
@@ -21,54 +21,51 @@ interface EdgeStyle {
 /** Color-code edge stroke by relationship type */
 const getRelationshipStroke = (type?: string): string => {
   switch (type) {
-    case "semantic":
+    case 'semantic':
       return tokens.colorBrandStroke1;
-    case "same_matter":
+    case 'same_matter':
       return tokens.colorPaletteGreenBorder2;
-    case "same_project":
+    case 'same_project':
       return tokens.colorPaletteGreenBorder1;
-    case "same_email":
-    case "same_thread":
+    case 'same_email':
+    case 'same_thread':
       return tokens.colorStatusWarningBorder1;
-    case "same_invoice":
+    case 'same_invoice':
       return tokens.colorPaletteBerryBorder2;
     default:
       return tokens.colorNeutralStroke1;
   }
 };
 
-const getEdgeStyle = (
-  similarity: number,
-  relationshipType?: string,
-): EdgeStyle => {
+const getEdgeStyle = (similarity: number, relationshipType?: string): EdgeStyle => {
   const stroke = getRelationshipStroke(relationshipType);
   if (similarity >= 0.9) return { strokeWidth: 1.5, stroke, opacity: 0.9 };
   if (similarity >= 0.75) return { strokeWidth: 1.2, stroke, opacity: 0.8 };
   if (similarity >= 0.65) return { strokeWidth: 1, stroke, opacity: 0.7 };
-  return { strokeWidth: 0.75, stroke, strokeDasharray: "5,5", opacity: 0.5 };
+  return { strokeWidth: 0.75, stroke, strokeDasharray: '5,5', opacity: 0.5 };
 };
 
 /** Color-code edge label by relationship type */
 const getLabelColors = (type?: string): { bg: string; fg: string } => {
   switch (type) {
-    case "semantic":
+    case 'semantic':
       return {
         bg: tokens.colorBrandBackground2,
         fg: tokens.colorBrandForeground1,
       };
-    case "same_matter":
-    case "same_project":
+    case 'same_matter':
+    case 'same_project':
       return {
         bg: tokens.colorPaletteGreenBackground2,
         fg: tokens.colorPaletteGreenForeground1,
       };
-    case "same_email":
-    case "same_thread":
+    case 'same_email':
+    case 'same_thread':
       return {
         bg: tokens.colorStatusWarningBackground1,
         fg: tokens.colorStatusWarningForeground1,
       };
-    case "same_invoice":
+    case 'same_invoice':
       return {
         bg: tokens.colorPaletteBerryBackground2,
         fg: tokens.colorPaletteBerryForeground2,
@@ -86,10 +83,10 @@ const getLabelStyle = (type?: string): React.CSSProperties => {
   return {
     fontSize: tokens.fontSizeBase100,
     fontWeight: 600,
-    padding: "2px 6px",
+    padding: '2px 6px',
     borderRadius: tokens.borderRadiusSmall,
-    pointerEvents: "all",
-    whiteSpace: "nowrap",
+    pointerEvents: 'all',
+    whiteSpace: 'nowrap',
     backgroundColor: bg,
     color: fg,
   };
@@ -143,7 +140,7 @@ export const DocumentEdge: React.FC<EdgeProps<TDocumentEdge>> = ({
           stroke: edgeStyle.stroke,
           strokeDasharray: edgeStyle.strokeDasharray,
           opacity: selected ? 1 : edgeStyle.opacity,
-          fill: "none",
+          fill: 'none',
         }}
       />
       <foreignObject
@@ -155,17 +152,15 @@ export const DocumentEdge: React.FC<EdgeProps<TDocumentEdge>> = ({
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            width: "100%",
-            height: "100%",
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '100%',
+            height: '100%',
           }}
         >
           <div style={getLabelStyle(relationshipType)} className="nodrag nopan">
-            {data?.relationshipLabel
-              ? `${data.relationshipLabel} ${similarityPercent}%`
-              : `${similarityPercent}%`}
+            {data?.relationshipLabel ? `${data.relationshipLabel} ${similarityPercent}%` : `${similarityPercent}%`}
           </div>
         </div>
       </foreignObject>

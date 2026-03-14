@@ -12,7 +12,7 @@
  * - Column sorting
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -29,8 +29,8 @@ import {
   Text,
   makeStyles,
   shorthands,
-} from "@fluentui/react-components";
-import { useFilterState } from "../hooks/useFilterState";
+} from '@fluentui/react-components';
+import { useFilterState } from '../hooks/useFilterState';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -38,33 +38,33 @@ import { useFilterState } from "../hooks/useFilterState";
 
 const useStyles = makeStyles({
   container: {
-    height: "100%",
-    width: "100%",
-    overflow: "auto",
+    height: '100%',
+    width: '100%',
+    overflow: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   loadingContainer: {
-    height: "100%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "column",
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalM),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   emptyContainer: {
-    height: "100%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "column",
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground3,
   },
   filterBadge: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     backgroundColor: tokens.colorBrandBackground2,
@@ -118,7 +118,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
 
   // Track selected record IDs
   const [selectedRecordIds, setSelectedRecordIds] = React.useState<string[]>(
-    () => dataset.getSelectedRecordIds() || [],
+    () => dataset.getSelectedRecordIds() || []
   );
 
   // Convert dataset to rows format
@@ -133,12 +133,10 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
 
       // Add each column value
       if (dataset.columns) {
-        dataset.columns.forEach(
-          (column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
-            const value = record.getFormattedValue(column.name);
-            row[column.name] = value || "";
-          },
-        );
+        dataset.columns.forEach((column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
+          const value = record.getFormattedValue(column.name);
+          row[column.name] = value || '';
+        });
       }
 
       return row;
@@ -151,51 +149,40 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
       return [];
     }
 
-    return dataset.columns.map(
-      (column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
-        const isFilterColumn = activeFilter?.field === column.name;
+    return dataset.columns.map((column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
+      const isFilterColumn = activeFilter?.field === column.name;
 
-        return createTableColumn<GridRow>({
-          columnId: column.name as TableColumnId,
-          compare: (a: GridRow, b: GridRow) => {
-            const aVal = a[column.name]?.toString() || "";
-            const bVal = b[column.name]?.toString() || "";
-            return aVal.localeCompare(bVal);
-          },
-          renderHeaderCell: () => {
-            // Highlight the column header if it's the filter column
-            return (
-              <span
-                style={{
-                  fontWeight: isFilterColumn ? 600 : 400,
-                  color: isFilterColumn
-                    ? tokens.colorBrandForeground1
-                    : undefined,
-                }}
-              >
-                {column.displayName}
-                {isFilterColumn && " ●"}
-              </span>
-            );
-          },
-          renderCell: (item: GridRow) => {
-            return (
-              <TableCellLayout>
-                {item[column.name]?.toString() || ""}
-              </TableCellLayout>
-            );
-          },
-        });
-      },
-    );
+      return createTableColumn<GridRow>({
+        columnId: column.name as TableColumnId,
+        compare: (a: GridRow, b: GridRow) => {
+          const aVal = a[column.name]?.toString() || '';
+          const bVal = b[column.name]?.toString() || '';
+          return aVal.localeCompare(bVal);
+        },
+        renderHeaderCell: () => {
+          // Highlight the column header if it's the filter column
+          return (
+            <span
+              style={{
+                fontWeight: isFilterColumn ? 600 : 400,
+                color: isFilterColumn ? tokens.colorBrandForeground1 : undefined,
+              }}
+            >
+              {column.displayName}
+              {isFilterColumn && ' ●'}
+            </span>
+          );
+        },
+        renderCell: (item: GridRow) => {
+          return <TableCellLayout>{item[column.name]?.toString() || ''}</TableCellLayout>;
+        },
+      });
+    });
   }, [dataset.columns, activeFilter?.field]);
 
   // Handle selection change
   const handleSelectionChange = React.useCallback(
-    (
-      _e: React.MouseEvent | React.KeyboardEvent,
-      data: { selectedItems: Set<unknown> },
-    ) => {
+    (_e: React.MouseEvent | React.KeyboardEvent, data: { selectedItems: Set<unknown> }) => {
       const newSelection = Array.from(data.selectedItems) as string[];
       setSelectedRecordIds(newSelection);
 
@@ -205,15 +192,13 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
       // Notify parent
       onSelectionChange?.(newSelection);
     },
-    [dataset, onSelectionChange],
+    [dataset, onSelectionChange]
   );
 
   // Sync selection when dataset changes externally
   React.useEffect(() => {
     const contextSelection = dataset.getSelectedRecordIds() || [];
-    if (
-      JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)
-    ) {
+    if (JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)) {
       setSelectedRecordIds(contextSelection);
     }
   }, [dataset, selectedRecordIds]);
@@ -243,11 +228,7 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
     return (
       <div className={styles.emptyContainer}>
         <Text size={400}>No records found</Text>
-        {isFiltered && (
-          <Text size={300}>
-            Try adjusting your filter or click on a different chart segment
-          </Text>
-        )}
+        {isFiltered && <Text size={300}>Try adjusting your filter or click on a different chart segment</Text>}
       </div>
     );
   }
@@ -272,24 +253,20 @@ export const DrillThroughGrid: React.FC<IDrillThroughGridProps> = ({
         selectionMode="multiselect"
         selectedItems={new Set(selectedRecordIds)}
         onSelectionChange={handleSelectionChange}
-        getRowId={(item) => item.recordId}
+        getRowId={item => item.recordId}
         focusMode="composite"
         aria-label="Drill-through data grid"
         size="medium"
       >
         <DataGridHeader>
           <DataGridRow>
-            {({ renderHeaderCell }) => (
-              <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-            )}
+            {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
           </DataGridRow>
         </DataGridHeader>
         <DataGridBody<GridRow>>
           {({ item, rowId }) => (
             <DataGridRow<GridRow> key={rowId}>
-              {({ renderCell }) => (
-                <DataGridCell>{renderCell(item)}</DataGridCell>
-              )}
+              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
           )}
         </DataGridBody>

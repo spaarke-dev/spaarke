@@ -7,24 +7,11 @@
  *
  * @see DraftSummaryStep — primary consumer
  */
-import * as React from "react";
-import {
-  Input,
-  Text,
-  Button,
-  Spinner,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  DismissRegular,
-  SearchRegular,
-  PersonRegular,
-  MailRegular,
-} from "@fluentui/react-icons";
-import type { ILookupItem } from "../../../types/LookupTypes";
-import type { IRecipientItem } from "../types";
+import * as React from 'react';
+import { Input, Text, Button, Spinner, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { DismissRegular, SearchRegular, PersonRegular, MailRegular } from '@fluentui/react-icons';
+import type { ILookupItem } from '../../../types/LookupTypes';
+import type { IRecipientItem } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -47,11 +34,11 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function extractEmailFromName(name: string): string {
   const match = name.match(/\(([^)]+@[^)]+)\)/);
-  return match ? match[1] : "";
+  return match ? match[1] : '';
 }
 
 function extractDisplayName(name: string): string {
-  return name.replace(/\s*\([^)]*@[^)]*\)\s*$/, "").trim();
+  return name.replace(/\s*\([^)]*@[^)]*\)\s*$/, '').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -60,34 +47,34 @@ function extractDisplayName(name: string): string {
 
 const useStyles = makeStyles({
   wrapper: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   label: { color: tokens.colorNeutralForeground1 },
   chipList: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
   },
   chip: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    paddingTop: "2px",
-    paddingBottom: "2px",
+    paddingTop: '2px',
+    paddingBottom: '2px',
     paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: "2px",
+    paddingRight: '2px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground2,
-    borderTopWidth: "1px",
-    borderRightWidth: "1px",
-    borderBottomWidth: "1px",
-    borderLeftWidth: "1px",
-    borderTopStyle: "solid",
-    borderRightStyle: "solid",
-    borderBottomStyle: "solid",
-    borderLeftStyle: "solid",
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
     borderTopColor: tokens.colorBrandStroke2,
     borderRightColor: tokens.colorBrandStroke2,
     borderBottomColor: tokens.colorBrandStroke2,
@@ -101,76 +88,76 @@ const useStyles = makeStyles({
     borderLeftColor: tokens.colorNeutralStroke1,
   },
   chipIcon: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     color: tokens.colorBrandForeground2,
-    fontSize: "14px",
+    fontSize: '14px',
   },
   chipIconManual: { color: tokens.colorNeutralForeground3 },
   chipText: {
     color: tokens.colorBrandForeground2,
-    maxWidth: "200px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   chipTextManual: { color: tokens.colorNeutralForeground1 },
-  inputRow: { position: "relative" },
+  inputRow: { position: 'relative' },
   resultsList: {
-    position: "absolute",
-    top: "100%",
-    left: "0",
-    right: "0",
+    position: 'absolute',
+    top: '100%',
+    left: '0',
+    right: '0',
     zIndex: 100,
-    display: "flex",
-    flexDirection: "column",
-    gap: "1px",
-    borderTopWidth: "1px",
-    borderRightWidth: "1px",
-    borderBottomWidth: "1px",
-    borderLeftWidth: "1px",
-    borderTopStyle: "solid",
-    borderRightStyle: "solid",
-    borderBottomStyle: "solid",
-    borderLeftStyle: "solid",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
     borderRightColor: tokens.colorNeutralStroke1,
     borderBottomColor: tokens.colorNeutralStroke1,
     borderLeftColor: tokens.colorNeutralStroke1,
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    maxHeight: "200px",
-    overflowY: "auto",
-    marginTop: "2px",
+    overflow: 'hidden',
+    maxHeight: '200px',
+    overflowY: 'auto',
+    marginTop: '2px',
     boxShadow: tokens.shadow8,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   resultItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    cursor: "pointer",
+    cursor: 'pointer',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     gap: tokens.spacingHorizontalS,
-    ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   resultItemHighlighted: {
     backgroundColor: tokens.colorNeutralBackground1Hover,
   },
   resultIcon: {
     color: tokens.colorBrandForeground1,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     flexShrink: 0,
   },
   spinnerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
@@ -190,7 +177,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   minSearchLength = 2,
 }) => {
   const styles = useStyles();
-  const [inputValue, setInputValue] = React.useState("");
+  const [inputValue, setInputValue] = React.useState('');
   const [results, setResults] = React.useState<ILookupItem[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [showResults, setShowResults] = React.useState(false);
@@ -207,7 +194,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       return;
     }
 
-    if (inputValue.includes("@") && !EMAIL_REGEX.test(inputValue.trim())) {
+    if (inputValue.includes('@') && !EMAIL_REGEX.test(inputValue.trim())) {
       setResults([]);
       setShowResults(false);
       return;
@@ -217,8 +204,8 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       setLoading(true);
       try {
         const items = await onSearch(inputValue.trim());
-        const existingKeys = new Set(recipients.map((r) => r.key));
-        const filtered = items.filter((item) => !existingKeys.has(item.id));
+        const existingKeys = new Set(recipients.map(r => r.key));
+        const filtered = items.filter(item => !existingKeys.has(item.id));
         setResults(filtered);
         setShowResults(filtered.length > 0);
         setHighlightedIndex(-1);
@@ -237,15 +224,12 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
   React.useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setShowResults(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handleSelectContact = React.useCallback(
@@ -259,17 +243,17 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
         isManual: false,
       };
       onRecipientsChange([...recipients, newRecipient]);
-      setInputValue("");
+      setInputValue('');
       setResults([]);
       setShowResults(false);
     },
-    [recipients, onRecipientsChange],
+    [recipients, onRecipientsChange]
   );
 
   const handleAddManualEmail = React.useCallback(() => {
     const email = inputValue.trim();
     if (!EMAIL_REGEX.test(email)) return;
-    if (recipients.some((r) => r.email === email || r.key === email)) return;
+    if (recipients.some(r => r.email === email || r.key === email)) return;
 
     const newRecipient: IRecipientItem = {
       key: email,
@@ -278,48 +262,38 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       isManual: true,
     };
     onRecipientsChange([...recipients, newRecipient]);
-    setInputValue("");
+    setInputValue('');
     setResults([]);
     setShowResults(false);
   }, [inputValue, recipients, onRecipientsChange]);
 
   const handleRemove = React.useCallback(
     (key: string) => {
-      onRecipientsChange(recipients.filter((r) => r.key !== key));
+      onRecipientsChange(recipients.filter(r => r.key !== key));
     },
-    [recipients, onRecipientsChange],
+    [recipients, onRecipientsChange]
   );
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         e.preventDefault();
         if (showResults && highlightedIndex >= 0) {
           handleSelectContact(results[highlightedIndex]);
         } else {
           handleAddManualEmail();
         }
-      } else if (e.key === "ArrowDown" && showResults) {
+      } else if (e.key === 'ArrowDown' && showResults) {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev < results.length - 1 ? prev + 1 : 0,
-        );
-      } else if (e.key === "ArrowUp" && showResults) {
+        setHighlightedIndex(prev => (prev < results.length - 1 ? prev + 1 : 0));
+      } else if (e.key === 'ArrowUp' && showResults) {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : results.length - 1,
-        );
-      } else if (e.key === "Escape") {
+        setHighlightedIndex(prev => (prev > 0 ? prev - 1 : results.length - 1));
+      } else if (e.key === 'Escape') {
         setShowResults(false);
       }
     },
-    [
-      showResults,
-      highlightedIndex,
-      results,
-      handleSelectContact,
-      handleAddManualEmail,
-    ],
+    [showResults, highlightedIndex, results, handleSelectContact, handleAddManualEmail]
   );
 
   const handleFocus = React.useCallback(() => {
@@ -334,35 +308,15 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
       {recipients.length > 0 && (
         <div className={styles.chipList}>
-          {recipients.map((r) => (
-            <span
-              key={r.key}
-              className={mergeClasses(
-                styles.chip,
-                r.isManual && styles.chipManual,
-              )}
-            >
-              <span
-                className={mergeClasses(
-                  styles.chipIcon,
-                  r.isManual && styles.chipIconManual,
-                )}
-              >
-                {r.isManual ? (
-                  <MailRegular fontSize={14} />
-                ) : (
-                  <PersonRegular fontSize={14} />
-                )}
+          {recipients.map(r => (
+            <span key={r.key} className={mergeClasses(styles.chip, r.isManual && styles.chipManual)}>
+              <span className={mergeClasses(styles.chipIcon, r.isManual && styles.chipIconManual)}>
+                {r.isManual ? <MailRegular fontSize={14} /> : <PersonRegular fontSize={14} />}
               </span>
               <Text
                 size={200}
-                className={mergeClasses(
-                  styles.chipText,
-                  r.isManual && styles.chipTextManual,
-                )}
-                title={
-                  r.email ? `${r.displayName} (${r.email})` : r.displayName
-                }
+                className={mergeClasses(styles.chipText, r.isManual && styles.chipTextManual)}
+                title={r.email ? `${r.displayName} (${r.email})` : r.displayName}
               >
                 {r.displayName}
               </Text>
@@ -381,14 +335,14 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       <div className={styles.inputRow}>
         <Input
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={e => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={handleFocus}
-          placeholder={placeholder ?? "Search contacts or type email..."}
+          placeholder={placeholder ?? 'Search contacts or type email...'}
           contentBefore={<SearchRegular aria-hidden="true" />}
           aria-label={label}
           autoComplete="off"
-          style={{ width: "100%" }}
+          style={{ width: '100%' }}
         />
 
         {loading && (
@@ -398,25 +352,19 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
         )}
 
         {showResults && (
-          <div
-            className={styles.resultsList}
-            role="listbox"
-            aria-label={`${label} search results`}
-          >
+          <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
             {results.map((item, index) => (
               <div
                 key={item.id}
                 className={mergeClasses(
                   styles.resultItem,
-                  index === highlightedIndex
-                    ? styles.resultItemHighlighted
-                    : undefined,
+                  index === highlightedIndex ? styles.resultItemHighlighted : undefined
                 )}
                 role="option"
                 aria-selected={index === highlightedIndex}
                 onClick={() => handleSelectContact(item)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleSelectContact(item);
                   }

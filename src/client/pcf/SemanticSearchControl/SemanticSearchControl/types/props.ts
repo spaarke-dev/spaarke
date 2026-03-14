@@ -4,8 +4,8 @@
  * @see spec.md for component architecture
  */
 
-import { SearchFilters, SearchResult, SearchScope, DateRange } from "./search";
-import { IInputs } from "../generated/ManifestTypes";
+import { SearchFilters, SearchResult, SearchScope, DateRange } from './search';
+import { IInputs } from '../generated/ManifestTypes';
 
 /**
  * Props for the main SemanticSearchControl component
@@ -86,7 +86,7 @@ export interface IResultsListProps {
   threshold: number;
   onLoadMore: () => void;
   onResultClick: (result: SearchResult) => void;
-  onOpenFile: (result: SearchResult, mode: "web" | "desktop") => void;
+  onOpenFile: (result: SearchResult, mode: 'web' | 'desktop') => void;
   onOpenRecord: (result: SearchResult, inModal: boolean) => void;
   onFindSimilar: (result: SearchResult) => void;
   onPreview: (result: SearchResult) => Promise<string | null>;
@@ -115,7 +115,7 @@ export interface SummaryData {
 export interface IResultCardProps {
   result: SearchResult;
   onClick: () => void;
-  onOpenFile: (mode: "web" | "desktop") => void;
+  onOpenFile: (mode: 'web' | 'desktop') => void;
   onOpenRecord: (inModal: boolean) => void;
   onFindSimilar: () => void;
   onPreview: () => Promise<string | null>;

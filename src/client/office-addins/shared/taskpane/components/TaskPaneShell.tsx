@@ -1,15 +1,11 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import { TaskPaneHeader, type HostType } from "./TaskPaneHeader";
-import {
-  TaskPaneNavigation,
-  type NavigationTab,
-  getDefaultTab,
-} from "./TaskPaneNavigation";
-import { TaskPaneFooter, type ConnectionStatus } from "./TaskPaneFooter";
-import { ErrorBoundary } from "./ErrorBoundary";
-import { LoadingSkeleton } from "./LoadingSkeleton";
-import type { ThemePreference } from "../hooks/useTheme";
+import React, { useState, useEffect, useCallback } from 'react';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { TaskPaneHeader, type HostType } from './TaskPaneHeader';
+import { TaskPaneNavigation, type NavigationTab, getDefaultTab } from './TaskPaneNavigation';
+import { TaskPaneFooter, type ConnectionStatus } from './TaskPaneFooter';
+import { ErrorBoundary } from './ErrorBoundary';
+import { LoadingSkeleton } from './LoadingSkeleton';
+import type { ThemePreference } from '../hooks/useTheme';
 
 /**
  * TaskPaneShell - Main layout component for Office Add-in task pane.
@@ -33,17 +29,17 @@ const COMPACT_BREAKPOINT = 360;
 
 const useStyles = makeStyles({
   shell: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100vh',
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   content: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingVerticalM,
   },
   contentCompact: {
@@ -103,12 +99,10 @@ export interface TaskPaneShellProps {
  * Hook to detect task pane width and determine compact mode.
  */
 function useResponsiveLayout(): { isCompact: boolean; width: number } {
-  const [width, setWidth] = useState<number>(
-    typeof window !== "undefined" ? window.innerWidth : 400,
-  );
+  const [width, setWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 400);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
       return undefined;
     }
 
@@ -116,9 +110,9 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
       setWidth(window.innerWidth);
     };
 
-    window.addEventListener("resize", handleResize);
+    window.addEventListener('resize', handleResize);
     return () => {
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -129,22 +123,22 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 }
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
-  title = "Spaarke",
-  hostType = "outlook",
+  title = 'Spaarke',
+  hostType = 'outlook',
   userName,
   userEmail,
   isAuthenticated = false,
   onSignOut,
   onSettings,
   isLoading = false,
-  version = "1.0.1",
+  version = '1.0.1',
   buildDate,
-  appName = "Spaarke DMS",
+  appName = 'Spaarke DMS',
   connectionStatus,
   showNavigation = true,
   selectedTab: controlledSelectedTab,
   onTabChange,
-  themePreference = "auto",
+  themePreference = 'auto',
   onThemeChange,
   onError,
   showErrorDetails = false,
@@ -155,9 +149,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   const { isCompact } = useResponsiveLayout();
 
   // Internal state for uncontrolled navigation
-  const [internalSelectedTab, setInternalSelectedTab] = useState<NavigationTab>(
-    () => getDefaultTab(hostType),
-  );
+  const [internalSelectedTab, setInternalSelectedTab] = useState<NavigationTab>(() => getDefaultTab(hostType));
 
   // Use controlled or uncontrolled tab state
   const selectedTab = controlledSelectedTab ?? internalSelectedTab;
@@ -170,19 +162,14 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
         setInternalSelectedTab(tab);
       }
     },
-    [onTabChange],
+    [onTabChange]
   );
 
   // Show loading skeleton during initialization
   if (isLoading) {
     return (
       <div className={styles.shell}>
-        <LoadingSkeleton
-          showHeader={true}
-          showNavigation={showNavigation}
-          showFooter={true}
-          contentCards={2}
-        />
+        <LoadingSkeleton showHeader={true} showNavigation={showNavigation} showFooter={true} contentCards={2} />
       </div>
     );
   }
@@ -249,6 +236,6 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
 };
 
 // Re-export types for convenience
-export type { HostType } from "./TaskPaneHeader";
-export type { NavigationTab } from "./TaskPaneNavigation";
-export type { ConnectionStatus } from "./TaskPaneFooter";
+export type { HostType } from './TaskPaneHeader';
+export type { NavigationTab } from './TaskPaneNavigation';
+export type { ConnectionStatus } from './TaskPaneFooter';

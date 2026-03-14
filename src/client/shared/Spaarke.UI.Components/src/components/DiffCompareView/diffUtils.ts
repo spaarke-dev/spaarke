@@ -15,7 +15,7 @@
  * Standards: ADR-012 (shared component library)
  */
 
-import { diffWords, diffChars } from "diff";
+import { diffWords, diffChars } from 'diff';
 import type {
   DiffOptions,
   DiffResult,
@@ -23,33 +23,19 @@ import type {
   IDiffSegment,
   BlockChange,
   BlockChangeType,
-} from "./DiffCompareView.types";
+} from './DiffCompareView.types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Block-level HTML tags that should be treated as structural boundaries */
-const BLOCK_TAGS = new Set([
-  "p",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "li",
-  "ul",
-  "ol",
-  "blockquote",
-  "div",
-  "br",
-]);
+const BLOCK_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'ul', 'ol', 'blockquote', 'div', 'br']);
 
 /** Default diff options */
 const DEFAULT_OPTIONS: DiffOptions = {
-  whitespace: "relaxed",
-  granularity: "word",
+  whitespace: 'relaxed',
+  granularity: 'word',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,11 +49,11 @@ const DEFAULT_OPTIONS: DiffOptions = {
  */
 export function escapeHtml(text: string): string {
   return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +63,7 @@ export function escapeHtml(text: string): string {
 /** Represents a parsed token from an HTML string */
 interface HtmlToken {
   /** "tag" for opening/closing/self-closing tags; "text" for text content */
-  kind: "tag" | "text";
+  kind: 'tag' | 'text';
   /** The raw string content (including angle brackets for tags) */
   raw: string;
   /** For tags: the tag name (lowercase), e.g. "p", "h1", "li" */
@@ -105,16 +91,16 @@ function tokenizeHtml(html: string): HtmlToken[] {
     if (match.index > lastIndex) {
       const textContent = html.slice(lastIndex, match.index);
       if (textContent) {
-        tokens.push({ kind: "text", raw: textContent });
+        tokens.push({ kind: 'text', raw: textContent });
       }
     }
 
-    const isClosing = match[1] === "/";
+    const isClosing = match[1] === '/';
     const tagName = match[2].toLowerCase();
-    const isSelfClosing = match[4] === "/" || tagName === "br";
+    const isSelfClosing = match[4] === '/' || tagName === 'br';
 
     tokens.push({
-      kind: "tag",
+      kind: 'tag',
       raw: match[0],
       tagName,
       isClosing,
@@ -128,7 +114,7 @@ function tokenizeHtml(html: string): HtmlToken[] {
   if (lastIndex < html.length) {
     const textContent = html.slice(lastIndex);
     if (textContent) {
-      tokens.push({ kind: "text", raw: textContent });
+      tokens.push({ kind: 'text', raw: textContent });
     }
   }
 
@@ -161,7 +147,7 @@ function tokenizeHtml(html: string): HtmlToken[] {
  */
 export function extractTextFromHtml(html: string): string {
   if (!html || !html.trim()) {
-    return "";
+    return '';
   }
 
   const tokens = tokenizeHtml(html);
@@ -173,55 +159,55 @@ export function extractTextFromHtml(html: string): string {
   let inBlockquote = false;
 
   for (const token of tokens) {
-    if (token.kind === "tag") {
-      const tag = token.tagName ?? "";
+    if (token.kind === 'tag') {
+      const tag = token.tagName ?? '';
 
       if (token.isClosing) {
         // Closing tags
-        if (tag === "p" || tag === "div") {
-          parts.push("\n\n");
+        if (tag === 'p' || tag === 'div') {
+          parts.push('\n\n');
         } else if (/^h[1-6]$/.test(tag)) {
-          parts.push("\n\n");
-        } else if (tag === "li") {
-          parts.push("\n");
-        } else if (tag === "ul") {
-          parts.push("\n");
-        } else if (tag === "ol") {
+          parts.push('\n\n');
+        } else if (tag === 'li') {
+          parts.push('\n');
+        } else if (tag === 'ul') {
+          parts.push('\n');
+        } else if (tag === 'ol') {
           olCounterStack.pop();
           inOrderedList = olCounterStack.length > 0;
-          parts.push("\n");
-        } else if (tag === "blockquote") {
+          parts.push('\n');
+        } else if (tag === 'blockquote') {
           inBlockquote = false;
-          parts.push("\n");
+          parts.push('\n');
         }
-      } else if (token.isSelfClosing || tag === "br") {
-        parts.push("\n");
+      } else if (token.isSelfClosing || tag === 'br') {
+        parts.push('\n');
       } else {
         // Opening tags
         if (/^h([1-6])$/.test(tag)) {
           const level = parseInt(tag.charAt(1), 10);
-          const prefix = "#".repeat(level) + " ";
+          const prefix = '#'.repeat(level) + ' ';
           parts.push(prefix);
-        } else if (tag === "li") {
+        } else if (tag === 'li') {
           if (inBlockquote) {
-            parts.push("> ");
+            parts.push('> ');
           }
           if (inOrderedList && olCounterStack.length > 0) {
             const counter = olCounterStack[olCounterStack.length - 1];
             olCounterStack[olCounterStack.length - 1] = counter + 1;
             parts.push(`${counter}. `);
           } else {
-            parts.push("- ");
+            parts.push('- ');
           }
-        } else if (tag === "ol") {
+        } else if (tag === 'ol') {
           olCounterStack.push(1);
           inOrderedList = true;
-        } else if (tag === "ul") {
+        } else if (tag === 'ul') {
           // Track that we're in an unordered list
           // (li items default to "- " prefix)
-        } else if (tag === "blockquote") {
+        } else if (tag === 'blockquote') {
           inBlockquote = true;
-          parts.push("> ");
+          parts.push('> ');
         }
       }
     } else {
@@ -232,8 +218,8 @@ export function extractTextFromHtml(html: string): string {
   }
 
   // Clean up the result: collapse excessive newlines, trim
-  let result = parts.join("");
-  result = result.replace(/\n{3,}/g, "\n\n");
+  let result = parts.join('');
+  result = result.replace(/\n{3,}/g, '\n\n');
   result = result.trim();
 
   return result;
@@ -245,19 +231,15 @@ export function extractTextFromHtml(html: string): string {
  */
 function decodeHtmlEntities(text: string): string {
   return text
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'")
-    .replace(/&#(\d+);/g, (_match, code) =>
-      String.fromCharCode(parseInt(code, 10)),
-    )
-    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) =>
-      String.fromCharCode(parseInt(hex, 16)),
-    );
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,10 +252,10 @@ function decodeHtmlEntities(text: string): string {
  */
 function normalizeWhitespace(text: string): string {
   return text
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -316,7 +298,7 @@ function normalizeWhitespace(text: string): string {
 export function computeHtmlDiff(
   originalHtml: string,
   proposedHtml: string,
-  options?: Partial<DiffOptions>,
+  options?: Partial<DiffOptions>
 ): DiffResult {
   const opts: DiffOptions = { ...DEFAULT_OPTIONS, ...options };
 
@@ -325,13 +307,13 @@ export function computeHtmlDiff(
   let proposedText = extractTextFromHtml(proposedHtml);
 
   // Step 2: Normalize whitespace if relaxed mode
-  if (opts.whitespace === "relaxed") {
+  if (opts.whitespace === 'relaxed') {
     originalText = normalizeWhitespace(originalText);
     proposedText = normalizeWhitespace(proposedText);
   }
 
   // Step 3: Compute diff using jsdiff
-  const diffFn = opts.granularity === "character" ? diffChars : diffWords;
+  const diffFn = opts.granularity === 'character' ? diffChars : diffWords;
   const changes = diffFn(originalText, proposedText);
 
   // Step 4: Build segments and compute stats
@@ -341,11 +323,7 @@ export function computeHtmlDiff(
   let unchanged = 0;
 
   for (const change of changes) {
-    const segType: IDiffSegment["type"] = change.added
-      ? "added"
-      : change.removed
-        ? "removed"
-        : "unchanged";
+    const segType: IDiffSegment['type'] = change.added ? 'added' : change.removed ? 'removed' : 'unchanged';
 
     segments.push({ type: segType, value: change.value });
 
@@ -363,16 +341,8 @@ export function computeHtmlDiff(
   const stats: DiffStats = { additions, deletions, unchanged };
 
   // Step 5: Build annotated HTML for both sides
-  const originalAnnotatedHtml = buildAnnotatedHtml(
-    originalHtml,
-    segments,
-    "original",
-  );
-  const proposedAnnotatedHtml = buildAnnotatedHtml(
-    proposedHtml,
-    segments,
-    "proposed",
-  );
+  const originalAnnotatedHtml = buildAnnotatedHtml(originalHtml, segments, 'original');
+  const proposedAnnotatedHtml = buildAnnotatedHtml(proposedHtml, segments, 'proposed');
 
   return {
     originalAnnotatedHtml,
@@ -397,21 +367,17 @@ export function computeHtmlDiff(
  * @param segments - The diff segments computed from extractTextFromHtml output.
  * @param side - Which side to annotate ("original" shows removals, "proposed" shows additions).
  */
-function buildAnnotatedHtml(
-  html: string,
-  segments: IDiffSegment[],
-  side: "original" | "proposed",
-): string {
+function buildAnnotatedHtml(html: string, segments: IDiffSegment[], side: 'original' | 'proposed'): string {
   // Filter segments to those relevant to this side
-  const relevantSegments = segments.filter((seg) => {
-    if (side === "original") {
-      return seg.type === "unchanged" || seg.type === "removed";
+  const relevantSegments = segments.filter(seg => {
+    if (side === 'original') {
+      return seg.type === 'unchanged' || seg.type === 'removed';
     }
-    return seg.type === "unchanged" || seg.type === "added";
+    return seg.type === 'unchanged' || seg.type === 'added';
   });
 
   // Build a flat text from relevant segments for alignment
-  const flatText = relevantSegments.map((s) => s.value).join("");
+  const flatText = relevantSegments.map(s => s.value).join('');
 
   // Tokenize the source HTML
   const tokens = tokenizeHtml(html);
@@ -423,25 +389,19 @@ function buildAnnotatedHtml(
   let diffOffset = 0; // Current position in flatText
 
   for (const token of tokens) {
-    if (token.kind === "tag") {
+    if (token.kind === 'tag') {
       // Pass through structural tags as-is (they define block structure)
       output.push(token.raw);
     } else {
       // Text token: decode entities for matching, then re-encode with diff markup
       const decodedText = decodeHtmlEntities(token.raw);
-      const annotated = annotateTextWithDiff(
-        decodedText,
-        relevantSegments,
-        diffOffset,
-        flatText,
-        side,
-      );
+      const annotated = annotateTextWithDiff(decodedText, relevantSegments, diffOffset, flatText, side);
       output.push(annotated.html);
       diffOffset = annotated.newOffset;
     }
   }
 
-  return output.join("");
+  return output.join('');
 }
 
 /**
@@ -469,7 +429,7 @@ function annotateTextWithDiff(
   segments: IDiffSegment[],
   startOffset: number,
   flatText: string,
-  side: "original" | "proposed",
+  side: 'original' | 'proposed'
 ): AnnotateResult {
   if (!text.trim()) {
     return { html: escapeHtml(text), newOffset: startOffset };
@@ -507,9 +467,9 @@ function annotateTextWithDiff(
 
         // Wrap the run in a span if it's a diff change
         const escaped = escapeHtml(run);
-        if (segment.type === "removed" && side === "original") {
+        if (segment.type === 'removed' && side === 'original') {
           parts.push(`<span class="diff-removed">${escaped}</span>`);
-        } else if (segment.type === "added" && side === "proposed") {
+        } else if (segment.type === 'added' && side === 'proposed') {
           parts.push(`<span class="diff-added">${escaped}</span>`);
         } else {
           parts.push(escaped);
@@ -534,7 +494,7 @@ function annotateTextWithDiff(
     parts.push(escapeHtml(text.slice(textIdx)));
   }
 
-  return { html: parts.join(""), newOffset: diffOffset };
+  return { html: parts.join(''), newOffset: diffOffset };
 }
 
 /**
@@ -543,7 +503,7 @@ function annotateTextWithDiff(
  */
 function findSegmentAtOffset(
   segments: IDiffSegment[],
-  offset: number,
+  offset: number
 ): { segment: IDiffSegment | null; localOffset: number } {
   let runningOffset = 0;
   for (const segment of segments) {
@@ -587,10 +547,7 @@ function findSegmentAtOffset(
  * // ]
  * ```
  */
-export function detectBlockChanges(
-  originalHtml: string,
-  proposedHtml: string,
-): BlockChange[] {
+export function detectBlockChanges(originalHtml: string, proposedHtml: string): BlockChange[] {
   const originalBlocks = extractBlocks(originalHtml);
   const proposedBlocks = extractBlocks(proposedHtml);
 
@@ -609,10 +566,10 @@ export function detectBlockChanges(
       // Emit removed blocks before the LCS match
       while (oi < lcsItem.origIdx) {
         changes.push({
-          type: "removed",
+          type: 'removed',
           tag: originalBlocks[oi].tag,
           originalText: originalBlocks[oi].text,
-          proposedText: "",
+          proposedText: '',
         });
         oi++;
       }
@@ -620,9 +577,9 @@ export function detectBlockChanges(
       // Emit added blocks before the LCS match
       while (pi < lcsItem.propIdx) {
         changes.push({
-          type: "added",
+          type: 'added',
           tag: proposedBlocks[pi].tag,
-          originalText: "",
+          originalText: '',
           proposedText: proposedBlocks[pi].text,
         });
         pi++;
@@ -631,8 +588,7 @@ export function detectBlockChanges(
       // Emit the matched block (check if modified or unchanged)
       const origBlock = originalBlocks[oi];
       const propBlock = proposedBlocks[pi];
-      const changeType: BlockChangeType =
-        origBlock.text === propBlock.text ? "unchanged" : "modified";
+      const changeType: BlockChangeType = origBlock.text === propBlock.text ? 'unchanged' : 'modified';
       changes.push({
         type: changeType,
         tag: propBlock.tag || origBlock.tag,
@@ -647,18 +603,18 @@ export function detectBlockChanges(
       // Past LCS -- remaining blocks are removals or additions
       while (oi < originalBlocks.length) {
         changes.push({
-          type: "removed",
+          type: 'removed',
           tag: originalBlocks[oi].tag,
           originalText: originalBlocks[oi].text,
-          proposedText: "",
+          proposedText: '',
         });
         oi++;
       }
       while (pi < proposedBlocks.length) {
         changes.push({
-          type: "added",
+          type: 'added',
           tag: proposedBlocks[pi].tag,
-          originalText: "",
+          originalText: '',
           proposedText: proposedBlocks[pi].text,
         });
         pi++;
@@ -689,18 +645,18 @@ function extractBlocks(html: string): HtmlBlock[] {
   const blocks: HtmlBlock[] = [];
   const tokens = tokenizeHtml(html);
 
-  let currentTag = "";
+  let currentTag = '';
   let depth = 0;
   let textParts: string[] = [];
 
   for (const token of tokens) {
-    if (token.kind === "tag") {
-      const tag = token.tagName ?? "";
+    if (token.kind === 'tag') {
+      const tag = token.tagName ?? '';
 
       if (token.isSelfClosing) {
         // Self-closing tags like <br/> don't create blocks
-        if (depth > 0 && tag === "br") {
-          textParts.push("\n");
+        if (depth > 0 && tag === 'br') {
+          textParts.push('\n');
         }
         continue;
       }
@@ -708,11 +664,11 @@ function extractBlocks(html: string): HtmlBlock[] {
       if (token.isClosing) {
         if (isBlockTag(tag) && tag === currentTag && depth === 1) {
           // End of a top-level block
-          const text = textParts.join("").trim();
+          const text = textParts.join('').trim();
           if (text) {
             blocks.push({ tag: currentTag, text });
           }
-          currentTag = "";
+          currentTag = '';
           depth = 0;
           textParts = [];
         } else if (depth > 1 && isBlockTag(tag)) {
@@ -734,7 +690,7 @@ function extractBlocks(html: string): HtmlBlock[] {
   }
 
   // Handle trailing text that wasn't wrapped in a block
-  const trailing = textParts.join("").trim();
+  const trailing = textParts.join('').trim();
   if (trailing && currentTag) {
     blocks.push({ tag: currentTag, text: trailing });
   }
@@ -763,17 +719,12 @@ interface LcsEntry {
  * Two blocks "match" for LCS purposes if they share the same tag and
  * their text content shares >= 50% of words (allowing for modifications).
  */
-function computeBlockLcs(
-  original: HtmlBlock[],
-  proposed: HtmlBlock[],
-): LcsEntry[] {
+function computeBlockLcs(original: HtmlBlock[], proposed: HtmlBlock[]): LcsEntry[] {
   const m = original.length;
   const n = proposed.length;
 
   // Standard LCS dynamic programming
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    Array(n + 1).fill(0),
-  );
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {

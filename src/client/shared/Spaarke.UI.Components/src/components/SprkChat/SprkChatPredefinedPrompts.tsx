@@ -8,16 +8,10 @@
  * @see ADR-022 - React 16 APIs only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Button,
-  Text,
-} from "@fluentui/react-components";
-import { LightbulbRegular } from "@fluentui/react-icons";
-import { ISprkChatPredefinedPromptsProps } from "./types";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens, Button, Text } from '@fluentui/react-components';
+import { LightbulbRegular } from '@fluentui/react-icons';
+import { ISprkChatPredefinedPromptsProps } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -25,9 +19,9 @@ import { ISprkChatPredefinedPromptsProps } from "./types";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingVerticalM),
     ...shorthands.padding(tokens.spacingVerticalL, tokens.spacingHorizontalM),
   },
@@ -37,16 +31,16 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   promptGrid: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    maxWidth: "100%",
+    maxWidth: '100%',
   },
   promptButton: {
-    maxWidth: "280px",
-    textAlign: "left",
-    whiteSpace: "normal",
+    maxWidth: '280px',
+    textAlign: 'left',
+    whiteSpace: 'normal',
   },
 });
 
@@ -68,9 +62,11 @@ const useStyles = makeStyles({
  * />
  * ```
  */
-export const SprkChatPredefinedPrompts: React.FC<
-  ISprkChatPredefinedPromptsProps
-> = ({ prompts, onSelect, disabled = false }) => {
+export const SprkChatPredefinedPrompts: React.FC<ISprkChatPredefinedPromptsProps> = ({
+  prompts,
+  onSelect,
+  disabled = false,
+}) => {
   const styles = useStyles();
 
   if (prompts.length === 0) {
@@ -81,8 +77,8 @@ export const SprkChatPredefinedPrompts: React.FC<
     <div className={styles.root} role="region" aria-label="Suggested prompts">
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
+          display: 'flex',
+          alignItems: 'center',
           gap: tokens.spacingHorizontalXS,
         }}
       >
@@ -91,7 +87,7 @@ export const SprkChatPredefinedPrompts: React.FC<
       </div>
 
       <div className={styles.promptGrid}>
-        {prompts.map((prompt) => (
+        {prompts.map(prompt => (
           <Button
             key={prompt.key}
             appearance="outline"

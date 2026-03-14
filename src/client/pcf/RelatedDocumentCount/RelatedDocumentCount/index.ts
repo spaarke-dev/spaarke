@@ -1,14 +1,9 @@
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import {
-  FluentProvider,
-  Theme,
-  webLightTheme,
-  webDarkTheme,
-} from "@fluentui/react-components";
-import { resolveTheme, setupThemeListener } from "./services/ThemeService";
-import { RelatedDocumentCount as RelatedDocumentCountComponent } from "./RelatedDocumentCount";
-import { IRelatedDocumentCountProps } from "./types";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { resolveTheme, setupThemeListener } from './services/ThemeService';
+import { RelatedDocumentCount as RelatedDocumentCountComponent } from './RelatedDocumentCount';
+import { IRelatedDocumentCountProps } from './types';
 
 /**
  * RelatedDocumentCount PCF Control
@@ -22,10 +17,7 @@ import { IRelatedDocumentCountProps } from "./types";
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs with platform libraries (ReactControl pattern)
  */
-export class RelatedDocumentCount implements ComponentFramework.ReactControl<
-  IInputs,
-  IOutputs
-> {
+export class RelatedDocumentCount implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void;
   private _theme: Theme = webLightTheme;
   private _cleanupThemeListener?: () => void;
@@ -41,7 +33,7 @@ export class RelatedDocumentCount implements ComponentFramework.ReactControl<
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
-    state: ComponentFramework.Dictionary,
+    state: ComponentFramework.Dictionary
   ): void {
     this.notifyOutputChanged = notifyOutputChanged;
     this._context = context;
@@ -50,7 +42,7 @@ export class RelatedDocumentCount implements ComponentFramework.ReactControl<
     this._theme = resolveTheme(context);
 
     // Set up theme change listener for dynamic updates
-    this._cleanupThemeListener = setupThemeListener((isDark) => {
+    this._cleanupThemeListener = setupThemeListener(isDark => {
       this._theme = isDark ? webDarkTheme : webLightTheme;
       this.notifyOutputChanged();
     }, context);
@@ -62,17 +54,14 @@ export class RelatedDocumentCount implements ComponentFramework.ReactControl<
    *
    * Wraps content in FluentProvider with theme from context.
    */
-  public updateView(
-    context: ComponentFramework.Context<IInputs>,
-  ): React.ReactElement {
+  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
     // Update context reference and re-resolve theme
     this._context = context;
     this._theme = resolveTheme(context);
 
     // Read document ID from form context (not from bound field - field may not exist on entity)
-    const pageContext = (context as unknown as { page?: { entityId?: string } })
-      .page;
-    const documentId = pageContext?.entityId ?? "";
+    const pageContext = (context as unknown as { page?: { entityId?: string } }).page;
+    const documentId = pageContext?.entityId ?? '';
     const tenantId = context.parameters.tenantId?.raw ?? undefined;
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? undefined;
     const cardTitle = context.parameters.cardTitle?.raw ?? undefined;
@@ -96,13 +85,13 @@ export class RelatedDocumentCount implements ComponentFramework.ReactControl<
       {
         theme: this._theme,
         style: {
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
         },
       },
-      content,
+      content
     );
   }
 

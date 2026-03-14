@@ -7,37 +7,37 @@
  * Note: Using react-flow-renderer v10 for React 16 compatibility (ADR-022)
  */
 
-import type { Node, Edge } from "react-flow-renderer";
-import type { NodeType } from "./api";
+import type { Node, Edge } from 'react-flow-renderer';
+import type { NodeType } from './api';
 
 /**
  * Supported file types for icon selection and display.
  * Maps file extensions to display names.
  */
 export const FILE_TYPES = {
-  pdf: "PDF Document",
-  docx: "Word Document",
-  doc: "Word Document",
-  xlsx: "Excel Spreadsheet",
-  xls: "Excel Spreadsheet",
-  pptx: "PowerPoint",
-  ppt: "PowerPoint",
-  msg: "Email",
-  eml: "Email",
-  txt: "Text File",
-  csv: "CSV File",
-  png: "Image",
-  jpg: "Image",
-  jpeg: "Image",
-  gif: "Image",
-  bmp: "Image",
-  tiff: "Image",
-  html: "Web Page",
-  htm: "Web Page",
-  json: "JSON File",
-  xml: "XML File",
-  zip: "Archive",
-  file: "File", // Fallback for orphan files without extension
+  pdf: 'PDF Document',
+  docx: 'Word Document',
+  doc: 'Word Document',
+  xlsx: 'Excel Spreadsheet',
+  xls: 'Excel Spreadsheet',
+  pptx: 'PowerPoint',
+  ppt: 'PowerPoint',
+  msg: 'Email',
+  eml: 'Email',
+  txt: 'Text File',
+  csv: 'CSV File',
+  png: 'Image',
+  jpg: 'Image',
+  jpeg: 'Image',
+  gif: 'Image',
+  bmp: 'Image',
+  tiff: 'Image',
+  html: 'Web Page',
+  htm: 'Web Page',
+  json: 'JSON File',
+  xml: 'XML File',
+  zip: 'Archive',
+  file: 'File', // Fallback for orphan files without extension
 } as const;
 
 /**
@@ -52,7 +52,7 @@ export type FileType = keyof typeof FILE_TYPES;
  */
 export function getFileTypeDisplayName(fileType: string | undefined): string {
   if (!fileType) return FILE_TYPES.file;
-  const normalizedType = fileType.toLowerCase().replace(/^\./, "") as FileType;
+  const normalizedType = fileType.toLowerCase().replace(/^\./, '') as FileType;
   return FILE_TYPES[normalizedType] ?? FILE_TYPES.file;
 }
 

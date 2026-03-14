@@ -1,4 +1,4 @@
-import { Configuration, LogLevel } from "@azure/msal-browser";
+import { Configuration, LogLevel } from '@azure/msal-browser';
 
 /**
  * @deprecated This file is deprecated and will be removed in a future version.
@@ -29,17 +29,17 @@ import { Configuration, LogLevel } from "@azure/msal-browser";
  * From: Sparke DSM-SPE Dev 2 App Registration
  * This is the PCF CLIENT app, NOT the BFF API app
  */
-const CLIENT_ID = "170c98e1-d486-4355-bcbe-170454e0207c";
+const CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
 
 /**
  * Azure AD Tenant (Directory) ID
  */
-const TENANT_ID = "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+const TENANT_ID = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 
 /**
  * Dataverse Environment Redirect URI
  */
-const REDIRECT_URI = "https://spaarkedev1.crm.dynamics.com";
+const REDIRECT_URI = 'https://spaarkedev1.crm.dynamics.com';
 
 // ============================================================================
 // MSAL Browser Configuration
@@ -57,7 +57,7 @@ export const msalConfig: Configuration = {
   },
 
   cache: {
-    cacheLocation: "sessionStorage",
+    cacheLocation: 'sessionStorage',
     storeAuthStateInCookie: false,
   },
 
@@ -100,7 +100,7 @@ export const msalConfig: Configuration = {
  * - Scope: user_impersonation
  */
 export const loginRequest = {
-  scopes: ["api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"],
+  scopes: ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'],
   loginHint: undefined as string | undefined,
 };
 
@@ -112,8 +112,7 @@ export const loginRequest = {
  * Validate MSAL configuration before initialization
  */
 export function validateMsalConfig(): void {
-  const guidRegex =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   if (!CLIENT_ID || !guidRegex.test(CLIENT_ID)) {
     throw new Error(`[MSAL Config] Invalid CLIENT_ID: "${CLIENT_ID}"`);
@@ -123,12 +122,9 @@ export function validateMsalConfig(): void {
     throw new Error(`[MSAL Config] Invalid TENANT_ID: "${TENANT_ID}"`);
   }
 
-  if (
-    !REDIRECT_URI.startsWith("https://") ||
-    !REDIRECT_URI.includes(".dynamics.com")
-  ) {
+  if (!REDIRECT_URI.startsWith('https://') || !REDIRECT_URI.includes('.dynamics.com')) {
     throw new Error(`[MSAL Config] Invalid REDIRECT_URI: "${REDIRECT_URI}"`);
   }
 
-  console.info("[MSAL Config] Configuration validation passed");
+  console.info('[MSAL Config] Configuration validation passed');
 }

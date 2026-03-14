@@ -9,8 +9,8 @@
  * - ADR-021: Fluent UI v9 exclusively, design tokens only
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -27,11 +27,11 @@ export interface IDateColumnProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: "40px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '40px',
     paddingRight: tokens.spacingHorizontalM,
   },
   dayNumber: {
@@ -44,8 +44,8 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorNeutralForeground3,
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
 });
 
@@ -57,7 +57,7 @@ const useStyles = makeStyles({
  * Get day abbreviation (SUN, MON, TUE, etc.)
  */
 const getDayAbbreviation = (date: Date): string => {
-  const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
   return days[date.getDay()];
 };
 

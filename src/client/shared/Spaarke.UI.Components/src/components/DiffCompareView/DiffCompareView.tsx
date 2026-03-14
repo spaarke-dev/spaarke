@@ -17,17 +17,9 @@
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent UI v9)
  */
 
-import * as React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Textarea,
-  Tooltip,
-  mergeClasses,
-  shorthands,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { makeStyles, tokens, Button, Textarea, Tooltip, mergeClasses, shorthands } from '@fluentui/react-components';
 import {
   CheckmarkRegular,
   DismissRegular,
@@ -36,15 +28,10 @@ import {
   DismissCircleRegular,
   SplitHorizontalRegular,
   TextAlignLeftRegular,
-} from "@fluentui/react-icons";
-import { diffWords } from "diff";
-import type {
-  IDiffCompareViewProps,
-  IDiffSegment,
-  DiffCompareViewMode,
-  DiffResult,
-} from "./DiffCompareView.types";
-import { computeHtmlDiff } from "./diffUtils";
+} from '@fluentui/react-icons';
+import { diffWords } from 'diff';
+import type { IDiffCompareViewProps, IDiffSegment, DiffCompareViewMode, DiffResult } from './DiffCompareView.types';
+import { computeHtmlDiff } from './diffUtils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -52,22 +39,22 @@ import { computeHtmlDiff } from "./diffUtils";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
 
   // Header row: title + mode toggle
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "12px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '12px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   headerTitle: {
@@ -77,60 +64,60 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   modeToggle: {
-    display: "flex",
-    alignItems: "center",
-    columnGap: "4px",
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: '4px',
   },
 
   // Content area
   content: {
     flex: 1,
-    overflow: "auto",
-    maxHeight: "500px",
+    overflow: 'auto',
+    maxHeight: '500px',
   },
 
   // Side-by-side layout: uses a 2-column grid for header labels and content panes
   sideBySideContainer: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    minHeight: "100px",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    minHeight: '100px',
   },
   paneLabel: {
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-    ...shorthands.padding("6px", "12px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    ...shorthands.padding('6px', '12px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground3,
   },
   paneLabelOriginal: {
-    ...shorthands.borderRight("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke2),
   },
   pane: {
-    ...shorthands.padding("12px"),
+    ...shorthands.padding('12px'),
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
   },
   paneOriginal: {
-    ...shorthands.borderRight("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke2),
   },
 
   // Inline layout
   inlineContent: {
-    ...shorthands.padding("12px"),
+    ...shorthands.padding('12px'),
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
   },
 
   // Diff highlight segments
@@ -138,48 +125,48 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorPaletteGreenBackground2,
     color: tokens.colorPaletteGreenForeground2,
     borderRadius: tokens.borderRadiusSmall,
-    ...shorthands.padding("0", "2px"),
+    ...shorthands.padding('0', '2px'),
   },
   segmentRemoved: {
     backgroundColor: tokens.colorPaletteRedBackground2,
     color: tokens.colorPaletteRedForeground2,
-    textDecoration: "line-through",
+    textDecoration: 'line-through',
     borderRadius: tokens.borderRadiusSmall,
-    ...shorthands.padding("0", "2px"),
+    ...shorthands.padding('0', '2px'),
   },
 
   // High contrast overrides: use border outlines instead of background colors
   segmentAddedHighContrast: {
-    "@media (forced-colors: active)": {
-      backgroundColor: "transparent",
-      ...shorthands.borderBottom("2px", "solid", "Highlight"),
-      color: "Highlight",
+    '@media (forced-colors: active)': {
+      backgroundColor: 'transparent',
+      ...shorthands.borderBottom('2px', 'solid', 'Highlight'),
+      color: 'Highlight',
     },
   },
   segmentRemovedHighContrast: {
-    "@media (forced-colors: active)": {
-      backgroundColor: "transparent",
-      ...shorthands.borderBottom("2px", "solid", "LinkText"),
-      color: "LinkText",
-      textDecoration: "line-through",
+    '@media (forced-colors: active)': {
+      backgroundColor: 'transparent',
+      ...shorthands.borderBottom('2px', 'solid', 'LinkText'),
+      color: 'LinkText',
+      textDecoration: 'line-through',
     },
   },
 
   // Action bar
   actionBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    columnGap: "8px",
-    ...shorthands.padding("8px", "12px"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    columnGap: '8px',
+    ...shorthands.padding('8px', '12px'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   actionBarLeft: {
-    display: "flex",
-    alignItems: "center",
-    columnGap: "4px",
-    marginRight: "auto",
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: '4px',
+    marginRight: 'auto',
   },
   shortcutHint: {
     fontFamily: tokens.fontFamilyBase,
@@ -189,115 +176,115 @@ const useStyles = makeStyles({
 
   // Edit mode
   editArea: {
-    ...shorthands.padding("12px"),
+    ...shorthands.padding('12px'),
   },
   editActions: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    columnGap: "8px",
-    ...shorthands.padding("8px", "12px", "0"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    columnGap: '8px',
+    ...shorthands.padding('8px', '12px', '0'),
   },
 
   // HTML diff content panes (rendered via dangerouslySetInnerHTML)
   htmlPane: {
-    ...shorthands.padding("12px"),
+    ...shorthands.padding('12px'),
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    wordBreak: "break-word" as const,
-    "& p": {
-      margin: "0 0 8px 0",
+    wordBreak: 'break-word' as const,
+    '& p': {
+      margin: '0 0 8px 0',
     },
-    "& h1": {
+    '& h1': {
       fontSize: tokens.fontSizeBase600,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "16px 0 8px 0",
+      margin: '16px 0 8px 0',
     },
-    "& h2": {
+    '& h2': {
       fontSize: tokens.fontSizeBase500,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "12px 0 8px 0",
+      margin: '12px 0 8px 0',
     },
-    "& h3": {
+    '& h3': {
       fontSize: tokens.fontSizeBase400,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "8px 0 8px 0",
+      margin: '8px 0 8px 0',
     },
-    "& ul, & ol": {
-      margin: "8px 0",
-      paddingLeft: "24px",
+    '& ul, & ol': {
+      margin: '8px 0',
+      paddingLeft: '24px',
     },
-    "& li": {
-      marginBottom: "4px",
+    '& li': {
+      marginBottom: '4px',
     },
-    "& blockquote": {
+    '& blockquote': {
       borderLeft: `3px solid ${tokens.colorNeutralStroke2}`,
-      marginLeft: "0",
-      paddingLeft: "16px",
+      marginLeft: '0',
+      paddingLeft: '16px',
       color: tokens.colorNeutralForeground2,
     },
-    "& .diff-added": {
+    '& .diff-added': {
       backgroundColor: tokens.colorPaletteGreenBackground2,
       color: tokens.colorPaletteGreenForeground2,
       borderRadius: tokens.borderRadiusSmall,
-      ...shorthands.padding("0", "2px"),
+      ...shorthands.padding('0', '2px'),
     },
-    "& .diff-removed": {
+    '& .diff-removed': {
       backgroundColor: tokens.colorPaletteRedBackground2,
       color: tokens.colorPaletteRedForeground2,
-      textDecoration: "line-through",
+      textDecoration: 'line-through',
       borderRadius: tokens.borderRadiusSmall,
-      ...shorthands.padding("0", "2px"),
+      ...shorthands.padding('0', '2px'),
     },
   },
   htmlPaneOriginal: {
-    ...shorthands.borderRight("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke2),
   },
   htmlInlineContent: {
-    ...shorthands.padding("12px"),
+    ...shorthands.padding('12px'),
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    wordBreak: "break-word" as const,
-    "& p": {
-      margin: "0 0 8px 0",
+    wordBreak: 'break-word' as const,
+    '& p': {
+      margin: '0 0 8px 0',
     },
-    "& h1, & h2, & h3": {
+    '& h1, & h2, & h3': {
       fontWeight: tokens.fontWeightSemibold,
-      margin: "12px 0 8px 0",
+      margin: '12px 0 8px 0',
     },
-    "& ul, & ol": {
-      margin: "8px 0",
-      paddingLeft: "24px",
+    '& ul, & ol': {
+      margin: '8px 0',
+      paddingLeft: '24px',
     },
-    "& .diff-added": {
+    '& .diff-added': {
       backgroundColor: tokens.colorPaletteGreenBackground2,
       color: tokens.colorPaletteGreenForeground2,
       borderRadius: tokens.borderRadiusSmall,
-      ...shorthands.padding("0", "2px"),
+      ...shorthands.padding('0', '2px'),
     },
-    "& .diff-removed": {
+    '& .diff-removed': {
       backgroundColor: tokens.colorPaletteRedBackground2,
       color: tokens.colorPaletteRedForeground2,
-      textDecoration: "line-through",
+      textDecoration: 'line-through',
       borderRadius: tokens.borderRadiusSmall,
-      ...shorthands.padding("0", "2px"),
+      ...shorthands.padding('0', '2px'),
     },
   },
 
   // Stats badge
   statsBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    columnGap: "8px",
+    display: 'inline-flex',
+    alignItems: 'center',
+    columnGap: '8px',
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    ...shorthands.padding("4px", "12px"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.padding('4px', '12px'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
   },
   statsAdded: {
     color: tokens.colorPaletteGreenForeground2,
@@ -311,13 +298,10 @@ const useStyles = makeStyles({
 // Helper: Compute diff segments from jsdiff output
 // ─────────────────────────────────────────────────────────────────────────────
 
-function computeDiffSegments(
-  original: string,
-  proposed: string,
-): IDiffSegment[] {
+function computeDiffSegments(original: string, proposed: string): IDiffSegment[] {
   const changes = diffWords(original, proposed);
-  return changes.map((change) => ({
-    type: change.added ? "added" : change.removed ? "removed" : "unchanged",
+  return changes.map(change => ({
+    type: change.added ? 'added' : change.removed ? 'removed' : 'unchanged',
     value: change.value,
   }));
 }
@@ -338,8 +322,8 @@ function computeDiffStats(segments: IDiffSegment[]): DiffStats {
   let unchanged = 0;
   for (const seg of segments) {
     const wordCount = seg.value.trim().split(/\s+/).filter(Boolean).length;
-    if (seg.type === "added") additions += wordCount;
-    else if (seg.type === "removed") removals += wordCount;
+    if (seg.type === 'added') additions += wordCount;
+    else if (seg.type === 'removed') removals += wordCount;
     else unchanged += wordCount;
   }
   return { additions, removals, unchanged };
@@ -354,30 +338,21 @@ interface DiffSegmentSpanProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function DiffSegmentSpan({
-  segment,
-  styles,
-}: DiffSegmentSpanProps): React.ReactElement | null {
-  if (segment.type === "added") {
+function DiffSegmentSpan({ segment, styles }: DiffSegmentSpanProps): React.ReactElement | null {
+  if (segment.type === 'added') {
     return (
       <span
-        className={mergeClasses(
-          styles.segmentAdded,
-          styles.segmentAddedHighContrast,
-        )}
+        className={mergeClasses(styles.segmentAdded, styles.segmentAddedHighContrast)}
         aria-label={`Added: ${segment.value}`}
       >
         {segment.value}
       </span>
     );
   }
-  if (segment.type === "removed") {
+  if (segment.type === 'removed') {
     return (
       <span
-        className={mergeClasses(
-          styles.segmentRemoved,
-          styles.segmentRemovedHighContrast,
-        )}
+        className={mergeClasses(styles.segmentRemoved, styles.segmentRemovedHighContrast)}
         aria-label={`Removed: ${segment.value}`}
       >
         {segment.value}
@@ -398,11 +373,7 @@ interface InlineViewProps {
 
 function InlineView({ segments, styles }: InlineViewProps): React.ReactElement {
   return (
-    <div
-      className={styles.inlineContent}
-      role="region"
-      aria-label="Inline diff view"
-    >
+    <div className={styles.inlineContent} role="region" aria-label="Inline diff view">
       {segments.map((seg, i) => (
         <DiffSegmentSpan key={i} segment={seg} styles={styles} />
       ))}
@@ -419,29 +390,20 @@ interface SideBySideViewProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function SideBySideView({
-  segments,
-  styles,
-}: SideBySideViewProps): React.ReactElement {
+function SideBySideView({ segments, styles }: SideBySideViewProps): React.ReactElement {
   // Original side shows unchanged + removed segments
-  const originalSegments = segments.filter((s) => s.type !== "added");
+  const originalSegments = segments.filter(s => s.type !== 'added');
   // Proposed side shows unchanged + added segments
-  const proposedSegments = segments.filter((s) => s.type !== "removed");
+  const proposedSegments = segments.filter(s => s.type !== 'removed');
 
   return (
     <div className={styles.sideBySideContainer}>
       {/* Column headers (row 1 of grid) */}
-      <div className={mergeClasses(styles.paneLabel, styles.paneLabelOriginal)}>
-        Original
-      </div>
+      <div className={mergeClasses(styles.paneLabel, styles.paneLabelOriginal)}>Original</div>
       <div className={styles.paneLabel}>Proposed</div>
 
       {/* Content panes (row 2 of grid) */}
-      <div
-        className={mergeClasses(styles.pane, styles.paneOriginal)}
-        role="region"
-        aria-label="Original text"
-      >
+      <div className={mergeClasses(styles.pane, styles.paneOriginal)} role="region" aria-label="Original text">
         {originalSegments.map((seg, i) => (
           <DiffSegmentSpan key={i} segment={seg} styles={styles} />
         ))}
@@ -464,16 +426,11 @@ interface HtmlSideBySideViewProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function HtmlSideBySideView({
-  diffResult,
-  styles,
-}: HtmlSideBySideViewProps): React.ReactElement {
+function HtmlSideBySideView({ diffResult, styles }: HtmlSideBySideViewProps): React.ReactElement {
   return (
     <div className={styles.sideBySideContainer}>
       {/* Column headers */}
-      <div className={mergeClasses(styles.paneLabel, styles.paneLabelOriginal)}>
-        Original
-      </div>
+      <div className={mergeClasses(styles.paneLabel, styles.paneLabelOriginal)}>Original</div>
       <div className={styles.paneLabel}>Proposed</div>
 
       {/* Content panes with annotated HTML */}
@@ -502,10 +459,7 @@ interface HtmlInlineViewProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function HtmlInlineView({
-  diffResult,
-  styles,
-}: HtmlInlineViewProps): React.ReactElement {
+function HtmlInlineView({ diffResult, styles }: HtmlInlineViewProps): React.ReactElement {
   // For inline mode, show the proposed annotated HTML which contains both
   // additions and all unchanged content in the proposed document structure.
   // We use the proposed side because it represents the "merged" view.
@@ -542,19 +496,19 @@ function HtmlInlineView({
  * />
  * ```
  */
-export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
+export const DiffCompareView: React.FC<IDiffCompareViewProps> = props => {
   const {
     originalText,
     proposedText,
     htmlMode = false,
     diffOptions,
-    mode: initialMode = "side-by-side",
+    mode: initialMode = 'side-by-side',
     onAccept,
     onReject,
     onEdit,
     title,
     readOnly = false,
-    ariaLabel = "Diff comparison view",
+    ariaLabel = 'Diff comparison view',
   } = props;
 
   const styles = useStyles();
@@ -588,11 +542,8 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
 
   // Compute plain-text diff segments (used when htmlMode is off, or for stats fallback)
   const segments = useMemo(
-    () =>
-      htmlDiffResult
-        ? htmlDiffResult.segments
-        : computeDiffSegments(originalText, proposedText),
-    [htmlDiffResult, originalText, proposedText],
+    () => (htmlDiffResult ? htmlDiffResult.segments : computeDiffSegments(originalText, proposedText)),
+    [htmlDiffResult, originalText, proposedText]
   );
 
   // Compute stats
@@ -637,7 +588,7 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
   }, [proposedText]);
 
   const handleToggleMode = useCallback(() => {
-    setMode((prev) => (prev === "side-by-side" ? "inline" : "side-by-side"));
+    setMode(prev => (prev === 'side-by-side' ? 'inline' : 'side-by-side'));
   }, []);
 
   // Focus textarea when entering edit mode
@@ -655,14 +606,14 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       // Ctrl+Enter: Accept
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         handleAccept();
         return;
       }
 
       // Escape: Reject (if not editing), Cancel edit (if editing)
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         e.preventDefault();
         if (isEditing) {
           handleEditCancel();
@@ -672,20 +623,14 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
       }
     };
 
-    container.addEventListener("keydown", handleKeyDown);
-    return () => container.removeEventListener("keydown", handleKeyDown);
+    container.addEventListener('keydown', handleKeyDown);
+    return () => container.removeEventListener('keydown', handleKeyDown);
   }, [readOnly, isEditing, handleAccept, handleReject, handleEditCancel]);
 
   // ─── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div
-      ref={containerRef}
-      className={styles.root}
-      role="region"
-      aria-label={ariaLabel}
-      tabIndex={0}
-    >
+    <div ref={containerRef} className={styles.root} role="region" aria-label={ariaLabel} tabIndex={0}>
       {/* Header: title + mode toggle */}
       {(title || !readOnly) && (
         <div className={styles.header}>
@@ -693,31 +638,17 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
           {!title && <span />}
           <div className={styles.modeToggle}>
             <Tooltip
-              content={
-                mode === "side-by-side"
-                  ? "Switch to inline view"
-                  : "Switch to side-by-side view"
-              }
+              content={mode === 'side-by-side' ? 'Switch to inline view' : 'Switch to side-by-side view'}
               relationship="label"
             >
               <Button
                 appearance="subtle"
                 size="small"
-                icon={
-                  mode === "side-by-side" ? (
-                    <TextAlignLeftRegular />
-                  ) : (
-                    <SplitHorizontalRegular />
-                  )
-                }
+                icon={mode === 'side-by-side' ? <TextAlignLeftRegular /> : <SplitHorizontalRegular />}
                 onClick={handleToggleMode}
-                aria-label={
-                  mode === "side-by-side"
-                    ? "Switch to inline view"
-                    : "Switch to side-by-side view"
-                }
+                aria-label={mode === 'side-by-side' ? 'Switch to inline view' : 'Switch to side-by-side view'}
               >
-                {mode === "side-by-side" ? "Inline" : "Side-by-side"}
+                {mode === 'side-by-side' ? 'Inline' : 'Side-by-side'}
               </Button>
             </Tooltip>
           </div>
@@ -733,7 +664,7 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
               value={editText}
               onChange={(_e, data) => setEditText(data.value)}
               resize="vertical"
-              style={{ width: "100%", minHeight: "150px" }}
+              style={{ width: '100%', minHeight: '150px' }}
               aria-label="Edit proposed text"
             />
             <div className={styles.editActions}>
@@ -759,12 +690,12 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
           </div>
         ) : htmlMode && htmlDiffResult ? (
           // HTML diff mode: render annotated HTML with preserved structure
-          mode === "side-by-side" ? (
+          mode === 'side-by-side' ? (
             <HtmlSideBySideView diffResult={htmlDiffResult} styles={styles} />
           ) : (
             <HtmlInlineView diffResult={htmlDiffResult} styles={styles} />
           )
-        ) : mode === "side-by-side" ? (
+        ) : mode === 'side-by-side' ? (
           <SideBySideView segments={segments} styles={styles} />
         ) : (
           <InlineView segments={segments} styles={styles} />
@@ -776,12 +707,12 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
         <div className={styles.statsBadge} aria-live="polite">
           {stats.additions > 0 && (
             <span className={styles.statsAdded}>
-              +{stats.additions} word{stats.additions !== 1 ? "s" : ""}
+              +{stats.additions} word{stats.additions !== 1 ? 's' : ''}
             </span>
           )}
           {stats.removals > 0 && (
             <span className={styles.statsRemoved}>
-              -{stats.removals} word{stats.removals !== 1 ? "s" : ""}
+              -{stats.removals} word{stats.removals !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -789,15 +720,9 @@ export const DiffCompareView: React.FC<IDiffCompareViewProps> = (props) => {
 
       {/* Action bar */}
       {!readOnly && (
-        <div
-          className={styles.actionBar}
-          role="toolbar"
-          aria-label="Diff actions"
-        >
+        <div className={styles.actionBar} role="toolbar" aria-label="Diff actions">
           <div className={styles.actionBarLeft}>
-            <span className={styles.shortcutHint}>
-              Ctrl+Enter: Accept | Esc: Reject
-            </span>
+            <span className={styles.shortcutHint}>Ctrl+Enter: Accept | Esc: Reject</span>
           </div>
           {onEdit && !isEditing && (
             <Tooltip content="Edit the proposed text" relationship="label">

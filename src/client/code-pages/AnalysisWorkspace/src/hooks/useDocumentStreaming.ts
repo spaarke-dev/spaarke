@@ -25,12 +25,12 @@
  * @see ADR-012 - Shared Component Library
  */
 
-import { useEffect, useMemo, useRef, useCallback, useState } from "react";
-import { SprkChatBridge } from "@spaarke/ui-components/services/SprkChatBridge";
-import type { DocumentReplacedPayload } from "@spaarke/ui-components/services/SprkChatBridge";
-import { useDocumentStreamConsumer } from "@spaarke/ui-components/components/RichTextEditor/hooks/useDocumentStreamConsumer";
-import { useDocumentHistory } from "@spaarke/ui-components/hooks/useDocumentHistory";
-import type { RichTextEditorRef } from "@spaarke/ui-components/components/RichTextEditor";
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import { SprkChatBridge } from '@spaarke/ui-components/services/SprkChatBridge';
+import type { DocumentReplacedPayload } from '@spaarke/ui-components/services/SprkChatBridge';
+import { useDocumentStreamConsumer } from '@spaarke/ui-components/components/RichTextEditor/hooks/useDocumentStreamConsumer';
+import { useDocumentHistory } from '@spaarke/ui-components/hooks/useDocumentHistory';
+import type { RichTextEditorRef } from '@spaarke/ui-components/components/RichTextEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -89,9 +89,7 @@ export interface UseDocumentStreamingResult {
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function useDocumentStreaming(
-  options: UseDocumentStreamingOptions,
-): UseDocumentStreamingResult {
+export function useDocumentStreaming(options: UseDocumentStreamingOptions): UseDocumentStreamingResult {
   const { context, editorRef, enabled = true } = options;
 
   const [isReplacing, setIsReplacing] = useState(false);
@@ -110,12 +108,9 @@ export function useDocumentStreaming(
       return null;
     }
     try {
-      return new SprkChatBridge({ context, transport: "auto" });
+      return new SprkChatBridge({ context, transport: 'auto' });
     } catch (err) {
-      console.error(
-        "[useDocumentStreaming] Failed to create SprkChatBridge:",
-        err,
-      );
+      console.error('[useDocumentStreaming] Failed to create SprkChatBridge:', err);
       return null;
     }
   }, [context, enabled]);
@@ -164,7 +159,7 @@ export function useDocumentStreaming(
       if (cancelRequestedRef.current && bridge) {
         // Send cancel acknowledgment back to SprkChat side pane
         // so it knows to stop sending tokens
-        bridge.emit("document_stream_end", {
+        bridge.emit('document_stream_end', {
           operationId: opId,
           cancelled: true,
           totalTokens: 0,
@@ -172,7 +167,7 @@ export function useDocumentStreaming(
       }
       cancelRequestedRef.current = false;
     },
-    [documentHistory, bridge],
+    [documentHistory, bridge]
   );
 
   const streamConsumer = useDocumentStreamConsumer({
@@ -192,46 +187,36 @@ export function useDocumentStreaming(
       return;
     }
 
-    const unsubReplace = bridge.subscribe(
-      "document_replaced",
-      (payload: DocumentReplacedPayload) => {
-        const editor = editorRef.current;
-        if (!editor) {
-          console.warn(
-            "[useDocumentStreaming] Editor ref is null; cannot handle document_replaced.",
-          );
-          return;
-        }
+    const unsubReplace = bridge.subscribe('document_replaced', (payload: DocumentReplacedPayload) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        console.warn('[useDocumentStreaming] Editor ref is null; cannot handle document_replaced.');
+        return;
+      }
 
-        // Reject replacement if streaming is active
-        if (streamConsumer.isStreaming) {
-          console.warn(
-            "[useDocumentStreaming] Rejecting document_replaced during active stream.",
-          );
-          return;
-        }
+      // Reject replacement if streaming is active
+      if (streamConsumer.isStreaming) {
+        console.warn('[useDocumentStreaming] Rejecting document_replaced during active stream.');
+        return;
+      }
 
-        setIsReplacing(true);
+      setIsReplacing(true);
 
-        try {
-          // FR-07: Push current content to undo stack BEFORE replacing
-          documentHistory.pushVersion();
+      try {
+        // FR-07: Push current content to undo stack BEFORE replacing
+        documentHistory.pushVersion();
 
-          // Replace entire editor content
-          editor.setHtml(payload.html);
+        // Replace entire editor content
+        editor.setHtml(payload.html);
 
-          // Push the new content to undo stack after replacement
-          documentHistory.pushVersion();
-        } catch (err) {
-          console.error(
-            "[useDocumentStreaming] Error handling document_replaced:",
-            err,
-          );
-        } finally {
-          setIsReplacing(false);
-        }
-      },
-    );
+        // Push the new content to undo stack after replacement
+        documentHistory.pushVersion();
+      } catch (err) {
+        console.error('[useDocumentStreaming] Error handling document_replaced:', err);
+      } finally {
+        setIsReplacing(false);
+      }
+    });
 
     return () => {
       unsubReplace();
@@ -256,7 +241,7 @@ export function useDocumentStreaming(
     //
     // If the bridge is available, send a cancel signal to the producer side.
     if (bridge && activeOperationRef.current) {
-      bridge.emit("document_stream_end", {
+      bridge.emit('document_stream_end', {
         operationId: activeOperationRef.current,
         cancelled: true,
         totalTokens: streamConsumer.tokenCount,

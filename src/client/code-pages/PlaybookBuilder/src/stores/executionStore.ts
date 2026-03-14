@@ -9,29 +9,24 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 /** Node execution status */
-export type NodeExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type NodeExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 /** Execution event types from SSE stream */
 export type ExecutionEventType =
-  | "execution_started"
-  | "node_started"
-  | "node_progress"
-  | "node_completed"
-  | "node_failed"
-  | "execution_completed"
-  | "execution_failed";
+  | 'execution_started'
+  | 'node_started'
+  | 'node_progress'
+  | 'node_completed'
+  | 'node_failed'
+  | 'execution_completed'
+  | 'execution_failed';
 
 /** Node execution state */
 export interface NodeExecutionState {
@@ -49,7 +44,7 @@ export interface NodeExecutionState {
 /** Overall execution state */
 export interface ExecutionState {
   executionId: string | null;
-  status: "idle" | "running" | "completed" | "failed";
+  status: 'idle' | 'running' | 'completed' | 'failed';
   startedAt: string | null;
   completedAt: string | null;
   nodeStates: Map<string, NodeExecutionState>;
@@ -97,7 +92,7 @@ interface ExecutionStoreState extends ExecutionState {
 
 const initialState: ExecutionState = {
   executionId: null,
-  status: "idle",
+  status: 'idle',
   startedAt: null,
   completedAt: null,
   nodeStates: new Map(),
@@ -120,7 +115,7 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
   startExecution: (executionId: string) => {
     set({
       executionId,
-      status: "running",
+      status: 'running',
       startedAt: new Date().toISOString(),
       completedAt: null,
       nodeStates: new Map(),
@@ -131,51 +126,42 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
   },
 
   handleEvent: (event: ExecutionEvent) => {
-    const {
-      eventType,
-      nodeId,
-      progress,
-      outputPreview,
-      tokensUsed,
-      confidence,
-      overallConfidence,
-      error,
-    } = event;
+    const { eventType, nodeId, progress, outputPreview, tokensUsed, confidence, overallConfidence, error } = event;
 
-    set((state) => {
+    set(state => {
       const newNodeStates = new Map(state.nodeStates);
 
       switch (eventType) {
-        case "node_started":
+        case 'node_started':
           if (nodeId) {
             newNodeStates.set(nodeId, {
               nodeId,
-              status: "running",
+              status: 'running',
               startedAt: event.timestamp,
               progress: 0,
             });
           }
           return { nodeStates: newNodeStates };
 
-        case "node_progress":
+        case 'node_progress':
           if (nodeId) {
             const existing = newNodeStates.get(nodeId);
             newNodeStates.set(nodeId, {
               ...existing,
               nodeId,
-              status: "running",
+              status: 'running',
               progress: progress ?? existing?.progress,
             });
           }
           return { nodeStates: newNodeStates };
 
-        case "node_completed":
+        case 'node_completed':
           if (nodeId) {
             const existing = newNodeStates.get(nodeId);
             newNodeStates.set(nodeId, {
               ...existing,
               nodeId,
-              status: "completed",
+              status: 'completed',
               completedAt: event.timestamp,
               progress: 100,
               outputPreview,
@@ -188,31 +174,31 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
             totalTokensUsed: state.totalTokensUsed + (tokensUsed ?? 0),
           };
 
-        case "node_failed":
+        case 'node_failed':
           if (nodeId) {
             const existing = newNodeStates.get(nodeId);
             newNodeStates.set(nodeId, {
               ...existing,
               nodeId,
-              status: "failed",
+              status: 'failed',
               completedAt: event.timestamp,
               error,
             });
           }
           return { nodeStates: newNodeStates };
 
-        case "execution_completed":
+        case 'execution_completed':
           return {
-            status: "completed" as const,
+            status: 'completed' as const,
             completedAt: event.timestamp,
             overallConfidence: overallConfidence ?? null,
           };
 
-        case "execution_failed":
+        case 'execution_failed':
           return {
-            status: "failed" as const,
+            status: 'failed' as const,
             completedAt: event.timestamp,
-            error: error ?? "Execution failed",
+            error: error ?? 'Execution failed',
           };
 
         default:
@@ -223,7 +209,7 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
 
   stopExecution: () => {
     set({
-      status: "idle",
+      status: 'idle',
       completedAt: new Date().toISOString(),
     });
   },
@@ -238,10 +224,10 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
 
   isNodeRunning: (nodeId: string) => {
     const nodeState = get().nodeStates.get(nodeId);
-    return nodeState?.status === "running";
+    return nodeState?.status === 'running';
   },
 
   isExecuting: () => {
-    return get().status === "running";
+    return get().status === 'running';
   },
 }));

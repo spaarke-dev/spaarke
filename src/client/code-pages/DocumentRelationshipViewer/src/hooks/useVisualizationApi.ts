@@ -3,13 +3,10 @@
  * Identical logic to PCF version; framework-agnostic data fetching.
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import {
-  VisualizationApiService,
-  VisualizationApiError,
-} from "../services/VisualizationApiService";
-import type { DocumentNode, DocumentEdge } from "../types/graph";
-import type { VisualizationQueryParams, GraphMetadata } from "../types/api";
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { VisualizationApiService, VisualizationApiError } from '../services/VisualizationApiService';
+import type { DocumentNode, DocumentEdge } from '../types/graph';
+import type { VisualizationQueryParams, GraphMetadata } from '../types/api';
 
 export interface UseVisualizationApiOptions {
   apiBaseUrl: string;
@@ -33,9 +30,7 @@ export interface VisualizationApiState {
   refetch: () => Promise<void>;
 }
 
-export function useVisualizationApi(
-  options: UseVisualizationApiOptions,
-): VisualizationApiState {
+export function useVisualizationApi(options: UseVisualizationApiOptions): VisualizationApiState {
   const {
     apiBaseUrl,
     documentId,
@@ -53,14 +48,9 @@ export function useVisualizationApi(
   const [edges, setEdges] = useState<DocumentEdge[]>([]);
   const [metadata, setMetadata] = useState<GraphMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<VisualizationApiError | Error | null>(
-    null,
-  );
+  const [error, setError] = useState<VisualizationApiError | Error | null>(null);
 
-  const service = useMemo(
-    () => new VisualizationApiService(apiBaseUrl),
-    [apiBaseUrl],
-  );
+  const service = useMemo(() => new VisualizationApiService(apiBaseUrl), [apiBaseUrl]);
 
   const queryParams = useMemo(
     (): VisualizationQueryParams => ({
@@ -73,11 +63,11 @@ export function useVisualizationApi(
       includeKeywords: true,
       includeParentEntity: true,
     }),
-    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes],
+    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes]
   );
 
   const fetchData = useCallback(async () => {
-    if (!enabled || !documentId || !tenantId || documentId.trim() === "") {
+    if (!enabled || !documentId || !tenantId || documentId.trim() === '') {
       setNodes([]);
       setEdges([]);
       setMetadata(null);
@@ -89,11 +79,7 @@ export function useVisualizationApi(
     setError(null);
 
     try {
-      const result = await service.getRelatedDocuments(
-        documentId,
-        queryParams,
-        accessToken,
-      );
+      const result = await service.getRelatedDocuments(documentId, queryParams, accessToken);
       setNodes(result.nodes);
       setEdges(result.edges);
       setMetadata(result.metadata);
@@ -108,22 +94,12 @@ export function useVisualizationApi(
       } else if (err instanceof Error) {
         setError(err);
       } else {
-        setError(new Error("Unknown error occurred"));
+        setError(new Error('Unknown error occurred'));
       }
     } finally {
       setIsLoading(false);
     }
-  }, [
-    enabled,
-    documentId,
-    tenantId,
-    service,
-    queryParams,
-    accessToken,
-    threshold,
-    limit,
-    depth,
-  ]);
+  }, [enabled, documentId, tenantId, service, queryParams, accessToken, threshold, limit, depth]);
 
   useEffect(() => {
     void fetchData();
@@ -132,16 +108,12 @@ export function useVisualizationApi(
   return { nodes, edges, metadata, isLoading, error, refetch: fetchData };
 }
 
-export function formatVisualizationError(
-  error: VisualizationApiError | Error | null,
-): string {
-  if (!error) return "";
+export function formatVisualizationError(error: VisualizationApiError | Error | null): string {
+  if (!error) return '';
   if (error instanceof VisualizationApiError) {
-    if (error.isNotFound())
-      return "Document not found or has no relationship data yet.";
-    if (error.isUnauthorized())
-      return "You don't have permission to view relationships for this document.";
-    return error.message || "Failed to load document relationships.";
+    if (error.isNotFound()) return 'Document not found or has no relationship data yet.';
+    if (error.isUnauthorized()) return "You don't have permission to view relationships for this document.";
+    return error.message || 'Failed to load document relationships.';
   }
-  return error.message || "An unexpected error occurred.";
+  return error.message || 'An unexpected error occurred.';
 }

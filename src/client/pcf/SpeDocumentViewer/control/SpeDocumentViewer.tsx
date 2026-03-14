@@ -5,8 +5,8 @@
  * Supports preview mode (embed.aspx) and edit mode (embedview).
  */
 
-import * as React from "react";
-import { useCallback, useRef, useState, useEffect } from "react";
+import * as React from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   FluentProvider,
   webLightTheme,
@@ -17,20 +17,20 @@ import {
   MessageBarTitle,
   MessageBarActions,
   Button,
-} from "@fluentui/react-components";
-import { ArrowClockwise24Regular } from "@fluentui/react-icons";
-import { DocumentViewerProps } from "./types";
-import { useDocumentPreview } from "./hooks/useDocumentPreview";
-import { useCheckoutFlow } from "./hooks/useCheckoutFlow";
-import { Toolbar } from "./components/Toolbar";
-import { CheckInDialog } from "./components/CheckInDialog";
-import { DiscardConfirmDialog } from "./components/DiscardConfirmDialog";
-import { BffClient } from "./BffClient";
-import "./css/SpeDocumentViewer.css";
+} from '@fluentui/react-components';
+import { ArrowClockwise24Regular } from '@fluentui/react-icons';
+import { DocumentViewerProps } from './types';
+import { useDocumentPreview } from './hooks/useDocumentPreview';
+import { useCheckoutFlow } from './hooks/useCheckoutFlow';
+import { Toolbar } from './components/Toolbar';
+import { CheckInDialog } from './components/CheckInDialog';
+import { DiscardConfirmDialog } from './components/DiscardConfirmDialog';
+import { BffClient } from './BffClient';
+import './css/SpeDocumentViewer.css';
 
 // Control version - update in all 4 locations per PCF-V9-PACKAGING.md
-const CONTROL_VERSION = "1.0.15";
-const BUILD_DATE = "2026-01-15";
+const CONTROL_VERSION = '1.0.15';
+const BUILD_DATE = '2026-01-15';
 
 /**
  * DocumentViewerApp - Main React component
@@ -78,32 +78,32 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   const OFFICE_EXTENSIONS = React.useMemo(
     () => [
       // Word
-      ".docx",
-      ".doc",
-      ".docm",
-      ".dot",
-      ".dotx",
-      ".dotm",
+      '.docx',
+      '.doc',
+      '.docm',
+      '.dot',
+      '.dotx',
+      '.dotm',
       // Excel
-      ".xlsx",
-      ".xls",
-      ".xlsm",
-      ".xlsb",
-      ".xlt",
-      ".xltx",
-      ".xltm",
+      '.xlsx',
+      '.xls',
+      '.xlsm',
+      '.xlsb',
+      '.xlt',
+      '.xltx',
+      '.xltm',
       // PowerPoint
-      ".pptx",
-      ".ppt",
-      ".pptm",
-      ".pot",
-      ".potx",
-      ".potm",
-      ".pps",
-      ".ppsx",
-      ".ppsm",
+      '.pptx',
+      '.ppt',
+      '.pptm',
+      '.pot',
+      '.potx',
+      '.potm',
+      '.pps',
+      '.ppsx',
+      '.ppsm',
     ],
-    [],
+    []
   );
 
   // Determine if file supports "Open in Web" (Office Online)
@@ -134,14 +134,14 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     accessToken,
     correlationId,
     onCheckoutSuccess: () => {
-      console.log("[SpeDocumentViewer] Checkout succeeded");
+      console.log('[SpeDocumentViewer] Checkout succeeded');
     },
     onCheckInSuccess: () => {
-      console.log("[SpeDocumentViewer] Check-in succeeded, refreshing preview");
+      console.log('[SpeDocumentViewer] Check-in succeeded, refreshing preview');
       refresh();
     },
     onDiscardSuccess: () => {
-      console.log("[SpeDocumentViewer] Discard succeeded, refreshing preview");
+      console.log('[SpeDocumentViewer] Discard succeeded, refreshing preview');
       refresh();
     },
   });
@@ -215,7 +215,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         setIsCheckInDialogOpen(false);
       }
     },
-    [checkIn],
+    [checkIn]
   );
 
   /**
@@ -255,22 +255,19 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   const handleOpenDesktop = useCallback(async () => {
     if (!documentId) return;
 
-    console.log("[SpeDocumentViewer] Open in desktop clicked");
+    console.log('[SpeDocumentViewer] Open in desktop clicked');
 
     try {
-      const response = await bffClient.current.getOpenLinks(
-        documentId,
-        correlationId,
-      );
+      const response = await bffClient.current.getOpenLinks(documentId, correlationId);
 
       if (response.desktopUrl) {
         // Open desktop app using protocol URL
         window.location.href = response.desktopUrl;
       } else {
-        console.warn("[SpeDocumentViewer] No desktop URL available");
+        console.warn('[SpeDocumentViewer] No desktop URL available');
       }
     } catch (err) {
-      console.error("[SpeDocumentViewer] Get open links failed:", err);
+      console.error('[SpeDocumentViewer] Get open links failed:', err);
     }
   }, [documentId, correlationId]);
 
@@ -281,22 +278,19 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     if (!documentId) return;
 
     setIsOpenInWebLoading(true);
-    console.log("[SpeDocumentViewer] Open in web clicked");
+    console.log('[SpeDocumentViewer] Open in web clicked');
 
     try {
-      const response = await bffClient.current.getOpenLinks(
-        documentId,
-        correlationId,
-      );
+      const response = await bffClient.current.getOpenLinks(documentId, correlationId);
 
       if (response.webUrl) {
         // Open Office Online in new tab with security attributes
-        window.open(response.webUrl, "_blank", "noopener,noreferrer");
+        window.open(response.webUrl, '_blank', 'noopener,noreferrer');
       } else {
-        console.warn("[SpeDocumentViewer] No web URL available");
+        console.warn('[SpeDocumentViewer] No web URL available');
       }
     } catch (err) {
-      console.error("[SpeDocumentViewer] Get open links failed:", err);
+      console.error('[SpeDocumentViewer] Get open links failed:', err);
     } finally {
       setIsOpenInWebLoading(false);
     }
@@ -310,18 +304,14 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   const handleDownload = useCallback(async () => {
     if (!documentId) return;
 
-    console.log("[SpeDocumentViewer] Download button clicked");
+    console.log('[SpeDocumentViewer] Download button clicked');
 
     try {
       // Download through BFF proxy (app-only auth on server)
       // This works for documents that users don't have direct SPE permissions for
-      await bffClient.current.downloadDocument(
-        documentId,
-        correlationId,
-        documentInfo?.name,
-      );
+      await bffClient.current.downloadDocument(documentId, correlationId, documentInfo?.name);
     } catch (err) {
-      console.error("[SpeDocumentViewer] Download failed:", err);
+      console.error('[SpeDocumentViewer] Download failed:', err);
     }
   }, [documentId, correlationId, documentInfo?.name]);
 
@@ -332,16 +322,16 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     if (!documentId) return;
 
     setIsDeleteLoading(true);
-    console.log("[SpeDocumentViewer] Delete confirmed");
+    console.log('[SpeDocumentViewer] Delete confirmed');
 
     try {
       await bffClient.current.deleteDocument(documentId, correlationId);
-      console.log("[SpeDocumentViewer] Document deleted successfully");
+      console.log('[SpeDocumentViewer] Document deleted successfully');
 
       // Notify parent
       onDeleted?.();
     } catch (err) {
-      console.error("[SpeDocumentViewer] Delete failed:", err);
+      console.error('[SpeDocumentViewer] Delete failed:', err);
     } finally {
       setIsDeleteLoading(false);
     }
@@ -352,19 +342,16 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
 
   // Style for FluentProvider to ensure proper height inheritance
   const fluentProviderStyle: React.CSSProperties = {
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   };
 
   // Render loading state (initial API call)
   if (isLoading) {
     return (
       <FluentProvider theme={theme} style={fluentProviderStyle}>
-        <div
-          className="spe-document-viewer-container"
-          data-theme={isDarkTheme ? "dark" : "light"}
-        >
+        <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
           <div className="spe-document-viewer-loading">
             <Spinner size="large" label="Loading document..." />
           </div>
@@ -377,10 +364,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   if (error && !isIframeTimedOut) {
     return (
       <FluentProvider theme={theme} style={fluentProviderStyle}>
-        <div
-          className="spe-document-viewer-container"
-          data-theme={isDarkTheme ? "dark" : "light"}
-        >
+        <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
           <div className="spe-document-viewer-error">
             <MessageBar intent="error">
               <MessageBarBody>
@@ -388,11 +372,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
                 {error}
               </MessageBarBody>
               <MessageBarActions>
-                <Button
-                  appearance="transparent"
-                  icon={<ArrowClockwise24Regular />}
-                  onClick={handleRefresh}
-                >
+                <Button appearance="transparent" icon={<ArrowClockwise24Regular />} onClick={handleRefresh}>
                   Retry
                 </Button>
               </MessageBarActions>
@@ -407,10 +387,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   if (!documentId) {
     return (
       <FluentProvider theme={theme} style={fluentProviderStyle}>
-        <div
-          className="spe-document-viewer-container"
-          data-theme={isDarkTheme ? "dark" : "light"}
-        >
+        <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
           <div className="spe-document-viewer-error">
             <MessageBar intent="warning">
               <MessageBarBody>
@@ -425,14 +402,11 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
   }
 
   // Determine which URL to show in iframe based on view mode
-  const iframeSrc = viewMode === "edit" ? editUrl : previewUrl;
+  const iframeSrc = viewMode === 'edit' ? editUrl : previewUrl;
 
   return (
     <FluentProvider theme={theme} style={fluentProviderStyle}>
-      <div
-        className="spe-document-viewer-container"
-        data-theme={isDarkTheme ? "dark" : "light"}
-      >
+      <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
         {/* Toolbar - only shown when showToolbar is true */}
         {showToolbar && (
           <Toolbar
@@ -463,19 +437,14 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         {/* Document lock error banner */}
         {lockError && (
           <div className="spe-document-viewer-banner">
-            <MessageBar intent="warning" style={{ margin: "8px" }}>
+            <MessageBar intent="warning" style={{ margin: '8px' }}>
               <MessageBarBody>
                 <MessageBarTitle>Document Locked</MessageBarTitle>
-                This document is currently being edited by{" "}
-                {lockError.lockedByName}. You can view but not edit until they
-                release it.
+                This document is currently being edited by {lockError.lockedByName}. You can view but not edit until
+                they release it.
               </MessageBarBody>
               <MessageBarActions>
-                <Button
-                  appearance="transparent"
-                  icon={<ArrowClockwise24Regular />}
-                  onClick={handleRefresh}
-                >
+                <Button appearance="transparent" icon={<ArrowClockwise24Regular />} onClick={handleRefresh}>
                   Refresh
                 </Button>
               </MessageBarActions>
@@ -488,18 +457,13 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
           {/* Iframe timeout message with retry */}
           {isIframeTimedOut && (
             <div className="spe-document-viewer-iframe-loading">
-              <MessageBar intent="warning" style={{ maxWidth: "400px" }}>
+              <MessageBar intent="warning" style={{ maxWidth: '400px' }}>
                 <MessageBarBody>
                   <MessageBarTitle>Preview Timed Out</MessageBarTitle>
-                  The document preview took too long to load. This may be due to
-                  a slow connection or a large file.
+                  The document preview took too long to load. This may be due to a slow connection or a large file.
                 </MessageBarBody>
                 <MessageBarActions>
-                  <Button
-                    appearance="transparent"
-                    icon={<ArrowClockwise24Regular />}
-                    onClick={handleRetry}
-                  >
+                  <Button appearance="transparent" icon={<ArrowClockwise24Regular />} onClick={handleRetry}>
                     Retry
                   </Button>
                 </MessageBarActions>
@@ -510,14 +474,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
           {/* Loading overlay */}
           {isIframeLoading && !isIframeTimedOut && (
             <div className="spe-document-viewer-iframe-loading">
-              <Spinner
-                size="medium"
-                label={
-                  viewMode === "edit"
-                    ? "Loading editor..."
-                    : "Loading preview..."
-                }
-              />
+              <Spinner size="medium" label={viewMode === 'edit' ? 'Loading editor...' : 'Loading preview...'} />
             </div>
           )}
 
@@ -528,12 +485,11 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
               src={iframeSrc}
               className="spe-document-viewer-iframe"
               style={{
-                visibility:
-                  isIframeLoading || isIframeTimedOut ? "hidden" : "visible",
+                visibility: isIframeLoading || isIframeTimedOut ? 'hidden' : 'visible',
               }}
               onLoad={handleIframeLoad}
               onError={handleIframeError}
-              title={documentInfo?.name || "Document"}
+              title={documentInfo?.name || 'Document'}
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
               allow="autoplay"
             />
@@ -551,7 +507,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
       {/* Check-In Dialog */}
       <CheckInDialog
         isOpen={isCheckInDialogOpen}
-        documentName={documentInfo?.name || "Document"}
+        documentName={documentInfo?.name || 'Document'}
         isLoading={isCheckInLoading}
         onConfirm={handleCheckInConfirm}
         onCancel={handleCheckInCancel}
@@ -560,7 +516,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
       {/* Discard Confirmation Dialog */}
       <DiscardConfirmDialog
         isOpen={isDiscardDialogOpen}
-        documentName={documentInfo?.name || "Document"}
+        documentName={documentInfo?.name || 'Document'}
         isLoading={isDiscardLoading}
         onConfirm={handleDiscardConfirm}
         onCancel={handleDiscardCancel}

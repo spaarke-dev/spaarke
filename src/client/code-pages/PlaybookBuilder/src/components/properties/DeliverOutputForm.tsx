@@ -17,7 +17,7 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, memo } from "react";
+import { useCallback, memo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -29,15 +29,15 @@ import {
   Switch,
   SpinButton,
   shorthands,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import type {
   OptionOnSelectData,
   SelectionEvents,
   SwitchOnChangeData,
   SpinButtonOnChangeData,
   SpinButtonChangeEvent,
-} from "@fluentui/react-components";
-import type { PlaybookNodeData } from "../../types/playbook";
+} from '@fluentui/react-components';
+import type { PlaybookNodeData } from '../../types/playbook';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -55,13 +55,13 @@ export interface DeliverOutputFormProps {
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -69,13 +69,13 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   templateArea: {
-    minHeight: "120px",
+    minHeight: '120px',
   },
   switchRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
   },
 });
 
@@ -85,73 +85,68 @@ const useStyles = makeStyles({
 
 /** Delivery types matching server-side DeliveryNodeConfig.DeliveryType */
 const DELIVERY_TYPES = [
-  { value: "markdown", label: "Markdown" },
-  { value: "html", label: "HTML" },
-  { value: "text", label: "Plain Text" },
-  { value: "json", label: "JSON" },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'html', label: 'HTML' },
+  { value: 'text', label: 'Plain Text' },
+  { value: 'json', label: 'JSON' },
 ] as const;
 
-type DeliveryType = (typeof DELIVERY_TYPES)[number]["value"];
+type DeliveryType = (typeof DELIVERY_TYPES)[number]['value'];
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export const DeliverOutputForm = memo(function DeliverOutputForm({
-  nodeId,
-  data,
-  onUpdate,
-}: DeliverOutputFormProps) {
+export const DeliverOutputForm = memo(function DeliverOutputForm({ nodeId, data, onUpdate }: DeliverOutputFormProps) {
   const styles = useStyles();
 
   // Read from typed PlaybookNodeData fields
-  const deliveryType = (data.deliveryType as DeliveryType) || "markdown";
-  const template = data.template ?? "";
+  const deliveryType = (data.deliveryType as DeliveryType) || 'markdown';
+  const template = data.template ?? '';
   const includeMetadata = data.includeMetadata ?? false;
   const includeSourceCitations = data.includeSourceCitations ?? false;
   const maxOutputLength = data.maxOutputLength ?? 0;
 
   // Find display label for current value
-  const deliveryTypeLabel =
-    DELIVERY_TYPES.find((dt) => dt.value === deliveryType)?.label ?? "Markdown";
+  const deliveryTypeLabel = DELIVERY_TYPES.find(dt => dt.value === deliveryType)?.label ?? 'Markdown';
 
   // -- Handlers --
 
   const handleDeliveryTypeChange = useCallback(
     (_event: SelectionEvents, item: OptionOnSelectData) => {
       if (item.optionValue) {
-        onUpdate("deliveryType", item.optionValue);
+        onUpdate('deliveryType', item.optionValue);
       }
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   const handleTemplateChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      onUpdate("template", e.target.value);
+      onUpdate('template', e.target.value);
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   const handleMetadataToggle = useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, item: SwitchOnChangeData) => {
-      onUpdate("includeMetadata", item.checked);
+      onUpdate('includeMetadata', item.checked);
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   const handleCitationsToggle = useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, item: SwitchOnChangeData) => {
-      onUpdate("includeSourceCitations", item.checked);
+      onUpdate('includeSourceCitations', item.checked);
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   const handleMaxLengthChange = useCallback(
     (_e: SpinButtonChangeEvent, item: SpinButtonOnChangeData) => {
-      onUpdate("maxOutputLength", item.value ?? 0);
+      onUpdate('maxOutputLength', item.value ?? 0);
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   // -- Render --
@@ -170,15 +165,13 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
           selectedOptions={[deliveryType]}
           onOptionSelect={handleDeliveryTypeChange}
         >
-          {DELIVERY_TYPES.map((dt) => (
+          {DELIVERY_TYPES.map(dt => (
             <Option key={dt.value} value={dt.value}>
               {dt.label}
             </Option>
           ))}
         </Dropdown>
-        <Text className={styles.fieldHint}>
-          Format used when rendering the output content
-        </Text>
+        <Text className={styles.fieldHint}>Format used when rendering the output content</Text>
       </div>
 
       {/* Handlebars Template */}
@@ -193,18 +186,18 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
           value={template}
           onChange={handleTemplateChange}
           placeholder={
-            "Handlebars template with node output variables:\n\n" +
-            "## Summary\n" +
-            "{{summarize.text}}\n\n" +
-            "## Details\n" +
-            "{{extract_entities.text}}\n\n" +
-            "Leave empty for auto-assembly of all previous outputs."
+            'Handlebars template with node output variables:\n\n' +
+            '## Summary\n' +
+            '{{summarize.text}}\n\n' +
+            '## Details\n' +
+            '{{extract_entities.text}}\n\n' +
+            'Leave empty for auto-assembly of all previous outputs.'
           }
           resize="vertical"
         />
         <Text className={styles.fieldHint}>
-          {"Use {{outputVariable.text}} or {{outputVariable.output.field}} syntax. " +
-            "Leave empty to auto-assemble all previous node outputs."}
+          {'Use {{outputVariable.text}} or {{outputVariable.output.field}} syntax. ' +
+            'Leave empty to auto-assemble all previous node outputs.'}
         </Text>
       </div>
 
@@ -213,30 +206,18 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
         <Label htmlFor={`${nodeId}-includeMetadata`} size="small">
           Include Metadata
         </Label>
-        <Switch
-          id={`${nodeId}-includeMetadata`}
-          checked={includeMetadata}
-          onChange={handleMetadataToggle}
-        />
+        <Switch id={`${nodeId}-includeMetadata`} checked={includeMetadata} onChange={handleMetadataToggle} />
       </div>
-      <Text className={styles.fieldHint}>
-        Append execution metadata (timestamps, run ID, confidence) to the output
-      </Text>
+      <Text className={styles.fieldHint}>Append execution metadata (timestamps, run ID, confidence) to the output</Text>
 
       {/* Include Source Citations */}
       <div className={styles.switchRow}>
         <Label htmlFor={`${nodeId}-includeCitations`} size="small">
           Include Source Citations
         </Label>
-        <Switch
-          id={`${nodeId}-includeCitations`}
-          checked={includeSourceCitations}
-          onChange={handleCitationsToggle}
-        />
+        <Switch id={`${nodeId}-includeCitations`} checked={includeSourceCitations} onChange={handleCitationsToggle} />
       </div>
-      <Text className={styles.fieldHint}>
-        Append source citation references to the output
-      </Text>
+      <Text className={styles.fieldHint}>Append source citation references to the output</Text>
 
       {/* Max Output Length */}
       <div className={styles.field}>
@@ -253,8 +234,7 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({
           onChange={handleMaxLengthChange}
         />
         <Text className={styles.fieldHint}>
-          Maximum characters in output (0 = unlimited). Content beyond this
-          limit is truncated.
+          Maximum characters in output (0 = unlimited). Content beyond this limit is truncated.
         </Text>
       </div>
     </div>

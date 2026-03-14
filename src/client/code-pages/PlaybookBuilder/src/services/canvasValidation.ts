@@ -13,12 +13,9 @@
  * @see design.md Section "Canvas-Time Validation (PlaybookBuilder UI)"
  */
 
-import type { Node, Edge } from "@xyflow/react";
-import type { PlaybookNodeData } from "../types/canvas";
-import type {
-  PromptSchema,
-  OutputFieldDefinition,
-} from "../types/promptSchema";
+import type { Node, Edge } from '@xyflow/react';
+import type { PlaybookNodeData } from '../types/canvas';
+import type { PromptSchema, OutputFieldDefinition } from '../types/promptSchema';
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -31,14 +28,9 @@ export interface PromptSchemaValidation {
   /** Canvas node ID that the validation applies to. */
   nodeId: string;
   /** Severity: "error" prevents save, "warning" is informational. */
-  severity: "error" | "warning";
+  severity: 'error' | 'warning';
   /** Machine-readable rule identifier. */
-  rule:
-    | "missing-task"
-    | "unresolvable-choices"
-    | "output-coverage"
-    | "choice-consistency"
-    | "type-compatibility";
+  rule: 'missing-task' | 'unresolvable-choices' | 'output-coverage' | 'choice-consistency' | 'type-compatibility';
   /** Human-readable validation message. */
   message: string;
 }
@@ -86,7 +78,7 @@ interface TemplateRef {
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[PlaybookBuilder:CanvasValidation]";
+const LOG_PREFIX = '[PlaybookBuilder:CanvasValidation]';
 
 /**
  * Regex to extract Handlebars template refs:  {{output_VAR.output.FIELD}}
@@ -103,7 +95,7 @@ const CHOICES_REF_RE = /^downstream:(\w+)\.(.+)$/;
 /**
  * AI node types that can have prompt schemas.
  */
-const AI_NODE_TYPES = new Set(["aiAnalysis", "aiCompletion"]);
+const AI_NODE_TYPES = new Set(['aiAnalysis', 'aiCompletion']);
 
 /**
  * Type compatibility map: OutputFieldType -> compatible FieldMappingTypes.
@@ -111,11 +103,11 @@ const AI_NODE_TYPES = new Set(["aiAnalysis", "aiCompletion"]);
  * UpdateRecord field mapping types are: string, choice, boolean, number.
  */
 const TYPE_COMPAT: Record<string, string[]> = {
-  string: ["string", "choice"],
-  number: ["number"],
-  boolean: ["boolean"],
-  array: ["string"],
-  object: ["string"],
+  string: ['string', 'choice'],
+  number: ['number'],
+  boolean: ['boolean'],
+  array: ['string'],
+  object: ['string'],
 };
 
 // ---------------------------------------------------------------------------
@@ -129,10 +121,7 @@ const TYPE_COMPAT: Record<string, string[]> = {
  * @param edges - All canvas edges.
  * @returns Array of validation results (errors and warnings).
  */
-export function validatePromptSchemaNodes(
-  nodes: Node<PlaybookNodeData>[],
-  edges: Edge[],
-): PromptSchemaValidation[] {
+export function validatePromptSchemaNodes(nodes: Node<PlaybookNodeData>[], edges: Edge[]): PromptSchemaValidation[] {
   const results: PromptSchemaValidation[] = [];
 
   // Build lookup maps
@@ -160,40 +149,25 @@ export function validatePromptSchemaNodes(
     results.push(...validateMissingTask(node.id, schema));
 
     // Gather downstream node info for graph-aware rules
-    const downstreamInfos = collectDownstreamInfo(
-      node.id,
-      outgoingEdges,
-      nodeById,
-    );
+    const downstreamInfos = collectDownstreamInfo(node.id, outgoingEdges, nodeById);
 
     // Rule (b): Unresolvable $choices
-    results.push(
-      ...validateUnresolvableChoices(
-        node.id,
-        schema,
-        nodeByOutputVar,
-        downstreamInfos,
-      ),
-    );
+    results.push(...validateUnresolvableChoices(node.id, schema, nodeByOutputVar, downstreamInfos));
 
     // Rule (c): Output coverage
     results.push(...validateOutputCoverage(node.id, schema, downstreamInfos));
 
     // Rule (d): Choice consistency
-    results.push(
-      ...validateChoiceConsistency(node.id, schema, downstreamInfos),
-    );
+    results.push(...validateChoiceConsistency(node.id, schema, downstreamInfos));
 
     // Rule (e): Type compatibility
-    results.push(
-      ...validateTypeCompatibility(node.id, schema, downstreamInfos),
-    );
+    results.push(...validateTypeCompatibility(node.id, schema, downstreamInfos));
   }
 
   if (results.length > 0) {
     console.info(
-      `${LOG_PREFIX} Validation found ${results.filter((r) => r.severity === "error").length} error(s), ` +
-        `${results.filter((r) => r.severity === "warning").length} warning(s)`,
+      `${LOG_PREFIX} Validation found ${results.filter(r => r.severity === 'error').length} error(s), ` +
+        `${results.filter(r => r.severity === 'warning').length} warning(s)`
     );
   }
 
@@ -203,17 +177,15 @@ export function validatePromptSchemaNodes(
 /**
  * Check whether validation results contain any errors (which should prevent save).
  */
-export function hasValidationErrors(
-  results: PromptSchemaValidation[],
-): boolean {
-  return results.some((r) => r.severity === "error");
+export function hasValidationErrors(results: PromptSchemaValidation[]): boolean {
+  return results.some(r => r.severity === 'error');
 }
 
 /**
  * Group validation results by node ID for easy consumption by node components.
  */
 export function groupValidationsByNode(
-  results: PromptSchemaValidation[],
+  results: PromptSchemaValidation[]
 ): Map<string, { errors: string[]; warnings: string[] }> {
   const grouped = new Map<string, { errors: string[]; warnings: string[] }>();
 
@@ -222,7 +194,7 @@ export function groupValidationsByNode(
       grouped.set(r.nodeId, { errors: [], warnings: [] });
     }
     const entry = grouped.get(r.nodeId)!;
-    if (r.severity === "error") {
+    if (r.severity === 'error') {
       entry.errors.push(r.message);
     } else {
       entry.warnings.push(r.message);
@@ -239,22 +211,14 @@ export function groupValidationsByNode(
 /**
  * Rule (a): Missing task — error if JPS format detected and instruction.task is empty/missing.
  */
-function validateMissingTask(
-  nodeId: string,
-  schema: PromptSchema,
-): PromptSchemaValidation[] {
-  if (
-    !schema.instruction ||
-    typeof schema.instruction.task !== "string" ||
-    schema.instruction.task.trim() === ""
-  ) {
+function validateMissingTask(nodeId: string, schema: PromptSchema): PromptSchemaValidation[] {
+  if (!schema.instruction || typeof schema.instruction.task !== 'string' || schema.instruction.task.trim() === '') {
     return [
       {
         nodeId,
-        severity: "error",
-        rule: "missing-task",
-        message:
-          "instruction.task is required. Provide the specific work the AI must perform.",
+        severity: 'error',
+        rule: 'missing-task',
+        message: 'instruction.task is required. Provide the specific work the AI must perform.',
       },
     ];
   }
@@ -269,7 +233,7 @@ function validateUnresolvableChoices(
   nodeId: string,
   schema: PromptSchema,
   nodeByOutputVar: Map<string, Node<PlaybookNodeData>>,
-  downstreamInfos: DownstreamNodeInfo[],
+  downstreamInfos: DownstreamNodeInfo[]
 ): PromptSchemaValidation[] {
   const results: PromptSchemaValidation[] = [];
   const outputFields = schema.output?.fields ?? [];
@@ -281,8 +245,8 @@ function validateUnresolvableChoices(
     if (!parsed) {
       results.push({
         nodeId,
-        severity: "error",
-        rule: "unresolvable-choices",
+        severity: 'error',
+        rule: 'unresolvable-choices',
         message: `output.fields["${field.name}"].$choices has invalid format: "${field.$choices}". Expected "downstream:nodeVar.fieldName".`,
       });
       continue;
@@ -293,51 +257,44 @@ function validateUnresolvableChoices(
     if (!targetNode) {
       results.push({
         nodeId,
-        severity: "error",
-        rule: "unresolvable-choices",
+        severity: 'error',
+        rule: 'unresolvable-choices',
         message: `output.fields["${field.name}"].$choices references node "${parsed.outputVariable}" which does not exist on the canvas.`,
       });
       continue;
     }
 
     // Check that the referenced node is a downstream node with a matching field
-    const matchingDownstream = downstreamInfos.find(
-      (d) => d.outputVariable === parsed.outputVariable,
-    );
+    const matchingDownstream = downstreamInfos.find(d => d.outputVariable === parsed.outputVariable);
     if (!matchingDownstream) {
       // The node exists but is not directly downstream — still flag it
       results.push({
         nodeId,
-        severity: "error",
-        rule: "unresolvable-choices",
+        severity: 'error',
+        rule: 'unresolvable-choices',
         message: `output.fields["${field.name}"].$choices references node "${parsed.outputVariable}" which is not a downstream node.`,
       });
       continue;
     }
 
     // Check that the downstream node has a matching field in fieldMappings
-    const matchingField = matchingDownstream.fieldMappings.find(
-      (fm) => fm.field === parsed.fieldName,
-    );
+    const matchingField = matchingDownstream.fieldMappings.find(fm => fm.field === parsed.fieldName);
     if (!matchingField) {
       results.push({
         nodeId,
-        severity: "error",
-        rule: "unresolvable-choices",
+        severity: 'error',
+        rule: 'unresolvable-choices',
         message: `output.fields["${field.name}"].$choices references field "${parsed.fieldName}" on node "${parsed.outputVariable}", but that node has no matching fieldMapping.`,
       });
       continue;
     }
 
     // Check that the matching field has options (i.e., it's a choice field)
-    if (
-      !matchingField.options ||
-      Object.keys(matchingField.options).length === 0
-    ) {
+    if (!matchingField.options || Object.keys(matchingField.options).length === 0) {
       results.push({
         nodeId,
-        severity: "error",
-        rule: "unresolvable-choices",
+        severity: 'error',
+        rule: 'unresolvable-choices',
         message: `output.fields["${field.name}"].$choices references field "${parsed.fieldName}" on node "${parsed.outputVariable}", but that field has no options defined.`,
       });
     }
@@ -353,12 +310,10 @@ function validateUnresolvableChoices(
 function validateOutputCoverage(
   nodeId: string,
   schema: PromptSchema,
-  downstreamInfos: DownstreamNodeInfo[],
+  downstreamInfos: DownstreamNodeInfo[]
 ): PromptSchemaValidation[] {
   const results: PromptSchemaValidation[] = [];
-  const outputFieldNames = new Set(
-    (schema.output?.fields ?? []).map((f) => f.name),
-  );
+  const outputFieldNames = new Set((schema.output?.fields ?? []).map(f => f.name));
 
   for (const downstream of downstreamInfos) {
     for (const ref of downstream.templateRefs) {
@@ -383,7 +338,7 @@ function validateOutputCoverage(
   // Note: we receive nodeId but need outputVariable. Let's collect refs differently.
 
   // Collect all template refs across all downstream nodes
-  const allDownstreamRefs = downstreamInfos.flatMap((d) => d.templateRefs);
+  const allDownstreamRefs = downstreamInfos.flatMap(d => d.templateRefs);
 
   // We don't have the AI node's outputVariable in this function,
   // so we match by checking if any downstream ref's fieldName is
@@ -407,8 +362,8 @@ function validateOutputCoverage(
       // if the schema has output fields at all (indicating JPS is being used).
       results.push({
         nodeId,
-        severity: "warning",
-        rule: "output-coverage",
+        severity: 'warning',
+        rule: 'output-coverage',
         message: `Downstream node references "{{${ref.outputVariable}.output.${ref.fieldName}}}" but output.fields does not include a field named "${ref.fieldName}".`,
       });
     }
@@ -425,7 +380,7 @@ function validateOutputCoverage(
 function validateChoiceConsistency(
   nodeId: string,
   schema: PromptSchema,
-  downstreamInfos: DownstreamNodeInfo[],
+  downstreamInfos: DownstreamNodeInfo[]
 ): PromptSchemaValidation[] {
   const results: PromptSchemaValidation[] = [];
   const outputFields = schema.output?.fields ?? [];
@@ -439,7 +394,7 @@ function validateChoiceConsistency(
   for (const downstream of downstreamInfos) {
     for (const mapping of downstream.fieldMappings) {
       // Only check choice-type field mappings that have options
-      if (mapping.type !== "choice" || !mapping.options) continue;
+      if (mapping.type !== 'choice' || !mapping.options) continue;
       if (Object.keys(mapping.options).length === 0) continue;
 
       // Find which output field name this mapping's value template references
@@ -450,14 +405,13 @@ function validateChoiceConsistency(
 
         // Output field exists — check if it has $choices or enum
         const hasChoices = Boolean(outputField.$choices);
-        const hasEnum =
-          Array.isArray(outputField.enum) && outputField.enum.length > 0;
+        const hasEnum = Array.isArray(outputField.enum) && outputField.enum.length > 0;
 
         if (!hasChoices && !hasEnum) {
           results.push({
             nodeId,
-            severity: "warning",
-            rule: "choice-consistency",
+            severity: 'warning',
+            rule: 'choice-consistency',
             message:
               `output.fields["${ref.fieldName}"] maps to choice field "${mapping.field}" on node "${downstream.outputVariable}" ` +
               `which has ${Object.keys(mapping.options).length} options, but the output field has no $choices or enum. ` +
@@ -478,7 +432,7 @@ function validateChoiceConsistency(
 function validateTypeCompatibility(
   nodeId: string,
   schema: PromptSchema,
-  downstreamInfos: DownstreamNodeInfo[],
+  downstreamInfos: DownstreamNodeInfo[]
 ): PromptSchemaValidation[] {
   const results: PromptSchemaValidation[] = [];
   const outputFields = schema.output?.fields ?? [];
@@ -502,12 +456,12 @@ function validateTypeCompatibility(
         if (compatibleTypes && !compatibleTypes.includes(mapping.type)) {
           results.push({
             nodeId,
-            severity: "warning",
-            rule: "type-compatibility",
+            severity: 'warning',
+            rule: 'type-compatibility',
             message:
               `output.fields["${ref.fieldName}"] has type "${outputField.type}" but downstream field "${mapping.field}" ` +
               `on node "${downstream.outputVariable}" expects type "${mapping.type}". ` +
-              `Compatible types for "${outputField.type}" are: ${compatibleTypes.join(", ")}.`,
+              `Compatible types for "${outputField.type}" are: ${compatibleTypes.join(', ')}.`,
           });
         }
       }
@@ -543,7 +497,7 @@ function buildOutgoingEdgeMap(edges: Edge[]): Map<string, string[]> {
 function collectDownstreamInfo(
   aiNodeId: string,
   outgoingEdges: Map<string, string[]>,
-  nodeById: Map<string, Node<PlaybookNodeData>>,
+  nodeById: Map<string, Node<PlaybookNodeData>>
 ): DownstreamNodeInfo[] {
   const downstreamIds = outgoingEdges.get(aiNodeId) ?? [];
   const infos: DownstreamNodeInfo[] = [];
@@ -565,36 +519,26 @@ function collectDownstreamInfo(
  * Parse a downstream canvas node to extract its fieldMappings and template refs.
  * Returns null if the node can't be parsed (graceful degradation).
  */
-function parseDownstreamNode(
-  node: Node<PlaybookNodeData>,
-): DownstreamNodeInfo | null {
+function parseDownstreamNode(node: Node<PlaybookNodeData>): DownstreamNodeInfo | null {
   try {
-    const outputVariable =
-      (node.data.outputVariable as string) ?? `output_${node.id}`;
+    const outputVariable = (node.data.outputVariable as string) ?? `output_${node.id}`;
     const fieldMappings: ParsedFieldMapping[] = [];
     const templateRefs: TemplateRef[] = [];
 
     // Parse configJson for fieldMappings
     const configJsonStr = node.data.configJson;
-    if (typeof configJsonStr === "string" && configJsonStr.length > 0) {
+    if (typeof configJsonStr === 'string' && configJsonStr.length > 0) {
       const parsed = JSON.parse(configJsonStr);
 
       // Extract fieldMappings array (UpdateRecord nodes)
       if (Array.isArray(parsed.fieldMappings)) {
         for (const fm of parsed.fieldMappings) {
-          if (
-            fm &&
-            typeof fm.field === "string" &&
-            typeof fm.type === "string"
-          ) {
+          if (fm && typeof fm.field === 'string' && typeof fm.type === 'string') {
             const mapping: ParsedFieldMapping = {
               field: fm.field,
               type: fm.type,
-              value: typeof fm.value === "string" ? fm.value : "",
-              options:
-                fm.options && typeof fm.options === "object"
-                  ? fm.options
-                  : undefined,
+              value: typeof fm.value === 'string' ? fm.value : '',
+              options: fm.options && typeof fm.options === 'object' ? fm.options : undefined,
             };
             fieldMappings.push(mapping);
 
@@ -605,16 +549,12 @@ function parseDownstreamNode(
       }
 
       // Also scan legacy "fields" dict for template refs
-      if (
-        parsed.fields &&
-        typeof parsed.fields === "object" &&
-        !Array.isArray(parsed.fields)
-      ) {
+      if (parsed.fields && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields)) {
         for (const [field, value] of Object.entries(parsed.fields)) {
-          if (typeof value === "string") {
+          if (typeof value === 'string') {
             fieldMappings.push({
               field,
-              type: "string",
+              type: 'string',
               value,
             });
             templateRefs.push(...extractTemplateRefs(value));
@@ -623,24 +563,22 @@ function parseDownstreamNode(
       }
 
       // Scan template fields (deliverOutput, sendEmail, etc.)
-      for (const key of ["template", "body", "subject", "description"]) {
-        if (typeof parsed[key] === "string") {
+      for (const key of ['template', 'body', 'subject', 'description']) {
+        if (typeof parsed[key] === 'string') {
           templateRefs.push(...extractTemplateRefs(parsed[key]));
         }
       }
     }
 
     // Also scan template-like fields directly on node data
-    if (typeof node.data.template === "string") {
+    if (typeof node.data.template === 'string') {
       templateRefs.push(...extractTemplateRefs(node.data.template as string));
     }
-    if (typeof node.data.emailBody === "string") {
+    if (typeof node.data.emailBody === 'string') {
       templateRefs.push(...extractTemplateRefs(node.data.emailBody as string));
     }
-    if (typeof node.data.emailSubject === "string") {
-      templateRefs.push(
-        ...extractTemplateRefs(node.data.emailSubject as string),
-      );
+    if (typeof node.data.emailSubject === 'string') {
+      templateRefs.push(...extractTemplateRefs(node.data.emailSubject as string));
     }
 
     return {
@@ -652,10 +590,7 @@ function parseDownstreamNode(
     };
   } catch (err) {
     // Graceful: if downstream node can't be parsed, skip it
-    console.warn(
-      `${LOG_PREFIX} Failed to parse downstream node ${node.id}:`,
-      err,
-    );
+    console.warn(`${LOG_PREFIX} Failed to parse downstream node ${node.id}:`, err);
     return null;
   }
 }
@@ -686,9 +621,7 @@ function extractTemplateRefs(value: string): TemplateRef[] {
  * Parse a $choices reference string like "downstream:nodeVar.fieldName".
  * Returns the parsed parts or null if the format is invalid.
  */
-function parseChoicesRef(
-  ref: string,
-): { outputVariable: string; fieldName: string } | null {
+function parseChoicesRef(ref: string): { outputVariable: string; fieldName: string } | null {
   const match = CHOICES_REF_RE.exec(ref);
   if (!match) return null;
   return {

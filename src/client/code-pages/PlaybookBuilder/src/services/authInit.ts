@@ -18,13 +18,8 @@
  * @see ADR-008 - Endpoint filters for auth
  */
 
-import {
-  initAuth,
-  getAuthProvider,
-  authenticatedFetch,
-  AuthError,
-} from "@spaarke/auth";
-import type { SpaarkeAuthProvider } from "@spaarke/auth";
+import { initAuth, getAuthProvider, authenticatedFetch, AuthError } from '@spaarke/auth';
+import type { SpaarkeAuthProvider } from '@spaarke/auth';
 
 // Re-export core symbols for consumers
 export { initAuth, getAuthProvider, authenticatedFetch, AuthError };
@@ -82,8 +77,7 @@ export function getClientUrl(): string | null {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top!);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
   } catch {
     /* cross-origin */
   }
@@ -119,5 +113,5 @@ export function isSameOriginDataverse(): boolean {
     }
   }
   const hostname = window.location.hostname.toLowerCase();
-  return hostname.endsWith(".dynamics.com");
+  return hostname.endsWith('.dynamics.com');
 }

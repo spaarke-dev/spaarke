@@ -27,18 +27,11 @@
  *   - makeStyles with semantic tokens -- ZERO hardcoded colors
  */
 
-import * as React from "react";
-import {
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { LookupField } from "./LookupField";
-import { extractEmailFromUserName } from "./emailHelpers";
-import type { ILookupItem } from "./LookupField";
+import * as React from 'react';
+import { Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { LookupField } from './LookupField';
+import { extractEmailFromUserName } from './emailHelpers';
+import type { ILookupItem } from './LookupField';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -98,14 +91,14 @@ export interface ISendEmailStepProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
 
   headerText: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   stepTitle: {
@@ -116,14 +109,14 @@ const useStyles = makeStyles({
   },
 
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
 
   labelRow: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
   },
   requiredMark: {
@@ -151,15 +144,13 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
   onEmailBodyChange,
   onSearchUsers,
   headerContent,
-  infoNote = "This email will be saved as a draft activity.",
+  infoNote = 'This email will be saved as a draft activity.',
   messageRows = 15,
 }) => {
   const styles = useStyles();
 
   // Track the selected user lookup item for the LookupField display
-  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(
-    null,
-  );
+  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(null);
 
   const handleUserSelect = React.useCallback(
     (item: ILookupItem | null) => {
@@ -168,21 +159,18 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         const email = extractEmailFromUserName(item.name);
         onEmailToChange(email || item.name);
       } else {
-        onEmailToChange("");
+        onEmailToChange('');
       }
     },
-    [onEmailToChange],
+    [onEmailToChange]
   );
 
-  const renderLabel = (
-    text: string,
-    required?: boolean,
-  ): React.ReactElement => (
+  const renderLabel = (text: string, required?: boolean): React.ReactElement => (
     <span className={styles.labelRow}>
       {text}
       {required && (
         <span aria-hidden="true" className={styles.requiredMark}>
-          {" *"}
+          {' *'}
         </span>
       )}
     </span>
@@ -217,20 +205,20 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         />
 
         {/* Subject */}
-        <Field label={renderLabel("Subject", true)} required>
+        <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
         </Field>
 
         {/* Body */}
-        <Field label={renderLabel("Message", true)} required>
+        <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={messageRows}
             resize="vertical"
@@ -247,4 +235,4 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
   );
 };
 
-SendEmailStep.displayName = "SendEmailStep";
+SendEmailStep.displayName = 'SendEmailStep';

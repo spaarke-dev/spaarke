@@ -10,16 +10,9 @@
  * - ADR-021: Fluent UI v9 exclusively, design tokens only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Link,
-  Badge,
-  Text,
-  shorthands,
-} from "@fluentui/react-components";
-import { ChevronRight20Regular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Link, Badge, Text, shorthands } from '@fluentui/react-components';
+import { ChevronRight20Regular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -47,43 +40,43 @@ const BADGE_THRESHOLD = 10;
 
 const useStyles = makeStyles({
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
-    marginTop: "auto",
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
+    marginTop: 'auto',
   },
   linkContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     columnGap: tokens.spacingHorizontalXS,
   },
   link: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorBrandForeground1,
-    textDecoration: "none",
-    cursor: "pointer",
-    transitionProperty: "color",
+    textDecoration: 'none',
+    cursor: 'pointer',
+    transitionProperty: 'color',
     transitionDuration: tokens.durationNormal,
-    "&:hover": {
+    '&:hover': {
       color: tokens.colorBrandForeground2,
-      textDecoration: "underline",
+      textDecoration: 'underline',
     },
-    "&:focus": {
-      outlineStyle: "solid",
-      outlineWidth: "2px",
+    '&:focus': {
+      outlineStyle: 'solid',
+      outlineWidth: '2px',
       outlineColor: tokens.colorStrokeFocus2,
-      outlineOffset: "2px",
+      outlineOffset: '2px',
     },
   },
   chevron: {
-    fontSize: "12px",
+    fontSize: '12px',
     marginLeft: tokens.spacingHorizontalXXS,
-    color: "inherit",
+    color: 'inherit',
   },
   badge: {
     marginLeft: tokens.spacingHorizontalXS,
@@ -97,17 +90,12 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const WidgetFooter: React.FC<IWidgetFooterProps> = ({
-  totalEventCount,
-  displayedCount,
-  onViewAllClick,
-}) => {
+export const WidgetFooter: React.FC<IWidgetFooterProps> = ({ totalEventCount, displayedCount, onViewAllClick }) => {
   const styles = useStyles();
 
   // Determine if we should show the badge
   // Show badge when there are more events than displayed AND total exceeds threshold
-  const showBadge =
-    totalEventCount > displayedCount && totalEventCount > BADGE_THRESHOLD;
+  const showBadge = totalEventCount > displayedCount && totalEventCount > BADGE_THRESHOLD;
 
   // Calculate remaining events not shown
   const remainingCount = totalEventCount - displayedCount;
@@ -115,10 +103,8 @@ export const WidgetFooter: React.FC<IWidgetFooterProps> = ({
   /**
    * Handle keyboard navigation for the link
    */
-  const handleKeyDown = (
-    event: React.KeyboardEvent<HTMLAnchorElement>,
-  ): void => {
-    if (event.key === "Enter" || event.key === " ") {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLAnchorElement>): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onViewAllClick();
     }
@@ -133,9 +119,7 @@ export const WidgetFooter: React.FC<IWidgetFooterProps> = ({
           onKeyDown={handleKeyDown}
           tabIndex={0}
           aria-label={
-            showBadge
-              ? `View all events (${totalEventCount} total, ${remainingCount} more)`
-              : "View all events"
+            showBadge ? `View all events (${totalEventCount} total, ${remainingCount} more)` : 'View all events'
           }
         >
           All Events

@@ -12,8 +12,8 @@
  * @see ADR-022 - React 16 APIs only in PCF controls
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { authenticatedFetch } from "@spaarke/auth";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { authenticatedFetch } from '@spaarke/auth';
 
 /**
  * API response shape for countOnly=true calls.
@@ -44,7 +44,7 @@ export interface UseRelatedDocumentCountResult {
 }
 
 /** Default BFF API URL when not configured via PCF properties */
-const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
 /**
  * Hook to fetch the count of semantically related documents.
@@ -57,7 +57,7 @@ const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
 export function useRelatedDocumentCount(
   documentId: string,
   tenantId: string | undefined,
-  apiBaseUrl: string | undefined,
+  apiBaseUrl: string | undefined
 ): UseRelatedDocumentCountResult {
   const [count, setCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -79,10 +79,8 @@ export function useRelatedDocumentCount(
 
   const fetchCount = useCallback(async () => {
     // Skip if missing document ID
-    if (!documentId || documentId.trim() === "") {
-      console.warn(
-        "[useRelatedDocumentCount] No documentId available — skipping fetch.",
-      );
+    if (!documentId || documentId.trim() === '') {
+      console.warn('[useRelatedDocumentCount] No documentId available — skipping fetch.');
       setCount(0);
       setError(null);
       setIsLoading(false);
@@ -95,10 +93,10 @@ export function useRelatedDocumentCount(
 
     try {
       // Build URL with countOnly=true for lightweight response
-      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, "");
-      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ""}`;
+      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, '');
+      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
 
-      console.log("[useRelatedDocumentCount] Fetching count:", {
+      console.log('[useRelatedDocumentCount] Fetching count:', {
         documentId,
         baseUrl,
         url,
@@ -106,8 +104,8 @@ export function useRelatedDocumentCount(
 
       // Use authenticatedFetch from @spaarke/auth — handles MSAL token acquisition
       const response = await authenticatedFetch(url, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
       });
 
       // Guard against stale responses (documentId changed while fetching)
@@ -125,7 +123,7 @@ export function useRelatedDocumentCount(
           setError("You don't have permission to view related documents.");
           return;
         }
-        setError("Failed to load related document count.");
+        setError('Failed to load related document count.');
         return;
       }
 
@@ -136,7 +134,7 @@ export function useRelatedDocumentCount(
       }
 
       const total = data.metadata?.totalResults ?? 0;
-      console.log("[useRelatedDocumentCount] Got count:", total);
+      console.log('[useRelatedDocumentCount] Got count:', total);
       setCount(total);
       setLastUpdated(new Date());
     } catch (err) {
@@ -144,12 +142,12 @@ export function useRelatedDocumentCount(
         return;
       }
 
-      console.error("[useRelatedDocumentCount] Error fetching count:", err);
+      console.error('[useRelatedDocumentCount] Error fetching count:', err);
 
-      if (err instanceof Error && err.message.includes("auth")) {
-        setError("Authentication error. Please refresh the page.");
+      if (err instanceof Error && err.message.includes('auth')) {
+        setError('Authentication error. Please refresh the page.');
       } else {
-        setError("Unable to load related documents. Please try again.");
+        setError('Unable to load related documents. Please try again.');
       }
     } finally {
       if (mountedRef.current && currentFetchId === fetchIdRef.current) {

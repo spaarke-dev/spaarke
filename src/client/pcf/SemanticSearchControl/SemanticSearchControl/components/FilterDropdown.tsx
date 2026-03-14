@@ -7,47 +7,39 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useMemo, useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Dropdown,
-  Option,
-  Label,
-  Spinner,
-  useId,
-} from "@fluentui/react-components";
-import { IFilterDropdownProps, FilterOption } from "../types";
+import * as React from 'react';
+import { useMemo, useCallback } from 'react';
+import { makeStyles, tokens, Dropdown, Option, Label, Spinner, useId } from '@fluentui/react-components';
+import { IFilterDropdownProps, FilterOption } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    width: "100%",
+    width: '100%',
     minWidth: 0,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   label: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
   },
   dropdown: {
-    width: "100%",
-    maxWidth: "100%",
+    width: '100%',
+    maxWidth: '100%',
     minWidth: 0,
-    boxSizing: "border-box" as const,
-    "& > button": {
-      width: "100%",
-      maxWidth: "100%",
+    boxSizing: 'border-box' as const,
+    '& > button': {
+      width: '100%',
+      maxWidth: '100%',
       minWidth: 0,
-      boxSizing: "border-box" as const,
+      boxSizing: 'border-box' as const,
     },
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
 });
@@ -71,26 +63,23 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
   multiSelect = true,
 }) => {
   const styles = useStyles();
-  const dropdownId = useId("filter-dropdown");
+  const dropdownId = useId('filter-dropdown');
 
   // Handle selection change
   const handleOptionSelect = useCallback(
-    (
-      _ev: React.SyntheticEvent,
-      data: { optionValue?: string; selectedOptions: string[] },
-    ) => {
+    (_ev: React.SyntheticEvent, data: { optionValue?: string; selectedOptions: string[] }) => {
       onSelectionChange(data.selectedOptions);
     },
-    [onSelectionChange],
+    [onSelectionChange]
   );
 
   // Format selected value text
   const selectedValue = useMemo(() => {
     if (selectedKeys.length === 0) {
-      return "All";
+      return 'All';
     }
     if (selectedKeys.length === 1) {
-      const selectedOption = options.find((o) => o.key === selectedKeys[0]);
+      const selectedOption = options.find(o => o.key === selectedKeys[0]);
       return selectedOption?.label ?? selectedKeys[0];
     }
     return `${selectedKeys.length} selected`;
@@ -122,7 +111,7 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
         id={dropdownId}
         className={styles.dropdown}
         button={{
-          style: { width: "100%", minWidth: 0, boxSizing: "border-box" },
+          style: { width: '100%', minWidth: 0, boxSizing: 'border-box' },
         }}
         placeholder="All"
         value={selectedValue}
@@ -131,7 +120,7 @@ export const FilterDropdown: React.FC<IFilterDropdownProps> = ({
         disabled={disabled}
         multiselect={multiSelect}
       >
-        {options.map((option) => (
+        {options.map(option => (
           <Option key={option.key} value={option.key}>
             {option.label}
           </Option>

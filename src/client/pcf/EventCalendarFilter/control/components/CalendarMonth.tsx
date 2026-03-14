@@ -13,14 +13,8 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/002-implement-fluent-calendar-component.poml
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Badge,
-  mergeClasses,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Badge, mergeClasses } from '@fluentui/react-components';
 
 /**
  * Props for CalendarMonth component
@@ -67,20 +61,20 @@ export interface ICalendarMonthProps {
   rangeEndDate?: string | null;
 }
 
-const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 /**
@@ -89,15 +83,15 @@ const MONTHS = [
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     marginBottom: tokens.spacingVerticalM,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalXS,
   },
@@ -107,50 +101,50 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   weekdayRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    gap: "1px",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: '1px',
     marginBottom: tokens.spacingVerticalXS,
   },
   weekdayCell: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "24px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '24px',
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorNeutralForeground3,
-    textTransform: "uppercase",
+    textTransform: 'uppercase',
   },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    gap: "1px",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: '1px',
   },
   dayCell: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "32px",
-    minWidth: "32px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '32px',
+    minWidth: '32px',
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground1,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusSmall,
-    cursor: "pointer",
-    transition: "background-color 0.1s ease-in-out",
-    ":hover": {
+    cursor: 'pointer',
+    transition: 'background-color 0.1s ease-in-out',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
   dayCellOutsideMonth: {
     color: tokens.colorNeutralForeground4,
     opacity: 0.5,
-    cursor: "default",
-    ":hover": {
+    cursor: 'default',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1,
     },
   },
@@ -160,30 +154,30 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorBrandStroke1}`,
   },
   dayCellHasEvent: {
-    position: "relative",
+    position: 'relative',
   },
   /**
    * Event indicator container - positioned at bottom of cell
    * Contains either a dot (single event) or badge (multiple events)
    */
   eventIndicatorContainer: {
-    position: "absolute",
-    bottom: "2px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    pointerEvents: "none", // Don't interfere with date click
+    position: 'absolute',
+    bottom: '2px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none', // Don't interfere with date click
   },
   /**
    * Dot indicator for single event - uses Fluent brand color token
    * ADR-021: No hard-coded colors
    */
   eventDot: {
-    width: "6px",
-    height: "6px",
-    borderRadius: "50%",
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
   },
   /**
@@ -197,17 +191,17 @@ const useStyles = makeStyles({
    * Uses smaller badge size to fit in cell
    */
   eventBadge: {
-    transform: "scale(0.85)", // Slightly smaller for cell fit
-    minWidth: "16px",
+    transform: 'scale(0.85)', // Slightly smaller for cell fit
+    minWidth: '16px',
   },
   dayCellSelected: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
     fontWeight: tokens.fontWeightSemibold,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackgroundHover,
     },
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorBrandBackgroundPressed,
     },
   },
@@ -219,7 +213,7 @@ const useStyles = makeStyles({
   dayCellInRange: {
     backgroundColor: tokens.colorBrandBackground2,
     borderRadius: 0,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
@@ -237,7 +231,7 @@ const useStyles = makeStyles({
    */
   dayCellFocused: {
     outline: `2px solid ${tokens.colorStrokeFocus2}`,
-    outlineOffset: "1px",
+    outlineOffset: '1px',
   },
 });
 
@@ -275,8 +269,8 @@ const getCalendarDays = (year: number, month: number): Date[] => {
  */
 const toIsoDateString = (date: Date): string => {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
@@ -296,7 +290,7 @@ const isSameDay = (date1: Date, date2: Date): boolean => {
  * Task 004: Range selection support
  */
 const parseIsoDate = (dateStr: string): Date => {
-  const [year, month, day] = dateStr.split("-").map(Number);
+  const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day);
 };
 
@@ -307,7 +301,7 @@ const parseIsoDate = (dateStr: string): Date => {
 const isDateInRange = (
   dateStr: string,
   rangeStart: string | null | undefined,
-  rangeEnd: string | null | undefined,
+  rangeEnd: string | null | undefined
 ): boolean => {
   if (!rangeStart || !rangeEnd) return false;
 
@@ -322,10 +316,7 @@ const isDateInRange = (
  * Check if a date is the start of a range
  * Task 004: Range selection support
  */
-const isRangeStart = (
-  dateStr: string,
-  rangeStart: string | null | undefined,
-): boolean => {
+const isRangeStart = (dateStr: string, rangeStart: string | null | undefined): boolean => {
   return !!rangeStart && dateStr === rangeStart;
 };
 
@@ -333,10 +324,7 @@ const isRangeStart = (
  * Check if a date is the end of a range
  * Task 004: Range selection support
  */
-const isRangeEnd = (
-  dateStr: string,
-  rangeEnd: string | null | undefined,
-): boolean => {
+const isRangeEnd = (dateStr: string, rangeEnd: string | null | undefined): boolean => {
   return !!rangeEnd && dateStr === rangeEnd;
 };
 
@@ -361,10 +349,7 @@ interface IEventIndicatorProps {
   isSelected: boolean;
 }
 
-const EventIndicator: React.FC<IEventIndicatorProps> = ({
-  count,
-  isSelected,
-}) => {
+const EventIndicator: React.FC<IEventIndicatorProps> = ({ count, isSelected }) => {
   const styles = useStyles();
 
   if (count <= 0) {
@@ -375,13 +360,7 @@ const EventIndicator: React.FC<IEventIndicatorProps> = ({
     // Single event: show dot indicator
     return (
       <div className={styles.eventIndicatorContainer}>
-        <div
-          className={mergeClasses(
-            styles.eventDot,
-            isSelected && styles.eventDotSelected,
-          )}
-          aria-hidden="true"
-        />
+        <div className={mergeClasses(styles.eventDot, isSelected && styles.eventDotSelected)} aria-hidden="true" />
       </div>
     );
   }
@@ -393,9 +372,9 @@ const EventIndicator: React.FC<IEventIndicatorProps> = ({
         className={styles.eventBadge}
         size="small"
         appearance="filled"
-        color={isSelected ? "informative" : "brand"}
+        color={isSelected ? 'informative' : 'brand'}
       >
-        {count > 99 ? "99+" : count}
+        {count > 99 ? '99+' : count}
       </Badge>
     </div>
   );
@@ -420,26 +399,16 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
   const gridRef = React.useRef<HTMLDivElement>(null);
 
   // Memoize calendar days calculation
-  const calendarDays = React.useMemo(
-    () => getCalendarDays(year, month),
-    [year, month],
-  );
+  const calendarDays = React.useMemo(() => getCalendarDays(year, month), [year, month]);
 
   // Get dates that belong to current month (for keyboard navigation bounds)
-  const currentMonthDays = React.useMemo(
-    () => calendarDays.filter((d) => d.getMonth() === month),
-    [calendarDays, month],
-  );
+  const currentMonthDays = React.useMemo(() => calendarDays.filter(d => d.getMonth() === month), [calendarDays, month]);
 
   /**
    * Handle day click - supports Shift+click for range selection
    * Task 004: Range selection via Shift+click
    */
-  const handleDayClick = (
-    date: Date,
-    isCurrentMonth: boolean,
-    event?: React.MouseEvent,
-  ) => {
+  const handleDayClick = (date: Date, isCurrentMonth: boolean, event?: React.MouseEvent) => {
     if (!showAdjacentMonths && !isCurrentMonth) {
       return; // Don't allow clicking outside-month dates if not showing them
     }
@@ -458,23 +427,16 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
    * Task 003: Keyboard accessibility per ADR-021
    */
   const handleKeyDown = React.useCallback(
-    (
-      e: React.KeyboardEvent,
-      date: Date,
-      index: number,
-      isCurrentMonth: boolean,
-    ) => {
+    (e: React.KeyboardEvent, date: Date, index: number, isCurrentMonth: boolean) => {
       // Enter/Space selects the date
-      if (e.key === "Enter" || e.key === " ") {
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         handleDayClick(date, isCurrentMonth);
         return;
       }
 
       // Arrow key navigation
-      if (
-        !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
-      ) {
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         return;
       }
 
@@ -484,19 +446,19 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
       const currentDate = new Date(date);
 
       switch (e.key) {
-        case "ArrowLeft":
+        case 'ArrowLeft':
           newDate = new Date(currentDate);
           newDate.setDate(currentDate.getDate() - 1);
           break;
-        case "ArrowRight":
+        case 'ArrowRight':
           newDate = new Date(currentDate);
           newDate.setDate(currentDate.getDate() + 1);
           break;
-        case "ArrowUp":
+        case 'ArrowUp':
           newDate = new Date(currentDate);
           newDate.setDate(currentDate.getDate() - 7);
           break;
-        case "ArrowDown":
+        case 'ArrowDown':
           newDate = new Date(currentDate);
           newDate.setDate(currentDate.getDate() + 7);
           break;
@@ -509,7 +471,7 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
         onFocusDateChange(newDate);
       }
     },
-    [onFocusDateChange, handleDayClick],
+    [onFocusDateChange, handleDayClick]
   );
 
   return (
@@ -531,12 +493,7 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
       </div>
 
       {/* Date Grid */}
-      <div
-        ref={gridRef}
-        className={styles.grid}
-        role="grid"
-        aria-label="Calendar dates"
-      >
+      <div ref={gridRef} className={styles.grid} role="grid" aria-label="Calendar dates">
         {calendarDays.map((date, index) => {
           const dateStr = toIsoDateString(date);
           const isCurrentMonth = date.getMonth() === month;
@@ -550,11 +507,7 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
           const isEnd = isRangeEnd(dateStr, rangeEndDate);
 
           // Get event count: prefer eventCounts Map, fallback to eventDates Set
-          const eventCount = eventCounts
-            ? eventCounts.get(dateStr) || 0
-            : eventDates.has(dateStr)
-              ? 1
-              : 0;
+          const eventCount = eventCounts ? eventCounts.get(dateStr) || 0 : eventDates.has(dateStr) ? 1 : 0;
           const hasEvent = eventCount > 0;
 
           // Build class list based on date state
@@ -570,7 +523,7 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
             isEnd && styles.dayCellRangeEnd,
             // Selected state (range endpoints are "selected")
             (isSelected || isStart || isEnd) && styles.dayCellSelected,
-            isFocused && styles.dayCellFocused,
+            isFocused && styles.dayCellFocused
           );
 
           // Skip rendering outside-month dates if not showing them
@@ -578,10 +531,7 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
             return (
               <div
                 key={`day-${index}`}
-                className={mergeClasses(
-                  styles.dayCell,
-                  styles.dayCellOutsideMonth,
-                )}
+                className={mergeClasses(styles.dayCell, styles.dayCellOutsideMonth)}
                 aria-hidden="true"
               >
                 {date.getDate()}
@@ -590,47 +540,32 @@ export const CalendarMonth: React.FC<ICalendarMonthProps> = ({
           }
 
           // Build accessible label with event count and range info
-          const eventLabel = hasEvent
-            ? eventCount === 1
-              ? ", has 1 event"
-              : `, has ${eventCount} events`
-            : "";
+          const eventLabel = hasEvent ? (eventCount === 1 ? ', has 1 event' : `, has ${eventCount} events`) : '';
           const rangeLabel = inRange
             ? isStart && isEnd
-              ? ", selected (single date)"
+              ? ', selected (single date)'
               : isStart
-                ? ", range start"
+                ? ', range start'
                 : isEnd
-                  ? ", range end"
-                  : ", in selected range"
-            : "";
+                  ? ', range end'
+                  : ', in selected range'
+            : '';
 
           return (
             <div
               key={`day-${index}`}
               className={cellClasses}
-              onClick={(e) => handleDayClick(date, isCurrentMonth, e)}
-              onKeyDown={(e) => handleKeyDown(e, date, index, isCurrentMonth)}
+              onClick={e => handleDayClick(date, isCurrentMonth, e)}
+              onKeyDown={e => handleKeyDown(e, date, index, isCurrentMonth)}
               role="gridcell"
-              tabIndex={
-                isFocused
-                  ? 0
-                  : isCurrentMonth && !focusedDate && isToday
-                    ? 0
-                    : -1
-              }
-              aria-label={`${date.toLocaleDateString()}${eventLabel}${isSelected ? ", selected" : ""}${rangeLabel}`}
+              tabIndex={isFocused ? 0 : isCurrentMonth && !focusedDate && isToday ? 0 : -1}
+              aria-label={`${date.toLocaleDateString()}${eventLabel}${isSelected ? ', selected' : ''}${rangeLabel}`}
               aria-selected={isSelected || inRange}
               data-date={dateStr}
             >
               {date.getDate()}
               {/* Event indicator: dot for 1 event, badge for 2+ */}
-              {hasEvent && (
-                <EventIndicator
-                  count={eventCount}
-                  isSelected={isSelected || isStart || isEnd}
-                />
-              )}
+              {hasEvent && <EventIndicator count={eventCount} isSelected={isSelected || isStart || isEnd} />}
             </div>
           );
         })}

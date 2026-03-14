@@ -11,15 +11,15 @@
  * @see types/index.ts for SearchDomain type definition
  */
 
-import { useCallback } from "react";
-import { makeStyles, tokens, ToggleButton } from "@fluentui/react-components";
+import { useCallback } from 'react';
+import { makeStyles, tokens, ToggleButton } from '@fluentui/react-components';
 import {
   DocumentMultipleRegular,
   BriefcaseRegular,
   TaskListSquareAddRegular,
   ReceiptRegular,
-} from "@fluentui/react-icons";
-import type { SearchDomain } from "../types";
+} from '@fluentui/react-icons';
+import type { SearchDomain } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -47,10 +47,10 @@ interface DomainTabConfig {
 }
 
 const DOMAIN_TABS: DomainTabConfig[] = [
-  { id: "documents", label: "Documents", icon: <DocumentMultipleRegular /> },
-  { id: "matters", label: "Matters", icon: <BriefcaseRegular /> },
-  { id: "projects", label: "Projects", icon: <TaskListSquareAddRegular /> },
-  { id: "invoices", label: "Invoices", icon: <ReceiptRegular /> },
+  { id: 'documents', label: 'Documents', icon: <DocumentMultipleRegular /> },
+  { id: 'matters', label: 'Matters', icon: <BriefcaseRegular /> },
+  { id: 'projects', label: 'Projects', icon: <TaskListSquareAddRegular /> },
+  { id: 'invoices', label: 'Invoices', icon: <ReceiptRegular /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -59,12 +59,12 @@ const DOMAIN_TABS: DomainTabConfig[] = [
 
 const useStyles = makeStyles({
   grid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalXS,
   },
   button: {
-    justifyContent: "flex-start",
+    justifyContent: 'flex-start',
   },
 });
 
@@ -85,16 +85,12 @@ export const SearchDomainTabs: React.FC<SearchDomainTabsProps> = ({
       onDomainChange(domain);
       onSearch(query, domain);
     },
-    [onDomainChange, onSearch, query],
+    [onDomainChange, onSearch, query]
   );
 
   return (
-    <div
-      className={styles.grid}
-      role="tablist"
-      aria-label="Search domain selector"
-    >
-      {DOMAIN_TABS.map((tab) => (
+    <div className={styles.grid} role="tablist" aria-label="Search domain selector">
+      {DOMAIN_TABS.map(tab => (
         <ToggleButton
           key={tab.id}
           className={styles.button}
@@ -102,7 +98,7 @@ export const SearchDomainTabs: React.FC<SearchDomainTabsProps> = ({
           onClick={handleClick(tab.id)}
           icon={tab.icon}
           size="small"
-          appearance={activeDomain === tab.id ? "primary" : "subtle"}
+          appearance={activeDomain === tab.id ? 'primary' : 'subtle'}
           aria-label={`Search ${tab.label}`}
         >
           {tab.label}

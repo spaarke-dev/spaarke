@@ -1,18 +1,13 @@
-import * as React from "react";
-import type { Preview } from "@storybook/react";
-import { withThemeByClassName } from "@storybook/addon-themes";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import type { Preview } from '@storybook/react';
+import { withThemeByClassName } from '@storybook/addon-themes';
+import { FluentProvider, webLightTheme, webDarkTheme, teamsHighContrastTheme } from '@fluentui/react-components';
 
 // Theme mapping for Fluent UI
 const themes = {
   light: webLightTheme,
   dark: webDarkTheme,
-  "high-contrast": teamsHighContrastTheme,
+  'high-contrast': teamsHighContrastTheme,
 };
 
 // Current theme state
@@ -22,7 +17,7 @@ let currentTheme = themes.light;
 const FluentDecorator = (Story: React.ComponentType) => {
   return (
     <FluentProvider theme={currentTheme}>
-      <div style={{ padding: "1rem", minHeight: "200px" }}>
+      <div style={{ padding: '1rem', minHeight: '200px' }}>
         <Story />
       </div>
     </FluentProvider>
@@ -30,11 +25,8 @@ const FluentDecorator = (Story: React.ComponentType) => {
 };
 
 // Theme switcher decorator
-const ThemeSwitcherDecorator = (
-  Story: React.ComponentType,
-  context: { globals: { theme?: string } },
-) => {
-  const selectedTheme = context.globals.theme || "light";
+const ThemeSwitcherDecorator = (Story: React.ComponentType, context: { globals: { theme?: string } }) => {
+  const selectedTheme = context.globals.theme || 'light';
   currentTheme = themes[selectedTheme as keyof typeof themes] || themes.light;
   return <Story />;
 };
@@ -53,15 +45,15 @@ const preview: Preview = {
   },
   globalTypes: {
     theme: {
-      name: "Theme",
-      description: "Fluent UI theme for components",
-      defaultValue: "light",
+      name: 'Theme',
+      description: 'Fluent UI theme for components',
+      defaultValue: 'light',
       toolbar: {
-        icon: "paintbrush",
+        icon: 'paintbrush',
         items: [
-          { value: "light", title: "Light", icon: "sun" },
-          { value: "dark", title: "Dark", icon: "moon" },
-          { value: "high-contrast", title: "High Contrast", icon: "contrast" },
+          { value: 'light', title: 'Light', icon: 'sun' },
+          { value: 'dark', title: 'Dark', icon: 'moon' },
+          { value: 'high-contrast', title: 'High Contrast', icon: 'contrast' },
         ],
         dynamicTitle: true,
       },

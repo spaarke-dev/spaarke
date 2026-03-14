@@ -10,10 +10,10 @@
  * inside useMemo.
  */
 
-import { useMemo } from "react";
-import { scaleTime, scaleLinear } from "d3-scale";
-import { extent } from "d3-array";
-import type { VisualizationColorBy, TimelineDateField } from "../types";
+import { useMemo } from 'react';
+import { scaleTime, scaleLinear } from 'd3-scale';
+import { extent } from 'd3-array';
+import type { VisualizationColorBy, TimelineDateField } from '../types';
 import {
   type SearchResult,
   getScore,
@@ -21,7 +21,7 @@ import {
   getResultName,
   getResultDate,
   extractClusterKey,
-} from "../utils/groupResults";
+} from '../utils/groupResults';
 
 // =============================================
 // Public types
@@ -99,7 +99,7 @@ export function useTimelineLayout(
   dateField: TimelineDateField,
   colorBy: VisualizationColorBy,
   width: number,
-  height: number,
+  height: number
 ): {
   dated: TimelinePoint[];
   undated: TimelinePoint[];
@@ -120,7 +120,7 @@ export function useTimelineLayout(
     }
 
     // 1. Parse dates and enrich each result
-    const parsed: ParsedResult[] = results.map((result) => ({
+    const parsed: ParsedResult[] = results.map(result => ({
       result,
       id: getResultId(result),
       name: getResultName(result),
@@ -148,9 +148,7 @@ export function useTimelineLayout(
         date: null,
         x:
           undatedParsed.length > 1
-            ? MARGIN.left +
-              (index / (undatedParsed.length - 1)) *
-                (width - MARGIN.left - MARGIN.right)
+            ? MARGIN.left + (index / (undatedParsed.length - 1)) * (width - MARGIN.left - MARGIN.right)
             : width / 2,
         y: height - 15,
         radius: 5 + item.score * 18,
@@ -164,10 +162,7 @@ export function useTimelineLayout(
     }
 
     // 4. Compute x domain from dated results
-    const [minDate, maxDate] = extent(datedParsed, (d) => d.date as Date) as [
-      Date,
-      Date,
-    ];
+    const [minDate, maxDate] = extent(datedParsed, d => d.date as Date) as [Date, Date];
     const xDomain: [Date, Date] = [minDate, maxDate];
 
     // 5. Create scales
@@ -180,7 +175,7 @@ export function useTimelineLayout(
       .range([height - MARGIN.bottom - UNDATED_STRIP_HEIGHT, MARGIN.top]);
 
     // 6. Map dated results to TimelinePoint[]
-    const dated: TimelinePoint[] = datedParsed.map((item) => ({
+    const dated: TimelinePoint[] = datedParsed.map(item => ({
       id: item.id,
       date: item.date,
       x: xScale(item.date as Date),
@@ -198,9 +193,7 @@ export function useTimelineLayout(
       date: null,
       x:
         undatedParsed.length > 1
-          ? MARGIN.left +
-            (index / (undatedParsed.length - 1)) *
-              (width - MARGIN.left - MARGIN.right)
+          ? MARGIN.left + (index / (undatedParsed.length - 1)) * (width - MARGIN.left - MARGIN.right)
           : width / 2,
       y: height - 15,
       radius: 5 + item.score * 18,

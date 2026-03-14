@@ -16,13 +16,8 @@
  * @see ADR-008 - Endpoint filters for auth
  */
 
-import {
-  initAuth,
-  getAuthProvider,
-  authenticatedFetch,
-  AuthError,
-} from "@spaarke/auth";
-import type { SpaarkeAuthProvider } from "@spaarke/auth";
+import { initAuth, getAuthProvider, authenticatedFetch, AuthError } from '@spaarke/auth';
+import type { SpaarkeAuthProvider } from '@spaarke/auth';
 
 // Re-export core symbols for consumers
 export { initAuth, getAuthProvider, authenticatedFetch, AuthError };
@@ -62,13 +57,10 @@ export function clearTokenCache(): void {
  * Performs frame-walk to check window, parent, and top frames.
  */
 export function isXrmAvailable(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === 'undefined') return false;
   try {
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm =
-      (window as any).Xrm ??
-      (window.parent as any)?.Xrm ??
-      (window.top as any)?.Xrm;
+    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
     /* eslint-enable @typescript-eslint/no-explicit-any */
     return !!xrm?.Utility?.getGlobalContext;
   } catch {
@@ -91,8 +83,7 @@ export function getClientUrl(): string {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top!);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
   } catch {
     /* cross-origin */
   }
@@ -110,8 +101,5 @@ export function getClientUrl(): string {
   }
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
-  throw new AuthError(
-    "Xrm SDK is not available. This page must be opened from within Dataverse.",
-    "xrm_required",
-  );
+  throw new AuthError('Xrm SDK is not available. This page must be opened from within Dataverse.', 'xrm_required');
 }

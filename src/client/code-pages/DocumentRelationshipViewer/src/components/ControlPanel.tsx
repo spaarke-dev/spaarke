@@ -11,45 +11,31 @@
  *   - Relationship Types checkboxes
  */
 
-import React, { useMemo, useCallback, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Slider,
-  Checkbox,
-  Label,
-  Card,
-  Text,
-  Divider,
-  Link,
-} from "@fluentui/react-components";
-import {
-  Info20Regular,
-  ChevronDown20Regular,
-  ChevronUp20Regular,
-} from "@fluentui/react-icons";
+import React, { useMemo, useCallback, useState } from 'react';
+import { makeStyles, tokens, Slider, Checkbox, Label, Card, Text, Divider, Link } from '@fluentui/react-components';
+import { Info20Regular, ChevronDown20Regular, ChevronUp20Regular } from '@fluentui/react-icons';
 
 export const DOCUMENT_TYPES = [
-  { key: "pdf", label: "PDF Documents" },
-  { key: "docx", label: "Word Documents" },
-  { key: "xlsx", label: "Excel Spreadsheets" },
-  { key: "pptx", label: "PowerPoint Presentations" },
-  { key: "txt", label: "Text Files" },
-  { key: "other", label: "Other Types" },
+  { key: 'pdf', label: 'PDF Documents' },
+  { key: 'docx', label: 'Word Documents' },
+  { key: 'xlsx', label: 'Excel Spreadsheets' },
+  { key: 'pptx', label: 'PowerPoint Presentations' },
+  { key: 'txt', label: 'Text Files' },
+  { key: 'other', label: 'Other Types' },
 ] as const;
 
-export type DocumentTypeKey = (typeof DOCUMENT_TYPES)[number]["key"];
+export type DocumentTypeKey = (typeof DOCUMENT_TYPES)[number]['key'];
 
 export const RELATIONSHIP_TYPES = [
-  { key: "semantic", label: "Semantic Similarity" },
-  { key: "same_matter", label: "Same Matter" },
-  { key: "same_project", label: "Same Project" },
-  { key: "same_email", label: "Same Email" },
-  { key: "same_thread", label: "Same Thread" },
-  { key: "same_invoice", label: "Same Invoice" },
+  { key: 'semantic', label: 'Semantic Similarity' },
+  { key: 'same_matter', label: 'Same Matter' },
+  { key: 'same_project', label: 'Same Project' },
+  { key: 'same_email', label: 'Same Email' },
+  { key: 'same_thread', label: 'Same Thread' },
+  { key: 'same_invoice', label: 'Same Invoice' },
 ] as const;
 
-export type RelationshipTypeKey = (typeof RELATIONSHIP_TYPES)[number]["key"];
+export type RelationshipTypeKey = (typeof RELATIONSHIP_TYPES)[number]['key'];
 
 export interface FilterSettings {
   similarityThreshold: number;
@@ -63,15 +49,8 @@ export const DEFAULT_FILTER_SETTINGS: FilterSettings = {
   similarityThreshold: 0.65,
   depthLimit: 1,
   maxNodesPerLevel: 25,
-  documentTypes: ["pdf", "docx", "xlsx", "pptx", "txt", "other"],
-  relationshipTypes: [
-    "semantic",
-    "same_matter",
-    "same_project",
-    "same_email",
-    "same_thread",
-    "same_invoice",
-  ],
+  documentTypes: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'other'],
+  relationshipTypes: ['semantic', 'same_matter', 'same_project', 'same_email', 'same_thread', 'same_invoice'],
 };
 
 export interface ControlPanelProps {
@@ -83,17 +62,17 @@ export interface ControlPanelProps {
 
 const useStyles = makeStyles({
   container: {
-    width: "260px",
-    maxHeight: "100%",
-    overflowY: "auto",
+    width: '260px',
+    maxHeight: '100%',
+    overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow4,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -106,9 +85,9 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
   },
   sliderRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: tokens.spacingVerticalXXS,
   },
   sliderValue: {
@@ -116,11 +95,11 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
     fontSize: tokens.fontSizeBase200,
   },
-  slider: { width: "100%" },
+  slider: { width: '100%' },
   sliderBlock: { marginBottom: tokens.spacingVerticalS },
   checkboxGroup: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   checkboxLabel: { fontSize: tokens.fontSizeBase200 },
@@ -132,15 +111,15 @@ const useStyles = makeStyles({
     margin: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
   },
   infoHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    cursor: "pointer",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
   },
   infoContent: {
     marginTop: tokens.spacingVerticalS,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   infoTitle: {
@@ -159,27 +138,23 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXS,
   },
   sectionHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: tokens.spacingVerticalXS,
   },
   selectLinks: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase100,
   },
   selectLink: {
     fontSize: tokens.fontSizeBase100,
-    cursor: "pointer",
+    cursor: 'pointer',
   },
 });
 
-export const ControlPanel: React.FC<ControlPanelProps> = ({
-  settings,
-  onSettingsChange,
-  viewMode,
-}) => {
+export const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange, viewMode }) => {
   const styles = useStyles();
   const [showInfo, setShowInfo] = useState(false);
 
@@ -187,41 +162,41 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     (_ev: React.ChangeEvent<HTMLInputElement>, data: { value: number }) => {
       onSettingsChange({ ...settings, similarityThreshold: data.value / 100 });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   const handleDepthChange = useCallback(
     (_ev: React.ChangeEvent<HTMLInputElement>, data: { value: number }) => {
       onSettingsChange({ ...settings, depthLimit: data.value });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   const handleMaxNodesChange = useCallback(
     (_ev: React.ChangeEvent<HTMLInputElement>, data: { value: number }) => {
       onSettingsChange({ ...settings, maxNodesPerLevel: data.value });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   const handleDocumentTypeChange = useCallback(
     (typeKey: DocumentTypeKey, checked: boolean) => {
       const newTypes = checked
         ? [...settings.documentTypes, typeKey]
-        : settings.documentTypes.filter((t) => t !== typeKey);
+        : settings.documentTypes.filter(t => t !== typeKey);
       onSettingsChange({ ...settings, documentTypes: newTypes });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   const handleRelationshipTypeChange = useCallback(
     (typeKey: RelationshipTypeKey, checked: boolean) => {
       const newTypes = checked
         ? [...settings.relationshipTypes, typeKey]
-        : settings.relationshipTypes.filter((t) => t !== typeKey);
+        : settings.relationshipTypes.filter(t => t !== typeKey);
       onSettingsChange({ ...settings, relationshipTypes: newTypes });
     },
-    [settings, onSettingsChange],
+    [settings, onSettingsChange]
   );
 
   return (
@@ -235,14 +210,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
       {/* How It Works — collapsible, collapsed by default */}
       <div className={styles.infoSection}>
-        <div
-          className={styles.infoHeader}
-          onClick={() => setShowInfo(!showInfo)}
-        >
+        <div className={styles.infoHeader} onClick={() => setShowInfo(!showInfo)}>
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
+              display: 'flex',
+              alignItems: 'center',
               gap: tokens.spacingHorizontalXS,
             }}
           >
@@ -260,8 +232,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 Similarity Score
               </Text>
               <Text className={styles.infoText}>
-                The percentage indicates how closely a document's content
-                matches the source. Higher = more relevant.
+                The percentage indicates how closely a document's content matches the source. Higher = more relevant.
               </Text>
             </div>
             <div>
@@ -269,8 +240,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 Relationship Types
               </Text>
               <Text className={styles.infoText}>
-                Semantic: AI-detected content similarity. Same Matter/Project:
-                shared parent record. Same Email/Thread: communication linkage.
+                Semantic: AI-detected content similarity. Same Matter/Project: shared parent record. Same Email/Thread:
+                communication linkage.
               </Text>
             </div>
             <div>
@@ -278,8 +249,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 Depth Levels
               </Text>
               <Text className={styles.infoText}>
-                Level 1 shows directly related documents. Level 2+ shows
-                documents related to those, expanding discovery.
+                Level 1 shows directly related documents. Level 2+ shows documents related to those, expanding
+                discovery.
               </Text>
             </div>
           </div>
@@ -293,9 +264,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <Label htmlFor="similarity-slider" size="small">
               Minimum Similarity
             </Label>
-            <Text className={styles.sliderValue}>
-              {Math.round(settings.similarityThreshold * 100)}%
-            </Text>
+            <Text className={styles.sliderValue}>{Math.round(settings.similarityThreshold * 100)}%</Text>
           </div>
           <Slider
             id="similarity-slider"
@@ -310,7 +279,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         {/* Levels — only show on graph view */}
-        {viewMode === "graph" && (
+        {viewMode === 'graph' && (
           <div className={styles.sliderBlock}>
             <div className={styles.sliderRow}>
               <Label htmlFor="depth-slider" size="small">
@@ -337,9 +306,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <Label htmlFor="maxnodes-slider" size="small">
               Nodes per Level
             </Label>
-            <Text className={styles.sliderValue}>
-              {settings.maxNodesPerLevel}
-            </Text>
+            <Text className={styles.sliderValue}>{settings.maxNodesPerLevel}</Text>
           </div>
           <Slider
             id="maxnodes-slider"
@@ -366,35 +333,26 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               onClick={() =>
                 onSettingsChange({
                   ...settings,
-                  documentTypes: DOCUMENT_TYPES.map(
-                    (t) => t.key,
-                  ) as unknown as DocumentTypeKey[],
+                  documentTypes: DOCUMENT_TYPES.map(t => t.key) as unknown as DocumentTypeKey[],
                 })
               }
             >
               All
             </Link>
             <Text size={100}>|</Text>
-            <Link
-              className={styles.selectLink}
-              onClick={() =>
-                onSettingsChange({ ...settings, documentTypes: [] })
-              }
-            >
+            <Link className={styles.selectLink} onClick={() => onSettingsChange({ ...settings, documentTypes: [] })}>
               Clear
             </Link>
           </div>
         </div>
         <div className={styles.checkboxGroup}>
-          {DOCUMENT_TYPES.map((type) => (
+          {DOCUMENT_TYPES.map(type => (
             <Checkbox
               key={type.key}
               label={type.label}
               size="medium"
               checked={settings.documentTypes.includes(type.key)}
-              onChange={(_ev, data) =>
-                handleDocumentTypeChange(type.key, data.checked === true)
-              }
+              onChange={(_ev, data) => handleDocumentTypeChange(type.key, data.checked === true)}
             />
           ))}
         </div>
@@ -412,9 +370,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               onClick={() =>
                 onSettingsChange({
                   ...settings,
-                  relationshipTypes: RELATIONSHIP_TYPES.map(
-                    (t) => t.key,
-                  ) as unknown as RelationshipTypeKey[],
+                  relationshipTypes: RELATIONSHIP_TYPES.map(t => t.key) as unknown as RelationshipTypeKey[],
                 })
               }
             >
@@ -423,24 +379,20 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <Text size={100}>|</Text>
             <Link
               className={styles.selectLink}
-              onClick={() =>
-                onSettingsChange({ ...settings, relationshipTypes: [] })
-              }
+              onClick={() => onSettingsChange({ ...settings, relationshipTypes: [] })}
             >
               Clear
             </Link>
           </div>
         </div>
         <div className={styles.checkboxGroup}>
-          {RELATIONSHIP_TYPES.map((type) => (
+          {RELATIONSHIP_TYPES.map(type => (
             <Checkbox
               key={type.key}
               label={type.label}
               size="medium"
               checked={settings.relationshipTypes.includes(type.key)}
-              onChange={(_ev, data) =>
-                handleRelationshipTypeChange(type.key, data.checked === true)
-              }
+              onChange={(_ev, data) => handleRelationshipTypeChange(type.key, data.checked === true)}
             />
           ))}
         </div>

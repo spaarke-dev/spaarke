@@ -7,15 +7,15 @@
  * @see spec.md Section 6.1 — toolbar layout
  */
 
-import React, { useCallback } from "react";
-import { makeStyles, tokens, ToggleButton } from "@fluentui/react-components";
+import React, { useCallback } from 'react';
+import { makeStyles, tokens, ToggleButton } from '@fluentui/react-components';
 import {
   TextBulletListSquareRegular,
   DataScatterRegular,
   DataTreemapRegular,
   TimelineRegular,
-} from "@fluentui/react-icons";
-import type { ViewMode } from "../types";
+} from '@fluentui/react-icons';
+import type { ViewMode } from '../types';
 
 // =============================================
 // Props
@@ -41,28 +41,28 @@ interface ViewButtonConfig {
 
 const VIEW_BUTTONS: ViewButtonConfig[] = [
   {
-    mode: "grid",
-    label: "Grid",
+    mode: 'grid',
+    label: 'Grid',
     icon: <TextBulletListSquareRegular />,
-    ariaLabel: "Switch to grid view",
+    ariaLabel: 'Switch to grid view',
   },
   {
-    mode: "map",
-    label: "Network",
+    mode: 'map',
+    label: 'Network',
     icon: <DataScatterRegular />,
-    ariaLabel: "Switch to network graph view",
+    ariaLabel: 'Switch to network graph view',
   },
   {
-    mode: "treemap",
-    label: "Treemap",
+    mode: 'treemap',
+    label: 'Treemap',
     icon: <DataTreemapRegular />,
-    ariaLabel: "Switch to treemap view",
+    ariaLabel: 'Switch to treemap view',
   },
   {
-    mode: "timeline",
-    label: "Timeline",
+    mode: 'timeline',
+    label: 'Timeline',
     icon: <TimelineRegular />,
-    ariaLabel: "Switch to timeline view",
+    ariaLabel: 'Switch to timeline view',
   },
 ];
 
@@ -72,17 +72,17 @@ const VIEW_BUTTONS: ViewButtonConfig[] = [
 
 const useStyles = makeStyles({
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    width: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
     gap: tokens.spacingHorizontalS,
   },
   spacer: {
     flex: 1,
   },
   toggleGroup: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
   },
 });
@@ -91,17 +91,14 @@ const useStyles = makeStyles({
 // Component
 // =============================================
 
-export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({
-  viewMode,
-  onViewModeChange,
-}) => {
+export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({ viewMode, onViewModeChange }) => {
   const styles = useStyles();
 
   const handleClick = useCallback(
     (mode: ViewMode) => () => {
       onViewModeChange(mode);
     },
-    [onViewModeChange],
+    [onViewModeChange]
   );
 
   return (
@@ -109,14 +106,14 @@ export const ViewToggleToolbar: React.FC<ViewToggleToolbarProps> = ({
       <div className={styles.spacer} />
 
       <div className={styles.toggleGroup}>
-        {VIEW_BUTTONS.map((btn) => (
+        {VIEW_BUTTONS.map(btn => (
           <ToggleButton
             key={btn.mode}
             checked={viewMode === btn.mode}
             onClick={handleClick(btn.mode)}
             icon={btn.icon}
             size="small"
-            appearance={viewMode === btn.mode ? "primary" : "subtle"}
+            appearance={viewMode === btn.mode ? 'primary' : 'subtle'}
             aria-label={btn.ariaLabel}
           >
             {btn.label}

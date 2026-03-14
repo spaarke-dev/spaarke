@@ -9,7 +9,7 @@
  * - Info icon with Fluent V9 Popover for description
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Card,
   CardHeader,
@@ -22,7 +22,7 @@ import {
   PopoverTrigger,
   PopoverSurface,
   Button,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Lightbulb24Regular,
   Document24Regular,
@@ -31,17 +31,17 @@ import {
   Settings24Regular,
   Notebook24Regular,
   Info16Regular,
-} from "@fluentui/react-icons";
-import { IPlaybookSelectorProps, IPlaybook } from "../types";
+} from '@fluentui/react-icons';
+import { IPlaybookSelectorProps, IPlaybook } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    paddingTop: "12px",
-    paddingBottom: "12px",
-    paddingLeft: "16px",
-    paddingRight: "16px",
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     flexShrink: 0,
   },
@@ -49,104 +49,104 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: "8px",
-    display: "block",
+    marginBottom: '8px',
+    display: 'block',
   },
   scrollContainer: {
-    display: "flex",
-    overflowX: "auto",
-    gap: "12px",
-    paddingBottom: "4px",
+    display: 'flex',
+    overflowX: 'auto',
+    gap: '12px',
+    paddingBottom: '4px',
     // Hide scrollbar but keep functionality
-    scrollbarWidth: "thin",
-    "::-webkit-scrollbar": {
-      height: "4px",
+    scrollbarWidth: 'thin',
+    '::-webkit-scrollbar': {
+      height: '4px',
     },
-    "::-webkit-scrollbar-track": {
+    '::-webkit-scrollbar-track': {
       backgroundColor: tokens.colorNeutralBackground3,
     },
-    "::-webkit-scrollbar-thumb": {
+    '::-webkit-scrollbar-thumb': {
       backgroundColor: tokens.colorNeutralStroke1,
-      borderRadius: "2px",
+      borderRadius: '2px',
     },
   },
   card: {
-    cursor: "pointer",
+    cursor: 'pointer',
     flexShrink: 0,
-    width: "130px",
-    minWidth: "130px",
+    width: '130px',
+    minWidth: '130px',
   },
   cardSelected: {
     backgroundColor: tokens.colorBrandBackground2,
   },
   cardWrapper: {
-    position: "relative",
+    position: 'relative',
   },
   cardContent: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    paddingTop: "6px",
-    paddingBottom: "10px",
-    paddingLeft: "6px",
-    paddingRight: "6px",
-    textAlign: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingTop: '6px',
+    paddingBottom: '10px',
+    paddingLeft: '6px',
+    paddingRight: '6px',
+    textAlign: 'center',
   },
   infoButtonWrapper: {
-    position: "absolute",
-    top: "4px",
-    right: "4px",
+    position: 'absolute',
+    top: '4px',
+    right: '4px',
     zIndex: 1,
   },
   infoButton: {
-    minWidth: "24px",
-    width: "24px",
-    height: "24px",
+    minWidth: '24px',
+    width: '24px',
+    height: '24px',
   },
   icon: {
-    width: "32px",
-    height: "32px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: "6px",
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '6px',
     color: tokens.colorBrandForeground1,
   },
   name: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    lineHeight: "1.3",
+    lineHeight: '1.3',
   },
   popoverContent: {
-    maxWidth: "280px",
-    paddingTop: "12px",
-    paddingBottom: "12px",
-    paddingLeft: "12px",
-    paddingRight: "12px",
+    maxWidth: '280px',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
   },
   popoverTitle: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: "8px",
+    marginBottom: '8px',
   },
   popoverDescription: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    lineHeight: "1.5",
+    lineHeight: '1.5',
   },
   loading: {
-    display: "flex",
-    justifyContent: "center",
-    paddingTop: "24px",
-    paddingBottom: "24px",
+    display: 'flex',
+    justifyContent: 'center',
+    paddingTop: '24px',
+    paddingBottom: '24px',
   },
   empty: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
-    paddingTop: "24px",
-    paddingBottom: "24px",
+    textAlign: 'center',
+    paddingTop: '24px',
+    paddingBottom: '24px',
   },
 });
 
@@ -164,7 +164,7 @@ function getIcon(iconName?: string): React.ReactElement {
   if (iconName && iconMap[iconName]) {
     return iconMap[iconName];
   }
-  return iconMap["default"];
+  return iconMap['default'];
 }
 
 export const PlaybookSelector: React.FC<IPlaybookSelectorProps> = ({
@@ -179,11 +179,8 @@ export const PlaybookSelector: React.FC<IPlaybookSelectorProps> = ({
     onSelect(playbook);
   };
 
-  const handleKeyDown = (
-    event: React.KeyboardEvent,
-    playbook: IPlaybook,
-  ): void => {
-    if (event.key === "Enter" || event.key === " ") {
+  const handleKeyDown = (event: React.KeyboardEvent, playbook: IPlaybook): void => {
+    if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onSelect(playbook);
     }
@@ -213,15 +210,12 @@ export const PlaybookSelector: React.FC<IPlaybookSelectorProps> = ({
     <div className={styles.container}>
       <Text className={styles.label}>Select a Playbook</Text>
       <div className={styles.scrollContainer}>
-        {playbooks.map((playbook) => (
+        {playbooks.map(playbook => (
           <Card
             key={playbook.id}
-            className={mergeClasses(
-              styles.card,
-              selectedPlaybookId === playbook.id && styles.cardSelected,
-            )}
+            className={mergeClasses(styles.card, selectedPlaybookId === playbook.id && styles.cardSelected)}
             onClick={() => handleCardClick(playbook)}
-            onKeyDown={(e) => handleKeyDown(e, playbook)}
+            onKeyDown={e => handleKeyDown(e, playbook)}
             tabIndex={0}
             role="button"
             aria-pressed={selectedPlaybookId === playbook.id}
@@ -235,16 +229,14 @@ export const PlaybookSelector: React.FC<IPlaybookSelectorProps> = ({
                     appearance="subtle"
                     icon={<Info16Regular />}
                     size="small"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={e => e.stopPropagation()}
                     aria-label={`More info about ${playbook.name}`}
                   />
                 </PopoverTrigger>
                 <PopoverSurface>
                   <div className={styles.popoverContent}>
                     <Text className={styles.popoverTitle}>{playbook.name}</Text>
-                    <Text className={styles.popoverDescription}>
-                      {playbook.description}
-                    </Text>
+                    <Text className={styles.popoverDescription}>{playbook.description}</Text>
                   </div>
                 </PopoverSurface>
               </Popover>

@@ -12,8 +12,8 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import { useCallback, useMemo, useState } from "react";
+import * as React from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Accordion,
   AccordionHeader,
@@ -29,7 +29,7 @@ import {
   mergeClasses,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ArrowDownload20Regular,
   Copy20Regular,
@@ -38,11 +38,8 @@ import {
   ArrowForward16Regular,
   Code20Regular,
   DocumentText20Regular,
-} from "@fluentui/react-icons";
-import {
-  useAiAssistantStore,
-  type TestNodeProgress,
-} from "../../stores/aiAssistantStore";
+} from '@fluentui/react-icons';
+import { useAiAssistantStore, type TestNodeProgress } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -50,35 +47,35 @@ import {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalM),
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.gap(tokens.spacingHorizontalM),
   },
   headerLeft: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   accordion: {
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
   },
   accordionPanel: {
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   nodeHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    width: "100%",
+    width: '100%',
   },
   nodeIcon: {
     flexShrink: 0,
@@ -94,9 +91,9 @@ const useStyles = makeStyles({
   },
   nodeLabel: {
     flex: 1,
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   nodeDuration: {
     color: tokens.colorNeutralForeground3,
@@ -104,14 +101,14 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   outputContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
   },
   outputHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   codeBlock: {
@@ -120,11 +117,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
-    ...shorthands.overflow("auto"),
-    maxHeight: "300px",
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.overflow('auto'),
+    maxHeight: '300px',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
   },
   errorMessage: {
     color: tokens.colorPaletteRedForeground1,
@@ -133,24 +130,24 @@ const useStyles = makeStyles({
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
   },
   copyButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   actions: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalXXL),
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   emptyIcon: {
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalM,
   },
 });
@@ -206,11 +203,11 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
   // Get status icon
   const getStatusIcon = () => {
     switch (node.status) {
-      case "completed":
+      case 'completed':
         return <Checkmark16Regular className={styles.nodeIconCompleted} />;
-      case "failed":
+      case 'failed':
         return <Dismiss16Regular className={styles.nodeIconFailed} />;
-      case "skipped":
+      case 'skipped':
         return <ArrowForward16Regular className={styles.nodeIconSkipped} />;
       default:
         return null;
@@ -245,10 +242,7 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
             <Text size={200} weight="semibold">
               Output
             </Text>
-            <Tooltip
-              content={copySuccess ? "Copied!" : "Copy to clipboard"}
-              relationship="label"
-            >
+            <Tooltip content={copySuccess ? 'Copied!' : 'Copy to clipboard'} relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -263,13 +257,13 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
       )}
 
       {/* No output and no error */}
-      {!hasOutput && !node.error && node.status === "skipped" && (
+      {!hasOutput && !node.error && node.status === 'skipped' && (
         <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
           Node was skipped (condition not met)
         </Text>
       )}
 
-      {!hasOutput && !node.error && node.status === "completed" && (
+      {!hasOutput && !node.error && node.status === 'completed' && (
         <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
           No output data
         </Text>
@@ -282,9 +276,7 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
-  onDownload,
-}) => {
+export const TestResultPreview: React.FC<TestResultPreviewProps> = ({ onDownload }) => {
   const styles = useStyles();
 
   // Store state
@@ -293,10 +285,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
   // Filter nodes with results (completed, failed, or skipped)
   const nodesWithResults = useMemo(() => {
     return testExecution.nodesProgress.filter(
-      (n) =>
-        n.status === "completed" ||
-        n.status === "failed" ||
-        n.status === "skipped",
+      n => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
     );
   }, [testExecution.nodesProgress]);
 
@@ -308,7 +297,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
       totalDurationMs: testExecution.totalDurationMs,
       reportUrl: testExecution.reportUrl,
       completedAt: new Date().toISOString(),
-      nodes: testExecution.nodesProgress.map((n) => ({
+      nodes: testExecution.nodesProgress.map(n => ({
         nodeId: n.nodeId,
         label: n.label,
         status: n.status,
@@ -324,22 +313,22 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
     try {
       await navigator.clipboard.writeText(text);
     } catch (err) {
-      console.error("Failed to copy to clipboard:", err);
+      console.error('Failed to copy to clipboard:', err);
     }
   }, []);
 
   // Handle download
   const handleDownload = useCallback(() => {
     const json = formatJson(fullResults);
-    const filename = `test-results-${testExecution.mode ?? "test"}-${Date.now()}.json`;
+    const filename = `test-results-${testExecution.mode ?? 'test'}-${Date.now()}.json`;
 
     if (onDownload) {
       onDownload(json, filename);
     } else {
       // Default download behavior
-      const blob = new Blob([json], { type: "application/json" });
+      const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
       a.download = filename;
       document.body.appendChild(a);
@@ -368,8 +357,8 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
     if (nodesWithResults.length > 0) {
       items.push(nodesWithResults[0].nodeId);
     }
-    nodesWithResults.forEach((n) => {
-      if (n.status === "failed" && !items.includes(n.nodeId)) {
+    nodesWithResults.forEach(n => {
+      if (n.status === 'failed' && !items.includes(n.nodeId)) {
         items.push(n.nodeId);
       }
     });
@@ -387,12 +376,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
             {nodesWithResults.length} nodes
           </Badge>
         </div>
-        <Button
-          appearance="secondary"
-          size="small"
-          icon={<ArrowDownload20Regular />}
-          onClick={handleDownload}
-        >
+        <Button appearance="secondary" size="small" icon={<ArrowDownload20Regular />} onClick={handleDownload}>
           Download JSON
         </Button>
       </div>
@@ -405,13 +389,8 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
       )}
 
       {/* Node results accordion */}
-      <Accordion
-        className={styles.accordion}
-        multiple
-        collapsible
-        defaultOpenItems={defaultOpenItems}
-      >
-        {nodesWithResults.map((node) => (
+      <Accordion className={styles.accordion} multiple collapsible defaultOpenItems={defaultOpenItems}>
+        {nodesWithResults.map(node => (
           <AccordionItem key={node.nodeId} value={node.nodeId}>
             <AccordionHeader size="small">
               <div className={styles.nodeHeader}>
@@ -419,22 +398,19 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
                 <Text className={styles.nodeLabel} size={200}>
                   {node.label}
                 </Text>
-                {node.status === "failed" && (
+                {node.status === 'failed' && (
                   <Badge appearance="filled" color="danger" size="small">
                     Failed
                   </Badge>
                 )}
-                {node.status === "skipped" && (
+                {node.status === 'skipped' && (
                   <Badge appearance="outline" size="small">
                     Skipped
                   </Badge>
                 )}
-                {node.durationMs !== undefined &&
-                  node.status === "completed" && (
-                    <Text className={styles.nodeDuration}>
-                      {formatDuration(node.durationMs)}
-                    </Text>
-                  )}
+                {node.durationMs !== undefined && node.status === 'completed' && (
+                  <Text className={styles.nodeDuration}>{formatDuration(node.durationMs)}</Text>
+                )}
               </div>
             </AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
@@ -463,11 +439,11 @@ const getStatusIcon = (node: TestNodeProgress) => {
   };
 
   switch (node.status) {
-    case "completed":
+    case 'completed':
       return <Checkmark16Regular style={iconStyle.completed} />;
-    case "failed":
+    case 'failed':
       return <Dismiss16Regular style={iconStyle.failed} />;
-    case "skipped":
+    case 'skipped':
       return <ArrowForward16Regular style={iconStyle.skipped} />;
     default:
       return null;

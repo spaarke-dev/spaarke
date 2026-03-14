@@ -27,22 +27,22 @@ import {
   retrieveMultipleRecords,
   associate,
   disassociate,
-} from "./dataverseClient";
-import type { DataverseRecord } from "./dataverseClient";
+} from './dataverseClient';
+import type { DataverseRecord } from './dataverseClient';
 import {
   type PlaybookNodeData,
   type PlaybookNodeType,
   NodeTypeToDataverse,
   NodeTypeToActionType,
-} from "../types/playbook";
-import type { PromptSchema } from "../types/promptSchema";
-import { validatePromptSchema } from "../types/promptSchema";
+} from '../types/playbook';
+import type { PromptSchema } from '../types/promptSchema';
+import { validatePromptSchema } from '../types/promptSchema';
 import {
   validatePromptSchemaNodes,
   hasValidationErrors,
   groupValidationsByNode,
   type PromptSchemaValidation,
-} from "./canvasValidation";
+} from './canvasValidation';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,12 +76,11 @@ interface ExistingNode {
 // Constants
 // ---------------------------------------------------------------------------
 
-const ENTITY_SET_NAME = "sprk_playbooknodes";
-const LOG_PREFIX = "[PlaybookBuilder:PlaybookNodeSync]";
+const ENTITY_SET_NAME = 'sprk_playbooknodes';
+const LOG_PREFIX = '[PlaybookBuilder:PlaybookNodeSync]';
 
 /** Validate that a string is a Dataverse GUID (with or without braces). */
-const GUID_RE =
-  /^[{(]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[)}]?$/i;
+const GUID_RE = /^[{(]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[)}]?$/i;
 function isGuid(value: string): boolean {
   return GUID_RE.test(value);
 }
@@ -95,22 +94,18 @@ function isGuid(value: string): boolean {
  * @param playbookId - Playbook record GUID (no braces).
  * @returns Array of raw Dataverse record objects.
  */
-export async function loadPlaybookNodes(
-  playbookId: string,
-): Promise<DataverseRecord[]> {
+export async function loadPlaybookNodes(playbookId: string): Promise<DataverseRecord[]> {
   const queryOptions =
-    "$select=sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executionorder," +
-    "sprk_outputvariable,sprk_configjson,sprk_position_x,sprk_position_y," +
-    "sprk_isactive,sprk_timeoutseconds,sprk_retrycount,sprk_conditionjson," +
-    "sprk_dependsonjson,_sprk_playbookid_value,_sprk_actionid_value," +
-    "_sprk_modeldeploymentid_value" +
+    '$select=sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executionorder,' +
+    'sprk_outputvariable,sprk_configjson,sprk_position_x,sprk_position_y,' +
+    'sprk_isactive,sprk_timeoutseconds,sprk_retrycount,sprk_conditionjson,' +
+    'sprk_dependsonjson,_sprk_playbookid_value,_sprk_actionid_value,' +
+    '_sprk_modeldeploymentid_value' +
     `&$filter=_sprk_playbookid_value eq ${playbookId}` +
-    "&$orderby=sprk_executionorder asc";
+    '&$orderby=sprk_executionorder asc';
 
   const result = await retrieveMultipleRecords(ENTITY_SET_NAME, queryOptions);
-  console.info(
-    `${LOG_PREFIX} Loaded ${result.entities.length} node records for playbook ${playbookId}`,
-  );
+  console.info(`${LOG_PREFIX} Loaded ${result.entities.length} node records for playbook ${playbookId}`);
   return result.entities;
 }
 
@@ -123,15 +118,10 @@ export async function loadPlaybookNodes(
  * @returns Map of canvas node ID → { skillIds, knowledgeIds, toolIds }.
  */
 export async function loadNodeScopes(
-  playbookId: string,
-): Promise<
-  Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>
-> {
+  playbookId: string
+): Promise<Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>> {
   const existing = await getExistingNodes(playbookId);
-  const scopeMap = new Map<
-    string,
-    { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }
-  >();
+  const scopeMap = new Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>();
 
   for (const record of existing) {
     const canvasId = extractCanvasNodeId(record.configJson);
@@ -144,9 +134,7 @@ export async function loadNodeScopes(
     }
   }
 
-  console.info(
-    `${LOG_PREFIX} Loaded N:N scopes for ${scopeMap.size} nodes (of ${existing.length} total)`,
-  );
+  console.info(`${LOG_PREFIX} Loaded N:N scopes for ${scopeMap.size} nodes (of ${existing.length} total)`);
   return scopeMap;
 }
 
@@ -161,21 +149,16 @@ export async function syncNodesToDataverse(
   playbookId: string,
   nodes: CanvasNode[],
   edges: CanvasEdge[],
-  initialNodeScopes?: Map<
-    string,
-    { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }
-  >,
+  initialNodeScopes?: Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>
 ): Promise<void> {
-  console.info(
-    `${LOG_PREFIX} Syncing ${nodes.length} nodes, ${edges.length} edges for playbook ${playbookId}`,
-  );
+  console.info(`${LOG_PREFIX} Syncing ${nodes.length} nodes, ${edges.length} edges for playbook ${playbookId}`);
 
   // Step 1: Load existing node records
   const existing = await getExistingNodes(playbookId);
   const existingByCanvasId = buildCanvasIdMap(existing);
 
   console.info(
-    `${LOG_PREFIX} Found ${existing.length} existing records, ${existingByCanvasId.size} mapped by canvas ID`,
+    `${LOG_PREFIX} Found ${existing.length} existing records, ${existingByCanvasId.size} mapped by canvas ID`
   );
 
   // Step 2: Compute execution order (Kahn's topological sort)
@@ -200,12 +183,7 @@ export async function syncNodesToDataverse(
       if (existingRecord) {
         await updateNodeRecord(existingRecord.id, node, order);
         // Sync N:N relationships (skills, knowledge, tools)
-        await syncNodeRelationships(
-          existingRecord.id,
-          node.data,
-          existingRecord,
-          nodeInitialScopes,
-        );
+        await syncNodeRelationships(existingRecord.id, node.data, existingRecord, nodeInitialScopes);
       } else {
         const newId = await createNodeRecord(playbookId, node, order);
         canvasIdToNodeId.set(node.id, newId);
@@ -231,20 +209,16 @@ export async function syncNodesToDataverse(
     if (!nodeId) continue;
 
     const dependsOnIds = (incomingEdges.get(node.id) ?? [])
-      .filter((srcId) => canvasIdToNodeId.has(srcId))
-      .map((srcId) => canvasIdToNodeId.get(srcId)!);
+      .filter(srcId => canvasIdToNodeId.has(srcId))
+      .map(srcId => canvasIdToNodeId.get(srcId)!);
 
     try {
-      const dependsOnJson =
-        dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
+      const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
       await updateRecord(ENTITY_SET_NAME, nodeId, {
         sprk_dependsonjson: dependsOnJson,
       });
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to update dependsOn for node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to update dependsOn for node ${nodeId}:`, err);
     }
   }
 
@@ -258,16 +232,13 @@ export async function syncNodesToDataverse(
       await deleteRecord(ENTITY_SET_NAME, record.id);
       deletedCount++;
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to delete orphaned node ${record.id}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to delete orphaned node ${record.id}:`, err);
     }
   }
 
   console.info(
     `${LOG_PREFIX} Sync complete: ${nodes.length - existingByCanvasId.size} created, ` +
-      `${Math.min(nodes.length, existingByCanvasId.size)} updated, ${deletedCount} deleted`,
+      `${Math.min(nodes.length, existingByCanvasId.size)} updated, ${deletedCount} deleted`
   );
 }
 
@@ -304,32 +275,25 @@ export async function validateAndSyncNodes(
   playbookId: string,
   nodes: CanvasNode[],
   edges: CanvasEdge[],
-  initialNodeScopes?: Map<
-    string,
-    { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }
-  >,
+  initialNodeScopes?: Map<string, { skillIds: string[]; knowledgeIds: string[]; toolIds: string[] }>
 ): Promise<ValidatedSyncResult> {
   // Cast CanvasNode[] to the @xyflow/react Node shape for validation.
   // CanvasNode is structurally compatible (has id, type, data with PlaybookNodeData).
-  const validationNodes = nodes.map((n) => ({
+  const validationNodes = nodes.map(n => ({
     ...n,
     data: n.data,
   }));
 
   const validations = validatePromptSchemaNodes(
-    validationNodes as unknown as import("@xyflow/react").Node<
-      import("../types/canvas").PlaybookNodeData
-    >[],
-    edges,
+    validationNodes as unknown as import('@xyflow/react').Node<import('../types/canvas').PlaybookNodeData>[],
+    edges
   );
 
   const validationsByNode = groupValidationsByNode(validations);
 
   if (hasValidationErrors(validations)) {
-    const errorCount = validations.filter((v) => v.severity === "error").length;
-    console.warn(
-      `${LOG_PREFIX} Sync blocked: ${errorCount} validation error(s) found. Fix errors before saving.`,
-    );
+    const errorCount = validations.filter(v => v.severity === 'error').length;
+    console.warn(`${LOG_PREFIX} Sync blocked: ${errorCount} validation error(s) found. Fix errors before saving.`);
     return { synced: false, validations, validationsByNode };
   }
 
@@ -344,7 +308,7 @@ export {
   hasValidationErrors,
   groupValidationsByNode,
   type PromptSchemaValidation,
-} from "./canvasValidation";
+} from './canvasValidation';
 
 // ---------------------------------------------------------------------------
 // buildConfigJson — Maps ALL 7 node types' fields into sprk_configjson
@@ -359,10 +323,7 @@ export {
  * @param data - The PlaybookNodeData from the canvas store.
  * @returns JSON string for sprk_configjson.
  */
-export function buildConfigJson(
-  canvasNodeId: string,
-  data: PlaybookNodeData,
-): string {
+export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): string {
   const actionType = NodeTypeToActionType[data.type as PlaybookNodeType];
   const config: Record<string, unknown> = {
     __canvasNodeId: canvasNodeId,
@@ -370,12 +331,11 @@ export function buildConfigJson(
   };
 
   switch (data.type) {
-    case "aiAnalysis":
+    case 'aiAnalysis':
       // AI Analysis: scope IDs, model, tool, action
       // SkillIds and KnowledgeIds are handled via N:N tables, not in configjson.
       // But we include model/tool/action references for executor convenience.
-      if (data.modelDeploymentId)
-        config.modelDeploymentId = data.modelDeploymentId;
+      if (data.modelDeploymentId) config.modelDeploymentId = data.modelDeploymentId;
       // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
       // Otherwise preserve flat text systemPrompt for backward compatibility.
       if (data.promptSchema) {
@@ -385,7 +345,7 @@ export function buildConfigJson(
       }
       break;
 
-    case "aiCompletion":
+    case 'aiCompletion':
       // AI Completion: system prompt, user prompt template, temperature, max tokens
       // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
       // Otherwise preserve flat text systemPrompt for backward compatibility.
@@ -394,21 +354,19 @@ export function buildConfigJson(
       } else if (data.systemPrompt) {
         config.systemPrompt = data.systemPrompt;
       }
-      if (data.userPromptTemplate)
-        config.userPromptTemplate = data.userPromptTemplate;
+      if (data.userPromptTemplate) config.userPromptTemplate = data.userPromptTemplate;
       if (data.temperature != null) config.temperature = data.temperature;
       if (data.maxTokens != null) config.maxTokens = data.maxTokens;
-      if (data.modelDeploymentId)
-        config.modelDeploymentId = data.modelDeploymentId;
+      if (data.modelDeploymentId) config.modelDeploymentId = data.modelDeploymentId;
       break;
 
-    case "condition":
+    case 'condition':
       // Condition: conditionJson (already a JSON string, stored separately)
       // conditionJson goes into sprk_conditionjson field, not configjson.
       // Any additional condition config can go here.
       break;
 
-    case "deliverOutput":
+    case 'deliverOutput':
       // Deliver Output: delivery type, Handlebars template, output format
       if (data.deliveryType) config.deliveryType = data.deliveryType;
       if (data.template) config.template = data.template;
@@ -419,17 +377,16 @@ export function buildConfigJson(
       };
       break;
 
-    case "deliverToIndex":
+    case 'deliverToIndex':
       // Deliver to Index: index name, source, parent entity, metadata
-      config.indexName = data.indexName ?? "";
-      config.source = data.indexSource ?? "document";
-      if (data.indexContentVariable)
-        config.contentVariable = data.indexContentVariable;
+      config.indexName = data.indexName ?? '';
+      config.source = data.indexSource ?? 'document';
+      if (data.indexContentVariable) config.contentVariable = data.indexContentVariable;
       if (data.indexParentEntityType || data.indexParentEntityId) {
         config.parentEntity = {
-          entityType: data.indexParentEntityType ?? "",
-          entityId: data.indexParentEntityId ?? "",
-          entityName: data.indexParentEntityName ?? "",
+          entityType: data.indexParentEntityType ?? '',
+          entityId: data.indexParentEntityId ?? '',
+          entityName: data.indexParentEntityName ?? '',
         };
       }
       if (data.indexMetadata) {
@@ -441,7 +398,7 @@ export function buildConfigJson(
       }
       break;
 
-    case "sendEmail":
+    case 'sendEmail':
       // Send Email: to, cc, subject, body, isHtml
       if (data.emailTo && data.emailTo.length > 0) config.to = data.emailTo;
       if (data.emailCc && data.emailCc.length > 0) config.cc = data.emailCc;
@@ -450,14 +407,13 @@ export function buildConfigJson(
       if (data.emailIsHtml != null) config.isHtml = data.emailIsHtml;
       break;
 
-    case "updateRecord":
+    case 'updateRecord':
       // Update Record: entityLogicalName, recordId, fieldMappings (new) or fields (legacy), lookups
       // The UpdateRecordForm stores full config in data.configJson
       if (data.configJson) {
         try {
           const parsed = JSON.parse(data.configJson as string);
-          if (parsed.entityLogicalName)
-            config.entityLogicalName = parsed.entityLogicalName;
+          if (parsed.entityLogicalName) config.entityLogicalName = parsed.entityLogicalName;
           if (parsed.recordId) config.recordId = parsed.recordId;
           if (parsed.fieldMappings) config.fieldMappings = parsed.fieldMappings;
           else if (parsed.fields) config.fields = parsed.fields;
@@ -468,22 +424,20 @@ export function buildConfigJson(
       }
       break;
 
-    case "createTask":
+    case 'createTask':
       // Create Task: subject, description, regarding, owner, dueDate
       if (data.taskSubject) config.subject = data.taskSubject;
       if (data.taskDescription) config.description = data.taskDescription;
       if (data.taskRegardingId) config.regardingObjectId = data.taskRegardingId;
-      if (data.taskRegardingType)
-        config.regardingObjectType = data.taskRegardingType;
+      if (data.taskRegardingType) config.regardingObjectType = data.taskRegardingType;
       if (data.taskOwnerId) config.ownerId = data.taskOwnerId;
       if (data.taskDueDate) config.dueDate = data.taskDueDate;
       break;
 
-    case "wait":
+    case 'wait':
       // Wait: wait type, duration, datetime
       if (data.waitType) config.waitType = data.waitType;
-      if (data.waitDurationHours != null)
-        config.duration = { hours: data.waitDurationHours };
+      if (data.waitDurationHours != null) config.duration = { hours: data.waitDurationHours };
       if (data.waitUntilDateTime) config.untilDateTime = data.waitUntilDateTime;
       break;
   }
@@ -507,7 +461,7 @@ export function buildConfigJson(
 export function isJpsFormat(value: string | null | undefined): boolean {
   if (!value) return false;
   const trimmed = value.trimStart();
-  return trimmed.startsWith("{") && trimmed.includes('"$schema"');
+  return trimmed.startsWith('{') && trimmed.includes('"$schema"');
 }
 
 /**
@@ -519,9 +473,7 @@ export function isJpsFormat(value: string | null | undefined): boolean {
  * @param value - The raw string value to attempt JPS deserialization on.
  * @returns A validated PromptSchema if the value is valid JPS, or undefined otherwise.
  */
-export function deserializePromptSchema(
-  value: string | null | undefined,
-): PromptSchema | undefined {
+export function deserializePromptSchema(value: string | null | undefined): PromptSchema | undefined {
   if (!isJpsFormat(value)) return undefined;
 
   try {
@@ -551,23 +503,16 @@ export function deserializePromptSchema(
  * @returns An object with `promptSchema` (from systemPrompt) and `promptSchemaOverride`
  *          (from configJson.promptSchemaOverride), either or both may be undefined.
  */
-export function parseNodeConfigForPromptSchema(
-  configJson: string | null | undefined,
-): {
+export function parseNodeConfigForPromptSchema(configJson: string | null | undefined): {
   promptSchema: PromptSchema | undefined;
   promptSchemaOverride: PromptSchema | undefined;
 } {
-  if (!configJson)
-    return { promptSchema: undefined, promptSchemaOverride: undefined };
+  if (!configJson) return { promptSchema: undefined, promptSchemaOverride: undefined };
 
   try {
     const parsed = JSON.parse(configJson);
-    const systemPromptValue =
-      typeof parsed.systemPrompt === "string" ? parsed.systemPrompt : undefined;
-    const overrideValue =
-      typeof parsed.promptSchemaOverride === "string"
-        ? parsed.promptSchemaOverride
-        : undefined;
+    const systemPromptValue = typeof parsed.systemPrompt === 'string' ? parsed.systemPrompt : undefined;
+    const overrideValue = typeof parsed.promptSchemaOverride === 'string' ? parsed.promptSchemaOverride : undefined;
 
     return {
       promptSchema: deserializePromptSchema(systemPromptValue),
@@ -584,28 +529,19 @@ export function parseNodeConfigForPromptSchema(
 
 async function getExistingNodes(playbookId: string): Promise<ExistingNode[]> {
   const queryOptions =
-    "$select=sprk_playbooknodeid,sprk_configjson" +
+    '$select=sprk_playbooknodeid,sprk_configjson' +
     `&$filter=_sprk_playbookid_value eq ${playbookId}` +
-    "&$expand=sprk_playbooknode_skill($select=sprk_analysisskillid)" +
-    ",sprk_playbooknode_knowledge($select=sprk_analysisknowledgeid)" +
-    ",sprk_playbooknode_tool($select=sprk_analysistoolid)";
+    '&$expand=sprk_playbooknode_skill($select=sprk_analysisskillid)' +
+    ',sprk_playbooknode_knowledge($select=sprk_analysisknowledgeid)' +
+    ',sprk_playbooknode_tool($select=sprk_analysistoolid)';
 
   const result = await retrieveMultipleRecords(ENTITY_SET_NAME, queryOptions);
-  return (result.entities ?? []).map((e) => ({
-    id: (e["sprk_playbooknodeid"] as string) ?? "",
-    configJson: (e["sprk_configjson"] as string) ?? null,
-    skillIds: extractRelatedIds(
-      e["sprk_playbooknode_skill"],
-      "sprk_analysisskillid",
-    ),
-    knowledgeIds: extractRelatedIds(
-      e["sprk_playbooknode_knowledge"],
-      "sprk_analysisknowledgeid",
-    ),
-    toolIds: extractRelatedIds(
-      e["sprk_playbooknode_tool"],
-      "sprk_analysistoolid",
-    ),
+  return (result.entities ?? []).map(e => ({
+    id: (e['sprk_playbooknodeid'] as string) ?? '',
+    configJson: (e['sprk_configjson'] as string) ?? null,
+    skillIds: extractRelatedIds(e['sprk_playbooknode_skill'], 'sprk_analysisskillid'),
+    knowledgeIds: extractRelatedIds(e['sprk_playbooknode_knowledge'], 'sprk_analysisknowledgeid'),
+    toolIds: extractRelatedIds(e['sprk_playbooknode_tool'], 'sprk_analysistoolid'),
   }));
 }
 
@@ -613,18 +549,13 @@ async function getExistingNodes(playbookId: string): Promise<ExistingNode[]> {
 function extractRelatedIds(collection: unknown, idField: string): string[] {
   if (!Array.isArray(collection)) return [];
   return collection
-    .map((item: Record<string, unknown>) => (item[idField] as string) ?? "")
+    .map((item: Record<string, unknown>) => (item[idField] as string) ?? '')
     .filter((id: string) => id.length > 0);
 }
 
-async function createNodeRecord(
-  playbookId: string,
-  node: CanvasNode,
-  executionOrder: number,
-): Promise<string> {
+async function createNodeRecord(playbookId: string, node: CanvasNode, executionOrder: number): Promise<string> {
   const data = node.data;
-  const name =
-    asString(data.label) ?? asString(data.name as unknown) ?? node.type;
+  const name = asString(data.label) ?? asString(data.name as unknown) ?? node.type;
   const outputVariable = asString(data.outputVariable) ?? `output_${node.id}`;
   const configJson = buildConfigJson(node.id, data);
   const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
@@ -632,7 +563,7 @@ async function createNodeRecord(
   const payload: Record<string, unknown> = {
     sprk_name: name,
     sprk_nodetype: nodeType,
-    "sprk_playbookid@odata.bind": `/sprk_analysisplaybooks(${playbookId})`,
+    'sprk_playbookid@odata.bind': `/sprk_analysisplaybooks(${playbookId})`,
     sprk_executionorder: executionOrder,
     sprk_outputvariable: outputVariable,
     sprk_configjson: configJson,
@@ -643,37 +574,29 @@ async function createNodeRecord(
 
   // Optional lookup bindings (only if real GUIDs, skip mock IDs)
   const actionId = asString(data.actionId);
-  if (actionId && isGuid(actionId))
-    payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+  if (actionId && isGuid(actionId)) payload['sprk_actionid@odata.bind'] = `/sprk_analysisactions(${actionId})`;
 
   // Tool is now N:N — handled via syncNodeRelationships, not lookup binding
 
   const modelDeploymentId = asString(data.modelDeploymentId);
   if (modelDeploymentId && isGuid(modelDeploymentId))
-    payload["sprk_modeldeploymentid@odata.bind"] =
-      `/sprk_aimodeldeployments(${modelDeploymentId})`;
+    payload['sprk_modeldeploymentid@odata.bind'] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
   const timeoutSeconds = asNumber(data.timeoutSeconds);
-  if (timeoutSeconds != null) payload["sprk_timeoutseconds"] = timeoutSeconds;
+  if (timeoutSeconds != null) payload['sprk_timeoutseconds'] = timeoutSeconds;
 
   const retryCount = asNumber(data.retryCount);
-  if (retryCount != null) payload["sprk_retrycount"] = retryCount;
+  if (retryCount != null) payload['sprk_retrycount'] = retryCount;
 
   const conditionJson = asString(data.conditionJson);
-  if (conditionJson) payload["sprk_conditionjson"] = conditionJson;
+  if (conditionJson) payload['sprk_conditionjson'] = conditionJson;
 
   const newId = await createRecord(ENTITY_SET_NAME, payload);
-  console.info(
-    `${LOG_PREFIX} Created node ${newId} from canvas ${node.id}: ${name}`,
-  );
+  console.info(`${LOG_PREFIX} Created node ${newId} from canvas ${node.id}: ${name}`);
   return newId;
 }
 
-async function updateNodeRecord(
-  nodeId: string,
-  node: CanvasNode,
-  executionOrder: number,
-): Promise<void> {
+async function updateNodeRecord(nodeId: string, node: CanvasNode, executionOrder: number): Promise<void> {
   const data = node.data;
   const configJson = buildConfigJson(node.id, data);
   const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
@@ -687,33 +610,31 @@ async function updateNodeRecord(
   };
 
   const name = asString(data.label) ?? asString(data.name as unknown);
-  if (name) payload["sprk_name"] = name;
+  if (name) payload['sprk_name'] = name;
 
   const outputVariable = asString(data.outputVariable);
-  if (outputVariable) payload["sprk_outputvariable"] = outputVariable;
+  if (outputVariable) payload['sprk_outputvariable'] = outputVariable;
 
   const actionId = asString(data.actionId);
-  if (actionId && isGuid(actionId))
-    payload["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${actionId})`;
+  if (actionId && isGuid(actionId)) payload['sprk_actionid@odata.bind'] = `/sprk_analysisactions(${actionId})`;
 
   // Tool is now N:N — handled via syncNodeRelationships, not lookup binding
 
   const modelDeploymentId = asString(data.modelDeploymentId);
   if (modelDeploymentId && isGuid(modelDeploymentId))
-    payload["sprk_modeldeploymentid@odata.bind"] =
-      `/sprk_aimodeldeployments(${modelDeploymentId})`;
+    payload['sprk_modeldeploymentid@odata.bind'] = `/sprk_aimodeldeployments(${modelDeploymentId})`;
 
   const timeoutSeconds = asNumber(data.timeoutSeconds);
-  if (timeoutSeconds != null) payload["sprk_timeoutseconds"] = timeoutSeconds;
+  if (timeoutSeconds != null) payload['sprk_timeoutseconds'] = timeoutSeconds;
 
   const retryCount = asNumber(data.retryCount);
-  if (retryCount != null) payload["sprk_retrycount"] = retryCount;
+  if (retryCount != null) payload['sprk_retrycount'] = retryCount;
 
   const conditionJson = asString(data.conditionJson);
-  if (conditionJson) payload["sprk_conditionjson"] = conditionJson;
+  if (conditionJson) payload['sprk_conditionjson'] = conditionJson;
 
   const isActive = asBool(data.isActive);
-  if (isActive != null) payload["sprk_isactive"] = isActive;
+  if (isActive != null) payload['sprk_isactive'] = isActive;
 
   await updateRecord(ENTITY_SET_NAME, nodeId, payload);
 }
@@ -745,7 +666,7 @@ async function syncNodeRelationships(
     skillIds: string[];
     knowledgeIds: string[];
     toolIds: string[];
-  },
+  }
 ): Promise<void> {
   // Filter out non-GUID IDs (e.g. mock/placeholder IDs like "skill-5")
   const desiredSkillIds = (data.skillIds ?? []).filter(isGuid);
@@ -760,126 +681,68 @@ async function syncNodeRelationships(
   const safeToRemoveTools = initialScopes?.toolIds ?? [];
 
   // Sync skills
-  const skillsToAdd = desiredSkillIds.filter(
-    (id) => !existingRecord.skillIds.includes(id),
-  );
+  const skillsToAdd = desiredSkillIds.filter(id => !existingRecord.skillIds.includes(id));
   const skillsToRemove = existingRecord.skillIds.filter(
-    (id) => !desiredSkillIds.includes(id) && safeToRemoveSkills.includes(id),
+    id => !desiredSkillIds.includes(id) && safeToRemoveSkills.includes(id)
   );
 
   for (const skillId of skillsToAdd) {
     try {
-      await associate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_skill",
-        "sprk_analysisskills",
-        skillId,
-      );
+      await associate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_skill', 'sprk_analysisskills', skillId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to associate skill ${skillId} with node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to associate skill ${skillId} with node ${nodeId}:`, err);
     }
   }
 
   for (const skillId of skillsToRemove) {
     try {
-      await disassociate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_skill",
-        skillId,
-      );
+      await disassociate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_skill', skillId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to disassociate skill ${skillId} from node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to disassociate skill ${skillId} from node ${nodeId}:`, err);
     }
   }
 
   // Sync knowledge
-  const knowledgeToAdd = desiredKnowledgeIds.filter(
-    (id) => !existingRecord.knowledgeIds.includes(id),
-  );
+  const knowledgeToAdd = desiredKnowledgeIds.filter(id => !existingRecord.knowledgeIds.includes(id));
   const knowledgeToRemove = existingRecord.knowledgeIds.filter(
-    (id) =>
-      !desiredKnowledgeIds.includes(id) && safeToRemoveKnowledge.includes(id),
+    id => !desiredKnowledgeIds.includes(id) && safeToRemoveKnowledge.includes(id)
   );
 
   for (const knowledgeId of knowledgeToAdd) {
     try {
-      await associate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_knowledge",
-        "sprk_analysisknowledges",
-        knowledgeId,
-      );
+      await associate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_knowledge', 'sprk_analysisknowledges', knowledgeId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to associate knowledge ${knowledgeId} with node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to associate knowledge ${knowledgeId} with node ${nodeId}:`, err);
     }
   }
 
   for (const knowledgeId of knowledgeToRemove) {
     try {
-      await disassociate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_knowledge",
-        knowledgeId,
-      );
+      await disassociate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_knowledge', knowledgeId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to disassociate knowledge ${knowledgeId} from node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to disassociate knowledge ${knowledgeId} from node ${nodeId}:`, err);
     }
   }
 
   // Sync tools
-  const toolsToAdd = desiredToolIds.filter(
-    (id) => !existingRecord.toolIds.includes(id),
-  );
+  const toolsToAdd = desiredToolIds.filter(id => !existingRecord.toolIds.includes(id));
   const toolsToRemove = existingRecord.toolIds.filter(
-    (id) => !desiredToolIds.includes(id) && safeToRemoveTools.includes(id),
+    id => !desiredToolIds.includes(id) && safeToRemoveTools.includes(id)
   );
 
   for (const toolId of toolsToAdd) {
     try {
-      await associate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_tool",
-        "sprk_analysistools",
-        toolId,
-      );
+      await associate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_tool', 'sprk_analysistools', toolId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to associate tool ${toolId} with node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to associate tool ${toolId} with node ${nodeId}:`, err);
     }
   }
 
   for (const toolId of toolsToRemove) {
     try {
-      await disassociate(
-        ENTITY_SET_NAME,
-        nodeId,
-        "sprk_playbooknode_tool",
-        toolId,
-      );
+      await disassociate(ENTITY_SET_NAME, nodeId, 'sprk_playbooknode_tool', toolId);
     } catch (err) {
-      console.error(
-        `${LOG_PREFIX} Failed to disassociate tool ${toolId} from node ${nodeId}:`,
-        err,
-      );
+      console.error(`${LOG_PREFIX} Failed to disassociate tool ${toolId} from node ${nodeId}:`, err);
     }
   }
 
@@ -896,7 +759,7 @@ async function syncNodeRelationships(
       `${LOG_PREFIX} Node ${nodeId} N:N sync: ` +
         `skills +${skillsToAdd.length}/-${skillsToRemove.length}, ` +
         `knowledge +${knowledgeToAdd.length}/-${knowledgeToRemove.length}, ` +
-        `tools +${toolsToAdd.length}/-${toolsToRemove.length}`,
+        `tools +${toolsToAdd.length}/-${toolsToRemove.length}`
     );
   }
 }
@@ -909,11 +772,8 @@ async function syncNodeRelationships(
  * Kahn's algorithm — topological sort of canvas edges to produce
  * execution order per node. Nodes in cycles receive order 0.
  */
-function computeExecutionOrders(
-  nodes: CanvasNode[],
-  edges: CanvasEdge[],
-): Map<string, number> {
-  const nodeIds = new Set(nodes.map((n) => n.id));
+function computeExecutionOrders(nodes: CanvasNode[], edges: CanvasEdge[]): Map<string, number> {
+  const nodeIds = new Set(nodes.map(n => n.id));
   const inDegree = new Map<string, number>();
   const adjacency = new Map<string, string[]>();
 
@@ -984,19 +844,19 @@ function extractCanvasNodeId(configJson: string | null): string | null {
   if (!configJson) return null;
   try {
     const obj = JSON.parse(configJson);
-    return typeof obj.__canvasNodeId === "string" ? obj.__canvasNodeId : null;
+    return typeof obj.__canvasNodeId === 'string' ? obj.__canvasNodeId : null;
   } catch {
     return null;
   }
 }
 
 function asString(v: unknown): string | null {
-  return typeof v === "string" && v.length > 0 ? v : null;
+  return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
 function asNumber(v: unknown): number | null {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
     const n = Number(v);
     return isNaN(n) ? null : n;
   }
@@ -1004,6 +864,6 @@ function asNumber(v: unknown): number | null {
 }
 
 function asBool(v: unknown): boolean | null {
-  if (typeof v === "boolean") return v;
+  if (typeof v === 'boolean') return v;
   return null;
 }

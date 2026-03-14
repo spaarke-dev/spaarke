@@ -12,23 +12,11 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import { useState, useCallback } from "react";
-import {
-  Button,
-  Input,
-  Text,
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  CheckmarkCircle20Regular,
-  Send20Regular,
-  Edit20Regular,
-} from "@fluentui/react-icons";
-import type { ClarificationData } from "../../stores/aiAssistantStore";
+import * as React from 'react';
+import { useState, useCallback } from 'react';
+import { Button, Input, Text, makeStyles, tokens, shorthands, mergeClasses } from '@fluentui/react-components';
+import { CheckmarkCircle20Regular, Send20Regular, Edit20Regular } from '@fluentui/react-icons';
+import type { ClarificationData } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -37,41 +25,41 @@ import type { ClarificationData } from "../../stores/aiAssistantStore";
 const useStyles = makeStyles({
   // Container for the entire clarification UI
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalM),
-    ...shorthands.padding(tokens.spacingVerticalS, "0"),
-    maxWidth: "100%",
+    ...shorthands.padding(tokens.spacingVerticalS, '0'),
+    maxWidth: '100%',
   },
   // Context text display
   contextText: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
-    fontStyle: "italic",
+    fontStyle: 'italic',
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     backgroundColor: tokens.colorNeutralBackground3,
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
   },
   // Options container
   optionsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
   },
   // Individual option button
   optionButton: {
-    justifyContent: "flex-start",
-    textAlign: "left",
-    minHeight: "40px",
+    justifyContent: 'flex-start',
+    textAlign: 'left',
+    minHeight: '40px',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
       ...shorthands.borderColor(tokens.colorBrandStroke1),
     },
-    ":active": {
+    ':active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
@@ -79,28 +67,28 @@ const useStyles = makeStyles({
   optionButtonSelected: {
     backgroundColor: tokens.colorBrandBackground2,
     ...shorthands.borderColor(tokens.colorBrandStroke1),
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
   // Responded (disabled) option styling
   optionButtonResponded: {
     opacity: 0.7,
-    cursor: "default",
+    cursor: 'default',
   },
   // Option text
   optionText: {
     flex: 1,
-    wordBreak: "break-word",
+    wordBreak: 'break-word',
   },
   // Option number badge
   optionNumber: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "24px",
-    height: "24px",
-    minWidth: "24px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    minWidth: '24px',
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
     ...shorthands.borderRadius(tokens.borderRadiusCircular),
@@ -114,32 +102,32 @@ const useStyles = makeStyles({
   },
   // Other option section
   otherSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
-    ...shorthands.padding(tokens.spacingVerticalS, "0"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.padding(tokens.spacingVerticalS, '0'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
     marginTop: tokens.spacingVerticalXS,
   },
   // Other input row
   otherInputRow: {
-    display: "flex",
+    display: 'flex',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   // Other text input
   otherInput: {
     flex: 1,
-    minHeight: "36px",
+    minHeight: '36px',
   },
   // Submit button for other option
   submitButton: {
-    minWidth: "80px",
+    minWidth: '80px',
   },
   // Responded indicator
   respondedIndicator: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
     color: tokens.colorStatusSuccessForeground1,
     fontSize: tokens.fontSizeBase200,
@@ -147,13 +135,13 @@ const useStyles = makeStyles({
   },
   // Selected response display
   selectedResponse: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorBrandBackground2,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border("1px", "solid", tokens.colorBrandStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
   },
   selectedResponseText: {
     color: tokens.colorBrandForeground1,
@@ -171,10 +159,7 @@ export interface ClarificationOptionsProps {
   /** Message ID for responding */
   messageId: string;
   /** Callback when user selects an option */
-  onRespond: (
-    messageId: string,
-    response: { selectedOption: number | "other"; freeText?: string },
-  ) => void;
+  onRespond: (messageId: string, response: { selectedOption: number | 'other'; freeText?: string }) => void;
   /** Whether the component is disabled (e.g., during streaming) */
   disabled?: boolean;
 }
@@ -190,10 +175,8 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
   disabled = false,
 }) => {
   const styles = useStyles();
-  const [selectedOption, setSelectedOption] = useState<number | "other" | null>(
-    null,
-  );
-  const [otherText, setOtherText] = useState("");
+  const [selectedOption, setSelectedOption] = useState<number | 'other' | null>(null);
+  const [otherText, setOtherText] = useState('');
   const [showOtherInput, setShowOtherInput] = useState(false);
 
   // If already responded, show the selected response
@@ -209,14 +192,14 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
       // Immediately send the response
       onRespond(messageId, { selectedOption: index });
     },
-    [hasResponded, disabled, messageId, onRespond],
+    [hasResponded, disabled, messageId, onRespond]
   );
 
   // Handle other click
   const handleOtherClick = useCallback(() => {
     if (hasResponded || disabled) return;
 
-    setSelectedOption("other");
+    setSelectedOption('other');
     setShowOtherInput(true);
   }, [hasResponded, disabled]);
 
@@ -225,7 +208,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
     if (hasResponded || disabled || !otherText.trim()) return;
 
     onRespond(messageId, {
-      selectedOption: "other",
+      selectedOption: 'other',
       freeText: otherText.trim(),
     });
   }, [hasResponded, disabled, otherText, messageId, onRespond]);
@@ -233,19 +216,19 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
   // Handle enter key in other input
   const handleOtherKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleOtherSubmit();
       }
     },
-    [handleOtherSubmit],
+    [handleOtherSubmit]
   );
 
   // Get the selected response text for display
   const getSelectedResponseText = (): string => {
-    if (!hasResponded) return "";
-    if (clarification.selectedOption === "other") {
-      return clarification.freeTextResponse ?? "";
+    if (!hasResponded) return '';
+    if (clarification.selectedOption === 'other') {
+      return clarification.freeTextResponse ?? '';
     }
     const options = clarification.options ?? [];
     const optionIndex = clarification.selectedOption as number;
@@ -257,16 +240,12 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
     return (
       <div className={styles.container}>
         {/* Context if provided */}
-        {clarification.context && (
-          <Text className={styles.contextText}>{clarification.context}</Text>
-        )}
+        {clarification.context && <Text className={styles.contextText}>{clarification.context}</Text>}
 
         {/* Show selected response */}
         <div className={styles.selectedResponse}>
           <CheckmarkCircle20Regular />
-          <Text className={styles.selectedResponseText}>
-            {getSelectedResponseText()}
-          </Text>
+          <Text className={styles.selectedResponseText}>{getSelectedResponseText()}</Text>
         </div>
       </div>
     );
@@ -276,15 +255,9 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
   const options = clarification.options ?? [];
 
   return (
-    <div
-      className={styles.container}
-      role="group"
-      aria-label="Clarification options"
-    >
+    <div className={styles.container} role="group" aria-label="Clarification options">
       {/* Context if provided */}
-      {clarification.context && (
-        <Text className={styles.contextText}>{clarification.context}</Text>
-      )}
+      {clarification.context && <Text className={styles.contextText}>{clarification.context}</Text>}
 
       {/* Options list */}
       {options.length > 0 && (
@@ -295,7 +268,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
               className={mergeClasses(
                 styles.optionButton,
                 selectedOption === index && styles.optionButtonSelected,
-                disabled && styles.optionButtonResponded,
+                disabled && styles.optionButtonResponded
               )}
               appearance="subtle"
               disabled={disabled}
@@ -304,10 +277,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
               role="listitem"
             >
               <span
-                className={mergeClasses(
-                  styles.optionNumber,
-                  selectedOption === index && styles.optionNumberSelected,
-                )}
+                className={mergeClasses(styles.optionNumber, selectedOption === index && styles.optionNumberSelected)}
               >
                 {index + 1}
               </span>
@@ -323,8 +293,8 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
           <Button
             className={mergeClasses(
               styles.optionButton,
-              selectedOption === "other" && styles.optionButtonSelected,
-              disabled && styles.optionButtonResponded,
+              selectedOption === 'other' && styles.optionButtonSelected,
+              disabled && styles.optionButtonResponded
             )}
             appearance="subtle"
             disabled={disabled}
@@ -332,9 +302,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
             icon={<Edit20Regular />}
             aria-label="Enter a different response"
           >
-            <Text className={styles.optionText}>
-              Other (type your response)
-            </Text>
+            <Text className={styles.optionText}>Other (type your response)</Text>
           </Button>
         ) : (
           <div className={styles.otherInputRow}>

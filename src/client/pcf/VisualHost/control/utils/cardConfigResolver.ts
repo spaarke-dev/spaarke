@@ -21,17 +21,17 @@ import {
   ColorSource,
   CardShape,
   VisualType,
-} from "../types";
+} from '../types';
 
 /**
  * Default card configuration — sensible defaults for all MetricCards
  */
 const DEFAULT_CONFIG: ICardConfig = {
-  valueFormat: "shortNumber",
-  colorSource: "none",
-  nullDisplay: "—",
-  cardSize: "medium",
-  sortBy: "label",
+  valueFormat: 'shortNumber',
+  colorSource: 'none',
+  nullDisplay: '—',
+  cardSize: 'medium',
+  sortBy: 'label',
   compact: false,
   showTitle: false,
   accentFromOptionSet: false,
@@ -42,18 +42,18 @@ const DEFAULT_CONFIG: ICardConfig = {
  * Default color thresholds for grade-based coloring (ReportCardMetric preset)
  */
 const GRADE_COLOR_THRESHOLDS: IColorThreshold[] = [
-  { range: [0.85, 1.0], tokenSet: "brand" },
-  { range: [0.7, 0.84], tokenSet: "warning" },
-  { range: [0.0, 0.69], tokenSet: "danger" },
+  { range: [0.85, 1.0], tokenSet: 'brand' },
+  { range: [0.7, 0.84], tokenSet: 'warning' },
+  { range: [0.0, 0.69], tokenSet: 'danger' },
 ];
 
 /**
  * Default icon map for ReportCardMetric preset (from GradeMetricCard legacy)
  */
 const GRADE_ICON_MAP: Record<string, string> = {
-  Guidelines: "Gavel",
-  Budget: "Money",
-  Outcomes: "Target",
+  Guidelines: 'Gavel',
+  Budget: 'Money',
+  Outcomes: 'Target',
 };
 
 /**
@@ -62,18 +62,18 @@ const GRADE_ICON_MAP: Record<string, string> = {
 function valueFormatEnumToString(enumVal: ValueFormat): ValueFormatType {
   switch (enumVal) {
     case ValueFormat.LetterGrade:
-      return "letterGrade";
+      return 'letterGrade';
     case ValueFormat.Percentage:
-      return "percentage";
+      return 'percentage';
     case ValueFormat.WholeNumber:
-      return "wholeNumber";
+      return 'wholeNumber';
     case ValueFormat.Decimal:
-      return "decimal";
+      return 'decimal';
     case ValueFormat.Currency:
-      return "currency";
+      return 'currency';
     case ValueFormat.ShortNumber:
     default:
-      return "shortNumber";
+      return 'shortNumber';
   }
 }
 
@@ -83,14 +83,14 @@ function valueFormatEnumToString(enumVal: ValueFormat): ValueFormatType {
 function colorSourceEnumToString(enumVal: ColorSource): ColorSourceType {
   switch (enumVal) {
     case ColorSource.OptionSetColor:
-      return "optionSetColor";
+      return 'optionSetColor';
     case ColorSource.ValueThreshold:
-      return "valueThreshold";
+      return 'valueThreshold';
     case ColorSource.SignBased:
-      return "signBased";
+      return 'signBased';
     case ColorSource.None:
     default:
-      return "none";
+      return 'none';
   }
 }
 
@@ -100,11 +100,11 @@ function colorSourceEnumToString(enumVal: ColorSource): ColorSourceType {
 function cardShapeToAspectRatio(shape?: CardShape): string | undefined {
   switch (shape) {
     case CardShape.Square:
-      return "1 / 1";
+      return '1 / 1';
     case CardShape.VerticalRectangle:
-      return "3 / 5";
+      return '3 / 5';
     case CardShape.HorizontalRectangle:
-      return "5 / 3";
+      return '5 / 3';
     default:
       return undefined;
   }
@@ -137,11 +137,10 @@ export function resolveCardConfig(
     columns?: number;
     showTitle?: boolean;
     titleFontSize?: string;
-  },
+  }
 ): ICardConfig {
   const json = parseConfigJson(chartDef.sprk_configurationjson);
-  const isReportCardMetric =
-    chartDef.sprk_visualtype === VisualType.ReportCardMetric;
+  const isReportCardMetric = chartDef.sprk_visualtype === VisualType.ReportCardMetric;
 
   // --- Value Format Resolution ---
   // Priority: PCF override > Chart Def field > Config JSON > preset default > default
@@ -150,90 +149,67 @@ export function resolveCardConfig(
     valueFormat = pcfOverrides.valueFormatOverride as ValueFormatType;
   } else if (chartDef.sprk_valueformat != null) {
     valueFormat = valueFormatEnumToString(chartDef.sprk_valueformat);
-  } else if (typeof json.valueFormat === "string") {
+  } else if (typeof json.valueFormat === 'string') {
     valueFormat = json.valueFormat as ValueFormatType;
   } else if (isReportCardMetric) {
-    valueFormat = "letterGrade";
+    valueFormat = 'letterGrade';
   }
 
   // --- Color Source Resolution ---
   let colorSource: ColorSourceType = DEFAULT_CONFIG.colorSource;
   if (chartDef.sprk_colorsource != null) {
     colorSource = colorSourceEnumToString(chartDef.sprk_colorsource);
-  } else if (typeof json.colorSource === "string") {
+  } else if (typeof json.colorSource === 'string') {
     colorSource = json.colorSource as ColorSourceType;
   } else if (isReportCardMetric) {
-    colorSource = "valueThreshold";
+    colorSource = 'valueThreshold';
   }
 
   // --- Config JSON fields with defaults ---
   const cardDescription =
     (json.cardDescription as string) ??
-    (isReportCardMetric
-      ? ((json.contextTemplate as string) ??
-        "{formatted} — {value}% compliance")
-      : undefined);
+    (isReportCardMetric ? ((json.contextTemplate as string) ?? '{formatted} — {value}% compliance') : undefined);
 
-  const nullDisplay =
-    (json.nullDisplay as string) ??
-    (isReportCardMetric ? "N/A" : DEFAULT_CONFIG.nullDisplay);
+  const nullDisplay = (json.nullDisplay as string) ?? (isReportCardMetric ? 'N/A' : DEFAULT_CONFIG.nullDisplay);
 
   const nullDescription =
-    (json.nullDescription as string) ??
-    (isReportCardMetric ? "No data available for {label}" : undefined);
+    (json.nullDescription as string) ?? (isReportCardMetric ? 'No data available for {label}' : undefined);
 
-  const cardSize =
-    (json.cardSize as ICardConfig["cardSize"]) ?? DEFAULT_CONFIG.cardSize;
+  const cardSize = (json.cardSize as ICardConfig['cardSize']) ?? DEFAULT_CONFIG.cardSize;
 
   const sortBy =
-    (json.sortBy as ICardConfig["sortBy"]) ??
-    (isReportCardMetric ? "optionSetOrder" : DEFAULT_CONFIG.sortBy);
+    (json.sortBy as ICardConfig['sortBy']) ?? (isReportCardMetric ? 'optionSetOrder' : DEFAULT_CONFIG.sortBy);
 
-  const columns =
-    pcfOverrides?.columns ?? (json.columns as number | undefined) ?? undefined;
+  const columns = pcfOverrides?.columns ?? (json.columns as number | undefined) ?? undefined;
 
   const compact = (json.compact as boolean) ?? DEFAULT_CONFIG.compact;
 
-  const showTitle =
-    pcfOverrides?.showTitle ??
-    (json.showTitle as boolean) ??
-    DEFAULT_CONFIG.showTitle;
+  const showTitle = pcfOverrides?.showTitle ?? (json.showTitle as boolean) ?? DEFAULT_CONFIG.showTitle;
 
   const maxCards = (json.maxCards as number | undefined) ?? undefined;
 
   const accentFromOptionSet =
-    (json.accentFromOptionSet as boolean) ??
-    (isReportCardMetric ? true : DEFAULT_CONFIG.accentFromOptionSet);
+    (json.accentFromOptionSet as boolean) ?? (isReportCardMetric ? true : DEFAULT_CONFIG.accentFromOptionSet);
 
-  const showAccentBar =
-    (json.showAccentBar as boolean) ?? DEFAULT_CONFIG.showAccentBar;
+  const showAccentBar = (json.showAccentBar as boolean) ?? DEFAULT_CONFIG.showAccentBar;
 
-  const titleFontSize =
-    pcfOverrides?.titleFontSize ??
-    (json.titleFontSize as string | undefined) ??
-    undefined;
+  const titleFontSize = pcfOverrides?.titleFontSize ?? (json.titleFontSize as string | undefined) ?? undefined;
 
   // --- Icon Map ---
   const iconMap =
-    (json.iconMap as Record<string, string> | undefined) ??
-    (isReportCardMetric ? GRADE_ICON_MAP : undefined);
+    (json.iconMap as Record<string, string> | undefined) ?? (isReportCardMetric ? GRADE_ICON_MAP : undefined);
 
   // --- Color Thresholds ---
   const colorThresholds =
     (json.colorThresholds as IColorThreshold[] | undefined) ??
-    (isReportCardMetric && colorSource === "valueThreshold"
-      ? GRADE_COLOR_THRESHOLDS
-      : undefined);
+    (isReportCardMetric && colorSource === 'valueThreshold' ? GRADE_COLOR_THRESHOLDS : undefined);
 
   // --- Aspect Ratio (from Chart Definition shape field, then JSON fallback) ---
   const aspectRatio =
-    cardShapeToAspectRatio(chartDef.sprk_metriccardshape) ??
-    (json.aspectRatio as string | undefined) ??
-    undefined;
+    cardShapeToAspectRatio(chartDef.sprk_metriccardshape) ?? (json.aspectRatio as string | undefined) ?? undefined;
 
   // --- Data Justification (from Config JSON) ---
-  const dataJustification =
-    (json.dataJustification as ICardConfig["dataJustification"]) ?? undefined;
+  const dataJustification = (json.dataJustification as ICardConfig['dataJustification']) ?? undefined;
 
   // --- Invert Sign (for signBased coloring) ---
   const invertSign = (json.invertSign as boolean | undefined) ?? undefined;

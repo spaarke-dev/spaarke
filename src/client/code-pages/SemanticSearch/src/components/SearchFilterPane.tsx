@@ -16,31 +16,14 @@
  * @see ADR-021 for Fluent UI v9 design system requirements
  */
 
-import { useState, useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  mergeClasses,
-  Textarea,
-  Button,
-  Label,
-  Text,
-} from "@fluentui/react-components";
-import {
-  ChevronDoubleLeft20Regular,
-  ChevronDoubleRight20Regular,
-  Search20Regular,
-} from "@fluentui/react-icons";
-import type {
-  SearchDomain,
-  SearchFilters,
-  FilterOption,
-  SavedSearch,
-} from "../types";
-import { SearchDomainTabs } from "./SearchDomainTabs";
-import { FilterDropdown } from "./FilterDropdown";
-import { DateRangeFilter } from "./DateRangeFilter";
-import { SavedSearchSelector } from "./SavedSearchSelector";
+import { useState, useCallback } from 'react';
+import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from '@fluentui/react-components';
+import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular, Search20Regular } from '@fluentui/react-icons';
+import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
+import { SearchDomainTabs } from './SearchDomainTabs';
+import { FilterDropdown } from './FilterDropdown';
+import { DateRangeFilter } from './DateRangeFilter';
+import { SavedSearchSelector } from './SavedSearchSelector';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -87,9 +70,9 @@ export interface SearchFilterPaneProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const EXPANDED_WIDTH = "280px";
-const COLLAPSED_WIDTH = "40px";
-const TRANSITION_DURATION = "200ms";
+const EXPANDED_WIDTH = '280px';
+const COLLAPSED_WIDTH = '40px';
+const TRANSITION_DURATION = '200ms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -97,16 +80,16 @@ const TRANSITION_DURATION = "200ms";
 
 const useStyles = makeStyles({
   pane: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    overflowY: "auto",
-    overflowX: "hidden",
-    transitionProperty: "width, min-width, padding",
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    transitionProperty: 'width, min-width, padding',
     transitionDuration: TRANSITION_DURATION,
-    transitionTimingFunction: "ease-in-out",
+    transitionTimingFunction: 'ease-in-out',
   },
   expanded: {
     width: EXPANDED_WIDTH,
@@ -123,16 +106,16 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalXS,
     paddingRight: tokens.spacingHorizontalXS,
-    alignItems: "center",
+    alignItems: 'center',
   },
   paneTitle: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "20px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '20px',
   },
   collapseButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   domainTabsSection: {
     marginBottom: tokens.spacingVerticalM,
@@ -141,8 +124,8 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalM,
   },
   querySection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     marginBottom: tokens.spacingVerticalM,
   },
@@ -152,7 +135,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   queryTextarea: {
-    width: "100%",
+    width: '100%',
   },
   separator: {
     borderBottom: `1px dashed ${tokens.colorNeutralStroke2}`,
@@ -160,8 +143,8 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalM,
   },
   filterSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
@@ -195,15 +178,14 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // --- Domain-visibility logic ---
-  const showDocumentTypeFilter = activeDomain === "documents";
-  const showFileTypeFilter = activeDomain === "documents";
-  const showMatterTypeFilter =
-    activeDomain === "documents" || activeDomain === "matters";
+  const showDocumentTypeFilter = activeDomain === 'documents';
+  const showFileTypeFilter = activeDomain === 'documents';
+  const showMatterTypeFilter = activeDomain === 'documents' || activeDomain === 'matters';
 
   // --- Handlers ---
 
   const handleToggleCollapse = useCallback(() => {
-    setIsCollapsed((prev) => !prev);
+    setIsCollapsed(prev => !prev);
   }, []);
 
   const handleSearch = useCallback(() => {
@@ -212,48 +194,45 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
 
   const handleQueryKeyDown = useCallback(
     (ev: React.KeyboardEvent) => {
-      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+      if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
         ev.preventDefault();
         onSearch(query, filters);
       }
     },
-    [onSearch, query, filters],
+    [onSearch, query, filters]
   );
 
   const handleDocumentTypesChange = useCallback(
     (selected: string[]) => {
       onFiltersChange({ ...filters, documentTypes: selected });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   const handleFileTypesChange = useCallback(
     (selected: string[]) => {
       onFiltersChange({ ...filters, fileTypes: selected });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   const handleMatterTypesChange = useCallback(
     (selected: string[]) => {
       onFiltersChange({ ...filters, matterTypes: selected });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   const handleDateRangeChange = useCallback(
     (dateRange: { from: string | null; to: string | null }) => {
       onFiltersChange({ ...filters, dateRange });
     },
-    [filters, onFiltersChange],
+    [filters, onFiltersChange]
   );
 
   // --- Render ---
 
-  const paneClassName = mergeClasses(
-    styles.pane,
-    isCollapsed ? styles.collapsed : styles.expanded,
-  );
+  const paneClassName = mergeClasses(styles.pane, isCollapsed ? styles.collapsed : styles.expanded);
 
   // Collapsed state: only show expand button
   if (isCollapsed) {
@@ -371,10 +350,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
 
       {/* Date Range Filter (all domains) */}
       <div className={styles.filterSection}>
-        <DateRangeFilter
-          value={filters.dateRange}
-          onChange={handleDateRangeChange}
-        />
+        <DateRangeFilter value={filters.dateRange} onChange={handleDateRangeChange} />
       </div>
 
       {/* Search Button */}

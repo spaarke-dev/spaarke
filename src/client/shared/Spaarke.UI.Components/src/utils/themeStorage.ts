@@ -8,16 +8,16 @@
  * @see projects/mda-darkmode-theme/spec.md Section 3.4
  */
 
-import { Theme, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+import { Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-export const THEME_STORAGE_KEY = "spaarke-theme";
-export const THEME_CHANGE_EVENT = "spaarke-theme-change";
+export const THEME_STORAGE_KEY = 'spaarke-theme';
+export const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-export type ThemePreference = "light" | "dark" | "auto";
+export type ThemePreference = 'light' | 'dark' | 'auto';
 
 // ============================================================================
 // Storage Functions
@@ -29,10 +29,10 @@ export type ThemePreference = "light" | "dark" | "auto";
  */
 export function getUserThemePreference(): ThemePreference {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === "light" || stored === "dark" || stored === "auto") {
+  if (stored === 'light' || stored === 'dark' || stored === 'auto') {
     return stored;
   }
-  return "auto";
+  return 'auto';
 }
 
 /**
@@ -45,7 +45,7 @@ export function setUserThemePreference(theme: ThemePreference): void {
   window.dispatchEvent(
     new CustomEvent(THEME_CHANGE_EVENT, {
       detail: { theme },
-    }),
+    })
   );
 }
 
@@ -69,8 +69,8 @@ export function getEffectiveDarkMode(context?: any): boolean {
   const preference = getUserThemePreference();
 
   // Explicit user choice
-  if (preference === "dark") return true;
-  if (preference === "light") return false;
+  if (preference === 'dark') return true;
+  if (preference === 'light') return false;
 
   // Auto mode: check Power Platform context first
   if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
@@ -81,12 +81,12 @@ export function getEffectiveDarkMode(context?: any): boolean {
   const navbar = document.querySelector("[data-id='navbar-container']");
   if (navbar) {
     const bg = getComputedStyle(navbar).backgroundColor;
-    if (bg === "rgb(10, 10, 10)") return true; // Dark mode navbar
-    if (bg === "rgb(240, 240, 240)") return false; // Light mode navbar
+    if (bg === 'rgb(10, 10, 10)') return true; // Dark mode navbar
+    if (bg === 'rgb(240, 240, 240)') return false; // Light mode navbar
   }
 
   // Final fallback to system preference
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
 }
 
 /**
@@ -118,10 +118,7 @@ export interface ThemeChangeHandler {
  * @param context - PCF context (optional, for re-evaluating effective theme)
  * @returns Cleanup function to remove listeners
  */
-export function setupThemeListener(
-  onChange: ThemeChangeHandler,
-  context?: any,
-): () => void {
+export function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => void {
   const handleStorageChange = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY) {
       onChange(getEffectiveDarkMode(context));
@@ -133,22 +130,22 @@ export function setupThemeListener(
   };
 
   const handleSystemChange = (event: MediaQueryListEvent) => {
-    if (getUserThemePreference() === "auto") {
+    if (getUserThemePreference() === 'auto') {
       onChange(event.matches);
     }
   };
 
   // Add listeners
-  window.addEventListener("storage", handleStorageChange);
+  window.addEventListener('storage', handleStorageChange);
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
 
-  const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
-  mediaQuery?.addEventListener("change", handleSystemChange);
+  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+  mediaQuery?.addEventListener('change', handleSystemChange);
 
   // Return cleanup function
   return () => {
-    window.removeEventListener("storage", handleStorageChange);
+    window.removeEventListener('storage', handleStorageChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener("change", handleSystemChange);
+    mediaQuery?.removeEventListener('change', handleSystemChange);
   };
 }

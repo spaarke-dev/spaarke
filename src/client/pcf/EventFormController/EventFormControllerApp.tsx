@@ -7,7 +7,7 @@
  * @version 2.0.0 - Refactored to use shared EventTypeService
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Text,
   Spinner,
@@ -17,13 +17,9 @@ import {
   MessageBar,
   MessageBarBody,
   Tooltip,
-} from "@fluentui/react-components";
-import {
-  Checkmark16Regular,
-  Dismiss16Regular,
-  Info16Regular,
-} from "@fluentui/react-icons";
-import { IInputs } from "./generated/ManifestTypes";
+} from '@fluentui/react-components';
+import { Checkmark16Regular, Dismiss16Regular, Info16Regular } from '@fluentui/react-icons';
+import { IInputs } from './generated/ManifestTypes';
 
 // Import from shared service
 import {
@@ -32,7 +28,7 @@ import {
   IEventTypeFieldConfig,
   IComputedFieldStates,
   IFieldRule,
-} from "@spaarke/ui-components";
+} from '@spaarke/ui-components';
 
 // Import form manipulation functions (PCF-specific, stays local)
 import {
@@ -41,16 +37,16 @@ import {
   isFormContextAvailable,
   ApplyRulesResult,
   ALL_EVENT_FIELDS,
-} from "./handlers/FieldVisibilityHandler";
+} from './handlers/FieldVisibilityHandler';
 
 import {
   registerSaveHandler,
   unregisterSaveHandler,
   clearValidationNotification,
-} from "./handlers/SaveValidationHandler";
+} from './handlers/SaveValidationHandler';
 
 // Import WebApi adapter
-import { createWebApiAdapter } from "./adapters/WebApiAdapter";
+import { createWebApiAdapter } from './adapters/WebApiAdapter';
 
 interface EventFormControllerAppProps {
   context: ComponentFramework.Context<IInputs>;
@@ -62,30 +58,30 @@ interface EventFormControllerAppProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingHorizontalS,
     fontSize: tokens.fontSizeBase200,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   badge: {
     marginLeft: tokens.spacingHorizontalXS,
   },
   fieldList: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
   },
   footer: {
     marginTop: tokens.spacingVerticalS,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   versionText: {
     fontSize: tokens.fontSizeBase100,
@@ -104,37 +100,32 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
 
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [config, setConfig] = React.useState<IEventTypeFieldConfig | null>(
-    null,
-  );
+  const [config, setConfig] = React.useState<IEventTypeFieldConfig | null>(null);
   const [appliedRules, setAppliedRules] = React.useState<number>(0);
   const [skippedFields, setSkippedFields] = React.useState<string[]>([]);
   const [wasReset, setWasReset] = React.useState(false);
 
   // Track previous event type to detect clear action
-  const previousEventTypeIdRef = React.useRef<string>("");
+  const previousEventTypeIdRef = React.useRef<string>('');
 
   /**
    * Builds IFieldRule array for save validation based on computed field states
    * Uses the shared EventTypeService for field state computation
    */
-  const buildFieldRules = React.useCallback(
-    (computed: IComputedFieldStates): IFieldRule[] => {
-      const rules: IFieldRule[] = [];
+  const buildFieldRules = React.useCallback((computed: IComputedFieldStates): IFieldRule[] => {
+    const rules: IFieldRule[] = [];
 
-      for (const [fieldName, state] of computed.fields) {
-        rules.push({
-          fieldName,
-          displayName: undefined, // Will be resolved from form control at validation time
-          isVisible: state.isVisible,
-          isRequired: state.requiredLevel === "required",
-        });
-      }
+    for (const [fieldName, state] of computed.fields) {
+      rules.push({
+        fieldName,
+        displayName: undefined, // Will be resolved from form control at validation time
+        isVisible: state.isVisible,
+        isRequired: state.requiredLevel === 'required',
+      });
+    }
 
-      return rules;
-    },
-    [],
-  );
+    return rules;
+  }, []);
 
   // Fetch Event Type configuration when eventTypeId changes
   React.useEffect(() => {
@@ -142,16 +133,14 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
 
     // Detect if Event Type was cleared (had a value, now empty)
     if (!eventTypeId && previousEventTypeId) {
-      console.log(
-        "[EventFormController] Event Type cleared - resetting to defaults",
-      );
+      console.log('[EventFormController] Event Type cleared - resetting to defaults');
       const resetResult = resetToDefaults();
       setConfig(null);
       setAppliedRules(resetResult.rulesApplied);
       setSkippedFields(resetResult.skippedFields);
       setWasReset(true);
-      onStatusChange("reset-to-defaults");
-      previousEventTypeIdRef.current = "";
+      onStatusChange('reset-to-defaults');
+      previousEventTypeIdRef.current = '';
 
       // Unregister save handler and clear notifications when Event Type cleared
       unregisterSaveHandler();
@@ -164,7 +153,7 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
       setAppliedRules(0);
       setSkippedFields([]);
       setWasReset(false);
-      onStatusChange("no-event-type");
+      onStatusChange('no-event-type');
 
       // No Event Type selected - unregister save handler
       unregisterSaveHandler();
@@ -178,7 +167,7 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
     const fetchEventTypeConfig = async () => {
       setIsLoading(true);
       setError(null);
-      onStatusChange("loading");
+      onStatusChange('loading');
 
       try {
         // Create WebApi adapter for the shared service
@@ -191,16 +180,12 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
 
         if (!result.success) {
           if (result.notFound) {
-            console.warn(
-              `[EventFormController] Event Type not found: ${eventTypeId}`,
-            );
+            console.warn(`[EventFormController] Event Type not found: ${eventTypeId}`);
             // Fall back to legacy query for backward compatibility with sprk_eventtype_ref
             await fetchLegacyEventTypeConfig();
             return;
           }
-          throw new Error(
-            result.error || "Failed to fetch Event Type configuration",
-          );
+          throw new Error(result.error || 'Failed to fetch Event Type configuration');
         }
 
         const eventConfig = result.config;
@@ -218,26 +203,19 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
         const fieldRules = buildFieldRules(computed);
         registerSaveHandler(fieldRules);
         console.log(
-          `[EventFormController] Registered save handler with ${fieldRules.filter((r) => r.isRequired).length} required fields`,
+          `[EventFormController] Registered save handler with ${fieldRules.filter(r => r.isRequired).length} required fields`
         );
 
         if (applyResult.success) {
           onStatusChange(`applied-${applyResult.rulesApplied}-rules`);
         } else {
-          console.warn(
-            "[EventFormController] Some rules failed:",
-            applyResult.errors,
-          );
+          console.warn('[EventFormController] Some rules failed:', applyResult.errors);
           onStatusChange(`partial-${applyResult.rulesApplied}-rules`);
         }
       } catch (err) {
-        console.error("[EventFormController] Error fetching config:", err);
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load Event Type configuration",
-        );
-        onStatusChange("error");
+        console.error('[EventFormController] Error fetching config:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load Event Type configuration');
+        onStatusChange('error');
       } finally {
         setIsLoading(false);
       }
@@ -252,25 +230,25 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
         // STUB: [API] - S003: Assumes sprk_eventtype_ref entity exists with exact schema (Task 003 - done)
         // Fields: sprk_requiredfields (comma-separated), sprk_hiddenfields (comma-separated)
         const result = await context.webAPI.retrieveRecord(
-          "sprk_eventtype_ref",
+          'sprk_eventtype_ref',
           eventTypeId,
-          "?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields",
+          '?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields'
         );
 
-        const requiredFieldsRaw = result.sprk_requiredfields || "";
-        const hiddenFieldsRaw = result.sprk_hiddenfields || "";
+        const requiredFieldsRaw = result.sprk_requiredfields || '';
+        const hiddenFieldsRaw = result.sprk_hiddenfields || '';
 
         // Convert legacy format to IEventTypeFieldConfig
         const eventConfig: IEventTypeFieldConfig = {
           requiredFields: requiredFieldsRaw
             ? String(requiredFieldsRaw)
-                .split(",")
+                .split(',')
                 .map((f: string) => f.trim())
                 .filter(Boolean)
             : [],
           hiddenFields: hiddenFieldsRaw
             ? String(hiddenFieldsRaw)
-                .split(",")
+                .split(',')
                 .map((f: string) => f.trim())
                 .filter(Boolean)
             : [],
@@ -291,29 +269,19 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
         const fieldRules = buildFieldRules(computed);
         registerSaveHandler(fieldRules);
         console.log(
-          `[EventFormController] (Legacy) Registered save handler with ${fieldRules.filter((r) => r.isRequired).length} required fields`,
+          `[EventFormController] (Legacy) Registered save handler with ${fieldRules.filter(r => r.isRequired).length} required fields`
         );
 
         if (applyResult.success) {
           onStatusChange(`applied-${applyResult.rulesApplied}-rules`);
         } else {
-          console.warn(
-            "[EventFormController] Some rules failed:",
-            applyResult.errors,
-          );
+          console.warn('[EventFormController] Some rules failed:', applyResult.errors);
           onStatusChange(`partial-${applyResult.rulesApplied}-rules`);
         }
       } catch (legacyErr) {
-        console.error(
-          "[EventFormController] Legacy fallback also failed:",
-          legacyErr,
-        );
-        setError(
-          legacyErr instanceof Error
-            ? legacyErr.message
-            : "Failed to load Event Type configuration",
-        );
-        onStatusChange("error");
+        console.error('[EventFormController] Legacy fallback also failed:', legacyErr);
+        setError(legacyErr instanceof Error ? legacyErr.message : 'Failed to load Event Type configuration');
+        onStatusChange('error');
       } finally {
         setIsLoading(false);
       }
@@ -355,12 +323,7 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
           <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
             Fields reset to defaults
           </Text>
-          <Badge
-            className={styles.badge}
-            appearance="filled"
-            color="informative"
-            icon={<Checkmark16Regular />}
-          >
+          <Badge className={styles.badge} appearance="filled" color="informative" icon={<Checkmark16Regular />}>
             {appliedRules} fields reset
           </Badge>
         </div>
@@ -388,29 +351,19 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
     <div className={styles.container}>
       <div className={styles.header}>
         <Text weight="semibold" size={200}>
-          {eventTypeName || "Event Type"}
+          {eventTypeName || 'Event Type'}
         </Text>
         <Badge
           className={styles.badge}
           appearance="filled"
-          color={appliedRules > 0 ? "success" : "informative"}
-          icon={
-            appliedRules > 0 ? <Checkmark16Regular /> : <Dismiss16Regular />
-          }
+          color={appliedRules > 0 ? 'success' : 'informative'}
+          icon={appliedRules > 0 ? <Checkmark16Regular /> : <Dismiss16Regular />}
         >
           {appliedRules} rules applied
         </Badge>
         {skippedFields.length > 0 && (
-          <Tooltip
-            content={`Fields not on form: ${skippedFields.join(", ")}`}
-            relationship="label"
-          >
-            <Badge
-              className={styles.badge}
-              appearance="outline"
-              color="warning"
-              icon={<Info16Regular />}
-            >
+          <Tooltip content={`Fields not on form: ${skippedFields.join(', ')}`} relationship="label">
+            <Badge className={styles.badge} appearance="outline" color="warning" icon={<Info16Regular />}>
               {skippedFields.length} skipped
             </Badge>
           </Tooltip>
@@ -421,21 +374,15 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
         <>
           {config.requiredFields && config.requiredFields.length > 0 && (
             <div>
-              <Text
-                size={100}
-                style={{ color: tokens.colorNeutralForeground3 }}
-              >
-                Required: {config.requiredFields.join(", ")}
+              <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                Required: {config.requiredFields.join(', ')}
               </Text>
             </div>
           )}
           {config.hiddenFields && config.hiddenFields.length > 0 && (
             <div>
-              <Text
-                size={100}
-                style={{ color: tokens.colorNeutralForeground3 }}
-              >
-                Hidden: {config.hiddenFields.join(", ")}
+              <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                Hidden: {config.hiddenFields.join(', ')}
               </Text>
             </div>
           )}

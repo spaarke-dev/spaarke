@@ -10,7 +10,7 @@
  * ADR-022: React 16 APIs.
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,7 +21,7 @@ import {
   Badge,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -42,25 +42,25 @@ export interface IKnowledgeSourceEditorProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-    width: "100%",
-    boxSizing: "border-box",
+    width: '100%',
+    boxSizing: 'border-box',
   },
   labelRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   textarea: {
-    width: "100%",
+    width: '100%',
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
   },
   actionRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalXS,
   },
@@ -71,7 +71,7 @@ const useStyles = makeStyles({
   charCount: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase100,
-    marginLeft: "auto",
+    marginLeft: 'auto',
   },
 });
 
@@ -79,32 +79,25 @@ const useStyles = makeStyles({
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
-  value,
-  onChange,
-  readOnly = false,
-}) => {
+export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({ value, onChange, readOnly = false }) => {
   const styles = useStyles();
   const [showUploadInfo, setShowUploadInfo] = React.useState<boolean>(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Calculate height from content rather than DOM measurement.
-  const calcHeight = React.useCallback(
-    (text: string, el: HTMLTextAreaElement): number => {
-      const width = el.clientWidth || el.parentElement?.clientWidth || 800;
-      const usableWidth = Math.max(width - 24, 200);
-      const charWidth = 8.4;
-      const charsPerLine = Math.floor(usableWidth / charWidth);
-      const lines = text.split("\n");
-      let totalLines = 0;
-      for (const line of lines) {
-        totalLines += Math.max(1, Math.ceil((line.length || 1) / charsPerLine));
-      }
-      return totalLines * 20 + 48;
-    },
-    [],
-  );
+  const calcHeight = React.useCallback((text: string, el: HTMLTextAreaElement): number => {
+    const width = el.clientWidth || el.parentElement?.clientWidth || 800;
+    const usableWidth = Math.max(width - 24, 200);
+    const charWidth = 8.4;
+    const charsPerLine = Math.floor(usableWidth / charWidth);
+    const lines = text.split('\n');
+    let totalLines = 0;
+    for (const line of lines) {
+      totalLines += Math.max(1, Math.ceil((line.length || 1) / charsPerLine));
+    }
+    return totalLines * 20 + 48;
+  }, []);
 
   // Apply calculated height to textarea AND its Fluent wrapper.
   // Must clear max-height — Griffel sets max-height which overrides height.
@@ -112,20 +105,17 @@ export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
     const el = textareaRef.current;
     if (!el) return;
     const wrapper = el.parentElement;
-    const height = Math.max(calcHeight(value, el), 300) + "px";
-    el.style.setProperty("height", height, "important");
-    el.style.setProperty("max-height", "none", "important");
-    el.style.setProperty("overflow", "hidden", "important");
+    const height = Math.max(calcHeight(value, el), 300) + 'px';
+    el.style.setProperty('height', height, 'important');
+    el.style.setProperty('max-height', 'none', 'important');
+    el.style.setProperty('overflow', 'hidden', 'important');
     if (wrapper) {
-      wrapper.style.setProperty("height", height, "important");
-      wrapper.style.setProperty("max-height", "none", "important");
+      wrapper.style.setProperty('height', height, 'important');
+      wrapper.style.setProperty('max-height', 'none', 'important');
     }
   }, [value, calcHeight]);
 
-  const handleChange = (
-    _ev: React.ChangeEvent<HTMLTextAreaElement>,
-    data: { value: string },
-  ) => {
+  const handleChange = (_ev: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
     onChange(data.value);
   };
 
@@ -145,9 +135,9 @@ export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
     // TRACKED: GitHub #234 - Upload file to BFF API endpoint
     // For now: read text content and populate textarea
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = e => {
       const content = e.target?.result;
-      if (typeof content === "string") {
+      if (typeof content === 'string') {
         onChange(content);
         setShowUploadInfo(true);
         // Clear info after 4 seconds
@@ -157,7 +147,7 @@ export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
     reader.readAsText(file);
 
     // Reset file input so the same file can be re-selected
-    ev.target.value = "";
+    ev.target.value = '';
   };
 
   return (
@@ -198,7 +188,7 @@ export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
           ref={fileInputRef}
           type="file"
           accept=".md,.txt,.pdf,.docx"
-          style={{ display: "none" }}
+          style={{ display: 'none' }}
           onChange={handleFileSelected}
           aria-hidden="true"
         />
@@ -213,9 +203,7 @@ export const KnowledgeSourceEditor: React.FC<IKnowledgeSourceEditorProps> = ({
           Upload File
         </Button>
 
-        <Text className={styles.uploadHint}>
-          Supports .md, .txt, .pdf, .docx
-        </Text>
+        <Text className={styles.uploadHint}>Supports .md, .txt, .pdf, .docx</Text>
 
         <Text className={styles.charCount} data-testid="knowledge-char-count">
           {value.length.toLocaleString()} chars

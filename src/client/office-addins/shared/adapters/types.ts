@@ -8,17 +8,17 @@
 /**
  * Represents the host type for Office add-ins.
  */
-export type HostType = "outlook" | "word";
+export type HostType = 'outlook' | 'word';
 
 /**
  * Represents the type of item being processed.
  */
-export type ItemType = "email" | "document";
+export type ItemType = 'email' | 'document';
 
 /**
  * Represents the body content format.
  */
-export type BodyType = "html" | "text";
+export type BodyType = 'html' | 'text';
 
 /**
  * Information about an email attachment.
@@ -49,7 +49,7 @@ export interface Recipient {
   /** Display name of the recipient (if available) */
   displayName?: string;
   /** Recipient type */
-  type: "to" | "cc" | "bcc";
+  type: 'to' | 'cc' | 'bcc';
 }
 
 /**
@@ -105,14 +105,14 @@ export interface HostAdapterError {
  * Error codes for host adapter operations.
  */
 export type HostAdapterErrorCode =
-  | "NOT_INITIALIZED"
-  | "NO_ITEM_SELECTED"
-  | "INVALID_HOST"
-  | "CAPABILITY_NOT_SUPPORTED"
-  | "ATTACHMENT_NOT_FOUND"
-  | "CONTENT_RETRIEVAL_FAILED"
-  | "API_NOT_AVAILABLE"
-  | "UNKNOWN_ERROR";
+  | 'NOT_INITIALIZED'
+  | 'NO_ITEM_SELECTED'
+  | 'INVALID_HOST'
+  | 'CAPABILITY_NOT_SUPPORTED'
+  | 'ATTACHMENT_NOT_FOUND'
+  | 'CONTENT_RETRIEVAL_FAILED'
+  | 'API_NOT_AVAILABLE'
+  | 'UNKNOWN_ERROR';
 
 /**
  * Result of a link insertion operation.
@@ -141,7 +141,7 @@ export interface AttachFileResult {
  */
 export interface GetDocumentContentOptions {
   /** The format to retrieve the document in */
-  format: "ooxml" | "html" | "text" | "pdf";
+  format: 'ooxml' | 'html' | 'text' | 'pdf';
 }
 
 /**
@@ -167,7 +167,7 @@ export interface EmailMetadata extends ItemMetadata {
   /** Conversation/thread ID */
   conversationId?: string;
   /** Email importance level */
-  importance?: "low" | "normal" | "high";
+  importance?: 'low' | 'normal' | 'high';
   /** Whether the email has attachments */
   hasAttachments?: boolean;
   /** Received date for the email */

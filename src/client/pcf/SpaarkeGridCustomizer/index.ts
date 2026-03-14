@@ -11,15 +11,11 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import {
-  PAOneGridCustomizer,
-  CellRendererOverrides,
-  GetRendererParams,
-} from "./types/PAGridCustomizer";
-import { RegardingLinkRenderer } from "./customizers/RegardingLinkRenderer";
+import * as React from 'react';
+import { PAOneGridCustomizer, CellRendererOverrides, GetRendererParams } from './types/PAGridCustomizer';
+import { RegardingLinkRenderer } from './customizers/RegardingLinkRenderer';
 
-const CUSTOMIZER_VERSION = "1.0.0";
+const CUSTOMIZER_VERSION = '1.0.0';
 
 /**
  * Registry of cell renderers by column logical name or pattern
@@ -35,9 +31,7 @@ const cellRendererRegistry: Record<string, React.FC<GetRendererParams>> = {
 /**
  * Pattern-based renderer lookup for columns matching naming conventions
  */
-function getRendererForColumn(
-  columnName: string,
-): React.FC<GetRendererParams> | null {
+function getRendererForColumn(columnName: string): React.FC<GetRendererParams> | null {
   // Direct match first
   const lowerName = columnName.toLowerCase();
   if (cellRendererRegistry[lowerName]) {
@@ -45,10 +39,7 @@ function getRendererForColumn(
   }
 
   // Pattern matching for regarding-related columns
-  if (
-    lowerName.includes("regarding") &&
-    (lowerName.includes("name") || lowerName.includes("id"))
-  ) {
+  if (lowerName.includes('regarding') && (lowerName.includes('name') || lowerName.includes('id'))) {
     return RegardingLinkRenderer;
   }
 
@@ -61,8 +52,8 @@ function getRendererForColumn(
 function createCellRendererOverrides(): CellRendererOverrides {
   return {
     // Text columns - check for registered custom renderers
-    ["Text"]: (props: GetRendererParams) => {
-      const columnName = props.columnInfo?.name || "";
+    ['Text']: (props: GetRendererParams) => {
+      const columnName = props.columnInfo?.name || '';
       const CustomRenderer = getRendererForColumn(columnName);
 
       if (CustomRenderer) {
@@ -73,8 +64,8 @@ function createCellRendererOverrides(): CellRendererOverrides {
       return null;
     },
     // Lookup columns - for regarding lookups
-    ["Lookup"]: (props: GetRendererParams) => {
-      const columnName = props.columnInfo?.name || "";
+    ['Lookup']: (props: GetRendererParams) => {
+      const columnName = props.columnInfo?.name || '';
       const CustomRenderer = getRendererForColumn(columnName);
 
       if (CustomRenderer) {
@@ -97,10 +88,8 @@ export class SpaarkeGridCustomizer implements PAOneGridCustomizer {
    * Returns the cell renderer overrides for the grid
    */
   public getRendererOverrides(): CellRendererOverrides {
-    if (typeof console !== "undefined") {
-      console.log(
-        `[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] Initializing cell renderer overrides`,
-      );
+    if (typeof console !== 'undefined') {
+      console.log(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] Initializing cell renderer overrides`);
     }
     return createCellRendererOverrides();
   }

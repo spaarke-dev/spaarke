@@ -8,17 +8,10 @@
  *
  * @see CreateRecordWizard — pre-fills emailSubject/emailBody from config
  */
-import * as React from "react";
-import {
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { LookupField } from "../../LookupField/LookupField";
-import type { ILookupItem } from "../../../types/LookupTypes";
+import * as React from 'react';
+import { Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { LookupField } from '../../LookupField/LookupField';
+import type { ILookupItem } from '../../../types/LookupTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -53,7 +46,7 @@ export interface ISendEmailStepProps {
 
 function extractEmailFromUserName(name: string): string {
   const match = name.match(/\(([^)]+@[^)]+)\)/);
-  return match ? match[1] : "";
+  return match ? match[1] : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -62,25 +55,25 @@ function extractEmailFromUserName(name: string): string {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
   headerText: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   stepTitle: { color: tokens.colorNeutralForeground1 },
   stepSubtitle: { color: tokens.colorNeutralForeground3 },
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   labelRow: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
   },
   requiredMark: { color: tokens.colorPaletteRedForeground1 },
@@ -95,7 +88,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
-  title = "Send Email to Client",
+  title = 'Send Email to Client',
   emailTo: _emailTo,
   onEmailToChange,
   emailCc,
@@ -107,9 +100,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
   onSearchUsers,
 }) => {
   const styles = useStyles();
-  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(
-    null,
-  );
+  const [selectedUser, setSelectedUser] = React.useState<ILookupItem | null>(null);
 
   const handleUserSelect = React.useCallback(
     (item: ILookupItem | null) => {
@@ -118,21 +109,18 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         const email = extractEmailFromUserName(item.name);
         onEmailToChange(email || item.name);
       } else {
-        onEmailToChange("");
+        onEmailToChange('');
       }
     },
-    [onEmailToChange],
+    [onEmailToChange]
   );
 
-  const renderLabel = (
-    text: string,
-    required?: boolean,
-  ): React.ReactElement => (
+  const renderLabel = (text: string, required?: boolean): React.ReactElement => (
     <span className={styles.labelRow}>
       {text}
       {required && (
         <span aria-hidden="true" className={styles.requiredMark}>
-          {" *"}
+          {' *'}
         </span>
       )}
     </span>
@@ -145,8 +133,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           {title}
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Compose an introductory email. It will be created as an email activity
-          in Dataverse, linked to this record.
+          Compose an introductory email. It will be created as an email activity in Dataverse, linked to this record.
         </Text>
       </div>
 
@@ -164,27 +151,27 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         {onEmailCcChange && (
           <Field label="CC">
             <Input
-              value={emailCc ?? ""}
-              onChange={(e) => onEmailCcChange(e.target.value)}
+              value={emailCc ?? ''}
+              onChange={e => onEmailCcChange(e.target.value)}
               placeholder="CC email addresses (separate with ;)"
               aria-label="CC"
             />
           </Field>
         )}
 
-        <Field label={renderLabel("Subject", true)} required>
+        <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
         </Field>
 
-        <Field label={renderLabel("Message", true)} required>
+        <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={15}
             resize="vertical"
@@ -193,8 +180,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         </Field>
 
         <Text size={100} className={styles.infoNote}>
-          This email will be saved as a draft activity on the record. You can
-          review and send it from there.
+          This email will be saved as a draft activity on the record. You can review and send it from there.
         </Text>
       </div>
     </div>

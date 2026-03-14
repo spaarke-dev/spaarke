@@ -11,26 +11,23 @@
  * - ADR-006: PCF control structure
  */
 
-import * as React from "react";
-import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
-import { FluentProvider } from "@fluentui/react-components";
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import { EventCalendarFilterRoot } from "./components/EventCalendarFilterRoot";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+import * as React from 'react';
+import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
+import { FluentProvider } from '@fluentui/react-components';
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { EventCalendarFilterRoot } from './components/EventCalendarFilterRoot';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { resolveTheme, setupThemeListener } from './providers/ThemeProvider';
 
-export class EventCalendarFilter implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class EventCalendarFilter implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private context: ComponentFramework.Context<IInputs> | null = null;
   private notifyOutputChanged: () => void;
   private cleanupThemeListener: (() => void) | null = null;
 
   // Output values
-  private filterOutputValue: string = "";
-  private selectedDateOutputValue: string = "";
+  private filterOutputValue = '';
+  private selectedDateOutputValue = '';
 
   constructor() {
     // Constructor
@@ -44,7 +41,7 @@ export class EventCalendarFilter implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.container = container;
     this.context = context;
@@ -140,8 +137,7 @@ export class EventCalendarFilter implements ComponentFramework.StandardControl<
     }
 
     // Get display mode
-    const displayMode =
-      this.context.parameters.displayMode?.raw || "multiMonth";
+    const displayMode = this.context.parameters.displayMode?.raw || 'multiMonth';
 
     // React 16: ReactDOM.render
     ReactDOM.render(
@@ -154,13 +150,13 @@ export class EventCalendarFilter implements ComponentFramework.StandardControl<
           React.createElement(EventCalendarFilterRoot, {
             context: this.context,
             eventDates,
-            displayMode: displayMode as "month" | "multiMonth",
+            displayMode: displayMode as 'month' | 'multiMonth',
             onFilterOutputChange: this.handleFilterOutputChange,
             onSelectedDateChange: this.handleSelectedDateChange,
-          }),
-        ),
+          })
+        )
       ),
-      this.container,
+      this.container
     );
   }
 }

@@ -18,22 +18,19 @@ export interface DocumentGraphResponse {
  * Node type values matching NodeTypes in IVisualizationService.cs
  */
 export type NodeType =
-  | "source" // The source document being queried (depth 0)
-  | "related" // A related document found via similarity or relationship
-  | "orphan" // An orphan file with no Dataverse record
-  | "matter" // A Matter entity acting as a hub node
-  | "project" // A Project entity acting as a hub node
-  | "invoice" // An Invoice entity acting as a hub node
-  | "email"; // An Email document acting as a hub node (parent of attachments)
+  | 'source' // The source document being queried (depth 0)
+  | 'related' // A related document found via similarity or relationship
+  | 'orphan' // An orphan file with no Dataverse record
+  | 'matter' // A Matter entity acting as a hub node
+  | 'project' // A Project entity acting as a hub node
+  | 'invoice' // An Invoice entity acting as a hub node
+  | 'email'; // An Email document acting as a hub node (parent of attachments)
 
 /**
  * Check if a node type represents a parent hub node.
  */
 export const isParentHubNode = (type: NodeType): boolean =>
-  type === "matter" ||
-  type === "project" ||
-  type === "invoice" ||
-  type === "email";
+  type === 'matter' || type === 'project' || type === 'invoice' || type === 'email';
 
 /**
  * A document node from the API response.
@@ -167,29 +164,26 @@ export interface VisualizationQueryParams {
  */
 export const RELATIONSHIP_TYPES = {
   /** Documents from the same email (parent email + attachments) */
-  same_email: "Attachment",
+  same_email: 'Attachment',
   /** Documents from the same email thread (ConversationIndex prefix match) */
-  same_thread: "Email thread",
+  same_thread: 'Email thread',
   /** Documents associated with the same Matter */
-  same_matter: "Same matter",
+  same_matter: 'Same matter',
   /** Documents associated with the same Project */
-  same_project: "Same project",
+  same_project: 'Same project',
   /** Documents associated with the same Invoice */
-  same_invoice: "Same invoice",
+  same_invoice: 'Same invoice',
   /** Documents related by vector similarity (content-based) */
-  semantic: "Semantic",
+  semantic: 'Semantic',
 } as const;
 
 /**
  * Get display label for a relationship type.
  * Falls back to the API label if type is unknown.
  */
-export function getRelationshipLabel(
-  relationshipType: string,
-  apiLabel?: string,
-): string {
+export function getRelationshipLabel(relationshipType: string, apiLabel?: string): string {
   const key = relationshipType as RelationshipTypeKey;
-  return RELATIONSHIP_TYPES[key] ?? apiLabel ?? "Related";
+  return RELATIONSHIP_TYPES[key] ?? apiLabel ?? 'Related';
 }
 
 /**

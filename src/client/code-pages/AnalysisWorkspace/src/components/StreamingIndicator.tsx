@@ -12,15 +12,8 @@
  * @see ADR-012 - Shared component library conventions
  */
 
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Text,
-  ProgressBar,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
+import { makeStyles, tokens, Button, Text, ProgressBar, mergeClasses } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -43,40 +36,40 @@ export interface StreamingIndicatorProps {
 
 const useStyles = makeStyles({
   overlay: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
     backgroundColor: tokens.colorNeutralBackground1Hover,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    minHeight: "36px",
-    transition: "opacity 200ms ease-in-out, max-height 200ms ease-in-out",
-    overflow: "hidden",
+    minHeight: '36px',
+    transition: 'opacity 200ms ease-in-out, max-height 200ms ease-in-out',
+    overflow: 'hidden',
   },
   overlayHidden: {
     opacity: 0,
-    maxHeight: "0px",
-    padding: "0px",
-    minHeight: "0px",
-    borderBottom: "none",
+    maxHeight: '0px',
+    padding: '0px',
+    minHeight: '0px',
+    borderBottom: 'none',
   },
   overlayVisible: {
     opacity: 1,
-    maxHeight: "48px",
+    maxHeight: '48px',
   },
   pulse: {
-    width: "8px",
-    height: "8px",
+    width: '8px',
+    height: '8px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground,
     animationName: {
-      "0%": { opacity: 1 },
-      "50%": { opacity: 0.4 },
-      "100%": { opacity: 1 },
+      '0%': { opacity: 1 },
+      '50%': { opacity: 0.4 },
+      '100%': { opacity: 1 },
     },
-    animationDuration: "1.5s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
+    animationDuration: '1.5s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'ease-in-out',
     flexShrink: 0,
   },
   label: {
@@ -92,12 +85,12 @@ const useStyles = makeStyles({
   },
   progress: {
     flex: 1,
-    minWidth: "60px",
-    maxWidth: "200px",
+    minWidth: '60px',
+    maxWidth: '200px',
   },
   cancelButton: {
     flexShrink: 0,
-    marginLeft: "auto",
+    marginLeft: 'auto',
   },
 });
 
@@ -114,14 +107,9 @@ export function StreamingIndicator({
   const styles = useStyles();
   const isActive = isStreaming || isReplacing;
 
-  const overlayClass = mergeClasses(
-    styles.overlay,
-    isActive ? styles.overlayVisible : styles.overlayHidden,
-  );
+  const overlayClass = mergeClasses(styles.overlay, isActive ? styles.overlayVisible : styles.overlayHidden);
 
-  const statusLabel = isReplacing
-    ? "Replacing document..."
-    : "AI is writing...";
+  const statusLabel = isReplacing ? 'Replacing document...' : 'AI is writing...';
 
   return (
     <div className={overlayClass} role="status" aria-live="polite">

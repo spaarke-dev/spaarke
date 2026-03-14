@@ -12,7 +12,7 @@
  * @see ADR-021 - Fluent UI v9 Design System
  */
 
-import { useCallback } from "react";
+import { useCallback } from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -24,10 +24,10 @@ import {
   Text,
   makeStyles,
   tokens,
-} from "@fluentui/react-components";
-import { ArrowSwap20Regular, Dismiss20Regular } from "@fluentui/react-icons";
-import type { DetectedContext } from "../services/contextService";
-import { getEntityDisplayName } from "../services/contextService";
+} from '@fluentui/react-components';
+import { ArrowSwap20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import type { DetectedContext } from '../services/contextService';
+import { getEntityDisplayName } from '../services/contextService';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -52,17 +52,17 @@ export interface ContextSwitchDialogProps {
 
 const useStyles = makeStyles({
   body: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   contextInfo: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalS + " " + tokens.spacingHorizontalM,
+    padding: tokens.spacingVerticalS + ' ' + tokens.spacingHorizontalM,
   },
   contextLabel: {
     color: tokens.colorNeutralForeground3,
@@ -80,10 +80,10 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
   },
   arrow: {
-    display: "flex",
-    justifyContent: "center",
+    display: 'flex',
+    justifyContent: 'center',
     color: tokens.colorNeutralForeground3,
-    fontSize: "20px",
+    fontSize: '20px',
   },
 });
 
@@ -120,7 +120,7 @@ export const ContextSwitchDialog: React.FC<ContextSwitchDialogProps> = ({
 
   // Truncate entity ID for display (show first 8 chars)
   const truncateId = (id: string): string => {
-    if (!id) return "";
+    if (!id) return '';
     return id.length > 8 ? `${id.substring(0, 8)}...` : id;
   };
 
@@ -131,19 +131,14 @@ export const ContextSwitchDialog: React.FC<ContextSwitchDialogProps> = ({
           <DialogTitle>Record Changed</DialogTitle>
           <DialogContent>
             <div className={styles.body}>
-              <Text>
-                You navigated to a different record. Would you like to switch
-                the chat context?
-              </Text>
+              <Text>You navigated to a different record. Would you like to switch the chat context?</Text>
 
               {/* Current context */}
               <div className={styles.contextInfo}>
                 <Text className={styles.contextLabel}>Current context</Text>
                 <Text className={styles.contextValue}>{currentEntityName}</Text>
                 {currentContext.entityId && (
-                  <Text className={styles.contextId}>
-                    {truncateId(currentContext.entityId)}
-                  </Text>
+                  <Text className={styles.contextId}>{truncateId(currentContext.entityId)}</Text>
                 )}
               </div>
 
@@ -156,11 +151,7 @@ export const ContextSwitchDialog: React.FC<ContextSwitchDialogProps> = ({
               <div className={styles.contextInfo}>
                 <Text className={styles.contextLabel}>New record</Text>
                 <Text className={styles.contextValue}>{newEntityName}</Text>
-                {newContext.entityId && (
-                  <Text className={styles.contextId}>
-                    {truncateId(newContext.entityId)}
-                  </Text>
-                )}
+                {newContext.entityId && <Text className={styles.contextId}>{truncateId(newContext.entityId)}</Text>}
               </div>
             </div>
           </DialogContent>

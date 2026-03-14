@@ -22,16 +22,10 @@
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + design tokens)
  */
 
-import { useCallback, useEffect, useRef } from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Button,
-} from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
-import { DiffCompareView } from "@spaarke/ui-components";
+import { useCallback, useEffect, useRef } from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Button } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
+import { DiffCompareView } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -56,47 +50,47 @@ export interface DiffReviewPanelProps {
 
 const useStyles = makeStyles({
   backdrop: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
     backgroundColor: tokens.colorNeutralBackgroundAlpha2,
     zIndex: 20,
-    transition: "opacity 250ms ease-in-out",
-    display: "flex",
-    justifyContent: "flex-end",
-    overflow: "hidden",
+    transition: 'opacity 250ms ease-in-out',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
   },
   backdropHidden: {
     opacity: 0,
-    pointerEvents: "none",
+    pointerEvents: 'none',
   },
   backdropVisible: {
     opacity: 1,
-    pointerEvents: "auto",
+    pointerEvents: 'auto',
   },
   panel: {
-    display: "flex",
-    flexDirection: "column",
-    width: "90%",
-    maxWidth: "900px",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '90%',
+    maxWidth: '900px',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow64,
-    transition: "transform 250ms ease-in-out",
-    overflow: "hidden",
+    transition: 'transform 250ms ease-in-out',
+    overflow: 'hidden',
   },
   panelHidden: {
-    transform: "translateX(100%)",
+    transform: 'translateX(100%)',
   },
   panelVisible: {
-    transform: "translateX(0)",
+    transform: 'translateX(0)',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -111,7 +105,7 @@ const useStyles = makeStyles({
   },
   diffContainer: {
     flex: 1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalL,
   },
 });
@@ -142,7 +136,7 @@ export function DiffReviewPanel({
     }
 
     const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         // Only dismiss if the event wasn't already handled by DiffCompareView
         if (!e.defaultPrevented) {
           e.preventDefault();
@@ -151,9 +145,9 @@ export function DiffReviewPanel({
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onReject]);
 
@@ -169,7 +163,7 @@ export function DiffReviewPanel({
     (acceptedText: string) => {
       onAccept(acceptedText);
     },
-    [onAccept],
+    [onAccept]
   );
 
   // ---- Edit handler: DiffCompareView calls this when user saves edits ----
@@ -180,14 +174,8 @@ export function DiffReviewPanel({
   }, []);
 
   // ---- Render ----
-  const backdropClass = mergeClasses(
-    styles.backdrop,
-    isOpen ? styles.backdropVisible : styles.backdropHidden,
-  );
-  const panelClass = mergeClasses(
-    styles.panel,
-    isOpen ? styles.panelVisible : styles.panelHidden,
-  );
+  const backdropClass = mergeClasses(styles.backdrop, isOpen ? styles.backdropVisible : styles.backdropHidden);
+  const panelClass = mergeClasses(styles.panel, isOpen ? styles.panelVisible : styles.panelHidden);
 
   return (
     <div
@@ -197,12 +185,7 @@ export function DiffReviewPanel({
       aria-label="Review proposed changes"
       data-testid="diff-review-panel-backdrop"
     >
-      <div
-        ref={panelRef}
-        className={panelClass}
-        tabIndex={-1}
-        data-testid="diff-review-panel"
-      >
+      <div ref={panelRef} className={panelClass} tabIndex={-1} data-testid="diff-review-panel">
         {/* Header */}
         <div className={styles.header}>
           <Text size={400} className={styles.headerTitle}>

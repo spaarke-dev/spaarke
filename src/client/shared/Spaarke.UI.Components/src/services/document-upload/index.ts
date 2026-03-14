@@ -29,37 +29,27 @@ export type {
   CreateResult,
   EntityDocumentConfig,
   LookupNavigationResponse,
-} from "./types";
+} from './types';
 
-export { consoleLogger } from "./types";
+export { consoleLogger } from './types';
 
 // SDAP API Client (SPE file operations)
-export { SdapApiClient } from "./SdapApiClient";
-export type {
-  SdapApiClientOptions,
-  OnUnauthorizedCallback,
-} from "./SdapApiClient";
+export { SdapApiClient } from './SdapApiClient';
+export type { SdapApiClientOptions, OnUnauthorizedCallback } from './SdapApiClient';
 
 // File Upload Services
-export { FileUploadService } from "./FileUploadService";
-export { MultiFileUploadService } from "./MultiFileUploadService";
+export { FileUploadService } from './FileUploadService';
+export { MultiFileUploadService } from './MultiFileUploadService';
 
 // NavMap Client (navigation property metadata)
-export { NavMapClient } from "./NavMapClient";
-export type {
-  NavMapClientOptions,
-  EntitySetNameResponse,
-  CollectionNavigationResponse,
-} from "./NavMapClient";
+export { NavMapClient } from './NavMapClient';
+export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationResponse } from './NavMapClient';
 
 // Document Record Service (Dataverse CRUD)
-export { DocumentRecordService } from "./DocumentRecordService";
-export type {
-  DocumentRecordServiceOptions,
-  EntityConfigResolver,
-} from "./DocumentRecordService";
+export { DocumentRecordService } from './DocumentRecordService';
+export type { DocumentRecordServiceOptions, EntityConfigResolver } from './DocumentRecordService';
 
 // IDataverseClient implementations
-export { PcfDataverseClient } from "./PcfDataverseClient";
-export { ODataDataverseClient } from "./ODataDataverseClient";
-export type { ODataDataverseClientOptions } from "./ODataDataverseClient";
+export { PcfDataverseClient } from './PcfDataverseClient';
+export { ODataDataverseClient } from './ODataDataverseClient';
+export type { ODataDataverseClientOptions } from './ODataDataverseClient';

@@ -43,7 +43,7 @@ export interface VariableEntry {
   /** Human-readable display label */
   label: string;
   /** Type hint for the variable value */
-  typeHint: "string" | "number" | "boolean" | "object" | "array";
+  typeHint: 'string' | 'number' | 'boolean' | 'object' | 'array';
   /** Source node label */
   sourceNodeLabel: string;
 }

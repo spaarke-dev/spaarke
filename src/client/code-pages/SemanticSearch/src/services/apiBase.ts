@@ -9,11 +9,11 @@
  * @see ADR-013: All AI calls go through BFF API
  */
 
-import { getAuthHeader } from "./authInit";
-import type { ApiError } from "../types";
+import { getAuthHeader } from './authInit';
+import type { ApiError } from '../types';
 
 /** BFF API base URL (dev environment). */
-export const BFF_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+export const BFF_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
 /**
  * Build authenticated request headers for BFF API calls.
@@ -27,7 +27,7 @@ export async function buildAuthHeaders(): Promise<Record<string, string>> {
   const authHeader = await getAuthHeader();
   return {
     Authorization: authHeader,
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
 }
 

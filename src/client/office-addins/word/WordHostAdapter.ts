@@ -1,9 +1,4 @@
-import type {
-  IHostAdapter,
-  IHostContext,
-  IContentData,
-  HostFeature,
-} from "@shared/adapters";
+import type { IHostAdapter, IHostContext, IContentData, HostFeature } from '@shared/adapters';
 import type {
   HostType,
   ItemType,
@@ -14,7 +9,7 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
-} from "@shared/adapters/types";
+} from '@shared/adapters/types';
 
 /**
  * Word-specific host adapter implementation.
@@ -24,13 +19,13 @@ import type {
  */
 export class WordHostAdapter implements IHostAdapter {
   private _isInitialized = false;
-  private _documentTitle = "Untitled Document";
+  private _documentTitle = 'Untitled Document';
 
   /**
    * Get the Office host type.
    */
   getHostType(): HostType {
-    return "word";
+    return 'word';
   }
 
   /**
@@ -38,15 +33,15 @@ export class WordHostAdapter implements IHostAdapter {
    * For Word documents, we use the document URL or a generated identifier.
    */
   async getItemId(): Promise<string> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
-      properties.load(["title"]);
+      properties.load(['title']);
       await context.sync();
 
       // Word doesn't have a unique ID like Outlook's itemId
       // Use title + timestamp as a fallback identifier
-      return `word-doc-${properties.title || "untitled"}-${Date.now()}`;
+      return `word-doc-${properties.title || 'untitled'}-${Date.now()}`;
     });
   }
 
@@ -54,20 +49,20 @@ export class WordHostAdapter implements IHostAdapter {
    * Get the type of the current item.
    */
   getItemType(): ItemType {
-    return "document";
+    return 'document';
   }
 
   /**
    * Get the document title.
    */
   async getSubject(): Promise<string> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
-      properties.load(["title"]);
+      properties.load(['title']);
       await context.sync();
 
-      this._documentTitle = properties.title || "Untitled Document";
+      this._documentTitle = properties.title || 'Untitled Document';
       return this._documentTitle;
     });
   }
@@ -75,23 +70,23 @@ export class WordHostAdapter implements IHostAdapter {
   /**
    * Get the body content of the Word document.
    */
-  async getBody(preferredType: "html" | "text" = "html"): Promise<BodyContent> {
-    return Word.run(async (context) => {
+  async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
+    return Word.run(async context => {
       const body = context.document.body;
 
-      if (preferredType === "html") {
+      if (preferredType === 'html') {
         const html = body.getHtml();
         await context.sync();
         return {
           content: html.value,
-          type: "html",
+          type: 'html',
         };
       } else {
-        body.load("text");
+        body.load('text');
         await context.sync();
         return {
           content: body.text,
-          type: "text",
+          type: 'text',
         };
       }
     });
@@ -109,14 +104,14 @@ export class WordHostAdapter implements IHostAdapter {
    * Get attachment content - not applicable for Word.
    */
   async getAttachmentContent(_attachmentId: string): Promise<AttachmentInfo> {
-    throw new Error("Word documents do not support attachments");
+    throw new Error('Word documents do not support attachments');
   }
 
   /**
    * Get sender email - not applicable for Word.
    */
   async getSenderEmail(): Promise<string> {
-    return "";
+    return '';
   }
 
   /**
@@ -129,15 +124,13 @@ export class WordHostAdapter implements IHostAdapter {
   /**
    * Get the document content as an ArrayBuffer.
    */
-  async getDocumentContent(
-    options?: GetDocumentContentOptions,
-  ): Promise<ArrayBuffer> {
-    const format = options?.format || "ooxml";
+  async getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer> {
+    const format = options?.format || 'ooxml';
 
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const body = context.document.body;
 
-      if (format === "ooxml") {
+      if (format === 'ooxml') {
         // Get as OOXML and convert to ArrayBuffer
         const ooxml = body.getOoxml();
         await context.sync();
@@ -145,14 +138,14 @@ export class WordHostAdapter implements IHostAdapter {
         // Convert OOXML string to ArrayBuffer
         const encoder = new TextEncoder();
         return encoder.encode(ooxml.value).buffer as ArrayBuffer;
-      } else if (format === "html") {
+      } else if (format === 'html') {
         const html = body.getHtml();
         await context.sync();
 
         const encoder = new TextEncoder();
         return encoder.encode(html.value).buffer as ArrayBuffer;
-      } else if (format === "text") {
-        body.load("text");
+      } else if (format === 'text') {
+        body.load('text');
         await context.sync();
 
         const encoder = new TextEncoder();
@@ -176,8 +169,8 @@ export class WordHostAdapter implements IHostAdapter {
       canSaveAsEml: false,
       canInsertLink: true,
       canAttachFile: false,
-      minApiVersion: "1.3",
-      supportedRequirementSet: "WordApi 1.3",
+      minApiVersion: '1.3',
+      supportedRequirementSet: 'WordApi 1.3',
     };
   }
 
@@ -186,12 +179,12 @@ export class WordHostAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host === Office.HostType.Word) {
           this._isInitialized = true;
           resolve();
         } else {
-          reject(new Error("Not running in Word"));
+          reject(new Error('Not running in Word'));
         }
       });
     });
@@ -207,11 +200,8 @@ export class WordHostAdapter implements IHostAdapter {
   /**
    * Insert a link at the current cursor position.
    */
-  async insertLink(
-    url: string,
-    displayText?: string,
-  ): Promise<InsertLinkResult> {
-    return Word.run(async (context) => {
+  async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
+    return Word.run(async context => {
       const selection = context.document.getSelection();
       const text = displayText || url;
 
@@ -224,7 +214,7 @@ export class WordHostAdapter implements IHostAdapter {
       return {
         success: true,
       };
-    }).catch((error) => {
+    }).catch(error => {
       return {
         success: false,
         errorMessage: error.message,
@@ -235,38 +225,34 @@ export class WordHostAdapter implements IHostAdapter {
   /**
    * Attach a file - not applicable for Word documents.
    */
-  async attachFile(
-    _content: string,
-    _fileName: string,
-    _contentType: string,
-  ): Promise<AttachFileResult> {
+  async attachFile(_content: string, _fileName: string, _contentType: string): Promise<AttachFileResult> {
     return {
       success: false,
-      errorMessage: "Word documents do not support file attachments",
+      errorMessage: 'Word documents do not support file attachments',
     };
   }
 
   // Legacy methods for backward compatibility
 
   async getCurrentContext(): Promise<IHostContext> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
-      properties.load(["title", "author", "creationDate", "lastSaveTime"]);
+      properties.load(['title', 'author', 'creationDate', 'lastSaveTime']);
 
       await context.sync();
 
-      const title = properties.title || "Untitled Document";
+      const title = properties.title || 'Untitled Document';
 
       return {
-        itemType: "document",
+        itemType: 'document',
         displayName: title,
         metadata: {
           title: properties.title,
           author: properties.author,
           creationDate: properties.creationDate,
           lastSaveTime: properties.lastSaveTime,
-          hostType: "word",
+          hostType: 'word',
         },
       };
     });
@@ -276,13 +262,12 @@ export class WordHostAdapter implements IHostAdapter {
     const context = await this.getCurrentContext();
 
     // Get document as base64-encoded OOXML
-    const content = await this.getDocumentContentAsString("Ooxml");
+    const content = await this.getDocumentContentAsString('Ooxml');
 
     return {
-      format: "docx",
+      format: 'docx',
       content,
-      mimeType:
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       fileName: `${this.sanitizeFileName(context.displayName)}.docx`,
       metadata: {
         originalName: context.displayName,
@@ -296,17 +281,17 @@ export class WordHostAdapter implements IHostAdapter {
 
   supportsFeature(feature: HostFeature): boolean {
     switch (feature) {
-      case "save-as-pdf":
+      case 'save-as-pdf':
         return true; // Conversion happens server-side
-      case "save-as-eml":
+      case 'save-as-eml':
         return false; // Not applicable for Word
-      case "attachments":
+      case 'attachments':
         return false; // Not applicable for Word
-      case "quick-create":
+      case 'quick-create':
         return true;
-      case "entity-association":
+      case 'entity-association':
         return true;
-      case "share-links":
+      case 'share-links':
         return true;
       default:
         return false;
@@ -315,26 +300,24 @@ export class WordHostAdapter implements IHostAdapter {
 
   // Private helper methods
 
-  private async getDocumentContentAsString(
-    format: "Ooxml" | "Text" | "Html",
-  ): Promise<string> {
-    return Word.run(async (context) => {
+  private async getDocumentContentAsString(format: 'Ooxml' | 'Text' | 'Html'): Promise<string> {
+    return Word.run(async context => {
       const body = context.document.body;
 
       switch (format) {
-        case "Ooxml": {
+        case 'Ooxml': {
           const ooxml = body.getOoxml();
           await context.sync();
           return ooxml.value;
         }
-        case "Html": {
+        case 'Html': {
           const html = body.getHtml();
           await context.sync();
           return html.value;
         }
-        case "Text":
+        case 'Text':
         default:
-          body.load("text");
+          body.load('text');
           await context.sync();
           return body.text;
       }
@@ -343,8 +326,8 @@ export class WordHostAdapter implements IHostAdapter {
 
   private sanitizeFileName(name: string): string {
     return name
-      .replace(/[<>:"/\\|?*]/g, "_")
-      .replace(/\s+/g, " ")
+      .replace(/[<>:"/\\|?*]/g, '_')
+      .replace(/\s+/g, ' ')
       .trim()
       .substring(0, 200);
   }

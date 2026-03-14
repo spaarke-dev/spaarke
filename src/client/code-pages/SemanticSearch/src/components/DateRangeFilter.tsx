@@ -14,17 +14,9 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import { useState, useCallback, useMemo, useEffect } from "react";
-import {
-  makeStyles,
-  tokens,
-  Input,
-  Label,
-  Dropdown,
-  Option,
-  useId,
-} from "@fluentui/react-components";
-import type { DateRange } from "../types";
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { makeStyles, tokens, Input, Label, Dropdown, Option, useId } from '@fluentui/react-components';
+import type { DateRange } from '../types';
 
 export interface DateRangeFilterProps {
   /** Label text for the filter (defaults to "Date Range") */
@@ -46,18 +38,18 @@ interface DatePreset {
 }
 
 const DATE_PRESETS: DatePreset[] = [
-  { value: "off", label: "Off", days: 0 },
-  { value: "last30", label: "Last 30 days", days: 30 },
-  { value: "last90", label: "Last 90 days", days: 90 },
-  { value: "thisYear", label: "This year", days: -1 },
-  { value: "lastYear", label: "Last year", days: -2 },
+  { value: 'off', label: 'Off', days: 0 },
+  { value: 'last30', label: 'Last 30 days', days: 30 },
+  { value: 'last90', label: 'Last 90 days', days: 90 },
+  { value: 'thisYear', label: 'This year', days: -1 },
+  { value: 'lastYear', label: 'Last year', days: -2 },
 ];
 
 /**
  * Get date string in YYYY-MM-DD format
  */
 function formatDateForInput(date: Date): string {
-  return date.toISOString().split("T")[0];
+  return date.toISOString().split('T')[0];
 }
 
 /**
@@ -99,14 +91,14 @@ function calculatePresetRange(days: number): DateRange {
  * Determine which preset matches the current date range (if any).
  */
 function detectActivePreset(value: DateRange): string {
-  if (!value.from && !value.to) return "off";
+  if (!value.from && !value.to) return 'off';
   for (const preset of DATE_PRESETS) {
     if (preset.days === 0) continue;
     const range = calculatePresetRange(preset.days);
     if (range.from === value.from && range.to === value.to) return preset.value;
   }
   // Dates set but don't match a preset — custom range
-  return "custom";
+  return 'custom';
 }
 
 // =============================================
@@ -115,8 +107,8 @@ function detectActivePreset(value: DateRange): string {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   label: {
@@ -125,11 +117,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   dropdown: {
-    width: "100%",
+    width: '100%',
   },
   dateFields: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   fieldLabel: {
@@ -137,11 +129,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   dateInput: {
-    width: "100%",
+    width: '100%',
   },
   // Hide native date placeholder text when input is empty (Chromium/Edge)
   dateInputEmpty: {
-    width: "100%",
+    width: '100%',
     "& input[type='date']::-webkit-datetime-edit": {
       color: tokens.colorTransparentStroke,
     },
@@ -156,18 +148,14 @@ const useStyles = makeStyles({
 // Component
 // =============================================
 
-export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
-  label = "Date Range",
-  value,
-  onChange,
-}) => {
+export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({ label = 'Date Range', value, onChange }) => {
   const styles = useStyles();
-  const fromId = useId("date-from");
-  const toId = useId("date-to");
+  const fromId = useId('date-from');
+  const toId = useId('date-to');
 
   // Local state for individual date inputs
-  const [fromDate, setFromDate] = useState<string>(value.from ?? "");
-  const [toDate, setToDate] = useState<string>(value.to ?? "");
+  const [fromDate, setFromDate] = useState<string>(value.from ?? '');
+  const [toDate, setToDate] = useState<string>(value.to ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Track which preset is active
@@ -175,8 +163,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
 
   // Sync local state with prop changes
   useEffect(() => {
-    setFromDate(value.from ?? "");
-    setToDate(value.to ?? "");
+    setFromDate(value.from ?? '');
+    setToDate(value.to ?? '');
   }, [value]);
 
   // Validate and update range
@@ -184,12 +172,12 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     (from: string, to: string) => {
       setValidationError(null);
       if (from && to && from > to) {
-        setValidationError("From date must be before To date");
+        setValidationError('From date must be before To date');
         return;
       }
       onChange({ from: from || null, to: to || null });
     },
-    [onChange],
+    [onChange]
   );
 
   // Handle from date change
@@ -199,7 +187,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
       setFromDate(newFrom);
       updateRange(newFrom, toDate);
     },
-    [toDate, updateRange],
+    [toDate, updateRange]
   );
 
   // Handle to date change
@@ -209,26 +197,26 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
       setToDate(newTo);
       updateRange(fromDate, newTo);
     },
-    [fromDate, updateRange],
+    [fromDate, updateRange]
   );
 
   // Handle preset selection from dropdown
   const handlePresetSelect = useCallback(
     (_event: unknown, data: { optionValue?: string }) => {
       if (!data.optionValue) return;
-      const preset = DATE_PRESETS.find((p) => p.value === data.optionValue);
+      const preset = DATE_PRESETS.find(p => p.value === data.optionValue);
       if (!preset) return;
       const range = calculatePresetRange(preset.days);
-      setFromDate(range.from ?? "");
-      setToDate(range.to ?? "");
+      setFromDate(range.from ?? '');
+      setToDate(range.to ?? '');
       onChange(range);
       setValidationError(null);
     },
-    [onChange],
+    [onChange]
   );
 
   // Show date fields when a non-off preset is selected or dates have values
-  const showDateFields = activePreset !== "off";
+  const showDateFields = activePreset !== 'off';
 
   return (
     <div className={styles.container}>
@@ -237,16 +225,13 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         className={styles.dropdown}
         size="small"
         value={
-          activePreset === "custom"
-            ? "Custom"
-            : (DATE_PRESETS.find((p) => p.value === activePreset)?.label ??
-              "Off")
+          activePreset === 'custom' ? 'Custom' : (DATE_PRESETS.find(p => p.value === activePreset)?.label ?? 'Off')
         }
         selectedOptions={[activePreset]}
         onOptionSelect={handlePresetSelect}
         aria-label="Date range preset"
       >
-        {DATE_PRESETS.map((preset) => (
+        {DATE_PRESETS.map(preset => (
           <Option key={preset.value} value={preset.value}>
             {preset.label}
           </Option>
@@ -277,9 +262,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             onChange={handleToChange}
             aria-label="To date"
           />
-          {validationError && (
-            <span className={styles.validationError}>{validationError}</span>
-          )}
+          {validationError && <span className={styles.validationError}>{validationError}</span>}
         </div>
       )}
     </div>

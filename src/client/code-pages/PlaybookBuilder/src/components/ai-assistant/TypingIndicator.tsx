@@ -7,15 +7,9 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-  Text,
-} from "@fluentui/react-components";
-import { Bot20Regular } from "@fluentui/react-icons";
+import React from 'react';
+import { makeStyles, tokens, shorthands, mergeClasses, Text } from '@fluentui/react-components';
+import { Bot20Regular } from '@fluentui/react-icons';
 
 // ============================================================================
 // Types
@@ -25,7 +19,7 @@ export interface TypingIndicatorProps {
   /** Optional label to show (e.g., "AI is thinking...") */
   label?: string;
   /** Size variant */
-  size?: "small" | "medium" | "large";
+  size?: 'small' | 'medium' | 'large';
   /** Custom class name */
   className?: string;
   /** Show bot icon */
@@ -38,87 +32,87 @@ export interface TypingIndicatorProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   iconContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "28px",
-    height: "28px",
-    ...shorthands.borderRadius("50%"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '28px',
+    height: '28px',
+    ...shorthands.borderRadius('50%'),
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
   },
   dotsContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.borderRadius(tokens.borderRadiusLarge),
     backgroundColor: tokens.colorNeutralBackground3,
   },
   dot: {
-    width: "8px",
-    height: "8px",
-    ...shorthands.borderRadius("50%"),
+    width: '8px',
+    height: '8px',
+    ...shorthands.borderRadius('50%'),
     backgroundColor: tokens.colorNeutralForeground3,
     animationName: {
-      "0%, 60%, 100%": {
-        transform: "scale(1)",
+      '0%, 60%, 100%': {
+        transform: 'scale(1)',
         opacity: 0.4,
       },
-      "30%": {
-        transform: "scale(1.2)",
+      '30%': {
+        transform: 'scale(1.2)',
         opacity: 1,
       },
     },
-    animationDuration: "1.4s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
+    animationDuration: '1.4s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'ease-in-out',
   },
   dot1: {
-    animationDelay: "0s",
+    animationDelay: '0s',
   },
   dot2: {
-    animationDelay: "0.2s",
+    animationDelay: '0.2s',
   },
   dot3: {
-    animationDelay: "0.4s",
+    animationDelay: '0.4s',
   },
   // Size variants
   small: {
-    "& $dot": {
-      width: "6px",
-      height: "6px",
+    '& $dot': {
+      width: '6px',
+      height: '6px',
     },
   },
   large: {
-    "& $dot": {
-      width: "10px",
-      height: "10px",
+    '& $dot': {
+      width: '10px',
+      height: '10px',
     },
   },
   label: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    fontStyle: "italic",
+    fontStyle: 'italic',
   },
   // Pulse animation for the icon
   iconPulse: {
     animationName: {
-      "0%, 100%": {
-        transform: "scale(1)",
+      '0%, 100%': {
+        transform: 'scale(1)',
       },
-      "50%": {
-        transform: "scale(1.05)",
+      '50%': {
+        transform: 'scale(1.05)',
       },
     },
-    animationDuration: "2s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
+    animationDuration: '2s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'ease-in-out',
   },
 });
 
@@ -128,7 +122,7 @@ const useStyles = makeStyles({
 
 export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   label,
-  size = "medium",
+  size = 'medium',
   className,
   showIcon = true,
 }) => {
@@ -139,7 +133,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
       className={mergeClasses(styles.container, className)}
       role="status"
       aria-live="polite"
-      aria-label={label || "AI is typing"}
+      aria-label={label || 'AI is typing'}
     >
       {showIcon && (
         <div className={mergeClasses(styles.iconContainer, styles.iconPulse)}>

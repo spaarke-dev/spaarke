@@ -9,22 +9,9 @@
  * @see ADR-021 - Fluent UI v9 design tokens
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Card,
-  Text,
-  Spinner,
-  Button,
-  Badge,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  Open16Regular,
-  ArrowSync20Regular,
-  Warning20Regular,
-} from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Card, Text, Spinner, Button, Badge, mergeClasses } from '@fluentui/react-components';
+import { Open16Regular, ArrowSync20Regular, Warning20Regular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -55,62 +42,62 @@ export interface IRelationshipCountCardProps {
 
 const useStyles = makeStyles({
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-    padding: tokens.spacingVerticalM + " " + tokens.spacingHorizontalM,
-    minWidth: "200px",
-    cursor: "default",
+    padding: tokens.spacingVerticalM + ' ' + tokens.spacingHorizontalM,
+    minWidth: '200px',
+    cursor: 'default',
   },
   topRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalXS,
   },
   /** When graph preview is present: count left, graph right */
   graphRow: {
-    display: "flex",
-    alignItems: "stretch",
-    gap: "0px",
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: '0px',
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   countColumn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
-    flexBasis: "50%",
-    width: "50%",
-    padding: tokens.spacingVerticalS + " " + tokens.spacingHorizontalM,
+    flexBasis: '50%',
+    width: '50%',
+    padding: tokens.spacingVerticalS + ' ' + tokens.spacingHorizontalM,
   },
   graphPreviewContainer: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    flexBasis: "50%",
-    width: "50%",
-    minHeight: "120px",
-    overflow: "hidden",
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexBasis: '50%',
+    width: '50%',
+    minHeight: '120px',
+    overflow: 'hidden',
   },
   /** Fallback body when no graph preview */
   body: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   countContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   count: {
-    fontSize: "42px",
+    fontSize: '42px',
     fontWeight: tokens.fontWeightBold,
-    lineHeight: "48px",
+    lineHeight: '48px',
     color: tokens.colorNeutralForeground1,
   },
   countLabel: {
@@ -124,14 +111,14 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   spinnerContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "48px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '48px',
   },
   errorContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     color: tokens.colorPaletteRedForeground1,
   },
@@ -140,9 +127,9 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   lastUpdated: {
     color: tokens.colorNeutralForeground3,
@@ -157,11 +144,11 @@ const useStyles = makeStyles({
  * Format a Date for display as a relative or short timestamp.
  */
 function formatLastUpdated(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   }).format(date);
 }
 
@@ -185,22 +172,10 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
   const actionRow = (
     <div className={styles.topRow}>
       {onRefresh && (
-        <Button
-          appearance="subtle"
-          icon={<ArrowSync20Regular />}
-          size="small"
-          onClick={onRefresh}
-          title="Refresh"
-        />
+        <Button appearance="subtle" icon={<ArrowSync20Regular />} size="small" onClick={onRefresh} title="Refresh" />
       )}
       {!isZero && !isLoading && !error && (
-        <Button
-          appearance="subtle"
-          icon={<Open16Regular />}
-          size="small"
-          onClick={onOpen}
-          title="Open full viewer"
-        />
+        <Button appearance="subtle" icon={<Open16Regular />} size="small" onClick={onOpen} title="Open full viewer" />
       )}
     </div>
   );
@@ -240,7 +215,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
         /* Graph layout: count left | graph right */
         <div className={styles.graphRow}>
           <div className={styles.countColumn}>
-            <Text className={styles.count}>{count > 99 ? "99+" : count}</Text>
+            <Text className={styles.count}>{count > 99 ? '99+' : count}</Text>
             <Text className={styles.countLabel}>Similar</Text>
           </div>
           <div className={styles.graphPreviewContainer}>{graphPreview}</div>
@@ -249,11 +224,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
         /* No-graph layout: count + badge inline */
         <div className={styles.body}>
           <div className={styles.countContainer}>
-            <Text
-              className={mergeClasses(styles.count, isZero && styles.zeroCount)}
-            >
-              {count}
-            </Text>
+            <Text className={mergeClasses(styles.count, isZero && styles.zeroCount)}>{count}</Text>
             {isZero && (
               <Text size={200} className={styles.zeroLabel}>
                 No related documents found

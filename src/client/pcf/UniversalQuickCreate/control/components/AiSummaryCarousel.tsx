@@ -12,25 +12,11 @@
  * @version 1.0.0.0
  */
 
-import * as React from "react";
-import {
-  Button,
-  Text,
-  Badge,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from "@fluentui/react-components";
-import {
-  ChevronLeftRegular,
-  ChevronRightRegular,
-  DocumentMultipleRegular,
-} from "@fluentui/react-icons";
-import { AiSummaryPanel } from "./AiSummaryPanel";
-import type {
-  DocumentSummaryState,
-  SummaryStatus,
-} from "@spaarke/ui-components/src/hooks";
+import * as React from 'react';
+import { Button, Text, Badge, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { ChevronLeftRegular, ChevronRightRegular, DocumentMultipleRegular } from '@fluentui/react-icons';
+import { AiSummaryPanel } from './AiSummaryPanel';
+import type { DocumentSummaryState, SummaryStatus } from '@spaarke/ui-components/src/hooks';
 
 // Re-export for backward compatibility
 export type { DocumentSummaryState, SummaryStatus };
@@ -57,8 +43,8 @@ export interface AiSummaryCarouselProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingVerticalM,
     borderRadius: tokens.borderRadiusMedium,
@@ -68,14 +54,14 @@ const useStyles = makeStyles({
     minHeight: 0,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   headerLeft: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   headerIcon: {
@@ -87,37 +73,37 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   navigation: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   navButton: {
-    minWidth: "32px",
+    minWidth: '32px',
   },
   pageIndicator: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
-    minWidth: "60px",
-    textAlign: "center",
+    minWidth: '60px',
+    textAlign: 'center',
   },
   panelContainer: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
     minHeight: 0,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
   },
   statusSummary: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   statusItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   statusCount: {
@@ -150,26 +136,26 @@ const getStatusCounts = (documents: DocumentSummaryState[]) => {
   return documents.reduce(
     (acc, doc) => {
       switch (doc.status) {
-        case "complete":
+        case 'complete':
           acc.complete++;
           break;
-        case "streaming":
+        case 'streaming':
           acc.streaming++;
           break;
-        case "pending":
+        case 'pending':
           acc.pending++;
           break;
-        case "error":
+        case 'error':
           acc.error++;
           break;
-        case "skipped":
-        case "not-supported":
+        case 'skipped':
+        case 'not-supported':
           acc.skipped++;
           break;
       }
       return acc;
     },
-    { complete: 0, streaming: 0, pending: 0, error: 0, skipped: 0 },
+    { complete: 0, streaming: 0, pending: 0, error: 0, skipped: 0 }
   );
 };
 
@@ -198,25 +184,25 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
 
   // Navigation handlers
   const handlePrevious = React.useCallback(() => {
-    setCurrentIndex((prev) => Math.max(0, prev - 1));
+    setCurrentIndex(prev => Math.max(0, prev - 1));
   }, []);
 
   const handleNext = React.useCallback(() => {
-    setCurrentIndex((prev) => Math.min(documents.length - 1, prev + 1));
+    setCurrentIndex(prev => Math.min(documents.length - 1, prev + 1));
   }, [documents.length]);
 
   // Keyboard navigation
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === "ArrowLeft") {
+      if (event.key === 'ArrowLeft') {
         event.preventDefault();
         handlePrevious();
-      } else if (event.key === "ArrowRight") {
+      } else if (event.key === 'ArrowRight') {
         event.preventDefault();
         handleNext();
       }
     },
-    [handlePrevious, handleNext],
+    [handlePrevious, handleNext]
   );
 
   // Handle retry for current document
@@ -228,10 +214,7 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
   }, [documents, currentIndex, onRetry]);
 
   // Get status counts for aggregate display
-  const statusCounts = React.useMemo(
-    () => getStatusCounts(documents),
-    [documents],
-  );
+  const statusCounts = React.useMemo(() => getStatusCounts(documents), [documents]);
 
   // Count currently streaming (for concurrent limit info)
   const streamingCount = statusCounts.streaming;
@@ -284,11 +267,7 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
         </div>
 
         {/* Navigation controls */}
-        <div
-          className={styles.navigation}
-          role="group"
-          aria-label="Carousel navigation"
-        >
+        <div className={styles.navigation} role="group" aria-label="Carousel navigation">
           <Button
             appearance="subtle"
             size="small"
@@ -298,11 +277,7 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
             className={styles.navButton}
             aria-label="Previous document"
           />
-          <Text
-            className={styles.pageIndicator}
-            aria-live="polite"
-            aria-atomic="true"
-          >
+          <Text className={styles.pageIndicator} aria-live="polite" aria-atomic="true">
             {currentIndex + 1} of {documents.length}
           </Text>
           <Button
@@ -341,18 +316,10 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
       </div>
 
       {/* Aggregate status summary */}
-      <div
-        className={styles.statusSummary}
-        role="status"
-        aria-label="Summary status overview"
-      >
+      <div className={styles.statusSummary} role="status" aria-label="Summary status overview">
         {statusCounts.complete > 0 && (
           <div className={styles.statusItem}>
-            <Badge
-              appearance="filled"
-              className={styles.badgeComplete}
-              size="small"
-            >
+            <Badge appearance="filled" className={styles.badgeComplete} size="small">
               {statusCounts.complete}
             </Badge>
             <Text className={styles.statusCount}>complete</Text>
@@ -360,26 +327,18 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
         )}
         {statusCounts.streaming > 0 && (
           <div className={styles.statusItem}>
-            <Badge
-              appearance="filled"
-              className={styles.badgeStreaming}
-              size="small"
-            >
+            <Badge appearance="filled" className={styles.badgeStreaming} size="small">
               {statusCounts.streaming}
             </Badge>
             <Text className={styles.statusCount}>
               generating
-              {streamingCount > maxConcurrent ? ` (${maxConcurrent} max)` : ""}
+              {streamingCount > maxConcurrent ? ` (${maxConcurrent} max)` : ''}
             </Text>
           </div>
         )}
         {statusCounts.pending > 0 && (
           <div className={styles.statusItem}>
-            <Badge
-              appearance="filled"
-              className={styles.badgePending}
-              size="small"
-            >
+            <Badge appearance="filled" className={styles.badgePending} size="small">
               {statusCounts.pending}
             </Badge>
             <Text className={styles.statusCount}>pending</Text>
@@ -387,11 +346,7 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
         )}
         {statusCounts.error > 0 && (
           <div className={styles.statusItem}>
-            <Badge
-              appearance="filled"
-              className={styles.badgeError}
-              size="small"
-            >
+            <Badge appearance="filled" className={styles.badgeError} size="small">
               {statusCounts.error}
             </Badge>
             <Text className={styles.statusCount}>failed</Text>

@@ -2,9 +2,9 @@
  * State machine for EmailProcessingMonitor control lifecycle
  */
 export enum MonitorState {
-  Loading = "Loading",
-  Ready = "Ready",
-  Error = "Error",
+  Loading = 'Loading',
+  Ready = 'Ready',
+  Error = 'Error',
 }
 
 /**

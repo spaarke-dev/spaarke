@@ -10,7 +10,7 @@
  * @version 1.0.0
  */
 
-import { IFieldRule } from "./FieldVisibilityHandler";
+import { IFieldRule } from './FieldVisibilityHandler';
 
 /** Currently active field rules */
 let currentRules: IFieldRule[] = [];
@@ -19,7 +19,7 @@ let currentRules: IFieldRule[] = [];
 let saveHandlerRegistered = false;
 
 /** Unique notification ID for validation errors */
-const VALIDATION_NOTIFICATION_ID = "requiredFieldsValidation";
+const VALIDATION_NOTIFICATION_ID = 'requiredFieldsValidation';
 
 /**
  * Gets the Xrm form context from the window or parent window
@@ -45,20 +45,15 @@ export function registerSaveHandler(rules: IFieldRule[]): void {
       try {
         formContext.data.entity.addOnSave(onSaveHandler);
         saveHandlerRegistered = true;
-        console.log("[SaveValidationHandler] Save handler registered");
+        console.log('[SaveValidationHandler] Save handler registered');
       } catch (err) {
-        console.error(
-          "[SaveValidationHandler] Failed to register save handler:",
-          err,
-        );
+        console.error('[SaveValidationHandler] Failed to register save handler:', err);
       }
     } else {
-      console.warn(
-        "[SaveValidationHandler] Xrm.Page.data.entity not available",
-      );
+      console.warn('[SaveValidationHandler] Xrm.Page.data.entity not available');
     }
   } else {
-    console.log("[SaveValidationHandler] Save handler rules updated");
+    console.log('[SaveValidationHandler] Save handler rules updated');
   }
 }
 
@@ -74,12 +69,9 @@ export function unregisterSaveHandler(): void {
         formContext.data.entity.removeOnSave(onSaveHandler);
         saveHandlerRegistered = false;
         currentRules = [];
-        console.log("[SaveValidationHandler] Save handler unregistered");
+        console.log('[SaveValidationHandler] Save handler unregistered');
       } catch (err) {
-        console.error(
-          "[SaveValidationHandler] Failed to unregister save handler:",
-          err,
-        );
+        console.error('[SaveValidationHandler] Failed to unregister save handler:', err);
       }
     }
   }
@@ -113,14 +105,11 @@ function setFieldNotification(fieldName: string, message: string): void {
   if (!formContext) return;
 
   const control = formContext.getControl(fieldName);
-  if (control && typeof control.setNotification === "function") {
+  if (control && typeof control.setNotification === 'function') {
     try {
       control.setNotification(message, VALIDATION_NOTIFICATION_ID);
     } catch (err) {
-      console.warn(
-        `[SaveValidationHandler] Could not set notification on ${fieldName}:`,
-        err,
-      );
+      console.warn(`[SaveValidationHandler] Could not set notification on ${fieldName}:`, err);
     }
   }
 }
@@ -135,7 +124,7 @@ function clearFieldNotification(fieldName: string): void {
   if (!formContext) return;
 
   const control = formContext.getControl(fieldName);
-  if (control && typeof control.clearNotification === "function") {
+  if (control && typeof control.clearNotification === 'function') {
     try {
       control.clearNotification(VALIDATION_NOTIFICATION_ID);
     } catch (err) {
@@ -154,7 +143,7 @@ function isFieldValueEmpty(value: any): boolean {
   if (value === null || value === undefined) {
     return true;
   }
-  if (typeof value === "string" && value.trim() === "") {
+  if (typeof value === 'string' && value.trim() === '') {
     return true;
   }
   if (Array.isArray(value) && value.length === 0) {
@@ -179,7 +168,7 @@ function getFieldDisplayName(fieldName: string, displayName?: string): string {
   const formContext = getFormContext();
   if (formContext) {
     const control = formContext.getControl(fieldName);
-    if (control && typeof control.getLabel === "function") {
+    if (control && typeof control.getLabel === 'function') {
       try {
         const label = control.getLabel();
         if (label) return label;
@@ -191,9 +180,9 @@ function getFieldDisplayName(fieldName: string, displayName?: string): string {
 
   // Format schema name as display name (sprk_fieldname -> Fieldname)
   return fieldName
-    .replace(/^sprk_/, "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+    .replace(/^sprk_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
 }
 
 /**
@@ -203,9 +192,7 @@ function getFieldDisplayName(fieldName: string, displayName?: string): string {
  */
 function onSaveHandler(context: any): void {
   // Only validate required fields that are visible
-  const requiredFields = currentRules.filter(
-    (r) => r.isRequired && r.isVisible,
-  );
+  const requiredFields = currentRules.filter(r => r.isRequired && r.isVisible);
 
   if (requiredFields.length === 0) {
     // No required fields to validate - allow save
@@ -215,7 +202,7 @@ function onSaveHandler(context: any): void {
 
   const formContext = getFormContext();
   if (!formContext) {
-    console.warn("[SaveValidationHandler] Xrm.Page not available during save");
+    console.warn('[SaveValidationHandler] Xrm.Page not available during save');
     return;
   }
 
@@ -230,10 +217,7 @@ function onSaveHandler(context: any): void {
     if (attr) {
       const value = attr.getValue();
       if (isFieldValueEmpty(value)) {
-        const displayName = getFieldDisplayName(
-          field.fieldName,
-          field.displayName,
-        );
+        const displayName = getFieldDisplayName(field.fieldName, field.displayName);
         emptyRequiredFields.push(displayName);
 
         // Set inline notification on the field
@@ -244,9 +228,9 @@ function onSaveHandler(context: any): void {
 
   if (emptyRequiredFields.length > 0) {
     // Prevent save
-    if (context?.getEventArgs && typeof context.getEventArgs === "function") {
+    if (context?.getEventArgs && typeof context.getEventArgs === 'function') {
       const eventArgs = context.getEventArgs();
-      if (eventArgs && typeof eventArgs.preventDefault === "function") {
+      if (eventArgs && typeof eventArgs.preventDefault === 'function') {
         eventArgs.preventDefault();
       }
     }
@@ -255,33 +239,21 @@ function onSaveHandler(context: any): void {
     const message =
       emptyRequiredFields.length === 1
         ? `Please fill in required field: ${emptyRequiredFields[0]}`
-        : `Please fill in required fields: ${emptyRequiredFields.join(", ")}`;
+        : `Please fill in required fields: ${emptyRequiredFields.join(', ')}`;
 
-    if (
-      formContext.ui &&
-      typeof formContext.ui.setFormNotification === "function"
-    ) {
+    if (formContext.ui && typeof formContext.ui.setFormNotification === 'function') {
       try {
-        formContext.ui.setFormNotification(
-          message,
-          "ERROR",
-          VALIDATION_NOTIFICATION_ID,
-        );
+        formContext.ui.setFormNotification(message, 'ERROR', VALIDATION_NOTIFICATION_ID);
       } catch (err) {
-        console.error(
-          "[SaveValidationHandler] Failed to set form notification:",
-          err,
-        );
+        console.error('[SaveValidationHandler] Failed to set form notification:', err);
       }
     }
 
-    console.log(
-      `[SaveValidationHandler] Save blocked - missing required fields: ${emptyRequiredFields.join(", ")}`,
-    );
+    console.log(`[SaveValidationHandler] Save blocked - missing required fields: ${emptyRequiredFields.join(', ')}`);
   } else {
     // Clear any previous validation notification - all required fields are filled
     clearValidationNotification();
-    console.log("[SaveValidationHandler] Validation passed - save proceeding");
+    console.log('[SaveValidationHandler] Validation passed - save proceeding');
   }
 }
 
@@ -293,7 +265,7 @@ function onSaveHandler(context: any): void {
  * @returns true if field is valid, false if required and empty
  */
 export function validateField(fieldName: string): boolean {
-  const rule = currentRules.find((r) => r.fieldName === fieldName);
+  const rule = currentRules.find(r => r.fieldName === fieldName);
 
   // If no rule or not required, field is valid
   if (!rule || !rule.isRequired || !rule.isVisible) {

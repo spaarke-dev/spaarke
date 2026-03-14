@@ -4,18 +4,11 @@
  * Supports click-to-drill for viewing records on a specific date
  */
 
-import * as React from "react";
-import { useState, useMemo } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Badge,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { ChevronLeftRegular, ChevronRightRegular } from "@fluentui/react-icons";
-import type { DrillInteraction } from "../../types";
+import * as React from 'react';
+import { useState, useMemo } from 'react';
+import { makeStyles, tokens, Text, Button, Badge, mergeClasses } from '@fluentui/react-components';
+import { ChevronLeftRegular, ChevronRightRegular } from '@fluentui/react-icons';
+import type { DrillInteraction } from '../../types';
 
 export interface ICalendarEvent {
   /** Event date */
@@ -45,15 +38,15 @@ export interface ICalendarVisualProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     gap: tokens.spacingVerticalS,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: tokens.spacingVerticalXS,
   },
   title: {
@@ -62,50 +55,50 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase400,
   },
   navigation: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   monthLabel: {
-    minWidth: "140px",
-    textAlign: "center",
+    minWidth: '140px',
+    textAlign: 'center',
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorNeutralForeground1,
   },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, 1fr)",
-    gap: "2px",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: '2px',
   },
   weekdayHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalXS,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorNeutralForeground3,
-    textTransform: "uppercase",
+    textTransform: 'uppercase',
   },
   day: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "48px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '48px',
     padding: tokens.spacingVerticalXXS,
     borderRadius: tokens.borderRadiusSmall,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    cursor: "default",
-    transition: "background-color 0.15s ease-in-out",
+    cursor: 'default',
+    transition: 'background-color 0.15s ease-in-out',
   },
   dayInteractive: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    "&:active": {
+    '&:active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
@@ -130,31 +123,31 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
   },
   eventBadge: {
-    marginTop: "2px",
+    marginTop: '2px',
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     color: tokens.colorNeutralForeground3,
   },
 });
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 /**
@@ -209,13 +202,11 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
 }) => {
   const styles = useStyles();
   const today = new Date();
-  const [currentMonth, setCurrentMonth] = useState(
-    initialMonth || new Date(today.getFullYear(), today.getMonth(), 1),
-  );
+  const [currentMonth, setCurrentMonth] = useState(initialMonth || new Date(today.getFullYear(), today.getMonth(), 1));
 
   const eventMap = useMemo(() => {
     const map = new Map<string, ICalendarEvent>();
-    events.forEach((event) => {
+    events.forEach(event => {
       const key = `${event.date.getFullYear()}-${event.date.getMonth()}-${event.date.getDate()}`;
       map.set(key, event);
     });
@@ -224,41 +215,26 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
 
   const calendarDays = useMemo(
     () => getCalendarDays(currentMonth.getFullYear(), currentMonth.getMonth()),
-    [currentMonth],
+    [currentMonth]
   );
 
   const handlePrevMonth = () => {
-    setCurrentMonth(
-      new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1),
-    );
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   };
 
   const handleNextMonth = () => {
-    setCurrentMonth(
-      new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1),
-    );
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   };
 
   const handleDayClick = (date: Date, event?: ICalendarEvent) => {
     if (onDrillInteraction && drillField) {
       // Create a date range for the entire day
-      const startOfDay = new Date(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate(),
-      );
-      const endOfDay = new Date(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate(),
-        23,
-        59,
-        59,
-      );
+      const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
 
       onDrillInteraction({
         field: drillField,
-        operator: "between",
+        operator: 'between',
         value: [startOfDay.toISOString(), endOfDay.toISOString()],
         label: date.toLocaleDateString(),
       });
@@ -293,7 +269,7 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
       </div>
 
       <div className={styles.grid}>
-        {WEEKDAYS.map((day) => (
+        {WEEKDAYS.map(day => (
           <div key={day} className={styles.weekdayHeader}>
             {day}
           </div>
@@ -313,30 +289,16 @@ export const CalendarVisual: React.FC<ICalendarVisualProps> = ({
                 !isCurrentMonth && styles.dayOutsideMonth,
                 isToday && styles.dayToday,
                 hasEvents && styles.dayWithEvents,
-                isInteractive && styles.dayInteractive,
+                isInteractive && styles.dayInteractive
               )}
-              onClick={
-                isInteractive ? () => handleDayClick(date, event) : undefined
-              }
+              onClick={isInteractive ? () => handleDayClick(date, event) : undefined}
               tabIndex={isInteractive ? 0 : undefined}
-              role={isInteractive ? "button" : undefined}
-              aria-label={`${date.toLocaleDateString()}${hasEvents ? `, ${event.count} events` : ""}`}
+              role={isInteractive ? 'button' : undefined}
+              aria-label={`${date.toLocaleDateString()}${hasEvents ? `, ${event.count} events` : ''}`}
             >
-              <Text
-                className={mergeClasses(
-                  styles.dayNumber,
-                  isToday && styles.dayNumberToday,
-                )}
-              >
-                {date.getDate()}
-              </Text>
+              <Text className={mergeClasses(styles.dayNumber, isToday && styles.dayNumberToday)}>{date.getDate()}</Text>
               {hasEvents && (
-                <Badge
-                  className={styles.eventBadge}
-                  size="small"
-                  appearance="filled"
-                  color="brand"
-                >
+                <Badge className={styles.eventBadge} size="small" appearance="filled" color="brand">
                   {event.count}
                 </Badge>
               )}

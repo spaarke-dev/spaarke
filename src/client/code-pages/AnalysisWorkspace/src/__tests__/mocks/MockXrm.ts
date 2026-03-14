@@ -19,18 +19,13 @@ export interface MockXrmOptions {
   tokenError?: Error;
 }
 
-const DEFAULT_TOKEN = "mock-bearer-token-abc-123";
+const DEFAULT_TOKEN = 'mock-bearer-token-abc-123';
 
 /**
  * Install a mock Xrm global and return a teardown function.
  */
 export function installMockXrm(options: MockXrmOptions = {}): () => void {
-  const {
-    token = DEFAULT_TOKEN,
-    unavailable = false,
-    tokenDelayMs = 0,
-    tokenError,
-  } = options;
+  const { token = DEFAULT_TOKEN, unavailable = false, tokenDelayMs = 0, tokenError } = options;
 
   const originalXrm = (globalThis as Record<string, unknown>).Xrm;
 
@@ -46,16 +41,16 @@ export function installMockXrm(options: MockXrmOptions = {}): () => void {
   const mockXrm = {
     Utility: {
       getGlobalContext: jest.fn(() => ({
-        getClientUrl: jest.fn(() => "https://spaarkedev1.crm.dynamics.com"),
+        getClientUrl: jest.fn(() => 'https://spaarkedev1.crm.dynamics.com'),
         organizationSettings: {
-          uniqueName: "spaarkedev1",
+          uniqueName: 'spaarkedev1',
         },
         userSettings: {
-          userId: "{00000000-0000-0000-0000-000000000001}",
-          userName: "Test User",
+          userId: '{00000000-0000-0000-0000-000000000001}',
+          userName: 'Test User',
         },
         client: {
-          getClient: jest.fn(() => "Web"),
+          getClient: jest.fn(() => 'Web'),
         },
       })),
     },
@@ -92,7 +87,7 @@ export function createMockAuthContextValue(
     isAuthenticating?: boolean;
     authError?: Error | null;
     isXrmUnavailable?: boolean;
-  } = {},
+  } = {}
 ) {
   return {
     token: overrides.token ?? DEFAULT_TOKEN,

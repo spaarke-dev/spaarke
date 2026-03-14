@@ -9,7 +9,7 @@
  * and adapted for React 18 / Code Page usage with external selectedIds state.
  */
 
-import React from "react";
+import React from 'react';
 import {
   Checkbox,
   Radio,
@@ -19,8 +19,8 @@ import {
   makeStyles,
   tokens,
   mergeClasses,
-} from "@fluentui/react-components";
-import { IScopeItem } from "./types";
+} from '@fluentui/react-components';
+import { IScopeItem } from './types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -45,39 +45,39 @@ export interface IScopeListProps<T extends IScopeItem> {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
   },
   item: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "12px",
-    paddingTop: "12px",
-    paddingBottom: "12px",
-    paddingLeft: "12px",
-    paddingRight: "12px",
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    cursor: "pointer",
+    cursor: 'pointer',
   },
   itemSelected: {
     backgroundColor: tokens.colorBrandBackground2,
   },
   itemReadOnly: {
-    cursor: "default",
-    opacity: "0.7",
+    cursor: 'default',
+    opacity: '0.7',
   },
   selector: {
     flexShrink: 0,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   content: {
     flex: 1,
     minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   name: {
     fontSize: tokens.fontSizeBase300,
@@ -87,22 +87,22 @@ const useStyles = makeStyles({
   description: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    lineHeight: "1.4",
+    lineHeight: '1.4',
   },
   loading: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "48px",
-    gap: "16px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '48px',
+    gap: '16px',
   },
   empty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "48px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '48px',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -117,7 +117,7 @@ export function ScopeList<T extends IScopeItem>({
   onSelectionChange,
   isLoading,
   multiSelect = true,
-  emptyMessage = "No items available",
+  emptyMessage = 'No items available',
   readOnly = false,
 }: IScopeListProps<T>): React.ReactElement {
   const styles = useStyles();
@@ -133,15 +133,12 @@ export function ScopeList<T extends IScopeItem>({
     if (checked) {
       newSelected = [...selectedIds, itemId];
     } else {
-      newSelected = selectedIds.filter((id) => id !== itemId);
+      newSelected = selectedIds.filter(id => id !== itemId);
     }
     onSelectionChange(newSelected);
   };
 
-  const handleRadioChange = (
-    _event: unknown,
-    data: { value: string },
-  ): void => {
+  const handleRadioChange = (_event: unknown, data: { value: string }): void => {
     if (readOnly) return;
     onSelectionChange([data.value]);
   };
@@ -175,36 +172,21 @@ export function ScopeList<T extends IScopeItem>({
   // ------------------------------------------------------------------
 
   if (!multiSelect) {
-    const selectedValue = selectedIds.length > 0 ? selectedIds[0] : "";
+    const selectedValue = selectedIds.length > 0 ? selectedIds[0] : '';
 
     return (
-      <RadioGroup
-        value={selectedValue}
-        onChange={handleRadioChange}
-        disabled={readOnly}
-        className={styles.container}
-      >
-        {items.map((item) => {
+      <RadioGroup value={selectedValue} onChange={handleRadioChange} disabled={readOnly} className={styles.container}>
+        {items.map(item => {
           const isSelected = selectedIds.includes(item.id);
           return (
             <div
               key={item.id}
-              className={mergeClasses(
-                styles.item,
-                isSelected && styles.itemSelected,
-                readOnly && styles.itemReadOnly,
-              )}
+              className={mergeClasses(styles.item, isSelected && styles.itemSelected, readOnly && styles.itemReadOnly)}
             >
-              <Radio
-                value={item.id}
-                disabled={readOnly}
-                className={styles.selector}
-              />
+              <Radio value={item.id} disabled={readOnly} className={styles.selector} />
               <div className={styles.content}>
                 <Text className={styles.name}>{item.name}</Text>
-                {item.description && (
-                  <Text className={styles.description}>{item.description}</Text>
-                )}
+                {item.description && <Text className={styles.description}>{item.description}</Text>}
               </div>
             </div>
           );
@@ -219,30 +201,22 @@ export function ScopeList<T extends IScopeItem>({
 
   return (
     <div className={styles.container}>
-      {items.map((item) => {
+      {items.map(item => {
         const isSelected = selectedIds.includes(item.id);
         return (
           <div
             key={item.id}
-            className={mergeClasses(
-              styles.item,
-              isSelected && styles.itemSelected,
-              readOnly && styles.itemReadOnly,
-            )}
+            className={mergeClasses(styles.item, isSelected && styles.itemSelected, readOnly && styles.itemReadOnly)}
           >
             <Checkbox
               checked={isSelected}
               disabled={readOnly}
-              onChange={(_e, data) =>
-                handleCheckboxChange(item.id, !!data.checked)
-              }
+              onChange={(_e, data) => handleCheckboxChange(item.id, !!data.checked)}
               className={styles.selector}
             />
             <div className={styles.content}>
               <Text className={styles.name}>{item.name}</Text>
-              {item.description && (
-                <Text className={styles.description}>{item.description}</Text>
-              )}
+              {item.description && <Text className={styles.description}>{item.description}</Text>}
             </div>
           </div>
         );

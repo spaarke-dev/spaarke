@@ -18,13 +18,7 @@
  * @see ColumnRendererService.tsx (shared library) — reference renderer patterns
  */
 
-import React, {
-  useMemo,
-  useCallback,
-  useRef,
-  useEffect,
-  useState,
-} from "react";
+import React, { useMemo, useCallback, useRef, useEffect, useState } from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -47,11 +41,11 @@ import {
   type DataGridProps,
   type TableRowId,
   type TableColumnSizingOptions,
-} from "@fluentui/react-components";
-import { ColumnTriple20Regular } from "@fluentui/react-icons";
-import type { IDatasetColumn } from "../hooks/useSearchViewDefinitions";
-import type { IDatasetRecord } from "../adapters/searchResultAdapter";
-import type { SearchDomain } from "../types";
+} from '@fluentui/react-components';
+import { ColumnTriple20Regular } from '@fluentui/react-icons';
+import type { IDatasetColumn } from '../hooks/useSearchViewDefinitions';
+import type { IDatasetRecord } from '../adapters/searchResultAdapter';
+import type { SearchDomain } from '../types';
 
 // =============================================
 // Props
@@ -77,7 +71,7 @@ export interface SearchResultsGridProps {
   /** Callback when row selection changes. */
   onSelectionChange: (selectedIds: string[]) => void;
   /** Callback when a column sort is requested. */
-  onSort: (columnKey: string, direction: "asc" | "desc") => void;
+  onSort: (columnKey: string, direction: 'asc' | 'desc') => void;
 }
 
 // =============================================
@@ -86,56 +80,52 @@ export interface SearchResultsGridProps {
 
 /** Render a cell value based on the column's dataType. Matches ColumnRendererService patterns. */
 function renderByDataType(value: unknown, dataType: string): string {
-  if (value == null || value === "") return "";
+  if (value == null || value === '') return '';
 
   switch (dataType) {
-    case "Percentage": {
-      const num = typeof value === "number" ? value : Number(value);
+    case 'Percentage': {
+      const num = typeof value === 'number' ? value : Number(value);
       if (isNaN(num)) return String(value);
       return `${Math.round(num * 100)}%`;
     }
-    case "DateAndTime.DateOnly": {
-      if (typeof value !== "string" && typeof value !== "number")
-        return String(value);
+    case 'DateAndTime.DateOnly': {
+      if (typeof value !== 'string' && typeof value !== 'number') return String(value);
       try {
-        return new Date(value as string | number).toLocaleDateString(
-          undefined,
-          {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-          },
-        );
+        return new Date(value as string | number).toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        });
       } catch {
         return String(value);
       }
     }
-    case "Currency": {
-      const num = typeof value === "number" ? value : Number(value);
+    case 'Currency': {
+      const num = typeof value === 'number' ? value : Number(value);
       if (isNaN(num)) return String(value);
       return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
+        style: 'currency',
+        currency: 'USD',
         minimumFractionDigits: 2,
       }).format(num);
     }
-    case "StringArray": {
-      if (Array.isArray(value)) return value.join(", ");
-      return typeof value === "string" ? value : String(value);
+    case 'StringArray': {
+      if (Array.isArray(value)) return value.join(', ');
+      return typeof value === 'string' ? value : String(value);
     }
-    case "FileType": {
-      return typeof value === "string" ? value.toUpperCase() : String(value);
+    case 'FileType': {
+      return typeof value === 'string' ? value.toUpperCase() : String(value);
     }
-    case "EntityLink": {
-      if (typeof value === "object" && value !== null && "name" in value) {
+    case 'EntityLink': {
+      if (typeof value === 'object' && value !== null && 'name' in value) {
         return String((value as { name: string }).name);
       }
       return String(value);
     }
     default: {
       // SingleLine.Text and all other types
-      if (typeof value === "number") return value.toLocaleString();
-      if (Array.isArray(value)) return value.join(", ");
+      if (typeof value === 'number') return value.toLocaleString();
+      if (Array.isArray(value)) return value.join(', ');
       return String(value);
     }
   }
@@ -147,66 +137,66 @@ function renderByDataType(value: unknown, dataType: string): string {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100%",
-    position: "relative",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    overflow: 'hidden',
   },
   gridToolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingRight: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    minHeight: "32px",
+    minHeight: '32px',
   },
   gridContainer: {
     flex: 1,
-    overflow: "auto",
-    position: "relative",
+    overflow: 'auto',
+    position: 'relative',
   },
   loadingOverlay: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: tokens.colorNeutralBackground1,
     opacity: 0.85,
     zIndex: 10,
   },
   loadMoreContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalM,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingVerticalXXL,
   },
   sentinel: {
-    height: "1px",
-    width: "100%",
+    height: '1px',
+    width: '100%',
   },
   cell: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
@@ -239,7 +229,7 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
   const [selectedRows, setSelectedRows] = useState<Set<TableRowId>>(new Set());
   const [sortState, setSortState] = useState<{
     columnKey: string;
-    direction: "asc" | "desc";
+    direction: 'asc' | 'desc';
   } | null>(null);
 
   // --- Column visibility state ---
@@ -260,7 +250,7 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
-      (entries) => {
+      entries => {
         const entry = entries[0];
         if (entry.isIntersecting && hasMore && !isLoadingMore && !isLoading) {
           onLoadMore();
@@ -268,9 +258,9 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
       },
       {
         root: gridContainerRef.current,
-        rootMargin: "200px",
+        rootMargin: '200px',
         threshold: 0,
-      },
+      }
     );
 
     observer.observe(sentinel);
@@ -278,44 +268,39 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
   }, [hasMore, isLoadingMore, isLoading, onLoadMore]);
 
   // --- Visible columns (filtered by user selection) ---
-  const visibleColumns = useMemo(
-    () => columns.filter((col) => !hiddenColumns.has(col.name)),
-    [columns, hiddenColumns],
-  );
+  const visibleColumns = useMemo(() => columns.filter(col => !hiddenColumns.has(col.name)), [columns, hiddenColumns]);
 
   // --- Map IDatasetColumn to Fluent TableColumnDefinition ---
   type GridItem = IDatasetRecord & { _rowId: number };
 
   const tableColumns: TableColumnDefinition<GridItem>[] = useMemo(
     () =>
-      visibleColumns.map((col) =>
+      visibleColumns.map(col =>
         createTableColumn<GridItem>({
           columnId: col.name,
           compare: (a, b) => {
             const aVal = a[col.name];
             const bVal = b[col.name];
-            if (typeof aVal === "number" && typeof bVal === "number") {
+            if (typeof aVal === 'number' && typeof bVal === 'number') {
               return aVal - bVal;
             }
-            return String(aVal ?? "").localeCompare(String(bVal ?? ""));
+            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
           },
           renderHeaderCell: () => col.displayName,
-          renderCell: (item) => {
+          renderCell: item => {
             const value = item[col.name];
             return renderByDataType(value, col.dataType);
           },
-        }),
+        })
       ),
-    [visibleColumns],
+    [visibleColumns]
   );
 
   // --- Column sizing options (from visualSizeFactor → pixel widths) ---
   const columnSizingOptions: TableColumnSizingOptions = useMemo(() => {
     const options: TableColumnSizingOptions = {};
     for (const col of visibleColumns) {
-      const defaultWidth = col.visualSizeFactor
-        ? Math.round(col.visualSizeFactor * 100)
-        : 150;
+      const defaultWidth = col.visualSizeFactor ? Math.round(col.visualSizeFactor * 100) : 150;
       options[col.name] = {
         defaultWidth,
         minWidth: Math.max(80, Math.round(defaultWidth * 0.5)),
@@ -327,15 +312,13 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
 
   // --- Column picker: checked state for MenuItemCheckbox ---
   const columnCheckedValues = useMemo(() => {
-    const visible = columns
-      .filter((col) => !hiddenColumns.has(col.name))
-      .map((col) => col.name);
+    const visible = columns.filter(col => !hiddenColumns.has(col.name)).map(col => col.name);
     return { columns: visible };
   }, [columns, hiddenColumns]);
 
   const handleCheckedValueChange = useCallback(
     (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
-      if (data.name !== "columns") return;
+      if (data.name !== 'columns') return;
       // checkedItems = names of columns that are now checked (visible)
       const visibleSet = new Set(data.checkedItems);
       const newHidden = new Set<string>();
@@ -346,22 +329,22 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
       }
       setHiddenColumns(newHidden);
     },
-    [columns],
+    [columns]
   );
 
   // --- Selection handler ---
-  const handleSelectionChange: DataGridProps["onSelectionChange"] = useCallback(
+  const handleSelectionChange: DataGridProps['onSelectionChange'] = useCallback(
     (_event: unknown, data: { selectedItems: Set<TableRowId> }) => {
       setSelectedRows(data.selectedItems);
       const ids = Array.from(data.selectedItems)
-        .map((rowId) => {
+        .map(rowId => {
           const record = records[rowId as number];
-          return record?.id ?? "";
+          return record?.id ?? '';
         })
         .filter(Boolean);
       onSelectionChange(ids);
     },
-    [records, onSelectionChange],
+    [records, onSelectionChange]
   );
 
   // --- Sort handler ---
@@ -370,25 +353,19 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
       _event: React.MouseEvent,
       data: {
         sortColumn?: string | number;
-        sortDirection: "ascending" | "descending";
-      },
+        sortDirection: 'ascending' | 'descending';
+      }
     ) => {
-      const colKey = String(data.sortColumn ?? "");
-      const direction =
-        data.sortDirection === "ascending"
-          ? ("asc" as const)
-          : ("desc" as const);
+      const colKey = String(data.sortColumn ?? '');
+      const direction = data.sortDirection === 'ascending' ? ('asc' as const) : ('desc' as const);
       setSortState({ columnKey: colKey, direction });
       onSort(colKey, direction);
     },
-    [onSort],
+    [onSort]
   );
 
   // --- Items with row IDs ---
-  const items: GridItem[] = useMemo(
-    () => records.map((r, i) => ({ ...r, _rowId: i })),
-    [records],
-  );
+  const items: GridItem[] = useMemo(() => records.map((r, i) => ({ ...r, _rowId: i })), [records]);
 
   // --- Empty state ---
   if (!isLoading && records.length === 0) {
@@ -398,9 +375,7 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
           <Text size={400} weight="semibold">
             No results found
           </Text>
-          <Text size={200}>
-            Try adjusting your search query or filters for {activeDomain}
-          </Text>
+          <Text size={200}>Try adjusting your search query or filters for {activeDomain}</Text>
         </div>
       </div>
     );
@@ -417,28 +392,16 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
 
       {/* Column picker toolbar */}
       <div className={styles.gridToolbar}>
-        <Menu
-          checkedValues={columnCheckedValues}
-          onCheckedValueChange={handleCheckedValueChange}
-        >
+        <Menu checkedValues={columnCheckedValues} onCheckedValueChange={handleCheckedValueChange}>
           <MenuTrigger disableButtonEnhancement>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ColumnTriple20Regular />}
-              aria-label="Choose columns"
-            >
+            <Button appearance="subtle" size="small" icon={<ColumnTriple20Regular />} aria-label="Choose columns">
               Columns
             </Button>
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
-              {columns.map((col) => (
-                <MenuItemCheckbox
-                  key={col.name}
-                  name="columns"
-                  value={col.name}
-                >
+              {columns.map(col => (
+                <MenuItemCheckbox key={col.name} name="columns" value={col.name}>
                   {col.displayName}
                 </MenuItemCheckbox>
               ))}
@@ -459,14 +422,13 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
           resizableColumns
           columnSizingOptions={columnSizingOptions}
           getRowId={(item: GridItem) => item._rowId}
-          style={{ minWidth: "100%" }}
+          style={{ minWidth: '100%' }}
           aria-label="Search results"
           {...(sortState
             ? {
                 defaultSortState: {
                   sortColumn: sortState.columnKey,
-                  sortDirection:
-                    sortState.direction === "asc" ? "ascending" : "descending",
+                  sortDirection: sortState.direction === 'asc' ? 'ascending' : 'descending',
                 },
               }
             : {})}
@@ -474,13 +436,11 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
           <DataGridHeader>
             <DataGridRow
               selectionCell={{
-                checkboxIndicator: { "aria-label": "Select all rows" },
+                checkboxIndicator: { 'aria-label': 'Select all rows' },
               }}
             >
               {({ renderHeaderCell }) => (
-                <DataGridHeaderCell className={styles.headerCell}>
-                  {renderHeaderCell()}
-                </DataGridHeaderCell>
+                <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
               )}
             </DataGridRow>
           </DataGridHeader>
@@ -489,15 +449,11 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
               <DataGridRow<GridItem>
                 key={rowId}
                 selectionCell={{
-                  checkboxIndicator: { "aria-label": "Select row" },
+                  checkboxIndicator: { 'aria-label': 'Select row' },
                 }}
-                style={{ height: "44px" }}
+                style={{ height: '44px' }}
               >
-                {({ renderCell }) => (
-                  <DataGridCell className={styles.cell}>
-                    {renderCell(item)}
-                  </DataGridCell>
-                )}
+                {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
               </DataGridRow>
             )}
           </DataGridBody>

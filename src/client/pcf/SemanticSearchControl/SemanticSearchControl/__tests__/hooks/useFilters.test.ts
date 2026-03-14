@@ -3,11 +3,11 @@
  *
  * @see useFilters.ts for implementation
  */
-import { renderHook, act } from "@testing-library/react-hooks";
-import { useFilters } from "../../hooks/useFilters";
+import { renderHook, act } from '@testing-library/react-hooks';
+import { useFilters } from '../../hooks/useFilters';
 
-describe("useFilters", () => {
-  it("should initialize with empty filters", () => {
+describe('useFilters', () => {
+  it('should initialize with empty filters', () => {
     const { result } = renderHook(() => useFilters());
 
     expect(result.current.filters).toEqual({
@@ -16,85 +16,82 @@ describe("useFilters", () => {
       dateRange: null,
       fileTypes: [],
       threshold: 0,
-      searchMode: "hybrid",
+      searchMode: 'hybrid',
     });
     expect(result.current.hasActiveFilters).toBe(false);
   });
 
-  it("should update document types", () => {
+  it('should update document types', () => {
     const { result } = renderHook(() => useFilters());
 
     act(() => {
       result.current.setFilters({
         ...result.current.filters,
-        documentTypes: ["contract", "invoice"],
+        documentTypes: ['contract', 'invoice'],
       });
     });
 
-    expect(result.current.filters.documentTypes).toEqual([
-      "contract",
-      "invoice",
-    ]);
+    expect(result.current.filters.documentTypes).toEqual(['contract', 'invoice']);
     expect(result.current.hasActiveFilters).toBe(true);
   });
 
-  it("should update matter types", () => {
+  it('should update matter types', () => {
     const { result } = renderHook(() => useFilters());
 
     act(() => {
       result.current.setFilters({
         ...result.current.filters,
-        matterTypes: ["litigation"],
+        matterTypes: ['litigation'],
       });
     });
 
-    expect(result.current.filters.matterTypes).toEqual(["litigation"]);
+    expect(result.current.filters.matterTypes).toEqual(['litigation']);
     expect(result.current.hasActiveFilters).toBe(true);
   });
 
-  it("should update date range", () => {
+  it('should update date range', () => {
     const { result } = renderHook(() => useFilters());
 
     act(() => {
       result.current.setFilters({
         ...result.current.filters,
-        dateRange: { from: "2026-01-01", to: "2026-01-31" },
+        dateRange: { from: '2026-01-01', to: '2026-01-31' },
       });
     });
 
     expect(result.current.filters.dateRange).toEqual({
-      from: "2026-01-01",
-      to: "2026-01-31",
+      from: '2026-01-01',
+      to: '2026-01-31',
     });
     expect(result.current.hasActiveFilters).toBe(true);
   });
 
-  it("should update file types", () => {
+  it('should update file types', () => {
     const { result } = renderHook(() => useFilters());
 
     act(() => {
       result.current.setFilters({
         ...result.current.filters,
-        fileTypes: ["pdf", "docx"],
+        fileTypes: ['pdf', 'docx'],
       });
     });
 
-    expect(result.current.filters.fileTypes).toEqual(["pdf", "docx"]);
+    expect(result.current.filters.fileTypes).toEqual(['pdf', 'docx']);
     expect(result.current.hasActiveFilters).toBe(true);
   });
 
-  it("should clear all filters", () => {
+  it('should clear all filters', () => {
     const { result } = renderHook(() => useFilters());
 
     // Set some filters first
     act(() => {
       result.current.setFilters({
-        documentTypes: ["contract"],
-        matterTypes: ["litigation"],
-        dateRange: { from: "2026-01-01", to: null },
-        fileTypes: ["pdf"],
+        documentTypes: ['contract'],
+        matterTypes: ['litigation'],
+        dateRange: { from: '2026-01-01', to: null },
+        fileTypes: ['pdf'],
         threshold: 0,
-        searchMode: "hybrid",
+        searchMode: 'hybrid',
       });
     });
 
@@ -111,12 +108,12 @@ describe("useFilters", () => {
       dateRange: null,
       fileTypes: [],
       threshold: 0,
-      searchMode: "hybrid",
+      searchMode: 'hybrid',
     });
     expect(result.current.hasActiveFilters).toBe(false);
   });
 
-  it("should detect active filters correctly", () => {
+  it('should detect active filters correctly', () => {
     const { result } = renderHook(() => useFilters());
 
     // Empty filters - not active
@@ -130,7 +127,7 @@ describe("useFilters", () => {
         dateRange: null,
         fileTypes: [],
         threshold: 0,
-        searchMode: "hybrid",
+        searchMode: 'hybrid',
       });
     });
     expect(result.current.hasActiveFilters).toBe(false);
@@ -139,7 +136,7 @@ describe("useFilters", () => {
     act(() => {
       result.current.setFilters({
         ...result.current.filters,
-        documentTypes: ["contract"],
+        documentTypes: ['contract'],
       });
     });
     expect(result.current.hasActiveFilters).toBe(true);

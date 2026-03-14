@@ -9,24 +9,13 @@
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Theme,
-} from "@fluentui/react-components";
-import {
-  UpdateRelatedButtonApp,
-  IUpdateRelatedButtonAppProps,
-} from "./UpdateRelatedButtonApp";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { UpdateRelatedButtonApp, IUpdateRelatedButtonAppProps } from './UpdateRelatedButtonApp';
 
-export class UpdateRelatedButton implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class UpdateRelatedButton implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement;
   private notifyOutputChanged: () => void;
   private context: ComponentFramework.Context<IInputs>;
@@ -39,7 +28,7 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.container = container;
     this.notifyOutputChanged = notifyOutputChanged;
@@ -57,13 +46,11 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
     const theme = this.resolveTheme();
 
     const props: IUpdateRelatedButtonAppProps = {
-      buttonLabel:
-        this.context.parameters.buttonLabel?.raw || "Update Related Records",
-      sourceEntityId: this.context.parameters.sourceEntityId?.raw || "",
-      sourceEntityType: this.context.parameters.sourceEntityType?.raw || "",
-      mappingProfileId:
-        this.context.parameters.mappingProfileId?.raw || undefined,
-      apiBaseUrl: this.context.parameters.apiBaseUrl?.raw || "",
+      buttonLabel: this.context.parameters.buttonLabel?.raw || 'Update Related Records',
+      sourceEntityId: this.context.parameters.sourceEntityId?.raw || '',
+      sourceEntityType: this.context.parameters.sourceEntityType?.raw || '',
+      mappingProfileId: this.context.parameters.mappingProfileId?.raw || undefined,
+      apiBaseUrl: this.context.parameters.apiBaseUrl?.raw || '',
       webApi: this.context.webAPI,
       onUpdateComplete: this.handleUpdateComplete.bind(this),
     };
@@ -72,10 +59,10 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
     ReactDOM.render(
       React.createElement(
         FluentProvider,
-        { theme, style: { height: "100%", width: "100%" } },
-        React.createElement(UpdateRelatedButtonApp, props),
+        { theme, style: { height: '100%', width: '100%' } },
+        React.createElement(UpdateRelatedButtonApp, props)
       ),
-      this.container,
+      this.container
     );
   }
 
@@ -85,15 +72,15 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
    */
   private resolveTheme(): Theme {
     // 1. Check localStorage override
-    const storedTheme = localStorage.getItem("spaarke-theme");
-    if (storedTheme === "dark") return webDarkTheme;
-    if (storedTheme === "light") return webLightTheme;
+    const storedTheme = localStorage.getItem('spaarke-theme');
+    if (storedTheme === 'dark') return webDarkTheme;
+    if (storedTheme === 'light') return webLightTheme;
 
     // 2. Check URL flag
     const urlParams = new URLSearchParams(window.location.search);
-    const urlTheme = urlParams.get("theme");
-    if (urlTheme === "dark") return webDarkTheme;
-    if (urlTheme === "light") return webLightTheme;
+    const urlTheme = urlParams.get('theme');
+    if (urlTheme === 'dark') return webDarkTheme;
+    if (urlTheme === 'light') return webLightTheme;
 
     // 3. Try to detect from D365 navbar (common dark mode indicator)
     const navbar = document.querySelector('[data-id="navbar"]');
@@ -105,10 +92,7 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
     }
 
     // 4. Fallback to system preference
-    if (
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-    ) {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       return webDarkTheme;
     }
 
@@ -128,12 +112,9 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<
   private handleUpdateComplete(success: boolean, message: string): void {
     // Could trigger notification or refresh
     if (success) {
-      console.log(
-        "UpdateRelatedButton: Update completed successfully",
-        message,
-      );
+      console.log('UpdateRelatedButton: Update completed successfully', message);
     } else {
-      console.error("UpdateRelatedButton: Update failed", message);
+      console.error('UpdateRelatedButton: Update failed', message);
     }
   }
 

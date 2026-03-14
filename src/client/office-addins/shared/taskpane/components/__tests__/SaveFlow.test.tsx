@@ -1,29 +1,21 @@
-import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  within,
-} from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { SaveFlow } from "../SaveFlow";
-import type { AttachmentInfo } from "@shared/adapters/types";
-import type { EntitySearchResult } from "../../hooks/useEntitySearch";
+import React from 'react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { SaveFlow } from '../SaveFlow';
+import type { AttachmentInfo } from '@shared/adapters/types';
+import type { EntitySearchResult } from '../../hooks/useEntitySearch';
 
 // Mock fetch for API calls
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 // Mock crypto.subtle for idempotency key computation
-Object.defineProperty(global.crypto, "subtle", {
+Object.defineProperty(global.crypto, 'subtle', {
   value: {
     digest: jest.fn().mockImplementation(async () => {
       // Return a mock hash buffer
-      return new Uint8Array([
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-      ]).buffer;
+      return new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]).buffer;
     }),
   },
 });
@@ -43,23 +35,23 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 // Mock attachments for Outlook scenario
 const mockAttachments: AttachmentInfo[] = [
   {
-    id: "att-1",
-    name: "document.pdf",
-    contentType: "application/pdf",
+    id: 'att-1',
+    name: 'document.pdf',
+    contentType: 'application/pdf',
     size: 1024 * 100, // 100KB
     isInline: false,
   },
   {
-    id: "att-2",
-    name: "image.png",
-    contentType: "image/png",
+    id: 'att-2',
+    name: 'image.png',
+    contentType: 'image/png',
     size: 1024 * 50, // 50KB
     isInline: false,
   },
   {
-    id: "att-3",
-    name: "large-file.zip",
-    contentType: "application/zip",
+    id: 'att-3',
+    name: 'large-file.zip',
+    contentType: 'application/zip',
     size: 30 * 1024 * 1024, // 30MB - exceeds limit
     isInline: false,
   },
@@ -67,48 +59,48 @@ const mockAttachments: AttachmentInfo[] = [
 
 // Mock entity search result
 const mockEntity: EntitySearchResult = {
-  id: "entity-123",
-  entityType: "Matter",
-  logicalName: "sprk_matter",
-  name: "Test Matter",
-  displayInfo: "Client: Test Corp",
+  id: 'entity-123',
+  entityType: 'Matter',
+  logicalName: 'sprk_matter',
+  name: 'Test Matter',
+  displayInfo: 'Client: Test Corp',
 };
 
 // Mock access token getter
-const mockGetAccessToken = jest.fn().mockResolvedValue("test-access-token");
+const mockGetAccessToken = jest.fn().mockResolvedValue('test-access-token');
 
 // Mock save response
 const mockSaveResponse = {
-  jobId: "job-123",
-  documentId: "doc-456",
-  statusUrl: "/office/jobs/job-123",
-  streamUrl: "/office/jobs/job-123/stream",
-  status: "Queued",
+  jobId: 'job-123',
+  documentId: 'doc-456',
+  statusUrl: '/office/jobs/job-123',
+  streamUrl: '/office/jobs/job-123/stream',
+  status: 'Queued',
   duplicate: false,
-  correlationId: "corr-789",
+  correlationId: 'corr-789',
 };
 
 // Mock job status response
 const mockJobStatus = {
-  jobId: "job-123",
-  status: "Running",
+  jobId: 'job-123',
+  status: 'Running',
   stages: [
-    { name: "RecordsCreated", status: "Completed" },
-    { name: "FileUploaded", status: "Running" },
-    { name: "ProfileSummary", status: "Pending" },
-    { name: "Indexed", status: "Pending" },
+    { name: 'RecordsCreated', status: 'Completed' },
+    { name: 'FileUploaded', status: 'Running' },
+    { name: 'ProfileSummary', status: 'Pending' },
+    { name: 'Indexed', status: 'Pending' },
   ],
-  documentId: "doc-456",
+  documentId: 'doc-456',
 };
 
-describe("SaveFlow", () => {
+describe('SaveFlow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockFetch.mockReset();
   });
 
-  describe("Initial Render", () => {
-    it("renders save form with entity picker", () => {
+  describe('Initial Render', () => {
+    it('renders save form with entity picker', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -119,16 +111,14 @@ describe("SaveFlow", () => {
             emailSender="sender@example.com"
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(screen.getByText("Associate With")).toBeInTheDocument();
-      expect(
-        screen.getByRole("form", { name: /save to spaarke/i }),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Associate With')).toBeInTheDocument();
+      expect(screen.getByRole('form', { name: /save to spaarke/i })).toBeInTheDocument();
     });
 
-    it("renders document info section for Outlook", () => {
+    it('renders document info section for Outlook', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -138,15 +128,15 @@ describe("SaveFlow", () => {
             emailSender="sender@example.com"
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(screen.getByText("Email")).toBeInTheDocument();
-      expect(screen.getByText("Test Email Subject")).toBeInTheDocument();
-      expect(screen.getByText("From: sender@example.com")).toBeInTheDocument();
+      expect(screen.getByText('Email')).toBeInTheDocument();
+      expect(screen.getByText('Test Email Subject')).toBeInTheDocument();
+      expect(screen.getByText('From: sender@example.com')).toBeInTheDocument();
     });
 
-    it("renders document info section for Word", () => {
+    it('renders document info section for Word', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -156,14 +146,14 @@ describe("SaveFlow", () => {
             documentUrl="https://example.com/doc"
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(screen.getByText("Document")).toBeInTheDocument();
-      expect(screen.getByText("Test Document.docx")).toBeInTheDocument();
+      expect(screen.getByText('Document')).toBeInTheDocument();
+      expect(screen.getByText('Test Document.docx')).toBeInTheDocument();
     });
 
-    it("renders attachment selector for Outlook with attachments", () => {
+    it('renders attachment selector for Outlook with attachments', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -173,15 +163,15 @@ describe("SaveFlow", () => {
             attachments={mockAttachments}
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(screen.getByText("Attachments")).toBeInTheDocument();
-      expect(screen.getByText("document.pdf")).toBeInTheDocument();
-      expect(screen.getByText("image.png")).toBeInTheDocument();
+      expect(screen.getByText('Attachments')).toBeInTheDocument();
+      expect(screen.getByText('document.pdf')).toBeInTheDocument();
+      expect(screen.getByText('image.png')).toBeInTheDocument();
     });
 
-    it("does not render attachment selector for Word", () => {
+    it('does not render attachment selector for Word', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -190,83 +180,61 @@ describe("SaveFlow", () => {
             itemName="Test Document.docx"
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
+      expect(screen.queryByText('Attachments')).not.toBeInTheDocument();
     });
 
-    it("renders processing options", () => {
+    it('renders processing options', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      expect(screen.getByText("AI Processing")).toBeInTheDocument();
-      expect(screen.getByText("Profile Summary")).toBeInTheDocument();
-      expect(screen.getByText("Search Index")).toBeInTheDocument();
-      expect(screen.getByText("Deep Analysis")).toBeInTheDocument();
+      expect(screen.getByText('AI Processing')).toBeInTheDocument();
+      expect(screen.getByText('Profile Summary')).toBeInTheDocument();
+      expect(screen.getByText('Search Index')).toBeInTheDocument();
+      expect(screen.getByText('Deep Analysis')).toBeInTheDocument();
     });
 
-    it("renders save button", () => {
+    it('renders save button', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      expect(
-        screen.getByRole("button", { name: /save to spaarke/i }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /save to spaarke/i })).toBeInTheDocument();
     });
   });
 
-  describe("Form Validation", () => {
-    it("disables save button when no entity is selected", () => {
+  describe('Form Validation', () => {
+    it('disables save button when no entity is selected', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      const saveButton = screen.getByRole("button", {
+      const saveButton = screen.getByRole('button', {
         name: /save to spaarke/i,
       });
       expect(saveButton).toBeDisabled();
     });
   });
 
-  describe("Processing Options", () => {
-    it("toggles profile summary option", async () => {
+  describe('Processing Options', () => {
+    it('toggles profile summary option', async () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      const profileSwitch = screen.getByRole("switch", {
+      const profileSwitch = screen.getByRole('switch', {
         name: /enable profile summary/i,
       });
       expect(profileSwitch).toBeChecked();
@@ -275,20 +243,15 @@ describe("SaveFlow", () => {
       expect(profileSwitch).not.toBeChecked();
     });
 
-    it("toggles search index option", async () => {
+    it('toggles search index option', async () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      const indexSwitch = screen.getByRole("switch", {
+      const indexSwitch = screen.getByRole('switch', {
         name: /enable rag indexing/i,
       });
       expect(indexSwitch).toBeChecked();
@@ -297,20 +260,15 @@ describe("SaveFlow", () => {
       expect(indexSwitch).not.toBeChecked();
     });
 
-    it("toggles deep analysis option", async () => {
+    it('toggles deep analysis option', async () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      const analysisSwitch = screen.getByRole("switch", {
+      const analysisSwitch = screen.getByRole('switch', {
         name: /enable deep ai analysis/i,
       });
       expect(analysisSwitch).not.toBeChecked();
@@ -320,13 +278,13 @@ describe("SaveFlow", () => {
     });
   });
 
-  describe("Attachment Selection", () => {
-    it("validates blocked file types", () => {
+  describe('Attachment Selection', () => {
+    it('validates blocked file types', () => {
       const blockedAttachments: AttachmentInfo[] = [
         {
-          id: "att-blocked",
-          name: "malware.exe",
-          contentType: "application/x-msdownload",
+          id: 'att-blocked',
+          name: 'malware.exe',
+          contentType: 'application/x-msdownload',
           size: 1024,
           isInline: false,
         },
@@ -341,13 +299,13 @@ describe("SaveFlow", () => {
             attachments={blockedAttachments}
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       expect(screen.getByText(/blocked for security/i)).toBeInTheDocument();
     });
 
-    it("validates file size limits", () => {
+    it('validates file size limits', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -357,7 +315,7 @@ describe("SaveFlow", () => {
             attachments={mockAttachments}
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       // The 30MB file should show an error
@@ -365,8 +323,8 @@ describe("SaveFlow", () => {
     });
   });
 
-  describe("Quick Create", () => {
-    it("calls onQuickCreate callback when triggered", async () => {
+  describe('Quick Create', () => {
+    it('calls onQuickCreate callback when triggered', async () => {
       const onQuickCreate = jest.fn();
       render(
         <TestWrapper>
@@ -377,17 +335,17 @@ describe("SaveFlow", () => {
             getAccessToken={mockGetAccessToken}
             onQuickCreate={onQuickCreate}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       // The EntityPicker component handles Quick Create
       // This test verifies the prop is passed through
-      expect(screen.getByRole("form")).toBeInTheDocument();
+      expect(screen.getByRole('form')).toBeInTheDocument();
     });
   });
 
-  describe("Accessibility", () => {
-    it("has proper ARIA labels", () => {
+  describe('Accessibility', () => {
+    it('has proper ARIA labels', () => {
       render(
         <TestWrapper>
           <SaveFlow
@@ -397,48 +355,35 @@ describe("SaveFlow", () => {
             attachments={mockAttachments}
             getAccessToken={mockGetAccessToken}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
-      expect(
-        screen.getByRole("form", { name: /save to spaarke/i }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('form', { name: /save to spaarke/i })).toBeInTheDocument();
     });
 
-    it("has proper labels for processing options", () => {
+    it('has proper labels for processing options', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
-        </TestWrapper>,
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
+        </TestWrapper>
       );
 
-      expect(
-        screen.getByRole("switch", { name: /enable profile summary/i }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("switch", { name: /enable rag indexing/i }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("switch", { name: /enable deep ai analysis/i }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: /enable profile summary/i })).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: /enable rag indexing/i })).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: /enable deep ai analysis/i })).toBeInTheDocument();
     });
   });
 
-  describe("Duplicate Detection", () => {
-    it("handles duplicate response correctly", async () => {
+  describe('Duplicate Detection', () => {
+    it('handles duplicate response correctly', async () => {
       const duplicateResponse = {
-        jobId: "existing-job",
-        documentId: "existing-doc",
-        statusUrl: "/office/jobs/existing-job",
-        status: "Completed",
+        jobId: 'existing-job',
+        documentId: 'existing-doc',
+        statusUrl: '/office/jobs/existing-job',
+        status: 'Completed',
         duplicate: true,
-        message: "This item was previously saved",
-        correlationId: "corr-123",
+        message: 'This item was previously saved',
+        correlationId: 'corr-123',
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -454,14 +399,14 @@ describe("SaveFlow", () => {
     });
   });
 
-  describe("Error Handling", () => {
-    it("displays error message on API failure", async () => {
+  describe('Error Handling', () => {
+    it('displays error message on API failure', async () => {
       const problemDetails = {
-        type: "https://spaarke.com/errors/office/validation-error",
-        title: "Validation Error",
+        type: 'https://spaarke.com/errors/office/validation-error',
+        title: 'Validation Error',
         status: 400,
-        detail: "Association target is required",
-        errorCode: "OFFICE_003",
+        detail: 'Association target is required',
+        errorCode: 'OFFICE_003',
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -475,35 +420,35 @@ describe("SaveFlow", () => {
     });
   });
 
-  describe("Success State", () => {
-    it("renders success UI after completion", async () => {
+  describe('Success State', () => {
+    it('renders success UI after completion', async () => {
       // Note: This test would require simulating the full save flow
       // including SSE/polling and job completion
     });
 
-    it("handles view document action", async () => {
+    it('handles view document action', async () => {
       const onViewDocument = jest.fn();
       // Note: This test would require simulating the full save flow
     });
 
-    it("handles copy link action", async () => {
+    it('handles copy link action', async () => {
       // Note: This test would require simulating the full save flow
       // and then testing the clipboard copy
     });
 
-    it("handles save another action", async () => {
+    it('handles save another action', async () => {
       // Note: This test would require simulating the full save flow
       // and then testing the reset functionality
     });
   });
 });
 
-describe("AttachmentSelector", () => {
+describe('AttachmentSelector', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it("renders attachment list", () => {
+  it('renders attachment list', () => {
     render(
       <TestWrapper>
         <SaveFlow
@@ -513,14 +458,14 @@ describe("AttachmentSelector", () => {
           attachments={mockAttachments}
           getAccessToken={mockGetAccessToken}
         />
-      </TestWrapper>,
+      </TestWrapper>
     );
 
-    expect(screen.getByText("document.pdf")).toBeInTheDocument();
-    expect(screen.getByText("image.png")).toBeInTheDocument();
+    expect(screen.getByText('document.pdf')).toBeInTheDocument();
+    expect(screen.getByText('image.png')).toBeInTheDocument();
   });
 
-  it("shows file sizes formatted correctly", () => {
+  it('shows file sizes formatted correctly', () => {
     render(
       <TestWrapper>
         <SaveFlow
@@ -530,14 +475,14 @@ describe("AttachmentSelector", () => {
           attachments={mockAttachments}
           getAccessToken={mockGetAccessToken}
         />
-      </TestWrapper>,
+      </TestWrapper>
     );
 
-    expect(screen.getByText("100 KB")).toBeInTheDocument();
-    expect(screen.getByText("50 KB")).toBeInTheDocument();
+    expect(screen.getByText('100 KB')).toBeInTheDocument();
+    expect(screen.getByText('50 KB')).toBeInTheDocument();
   });
 
-  it("indicates attachment selection count", () => {
+  it('indicates attachment selection count', () => {
     render(
       <TestWrapper>
         <SaveFlow
@@ -547,10 +492,10 @@ describe("AttachmentSelector", () => {
           attachments={mockAttachments}
           getAccessToken={mockGetAccessToken}
         />
-      </TestWrapper>,
+      </TestWrapper>
     );
 
     // Initial state: 0/3 selected
-    expect(screen.getByText("0/3")).toBeInTheDocument();
+    expect(screen.getByText('0/3')).toBeInTheDocument();
   });
 });

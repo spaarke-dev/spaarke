@@ -19,25 +19,21 @@
  * @see https://learn.microsoft.com/en-us/office/dev/add-ins/develop/dialog-api-in-office-add-ins
  */
 
-import type { AccountInfo } from "@azure/msal-browser";
-import {
-  type NaaAuthConfig,
-  DEFAULT_AUTH_CONFIG,
-  getBffApiScopes,
-} from "./authConfig";
+import type { AccountInfo } from '@azure/msal-browser';
+import { type NaaAuthConfig, DEFAULT_AUTH_CONFIG, getBffApiScopes } from './authConfig';
 
 /**
  * Message types for dialog communication
  */
 export enum DialogMessageType {
   /** Authentication completed successfully */
-  AUTH_COMPLETE = "auth-complete",
+  AUTH_COMPLETE = 'auth-complete',
   /** Authentication failed with error */
-  AUTH_ERROR = "auth-error",
+  AUTH_ERROR = 'auth-error',
   /** Dialog is ready and waiting */
-  READY = "ready",
+  READY = 'ready',
   /** User cancelled authentication */
-  CANCELLED = "cancelled",
+  CANCELLED = 'cancelled',
 }
 
 /**
@@ -95,21 +91,21 @@ export type DialogMessage =
  */
 export enum DialogAuthErrorCode {
   /** Dialog was closed by user */
-  DIALOG_CLOSED = "DIALOG_001",
+  DIALOG_CLOSED = 'DIALOG_001',
   /** Dialog failed to open */
-  DIALOG_OPEN_FAILED = "DIALOG_002",
+  DIALOG_OPEN_FAILED = 'DIALOG_002',
   /** Authentication timed out */
-  AUTH_TIMEOUT = "DIALOG_003",
+  AUTH_TIMEOUT = 'DIALOG_003',
   /** Invalid message from dialog */
-  INVALID_MESSAGE = "DIALOG_004",
+  INVALID_MESSAGE = 'DIALOG_004',
   /** Dialog communication error */
-  COMMUNICATION_ERROR = "DIALOG_005",
+  COMMUNICATION_ERROR = 'DIALOG_005',
   /** User cancelled authentication */
-  USER_CANCELLED = "DIALOG_006",
+  USER_CANCELLED = 'DIALOG_006',
   /** MSAL error in dialog */
-  MSAL_ERROR = "DIALOG_007",
+  MSAL_ERROR = 'DIALOG_007',
   /** Unknown error */
-  UNKNOWN = "DIALOG_999",
+  UNKNOWN = 'DIALOG_999',
 }
 
 /**
@@ -120,13 +116,9 @@ export class DialogAuthError extends Error {
   public readonly userMessage: string;
   public readonly originalError?: Error;
 
-  constructor(
-    code: DialogAuthErrorCode,
-    userMessage: string,
-    originalError?: Error,
-  ) {
+  constructor(code: DialogAuthErrorCode, userMessage: string, originalError?: Error) {
     super(userMessage);
-    this.name = "DialogAuthError";
+    this.name = 'DialogAuthError';
     this.code = code;
     this.userMessage = userMessage;
     this.originalError = originalError;
@@ -171,7 +163,7 @@ const DEFAULT_DIALOG_OPTIONS: Required<DialogAuthOptions> = {
   height: 60,
   timeout: 120000, // 2 minutes
   displayInIframe: false,
-  promptHint: "",
+  promptHint: '',
 };
 
 /**
@@ -246,13 +238,13 @@ class DialogAuthServiceImpl implements IDialogAuthService {
 
   public async initialize(config?: Partial<NaaAuthConfig>): Promise<void> {
     if (this.initialized) {
-      console.warn("[DialogAuthService] Already initialized");
+      console.warn('[DialogAuthService] Already initialized');
       return;
     }
 
     this.config = { ...DEFAULT_AUTH_CONFIG, ...config };
     this.initialized = true;
-    console.info("[DialogAuthService] Initialized");
+    console.info('[DialogAuthService] Initialized');
   }
 
   public isInitialized(): boolean {
@@ -268,13 +260,11 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     return `${window.location.origin}/dialog.html`;
   }
 
-  public async authenticate(
-    options?: DialogAuthOptions,
-  ): Promise<DialogTokenResult> {
+  public async authenticate(options?: DialogAuthOptions): Promise<DialogTokenResult> {
     if (!this.initialized) {
       throw new DialogAuthError(
         DialogAuthErrorCode.DIALOG_OPEN_FAILED,
-        "Dialog auth service is not initialized. Call initialize() first.",
+        'Dialog auth service is not initialized. Call initialize() first.'
       );
     }
 
@@ -304,7 +294,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
           displayInIframe: mergedOptions.displayInIframe,
           promptBeforeOpen: false,
         },
-        (asyncResult) => {
+        asyncResult => {
           if (asyncResult.status === Office.AsyncResultStatus.Failed) {
             this.handleDialogOpenError(asyncResult.error);
             return;
@@ -312,7 +302,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
 
           this.activeDialog = asyncResult.value;
           this.setupDialogEventHandlers();
-        },
+        }
       );
     });
   }
@@ -320,12 +310,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
   public cancelAuthentication(): void {
     this.cleanup();
     if (this.pendingReject) {
-      this.pendingReject(
-        new DialogAuthError(
-          DialogAuthErrorCode.USER_CANCELLED,
-          "Authentication was cancelled.",
-        ),
-      );
+      this.pendingReject(new DialogAuthError(DialogAuthErrorCode.USER_CANCELLED, 'Authentication was cancelled.'));
     }
     this.clearPendingPromise();
   }
@@ -339,12 +324,12 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     const url = new URL(baseUrl);
 
     // Add parameters for the dialog to use
-    url.searchParams.set("clientId", this.config.clientId);
-    url.searchParams.set("tenantId", this.config.tenantId);
-    url.searchParams.set("bffApiClientId", this.config.bffApiClientId);
+    url.searchParams.set('clientId', this.config.clientId);
+    url.searchParams.set('tenantId', this.config.tenantId);
+    url.searchParams.set('bffApiClientId', this.config.bffApiClientId);
 
     if (promptHint) {
-      url.searchParams.set("prompt", promptHint);
+      url.searchParams.set('prompt', promptHint);
     }
 
     return url.toString();
@@ -356,28 +341,21 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     // Handle messages from dialog
     this.activeDialog.addEventHandler(
       Office.EventType.DialogMessageReceived,
-      (
-        arg:
-          | { message: string; origin: string | undefined }
-          | { error: number },
-      ) => {
-        if ("error" in arg) {
+      (arg: { message: string; origin: string | undefined } | { error: number }) => {
+        if ('error' in arg) {
           // This is an error event
           this.handleDialogError(arg.error);
         } else {
           // This is a message event
           this.handleDialogMessage(arg.message);
         }
-      },
+      }
     );
 
     // Handle dialog close event
-    this.activeDialog.addEventHandler(
-      Office.EventType.DialogEventReceived,
-      (arg: { error: number }) => {
-        this.handleDialogEvent(arg.error);
-      },
-    );
+    this.activeDialog.addEventHandler(Office.EventType.DialogEventReceived, (arg: { error: number }) => {
+      this.handleDialogEvent(arg.error);
+    });
   }
 
   private handleDialogMessage(message: string): void {
@@ -398,23 +376,20 @@ class DialogAuthServiceImpl implements IDialogAuthService {
           break;
 
         case DialogMessageType.READY:
-          console.info("[DialogAuthService] Dialog is ready");
+          console.info('[DialogAuthService] Dialog is ready');
           break;
 
         default:
-          console.warn("[DialogAuthService] Unknown message type:", parsed);
+          console.warn('[DialogAuthService] Unknown message type:', parsed);
       }
     } catch (error) {
-      console.error(
-        "[DialogAuthService] Failed to parse dialog message:",
-        error,
-      );
+      console.error('[DialogAuthService] Failed to parse dialog message:', error);
       this.rejectWithError(
         new DialogAuthError(
           DialogAuthErrorCode.INVALID_MESSAGE,
-          "Invalid message received from authentication dialog.",
-          error instanceof Error ? error : undefined,
-        ),
+          'Invalid message received from authentication dialog.',
+          error instanceof Error ? error : undefined
+        )
       );
     }
   }
@@ -449,10 +424,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.MSAL_ERROR,
-        message.errorMessage || "Authentication failed in dialog.",
-      ),
+      new DialogAuthError(DialogAuthErrorCode.MSAL_ERROR, message.errorMessage || 'Authentication failed in dialog.')
     );
   }
 
@@ -460,22 +432,16 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.USER_CANCELLED,
-        "Authentication was cancelled by user.",
-      ),
+      new DialogAuthError(DialogAuthErrorCode.USER_CANCELLED, 'Authentication was cancelled by user.')
     );
   }
 
   private handleDialogError(errorCode: number): void {
-    console.error("[DialogAuthService] Dialog error:", errorCode);
+    console.error('[DialogAuthService] Dialog error:', errorCode);
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.COMMUNICATION_ERROR,
-        `Dialog communication error (code: ${errorCode}).`,
-      ),
+      new DialogAuthError(DialogAuthErrorCode.COMMUNICATION_ERROR, `Dialog communication error (code: ${errorCode}).`)
     );
   }
 
@@ -493,42 +459,33 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     if (eventType === 12002) {
       // Dialog was closed by user
       this.rejectWithError(
-        new DialogAuthError(
-          DialogAuthErrorCode.DIALOG_CLOSED,
-          "The authentication dialog was closed.",
-        ),
+        new DialogAuthError(DialogAuthErrorCode.DIALOG_CLOSED, 'The authentication dialog was closed.')
       );
     } else {
       this.rejectWithError(
-        new DialogAuthError(
-          DialogAuthErrorCode.COMMUNICATION_ERROR,
-          `Dialog event error (code: ${eventType}).`,
-        ),
+        new DialogAuthError(DialogAuthErrorCode.COMMUNICATION_ERROR, `Dialog event error (code: ${eventType}).`)
       );
     }
   }
 
   private handleDialogOpenError(error: Office.Error): void {
-    console.error("[DialogAuthService] Failed to open dialog:", error);
+    console.error('[DialogAuthService] Failed to open dialog:', error);
     this.cleanup();
 
     this.rejectWithError(
       new DialogAuthError(
         DialogAuthErrorCode.DIALOG_OPEN_FAILED,
-        `Failed to open authentication dialog: ${error.message}`,
-      ),
+        `Failed to open authentication dialog: ${error.message}`
+      )
     );
   }
 
   private handleAuthTimeout(): void {
-    console.warn("[DialogAuthService] Authentication timed out");
+    console.warn('[DialogAuthService] Authentication timed out');
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.AUTH_TIMEOUT,
-        "Authentication timed out. Please try again.",
-      ),
+      new DialogAuthError(DialogAuthErrorCode.AUTH_TIMEOUT, 'Authentication timed out. Please try again.')
     );
   }
 
@@ -566,8 +523,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
 /**
  * Get the singleton Dialog Authentication Service instance
  */
-export const dialogAuthService: IDialogAuthService =
-  DialogAuthServiceImpl.getInstance();
+export const dialogAuthService: IDialogAuthService = DialogAuthServiceImpl.getInstance();
 
 /**
  * Export the class for testing purposes

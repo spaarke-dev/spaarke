@@ -17,13 +17,10 @@
  * @see ADR-012 - Shared Component Library
  */
 
-import * as React from "react";
-import { useRef, useState, useCallback } from "react";
-import type {
-  StreamingInsertHandle,
-  StreamingInsertPluginProps,
-} from "./StreamingInsertPlugin";
-import type { IDocumentStreamEvent } from "../../SprkChat/types";
+import * as React from 'react';
+import { useRef, useState, useCallback } from 'react';
+import type { StreamingInsertHandle, StreamingInsertPluginProps } from './StreamingInsertPlugin';
+import type { IDocumentStreamEvent } from '../../SprkChat/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -114,7 +111,7 @@ export interface UseStreamingInsertResult {
  * ```
  */
 export function useStreamingInsert(
-  onComplete?: (operationId: string | null, cancelled: boolean) => void,
+  onComplete?: (operationId: string | null, cancelled: boolean) => void
 ): UseStreamingInsertResult {
   const pluginRef = useRef<StreamingInsertHandle | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -129,7 +126,7 @@ export function useStreamingInsert(
       setIsStreaming(false);
       onComplete?.(operationIdRef.current, cancelled);
     },
-    [onComplete],
+    [onComplete]
   );
 
   const startStream = useCallback((opId: string, targetPosition?: string) => {
@@ -153,33 +150,33 @@ export function useStreamingInsert(
   const handleStreamEvent = useCallback(
     (event: IDocumentStreamEvent) => {
       switch (event.type) {
-        case "document_stream_start":
+        case 'document_stream_start':
           startStream(event.operationId, event.targetPosition);
           break;
 
-        case "document_stream_token":
+        case 'document_stream_token':
           insertToken(event.token);
           break;
 
-        case "document_stream_end":
+        case 'document_stream_end':
           // Per FR-06: cancelled writes PRESERVE partial content.
           // Pass false to endStream so the plugin keeps inserted text.
           // The user can undo to the pre-stream state via useDocumentHistory.
           endStream(false);
           break;
 
-        case "document_replace":
+        case 'document_replace':
           // Replace events are handled outside this plugin (full HTML replacement).
           // Log for debugging but do not process here.
           break;
 
-        case "progress":
+        case 'progress':
           // Progress events are informational; consumers can
           // observe them via their own SSE handler if needed.
           break;
       }
     },
-    [startStream, insertToken, endStream],
+    [startStream, insertToken, endStream]
   );
 
   const pluginProps: StreamingInsertPluginProps = {

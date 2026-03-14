@@ -13,24 +13,10 @@
  * - FR-06: Node Action Bar specification
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Card,
-  CardHeader,
-  Button,
-  Tooltip,
-  Text,
-  Divider,
-} from "@fluentui/react-components";
-import {
-  Open20Regular,
-  Globe20Regular,
-  ArrowExpand20Regular,
-  Dismiss20Regular,
-} from "@fluentui/react-icons";
-import type { DocumentNodeData } from "../types/graph";
+import * as React from 'react';
+import { makeStyles, tokens, Card, CardHeader, Button, Tooltip, Text, Divider } from '@fluentui/react-components';
+import { Open20Regular, Globe20Regular, ArrowExpand20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import type { DocumentNodeData } from '../types/graph';
 
 /**
  * Props for NodeActionBar component
@@ -51,10 +37,10 @@ export interface NodeActionBarProps {
  */
 const useStyles = makeStyles({
   container: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalM,
     right: tokens.spacingHorizontalM,
-    width: "280px",
+    width: '280px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
@@ -62,48 +48,48 @@ const useStyles = makeStyles({
     zIndex: 100,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   headerContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    overflow: "hidden",
+    overflow: 'hidden',
     flex: 1,
   },
   documentName: {
     fontWeight: tokens.fontWeightSemibold,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground1,
   },
   parentEntity: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   closeButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
     padding: tokens.spacingHorizontalXS,
   },
   actionsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     padding: tokens.spacingVerticalS,
     gap: tokens.spacingVerticalXS,
   },
   actionButton: {
-    justifyContent: "flex-start",
-    width: "100%",
+    justifyContent: 'flex-start',
+    width: '100%',
   },
   divider: {
     margin: `${tokens.spacingVerticalXXS} 0`,
@@ -122,11 +108,7 @@ const useStyles = makeStyles({
  */
 declare global {
   interface XrmNavigation {
-    openForm(options: {
-      entityName: string;
-      entityId?: string;
-      openInNewWindow?: boolean;
-    }): Promise<void>;
+    openForm(options: { entityName: string; entityId?: string; openInNewWindow?: boolean }): Promise<void>;
   }
   interface Xrm {
     Navigation: XrmNavigation;
@@ -137,12 +119,7 @@ declare global {
 /**
  * NodeActionBar component - Action bar for selected nodes
  */
-export const NodeActionBar: React.FC<NodeActionBarProps> = ({
-  nodeData,
-  onClose,
-  onExpand,
-  canExpand = true,
-}) => {
+export const NodeActionBar: React.FC<NodeActionBarProps> = ({ nodeData, onClose, onExpand, canExpand = true }) => {
   const styles = useStyles();
   const isSource = nodeData.isSource ?? false;
 
@@ -156,29 +133,24 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
    */
   const handleOpenDocumentRecord = React.useCallback(() => {
     if (!nodeData.documentId) {
-      console.warn(
-        "Cannot open document record: orphan file has no documentId",
-      );
+      console.warn('Cannot open document record: orphan file has no documentId');
       return;
     }
-    if (typeof Xrm !== "undefined" && Xrm.Navigation) {
+    if (typeof Xrm !== 'undefined' && Xrm.Navigation) {
       Xrm.Navigation.openForm({
-        entityName: "sprk_document",
+        entityName: 'sprk_document',
         entityId: nodeData.documentId,
         openInNewWindow: true,
       }).catch((error: Error) => {
-        console.error("Failed to open document record:", error);
+        console.error('Failed to open document record:', error);
       });
     } else {
       // Fallback for development/testing outside Dataverse
-      console.warn(
-        "Xrm.Navigation not available. Document ID:",
-        nodeData.documentId,
-      );
+      console.warn('Xrm.Navigation not available. Document ID:', nodeData.documentId);
       // Try to construct a URL for testing
       const baseUrl = window.location.origin;
       const formUrl = `${baseUrl}/main.aspx?etn=sprk_document&id=${nodeData.documentId}&pagetype=entityrecord`;
-      window.open(formUrl, "_blank");
+      window.open(formUrl, '_blank');
     }
   }, [nodeData.documentId]);
 
@@ -188,9 +160,9 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
    */
   const handleViewFile = React.useCallback(() => {
     if (nodeData.fileUrl) {
-      window.open(nodeData.fileUrl, "_blank", "noopener,noreferrer");
+      window.open(nodeData.fileUrl, '_blank', 'noopener,noreferrer');
     } else {
-      console.warn("No fileUrl available for document:", nodeData.name);
+      console.warn('No fileUrl available for document:', nodeData.name);
     }
   }, [nodeData.fileUrl, nodeData.name]);
 
@@ -216,16 +188,11 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
             {nodeData.name}
           </Text>
           {nodeData.parentEntityName && (
-            <Text
-              className={styles.parentEntity}
-              title={nodeData.parentEntityName}
-            >
+            <Text className={styles.parentEntity} title={nodeData.parentEntityName}>
               {nodeData.parentEntityName}
             </Text>
           )}
-          {isSource && (
-            <Text className={styles.sourceLabel}>Source Document</Text>
-          )}
+          {isSource && <Text className={styles.sourceLabel}>Source Document</Text>}
         </div>
         <Tooltip content="Close" relationship="label">
           <Button
@@ -242,9 +209,7 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
       <div className={styles.actionsContainer}>
         <Tooltip
           content={
-            isOrphanFile
-              ? "Not available for files without a document record"
-              : "Open document record in Dataverse"
+            isOrphanFile ? 'Not available for files without a document record' : 'Open document record in Dataverse'
           }
           relationship="description"
         >
@@ -274,10 +239,7 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
         {!isSource && (
           <>
             <Divider className={styles.divider} />
-            <Tooltip
-              content="Load related documents for this node"
-              relationship="description"
-            >
+            <Tooltip content="Load related documents for this node" relationship="description">
               <Button
                 className={styles.actionButton}
                 appearance="subtle"

@@ -8,7 +8,7 @@
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,7 +30,7 @@ const DEFAULT_SPLIT_RATIO = 0.6;
 const KEYBOARD_STEP_PX = 20;
 
 /** sessionStorage key for persisted split ratio */
-const STORAGE_KEY = "aw-panel-split-ratio";
+const STORAGE_KEY = 'aw-panel-split-ratio';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,9 +97,7 @@ function persistRatio(ratio: number): void {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function usePanelResize(
-  options: UsePanelResizeOptions = {},
-): UsePanelResizeResult {
+export function usePanelResize(options: UsePanelResizeOptions = {}): UsePanelResizeResult {
   const {
     defaultRatio = DEFAULT_SPLIT_RATIO,
     minLeftWidth = MIN_LEFT_WIDTH_PX,
@@ -121,8 +119,7 @@ export function usePanelResize(
       const container = containerRef.current;
       if (!container) return newRatio;
 
-      const availableWidth =
-        container.getBoundingClientRect().width - SPLITTER_WIDTH_PX;
+      const availableWidth = container.getBoundingClientRect().width - SPLITTER_WIDTH_PX;
       if (availableWidth <= 0) return newRatio;
 
       const minRatioLeft = minLeftWidth / availableWidth;
@@ -130,7 +127,7 @@ export function usePanelResize(
 
       return Math.min(Math.max(newRatio, minRatioLeft), maxRatioLeft);
     },
-    [minLeftWidth, minRightWidth],
+    [minLeftWidth, minRightWidth]
   );
 
   // Update ratio and persist
@@ -140,7 +137,7 @@ export function usePanelResize(
       setRatio(clamped);
       persistRatio(clamped);
     },
-    [clampRatio],
+    [clampRatio]
   );
 
   // ------------------------------------------------------------------
@@ -161,25 +158,25 @@ export function usePanelResize(
 
       updateRatio(newRatio);
     },
-    [updateRatio],
+    [updateRatio]
   );
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;
     setIsDragging(false);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
   }, []);
 
   // Attach/detach document-level listeners when dragging starts/stops
   useEffect(() => {
     if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
     }
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
@@ -190,10 +187,10 @@ export function usePanelResize(
       dragStartXRef.current = e.clientX;
       dragStartRatioRef.current = ratio;
       setIsDragging(true);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
     },
-    [ratio],
+    [ratio]
   );
 
   // ------------------------------------------------------------------
@@ -205,19 +202,18 @@ export function usePanelResize(
       const container = containerRef.current;
       if (!container) return;
 
-      const availableWidth =
-        container.getBoundingClientRect().width - SPLITTER_WIDTH_PX;
+      const availableWidth = container.getBoundingClientRect().width - SPLITTER_WIDTH_PX;
       if (availableWidth <= 0) return;
 
       let delta = 0;
-      if (e.key === "ArrowLeft") {
+      if (e.key === 'ArrowLeft') {
         delta = -KEYBOARD_STEP_PX;
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === 'ArrowRight') {
         delta = KEYBOARD_STEP_PX;
-      } else if (e.key === "Home") {
+      } else if (e.key === 'Home') {
         // Jump to minimum left
         delta = -availableWidth;
-      } else if (e.key === "End") {
+      } else if (e.key === 'End') {
         // Jump to maximum left
         delta = availableWidth;
       } else {
@@ -228,7 +224,7 @@ export function usePanelResize(
       const deltaRatio = delta / availableWidth;
       updateRatio(ratio + deltaRatio);
     },
-    [ratio, updateRatio],
+    [ratio, updateRatio]
   );
 
   // ------------------------------------------------------------------
@@ -247,8 +243,8 @@ export function usePanelResize(
   let rightPanelWidth: string;
 
   if (isRightCollapsed) {
-    leftPanelWidth = "100%";
-    rightPanelWidth = "0px";
+    leftPanelWidth = '100%';
+    rightPanelWidth = '0px';
   } else {
     // Use fr-style calc to avoid sub-pixel rounding issues
     const leftPct = (ratio * 100).toFixed(2);

@@ -3,7 +3,7 @@
  * Uses Fluent UI v9 Dialog components
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -12,7 +12,7 @@ import {
   DialogActions,
   DialogContent,
   Button,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 interface ConfirmDialogProps {
   /** Dialog open state */
@@ -57,8 +57,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   open,
   title,
   message,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   onConfirm,
   onCancel,
 }) => {

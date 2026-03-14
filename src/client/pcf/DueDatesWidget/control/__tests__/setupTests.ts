@@ -8,7 +8,7 @@
  * - Mock for WebAPI
  */
 
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm Global Mock
@@ -57,10 +57,10 @@ interface MockXrm {
 }
 
 // Create default mock side pane
-export function createMockSidePane(paneId: string = "testPane"): MockSidePane {
+export function createMockSidePane(paneId: string = 'testPane'): MockSidePane {
   return {
     paneId,
-    title: "Test Pane",
+    title: 'Test Pane',
     close: jest.fn(),
     select: jest.fn(),
     navigate: jest.fn().mockResolvedValue(undefined),
@@ -68,7 +68,7 @@ export function createMockSidePane(paneId: string = "testPane"): MockSidePane {
 }
 
 // Create default mock form tab
-export function createMockFormTab(name: string = "events"): MockFormTab {
+export function createMockFormTab(name: string = 'events'): MockFormTab {
   return {
     getName: jest.fn().mockReturnValue(name),
     setFocus: jest.fn(),
@@ -79,8 +79,8 @@ export function createMockFormTab(name: string = "events"): MockFormTab {
 
 // Initialize Xrm mock
 export function createMockXrm(): MockXrm {
-  const mockPane = createMockSidePane("eventDetailPane");
-  const mockTab = createMockFormTab("events");
+  const mockPane = createMockSidePane('eventDetailPane');
+  const mockTab = createMockFormTab('events');
 
   return {
     App: {
@@ -95,7 +95,7 @@ export function createMockXrm(): MockXrm {
       ui: {
         tabs: {
           get: jest.fn().mockImplementation((name?: string) => {
-            if (name === "events" || name === "Events") {
+            if (name === 'events' || name === 'Events') {
               return mockTab;
             }
             return undefined;
@@ -123,9 +123,7 @@ export interface MockWebApiOptions {
   error?: Error;
 }
 
-export function createMockWebApi(
-  options: MockWebApiOptions = {},
-): ComponentFramework.WebApi {
+export function createMockWebApi(options: MockWebApiOptions = {}): ComponentFramework.WebApi {
   const { entities = [], error } = options;
 
   return {
@@ -136,7 +134,7 @@ export function createMockWebApi(
       return Promise.resolve({ entities });
     }),
     retrieveRecord: jest.fn().mockResolvedValue({}),
-    createRecord: jest.fn().mockResolvedValue({ id: "new-id" }),
+    createRecord: jest.fn().mockResolvedValue({ id: 'new-id' }),
     updateRecord: jest.fn().mockResolvedValue({}),
     deleteRecord: jest.fn().mockResolvedValue({}),
   } as unknown as ComponentFramework.WebApi;
@@ -153,50 +151,39 @@ export interface MockContextOptions {
   maxItems?: number;
 }
 
-export function createMockContext(
-  options: MockContextOptions = {},
-): ComponentFramework.Context<unknown> {
-  const {
-    webApi = createMockWebApi(),
-    parentRecordId = "test-parent-id",
-    daysAhead = 7,
-    maxItems = 10,
-  } = options;
+export function createMockContext(options: MockContextOptions = {}): ComponentFramework.Context<unknown> {
+  const { webApi = createMockWebApi(), parentRecordId = 'test-parent-id', daysAhead = 7, maxItems = 10 } = options;
 
   return {
     webAPI: webApi,
     parameters: {
       parentRecordId: {
         raw: parentRecordId,
-        type: "SingleLine.Text",
+        type: 'SingleLine.Text',
       },
       daysAhead: {
         raw: daysAhead,
-        type: "Whole.None",
+        type: 'Whole.None',
       },
       maxItems: {
         raw: maxItems,
-        type: "Whole.None",
+        type: 'Whole.None',
       },
     },
     mode: {
       isControlDisabled: false,
       isVisible: true,
-      label: "Due Dates Widget",
+      label: 'Due Dates Widget',
     },
     fluentDesignLanguage: {
       tokenToColorMap: {},
       isDarkTheme: false,
     },
     formatting: {
-      formatDateAsFilterStringInUTC: jest.fn((date: Date) =>
-        date.toISOString(),
-      ),
+      formatDateAsFilterStringInUTC: jest.fn((date: Date) => date.toISOString()),
       formatDateShort: jest.fn((date: Date) => date.toLocaleDateString()),
       formatDateLong: jest.fn((date: Date) => date.toLocaleDateString()),
-      formatDateLongAbbreviated: jest.fn((date: Date) =>
-        date.toLocaleDateString(),
-      ),
+      formatDateLongAbbreviated: jest.fn((date: Date) => date.toLocaleDateString()),
       formatDateYearMonth: jest.fn((date: Date) => date.toLocaleDateString()),
       formatTime: jest.fn((date: Date) => date.toLocaleTimeString()),
       formatCurrency: jest.fn((value: number) => `$${value.toFixed(2)}`),
@@ -206,15 +193,15 @@ export function createMockContext(
       parseDateFromInput: jest.fn((input: string) => new Date(input)),
     },
     userSettings: {
-      userId: "test-user-id",
-      userName: "Test User",
+      userId: 'test-user-id',
+      userName: 'Test User',
       languageId: 1033,
       dateFormattingInfo: {
-        amDesignator: "AM",
-        pmDesignator: "PM",
+        amDesignator: 'AM',
+        pmDesignator: 'PM',
         firstDayOfWeek: 0,
-        shortDatePattern: "M/d/yyyy",
-        longDatePattern: "dddd, MMMM d, yyyy",
+        shortDatePattern: 'M/d/yyyy',
+        longDatePattern: 'dddd, MMMM d, yyyy',
       },
     },
   } as unknown as ComponentFramework.Context<unknown>;
@@ -256,61 +243,50 @@ export const TestEventStatus = {
  * Event Status labels for test data
  */
 const EventStatusLabels: Record<number, string> = {
-  [TestEventStatus.Draft]: "Draft",
-  [TestEventStatus.Open]: "Open",
-  [TestEventStatus.Completed]: "Completed",
-  [TestEventStatus.Closed]: "Closed",
-  [TestEventStatus.OnHold]: "On Hold",
-  [TestEventStatus.Cancelled]: "Cancelled",
-  [TestEventStatus.Reassigned]: "Reassigned",
-  [TestEventStatus.Archived]: "Archived",
+  [TestEventStatus.Draft]: 'Draft',
+  [TestEventStatus.Open]: 'Open',
+  [TestEventStatus.Completed]: 'Completed',
+  [TestEventStatus.Closed]: 'Closed',
+  [TestEventStatus.OnHold]: 'On Hold',
+  [TestEventStatus.Cancelled]: 'Cancelled',
+  [TestEventStatus.Reassigned]: 'Reassigned',
+  [TestEventStatus.Archived]: 'Archived',
 };
 
-export function createMockEventData(
-  options: MockEventDataOptions = {},
-): Record<string, unknown> {
+export function createMockEventData(options: MockEventDataOptions = {}): Record<string, unknown> {
   const {
-    id = "event-id-1",
-    name = "Test Event",
+    id = 'event-id-1',
+    name = 'Test Event',
     dueDate = new Date(),
-    eventType = "event-type-1",
-    eventTypeName = "Filing Deadline",
+    eventType = 'event-type-1',
+    eventTypeName = 'Filing Deadline',
     eventStatus = TestEventStatus.Open, // Default to Open (1)
     statusCode, // Deprecated, prefer eventStatus
   } = options;
 
   // Use eventStatus, fallback to statusCode for backward compatibility
   const status = eventStatus ?? statusCode ?? TestEventStatus.Open;
-  const statusLabel = EventStatusLabels[status] ?? "Unknown";
+  const statusLabel = EventStatusLabels[status] ?? 'Unknown';
 
   return {
     sprk_eventid: id,
     sprk_eventname: name,
     sprk_duedate: dueDate.toISOString(),
     sprk_eventstatus: status,
-    "sprk_eventstatus@OData.Community.Display.V1.FormattedValue": statusLabel,
+    'sprk_eventstatus@OData.Community.Display.V1.FormattedValue': statusLabel,
     statecode: status === TestEventStatus.Archived ? 1 : 0, // Inactive only when Archived
     statuscode: statusCode, // Keep for backward compat in tests
     _sprk_eventtype_ref_value: eventType,
-    "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue":
-      eventTypeName,
-    "statuscode@OData.Community.Display.V1.FormattedValue": statusLabel,
-    _ownerid_value: "owner-id-1",
-    "_ownerid_value@OData.Community.Display.V1.FormattedValue": "Test Owner",
+    '_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue': eventTypeName,
+    'statuscode@OData.Community.Display.V1.FormattedValue': statusLabel,
+    _ownerid_value: 'owner-id-1',
+    '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Test Owner',
   };
 }
 
-export function createMockEventDataArray(
-  count: number = 3,
-): Record<string, unknown>[] {
+export function createMockEventDataArray(count: number = 3): Record<string, unknown>[] {
   const today = new Date();
-  const eventTypes = [
-    "Filing Deadline",
-    "Hearing",
-    "Meeting",
-    "Deadline",
-    "Review",
-  ];
+  const eventTypes = ['Filing Deadline', 'Hearing', 'Meeting', 'Deadline', 'Review'];
 
   return Array.from({ length: count }, (_, i) => {
     const dueDate = new Date(today);

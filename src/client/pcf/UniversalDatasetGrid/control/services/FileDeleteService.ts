@@ -5,9 +5,9 @@
  * Dataverse records to mark files as removed.
  */
 
-import { SdapApiClient } from "./SdapApiClient";
-import type { ServiceResult } from "../types";
-import { logger } from "../utils/logger";
+import { SdapApiClient } from './SdapApiClient';
+import type { ServiceResult } from '../types';
+import { logger } from '../utils/logger';
 
 /**
  * Service for deleting files and updating records
@@ -15,7 +15,7 @@ import { logger } from "../utils/logger";
 export class FileDeleteService {
   constructor(
     private apiClient: SdapApiClient,
-    private context: ComponentFramework.Context<unknown>,
+    private context: ComponentFramework.Context<unknown>
   ) {}
 
   /**
@@ -33,14 +33,9 @@ export class FileDeleteService {
    * @param fileName - File name for logging
    * @returns ServiceResult indicating success or failure
    */
-  async deleteFile(
-    documentId: string,
-    driveId: string,
-    itemId: string,
-    fileName: string,
-  ): Promise<ServiceResult> {
+  async deleteFile(documentId: string, driveId: string, itemId: string, fileName: string): Promise<ServiceResult> {
     try {
-      logger.info("FileDeleteService", `Deleting file: ${fileName}`, {
+      logger.info('FileDeleteService', `Deleting file: ${fileName}`, {
         documentId,
         driveId,
         itemId,
@@ -48,10 +43,10 @@ export class FileDeleteService {
 
       // Step 1: Delete file from SharePoint Embedded
       await this.apiClient.deleteFile({ driveId, itemId });
-      logger.debug("FileDeleteService", "File deleted from SPE");
+      logger.debug('FileDeleteService', 'File deleted from SPE');
 
       // Step 2: Update Dataverse record to clear file metadata
-      await this.context.webAPI.updateRecord("sprk_document", documentId, {
+      await this.context.webAPI.updateRecord('sprk_document', documentId, {
         sprk_hasfile: false,
         sprk_graphitemid: null,
         sprk_filesize: null,
@@ -60,27 +55,20 @@ export class FileDeleteService {
         sprk_etag: null,
         sprk_filepath: null,
       });
-      logger.info(
-        "FileDeleteService",
-        "Dataverse record updated (hasFile=false)",
-      );
+      logger.info('FileDeleteService', 'Dataverse record updated (hasFile=false)');
 
       return {
         success: true,
       };
     } catch (error) {
-      logger.error("FileDeleteService", "Delete failed", error);
+      logger.error('FileDeleteService', 'Delete failed', error);
 
       // Check if we got a partial failure
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown delete error";
+      const errorMessage = error instanceof Error ? error.message : 'Unknown delete error';
 
       // If file was deleted but Dataverse update failed, log it
-      if (errorMessage.includes("updateRecord")) {
-        logger.error(
-          "FileDeleteService",
-          "PARTIAL FAILURE: File deleted from SPE but Dataverse update failed",
-        );
+      if (errorMessage.includes('updateRecord')) {
+        logger.error('FileDeleteService', 'PARTIAL FAILURE: File deleted from SPE but Dataverse update failed');
       }
 
       return {
@@ -102,46 +90,35 @@ export class FileDeleteService {
       driveId: string;
       itemId: string;
       fileName: string;
-    }[],
+    }[]
   ): Promise<ServiceResult<{ successCount: number; failureCount: number }>> {
-    logger.info("FileDeleteService", `Deleting ${files.length} files`);
+    logger.info('FileDeleteService', `Deleting ${files.length} files`);
 
     let successCount = 0;
     let failureCount = 0;
 
     for (const file of files) {
-      const result = await this.deleteFile(
-        file.documentId,
-        file.driveId,
-        file.itemId,
-        file.fileName,
-      );
+      const result = await this.deleteFile(file.documentId, file.driveId, file.itemId, file.fileName);
 
       if (result.success) {
         successCount++;
       } else {
         failureCount++;
-        logger.warn("FileDeleteService", `Failed to delete: ${file.fileName}`);
+        logger.warn('FileDeleteService', `Failed to delete: ${file.fileName}`);
       }
 
       // Small delay between deletes
       if (files.length > 1) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
-    logger.info(
-      "FileDeleteService",
-      `Delete complete: ${successCount} success, ${failureCount} failed`,
-    );
+    logger.info('FileDeleteService', `Delete complete: ${successCount} success, ${failureCount} failed`);
 
     return {
       success: failureCount === 0,
       data: { successCount, failureCount },
-      error:
-        failureCount > 0
-          ? `${failureCount} file(s) failed to delete`
-          : undefined,
+      error: failureCount > 0 ? `${failureCount} file(s) failed to delete` : undefined,
     };
   }
 }

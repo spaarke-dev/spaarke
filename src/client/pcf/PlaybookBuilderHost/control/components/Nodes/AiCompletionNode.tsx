@@ -2,11 +2,11 @@
  * AI Completion Node - generates text using AI completion.
  */
 
-import * as React from "react";
-import { Text, tokens } from "@fluentui/react-components";
-import { BrainCircuit20Regular } from "@fluentui/react-icons";
-import { BaseNode } from "./BaseNode";
-import type { PlaybookNodeData } from "../../stores";
+import * as React from 'react';
+import { Text, tokens } from '@fluentui/react-components';
+import { BrainCircuit20Regular } from '@fluentui/react-icons';
+import { BaseNode } from './BaseNode';
+import type { PlaybookNodeData } from '../../stores';
 
 interface AiCompletionNodeProps {
   data: PlaybookNodeData;
@@ -17,17 +17,9 @@ interface AiCompletionNodeProps {
  * AI Completion node - generates text using AI completion.
  * Use for: drafting emails, creating summaries, generating content.
  */
-export const AiCompletionNode = React.memo(function AiCompletionNode({
-  data,
-  selected,
-}: AiCompletionNodeProps) {
+export const AiCompletionNode = React.memo(function AiCompletionNode({ data, selected }: AiCompletionNodeProps) {
   return (
-    <BaseNode
-      data={data}
-      selected={selected}
-      icon={<BrainCircuit20Regular />}
-      typeLabel="AI Completion"
-    >
+    <BaseNode data={data} selected={selected} icon={<BrainCircuit20Regular />} typeLabel="AI Completion">
       {data.outputVariable && (
         <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
           Output: {data.outputVariable}

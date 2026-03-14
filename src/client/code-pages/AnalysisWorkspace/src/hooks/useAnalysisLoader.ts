@@ -8,13 +8,9 @@
  * @see ADR-007 - Document access through BFF API (SpeFileStore facade)
  */
 
-import { useCallback, useEffect, useState, useRef } from "react";
-import {
-  fetchAnalysis,
-  fetchDocumentMetadata,
-  getDocumentViewUrl,
-} from "../services/analysisApi";
-import type { AnalysisRecord, DocumentMetadata, AnalysisError } from "../types";
+import { useCallback, useEffect, useState, useRef } from 'react';
+import { fetchAnalysis, fetchDocumentMetadata, getDocumentViewUrl } from '../services/analysisApi';
+import type { AnalysisRecord, DocumentMetadata, AnalysisError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,24 +58,18 @@ export interface UseAnalysisLoaderResult {
  * Document metadata loading uses BFF API (requires Bearer token).
  * Both fire when `token` becomes non-null so document metadata can load.
  */
-export function useAnalysisLoader(
-  options: UseAnalysisLoaderOptions,
-): UseAnalysisLoaderResult {
+export function useAnalysisLoader(options: UseAnalysisLoaderOptions): UseAnalysisLoaderResult {
   const { analysisId, documentId, token } = options;
 
   // Analysis state
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
   const [isAnalysisLoading, setIsAnalysisLoading] = useState(false);
-  const [analysisError, setAnalysisError] = useState<AnalysisError | null>(
-    null,
-  );
+  const [analysisError, setAnalysisError] = useState<AnalysisError | null>(null);
 
   // Document state
   const [document, setDocument] = useState<DocumentMetadata | null>(null);
   const [isDocumentLoading, setIsDocumentLoading] = useState(false);
-  const [documentError, setDocumentError] = useState<AnalysisError | null>(
-    null,
-  );
+  const [documentError, setDocumentError] = useState<AnalysisError | null>(null);
 
   // Ref to track whether the component is still mounted (avoid state updates after unmount)
   const mountedRef = useRef(true);
@@ -110,9 +100,8 @@ export function useAnalysisLoader(
         const analysisErr = isAnalysisError(err)
           ? err
           : {
-              errorCode: "LOAD_FAILED",
-              message:
-                err instanceof Error ? err.message : "Failed to load analysis",
+              errorCode: 'LOAD_FAILED',
+              message: err instanceof Error ? err.message : 'Failed to load analysis',
             };
         setAnalysisError(analysisErr);
       }
@@ -145,10 +134,7 @@ export function useAnalysisLoader(
           }
         } catch (previewErr) {
           // Non-fatal: metadata is still useful without preview
-          console.warn(
-            "[useAnalysisLoader] Preview URL fetch failed:",
-            previewErr,
-          );
+          console.warn('[useAnalysisLoader] Preview URL fetch failed:', previewErr);
         }
       }
 
@@ -160,11 +146,8 @@ export function useAnalysisLoader(
         const docErr = isAnalysisError(err)
           ? err
           : {
-              errorCode: "LOAD_FAILED",
-              message:
-                err instanceof Error
-                  ? err.message
-                  : "Failed to load document metadata",
+              errorCode: 'LOAD_FAILED',
+              message: err instanceof Error ? err.message : 'Failed to load document metadata',
             };
         setDocumentError(docErr);
       }
@@ -224,10 +207,5 @@ export function useAnalysisLoader(
  * Check if an unknown error value matches the AnalysisError shape.
  */
 function isAnalysisError(err: unknown): err is AnalysisError {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "errorCode" in err &&
-    "message" in err
-  );
+  return typeof err === 'object' && err !== null && 'errorCode' in err && 'message' in err;
 }

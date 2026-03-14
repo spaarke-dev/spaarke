@@ -14,26 +14,13 @@
  * - Dialog patterns from .claude/patterns/pcf/dialog-patterns.md
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Text,
-  Divider,
-} from "@fluentui/react-components";
-import {
-  Dismiss24Regular,
-  DocumentFlowchart24Regular,
-} from "@fluentui/react-icons";
-import { DocumentGraph } from "./DocumentGraph";
-import {
-  ControlPanel,
-  FilterSettings,
-  DEFAULT_FILTER_SETTINGS,
-} from "./ControlPanel";
-import { NodeActionBar } from "./NodeActionBar";
-import type { DocumentNode, DocumentEdge } from "../types/graph";
+import * as React from 'react';
+import { makeStyles, tokens, Button, Text, Divider } from '@fluentui/react-components';
+import { Dismiss24Regular, DocumentFlowchart24Regular } from '@fluentui/react-icons';
+import { DocumentGraph } from './DocumentGraph';
+import { ControlPanel, FilterSettings, DEFAULT_FILTER_SETTINGS } from './ControlPanel';
+import { NodeActionBar } from './NodeActionBar';
+import type { DocumentNode, DocumentEdge } from '../types/graph';
 
 /**
  * Props for RelationshipViewerModal component
@@ -66,35 +53,35 @@ export interface RelationshipViewerModalProps {
 const useStyles = makeStyles({
   // Modal overlay - covers entire screen
   overlay: {
-    position: "fixed",
+    position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 10000, // High z-index for Dataverse forms
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // Modal container - full-screen with padding
   modalContainer: {
-    position: "absolute",
-    top: "16px",
-    left: "16px",
-    right: "16px",
-    bottom: "16px",
+    position: 'absolute',
+    top: '16px',
+    left: '16px',
+    right: '16px',
+    bottom: '16px',
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusLarge,
     boxShadow: tokens.shadow64,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
   // Header with title and close button
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -107,8 +94,8 @@ const useStyles = makeStyles({
   },
   headerTitle: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   headerTitleText: {
@@ -120,22 +107,22 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   closeButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   // Main content area with sidebar and canvas
   content: {
     flex: 1,
-    display: "flex",
-    overflow: "hidden",
-    position: "relative",
+    display: 'flex',
+    overflow: 'hidden',
+    position: 'relative',
   },
   // Left sidebar with control panel
   sidebar: {
-    width: "300px",
-    minWidth: "280px",
-    maxWidth: "320px",
+    width: '300px',
+    minWidth: '280px',
+    maxWidth: '320px',
     borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-    overflowY: "auto",
+    overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   sidebarContent: {
@@ -144,21 +131,21 @@ const useStyles = makeStyles({
   // Main canvas area
   canvas: {
     flex: 1,
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   graphContainer: {
     flex: 1,
-    position: "relative",
+    position: 'relative',
     minHeight: 0, // Important for flex sizing
   },
   // Footer with version
   footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
@@ -176,14 +163,12 @@ const useStyles = makeStyles({
 });
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.16";
+const CONTROL_VERSION = '1.0.16';
 
 /**
  * RelationshipViewerModal - Full-screen modal for document relationship visualization
  */
-export const RelationshipViewerModal: React.FC<
-  RelationshipViewerModalProps
-> = ({
+export const RelationshipViewerModal: React.FC<RelationshipViewerModalProps> = ({
   isOpen,
   onClose,
   sourceDocumentId,
@@ -197,14 +182,10 @@ export const RelationshipViewerModal: React.FC<
   const styles = useStyles();
 
   // Filter settings state
-  const [filterSettings, setFilterSettings] = React.useState<FilterSettings>(
-    DEFAULT_FILTER_SETTINGS,
-  );
+  const [filterSettings, setFilterSettings] = React.useState<FilterSettings>(DEFAULT_FILTER_SETTINGS);
 
   // Selected node state
-  const [selectedNode, setSelectedNode] = React.useState<DocumentNode | null>(
-    null,
-  );
+  const [selectedNode, setSelectedNode] = React.useState<DocumentNode | null>(null);
 
   // Container ref for dimensions
   const graphContainerRef = React.useRef<HTMLDivElement>(null);
@@ -229,10 +210,10 @@ export const RelationshipViewerModal: React.FC<
     // Initial update after a small delay to ensure DOM is ready
     const timeoutId = setTimeout(updateDimensions, 100);
 
-    window.addEventListener("resize", updateDimensions);
+    window.addEventListener('resize', updateDimensions);
     return () => {
       clearTimeout(timeoutId);
-      window.removeEventListener("resize", updateDimensions);
+      window.removeEventListener('resize', updateDimensions);
     };
   }, [isOpen]);
 
@@ -241,20 +222,20 @@ export const RelationshipViewerModal: React.FC<
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === 'Escape') {
         onClose();
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
   // Prevent body scroll when modal is open
   React.useEffect(() => {
     if (isOpen) {
       const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
+      document.body.style.overflow = 'hidden';
       return () => {
         document.body.style.overflow = originalOverflow;
       };
@@ -269,7 +250,7 @@ export const RelationshipViewerModal: React.FC<
         onFilterChange(newSettings);
       }
     },
-    [onFilterChange],
+    [onFilterChange]
   );
 
   // Handle node selection
@@ -289,7 +270,7 @@ export const RelationshipViewerModal: React.FC<
         onExpand(documentId);
       }
     },
-    [onExpand],
+    [onExpand]
   );
 
   // Close modal when clicking overlay (outside modal)
@@ -299,7 +280,7 @@ export const RelationshipViewerModal: React.FC<
         onClose();
       }
     },
-    [onClose],
+    [onClose]
   );
 
   // Don't render if modal is not open
@@ -324,18 +305,10 @@ export const RelationshipViewerModal: React.FC<
         <div className={styles.header}>
           <DocumentFlowchart24Regular className={styles.headerIcon} />
           <div className={styles.headerTitle}>
-            <Text
-              id="modal-title"
-              className={styles.headerTitleText}
-              size={400}
-            >
+            <Text id="modal-title" className={styles.headerTitleText} size={400}>
               Document Relationships
             </Text>
-            {sourceDocumentName && (
-              <Text className={styles.headerSubtitle}>
-                Source: {sourceDocumentName}
-              </Text>
-            )}
+            {sourceDocumentName && <Text className={styles.headerSubtitle}>Source: {sourceDocumentName}</Text>}
           </div>
           <Button
             className={styles.closeButton}
@@ -352,10 +325,7 @@ export const RelationshipViewerModal: React.FC<
           {/* Left Sidebar - Control Panel */}
           <div className={styles.sidebar}>
             <div className={styles.sidebarContent}>
-              <ControlPanel
-                settings={filterSettings}
-                onSettingsChange={handleFilterChange}
-              />
+              <ControlPanel settings={filterSettings} onSettingsChange={handleFilterChange} />
             </div>
           </div>
 
@@ -387,8 +357,7 @@ export const RelationshipViewerModal: React.FC<
         {/* Footer */}
         <div className={styles.footer}>
           <Text className={styles.footerStats}>
-            {visibleNodesCount} documents &middot; {visibleEdgesCount}{" "}
-            relationships
+            {visibleNodesCount} documents &middot; {visibleEdgesCount} relationships
           </Text>
           <Text className={styles.footerVersion}>v{CONTROL_VERSION}</Text>
         </div>

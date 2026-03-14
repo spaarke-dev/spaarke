@@ -22,7 +22,7 @@
  * @see useSelectionListener (receives bridge events -> crossPaneSelection)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -33,19 +33,9 @@ import {
   Text,
   Badge,
   Tooltip,
-} from "@fluentui/react-components";
-import {
-  TextEditStyle20Regular,
-  Dismiss20Regular,
-  Document20Regular,
-  Chat20Regular,
-} from "@fluentui/react-icons";
-import {
-  ISprkChatHighlightRefineProps,
-  IRefineRequest,
-  IQuickAction,
-  DEFAULT_QUICK_ACTIONS,
-} from "./types";
+} from '@fluentui/react-components';
+import { TextEditStyle20Regular, Dismiss20Regular, Document20Regular, Chat20Regular } from '@fluentui/react-icons';
+import { ISprkChatHighlightRefineProps, IRefineRequest, IQuickAction, DEFAULT_QUICK_ACTIONS } from './types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,106 +52,106 @@ const ANIMATION_DURATION_MS = 200;
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  "@keyframes fadeIn": {
-    from: { opacity: 0, transform: "translateY(4px)" },
-    to: { opacity: 1, transform: "translateY(0)" },
+  '@keyframes fadeIn': {
+    from: { opacity: 0, transform: 'translateY(4px)' },
+    to: { opacity: 1, transform: 'translateY(0)' },
   },
-  "@keyframes fadeOut": {
-    from: { opacity: 1, transform: "translateY(0)" },
-    to: { opacity: 0, transform: "translateY(4px)" },
+  '@keyframes fadeOut': {
+    from: { opacity: 1, transform: 'translateY(0)' },
+    to: { opacity: 0, transform: 'translateY(4px)' },
   },
   toolbar: {
-    position: "absolute",
-    display: "flex",
-    flexDirection: "column",
+    position: 'absolute',
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalS),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow8,
     zIndex: 1000,
-    maxWidth: "340px",
-    animationName: "fadeIn",
+    maxWidth: '340px',
+    animationName: 'fadeIn',
     animationDuration: `${ANIMATION_DURATION_MS}ms`,
-    animationTimingFunction: "ease-out",
-    animationFillMode: "forwards",
+    animationTimingFunction: 'ease-out',
+    animationFillMode: 'forwards',
   },
   toolbarDismissing: {
-    animationName: "fadeOut",
+    animationName: 'fadeOut',
     animationDuration: `${ANIMATION_DURATION_MS}ms`,
-    animationTimingFunction: "ease-in",
-    animationFillMode: "forwards",
+    animationTimingFunction: 'ease-in',
+    animationFillMode: 'forwards',
   },
   crossPaneToolbar: {
-    position: "sticky",
+    position: 'sticky',
     top: 0,
     left: 0,
     right: 0,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalS),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border("1px", "solid", tokens.colorBrandStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
     backgroundColor: tokens.colorBrandBackground2,
     boxShadow: tokens.shadow8,
     zIndex: 1000,
-    maxWidth: "100%",
-    animationName: "fadeIn",
+    maxWidth: '100%',
+    animationName: 'fadeIn',
     animationDuration: `${ANIMATION_DURATION_MS}ms`,
-    animationTimingFunction: "ease-out",
-    animationFillMode: "forwards",
+    animationTimingFunction: 'ease-out',
+    animationFillMode: 'forwards',
   },
   crossPaneToolbarDismissing: {
-    animationName: "fadeOut",
+    animationName: 'fadeOut',
     animationDuration: `${ANIMATION_DURATION_MS}ms`,
-    animationTimingFunction: "ease-in",
-    animationFillMode: "forwards",
+    animationTimingFunction: 'ease-in',
+    animationFillMode: 'forwards',
   },
   headerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   sourceLabel: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   refineRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   selectedText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    fontStyle: "italic",
-    maxHeight: "40px",
-    overflowY: "hidden",
-    textOverflow: "ellipsis",
+    fontStyle: 'italic',
+    maxHeight: '40px',
+    overflowY: 'hidden',
+    textOverflow: 'ellipsis',
   },
   inputRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   quickActionsRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
-    ...shorthands.padding(tokens.spacingVerticalXXS, "0"),
+    ...shorthands.padding(tokens.spacingVerticalXXS, '0'),
   },
   quickActionChip: {
-    minWidth: "auto",
+    minWidth: 'auto',
     fontSize: tokens.fontSizeBase200,
   },
   sourceIcon: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     color: tokens.colorBrandForeground1,
   },
 });
@@ -198,9 +188,7 @@ const useStyles = makeStyles({
  * />
  * ```
  */
-export const SprkChatHighlightRefine: React.FC<
-  ISprkChatHighlightRefineProps
-> = ({
+export const SprkChatHighlightRefine: React.FC<ISprkChatHighlightRefineProps> = ({
   contentRef,
   onRefine,
   onRefineRequest,
@@ -210,8 +198,8 @@ export const SprkChatHighlightRefine: React.FC<
   onDismiss,
 }) => {
   // Local DOM selection state
-  const [localSelectedText, setLocalSelectedText] = React.useState<string>("");
-  const [instruction, setInstruction] = React.useState<string>("");
+  const [localSelectedText, setLocalSelectedText] = React.useState<string>('');
+  const [instruction, setInstruction] = React.useState<string>('');
   const [toolbarPosition, setToolbarPosition] = React.useState<{
     top: number;
     left: number;
@@ -223,24 +211,16 @@ export const SprkChatHighlightRefine: React.FC<
   const styles = useStyles();
 
   // Resolve quick actions: use provided or defaults
-  const resolvedQuickActions: IQuickAction[] =
-    quickActions !== undefined ? quickActions : DEFAULT_QUICK_ACTIONS;
+  const resolvedQuickActions: IQuickAction[] = quickActions !== undefined ? quickActions : DEFAULT_QUICK_ACTIONS;
 
   // Determine which selection source is active.
   // Cross-pane selection takes priority over local DOM selection.
-  const hasCrossPaneSelection =
-    !!crossPaneSelection && crossPaneSelection.text.length > 0;
-  const activeText = hasCrossPaneSelection
-    ? crossPaneSelection.text
-    : localSelectedText;
+  const hasCrossPaneSelection = !!crossPaneSelection && crossPaneSelection.text.length > 0;
+  const activeText = hasCrossPaneSelection ? crossPaneSelection.text : localSelectedText;
   // For refine submission, use the full untruncated text when available
-  const activeFullText = hasCrossPaneSelection
-    ? crossPaneSelection.fullText
-    : localSelectedText;
+  const activeFullText = hasCrossPaneSelection ? crossPaneSelection.fullText : localSelectedText;
   // Source identification
-  const activeSource: "editor" | "chat" = hasCrossPaneSelection
-    ? "editor"
-    : "chat";
+  const activeSource: 'editor' | 'chat' = hasCrossPaneSelection ? 'editor' : 'chat';
 
   // Listen for local DOM selection changes within the container
   React.useEffect(() => {
@@ -259,7 +239,7 @@ export const SprkChatHighlightRefine: React.FC<
       if (!selection || selection.isCollapsed || !selection.rangeCount) {
         // No selection or collapsed selection
         if (!showInput) {
-          setLocalSelectedText("");
+          setLocalSelectedText('');
           setToolbarPosition(null);
         }
         return;
@@ -285,9 +265,9 @@ export const SprkChatHighlightRefine: React.FC<
       }
     };
 
-    document.addEventListener("selectionchange", handleSelectionChange);
+    document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
-      document.removeEventListener("selectionchange", handleSelectionChange);
+      document.removeEventListener('selectionchange', handleSelectionChange);
     };
   }, [contentRef, showInput, hasCrossPaneSelection]);
 
@@ -296,7 +276,7 @@ export const SprkChatHighlightRefine: React.FC<
     if (hasCrossPaneSelection) {
       // When a new cross-pane selection arrives, reset the input state
       // but keep showInput if the user was already typing
-      setInstruction("");
+      setInstruction('');
       setShowInput(false);
       setIsDismissing(false);
     }
@@ -317,34 +297,33 @@ export const SprkChatHighlightRefine: React.FC<
 
     // Delay attaching to avoid immediate dismiss on the click that created the selection
     const timerId = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener('mousedown', handleClickOutside);
     }, 100);
 
     return () => {
       clearTimeout(timerId);
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localSelectedText, toolbarPosition, hasCrossPaneSelection]);
 
   // Global Escape key handler
   React.useEffect(() => {
-    const hasActiveSelection =
-      hasCrossPaneSelection || (localSelectedText && toolbarPosition);
+    const hasActiveSelection = hasCrossPaneSelection || (localSelectedText && toolbarPosition);
     if (!hasActiveSelection) {
       return;
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         e.preventDefault();
         handleAnimatedDismiss();
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasCrossPaneSelection, localSelectedText, toolbarPosition]);
@@ -360,8 +339,8 @@ export const SprkChatHighlightRefine: React.FC<
     setIsDismissing(true);
     setTimeout(() => {
       setShowInput(false);
-      setInstruction("");
-      setLocalSelectedText("");
+      setInstruction('');
+      setLocalSelectedText('');
       setToolbarPosition(null);
       setIsDismissing(false);
       // Clear the local text selection (only affects local DOM, not cross-pane)
@@ -405,9 +384,9 @@ export const SprkChatHighlightRefine: React.FC<
 
       // Reset state after submission
       setShowInput(false);
-      setInstruction("");
+      setInstruction('');
     },
-    [activeFullText, activeSource, onRefine, onRefineRequest],
+    [activeFullText, activeSource, onRefine, onRefineRequest]
   );
 
   const handleSubmitRefine = React.useCallback(() => {
@@ -421,41 +400,36 @@ export const SprkChatHighlightRefine: React.FC<
     (action: IQuickAction) => {
       submitRefine(action.instruction, action.key);
     },
-    [submitRefine],
+    [submitRefine]
   );
 
   const handleInstructionKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         e.preventDefault();
         handleSubmitRefine();
-      } else if (e.key === "Escape") {
+      } else if (e.key === 'Escape') {
         e.preventDefault();
         handleAnimatedDismiss();
       }
     },
-    [handleSubmitRefine, handleAnimatedDismiss],
+    [handleSubmitRefine, handleAnimatedDismiss]
   );
 
   const handleInstructionChange = React.useCallback(
     (_event: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
       setInstruction(data.value);
     },
-    [],
+    []
   );
 
   // Compute the preview text (truncated for display)
   const previewText =
-    activeText.length > PREVIEW_MAX_LENGTH
-      ? activeText.substring(0, PREVIEW_MAX_LENGTH) + "\u2026"
-      : activeText;
+    activeText.length > PREVIEW_MAX_LENGTH ? activeText.substring(0, PREVIEW_MAX_LENGTH) + '\u2026' : activeText;
 
   // Full text for tooltip (only show tooltip if text was truncated)
   const showTooltip = activeText.length > PREVIEW_MAX_LENGTH;
-  const tooltipContent =
-    activeFullText.length > 1000
-      ? activeFullText.substring(0, 1000) + "\u2026"
-      : activeFullText;
+  const tooltipContent = activeFullText.length > 1000 ? activeFullText.substring(0, 1000) + '\u2026' : activeFullText;
 
   // -----------------------------------------------------------------------
   // Shared sub-renders
@@ -463,9 +437,7 @@ export const SprkChatHighlightRefine: React.FC<
 
   /** Renders the source icon (document for editor, chat for local) */
   const renderSourceIcon = () => (
-    <span className={styles.sourceIcon}>
-      {activeSource === "editor" ? <Document20Regular /> : <Chat20Regular />}
-    </span>
+    <span className={styles.sourceIcon}>{activeSource === 'editor' ? <Document20Regular /> : <Chat20Regular />}</span>
   );
 
   /** Renders the quick action chips row */
@@ -476,7 +448,7 @@ export const SprkChatHighlightRefine: React.FC<
 
     return (
       <div className={styles.quickActionsRow} data-testid="quick-actions-row">
-        {resolvedQuickActions.map((action) => (
+        {resolvedQuickActions.map(action => (
           <Button
             key={action.key}
             appearance="outline"
@@ -495,17 +467,11 @@ export const SprkChatHighlightRefine: React.FC<
 
   /** Renders the selected text preview, optionally wrapped in a Tooltip */
   const renderPreviewText = () => {
-    const textElement = (
-      <Text className={styles.selectedText}>&ldquo;{previewText}&rdquo;</Text>
-    );
+    const textElement = <Text className={styles.selectedText}>&ldquo;{previewText}&rdquo;</Text>;
 
     if (showTooltip) {
       return (
-        <Tooltip
-          content={tooltipContent}
-          relationship="description"
-          positioning="below"
-        >
+        <Tooltip content={tooltipContent} relationship="description" positioning="below">
           {textElement}
         </Tooltip>
       );
@@ -609,9 +575,7 @@ export const SprkChatHighlightRefine: React.FC<
     return null;
   }
 
-  const localClassName = isDismissing
-    ? `${styles.toolbar} ${styles.toolbarDismissing}`
-    : styles.toolbar;
+  const localClassName = isDismissing ? `${styles.toolbar} ${styles.toolbarDismissing}` : styles.toolbar;
 
   return (
     <div

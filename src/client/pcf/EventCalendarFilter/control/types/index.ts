@@ -15,7 +15,7 @@ export {
   isRangeFilter,
   isClearFilter,
   parseFilterOutput,
-} from "./CalendarFilter";
+} from './CalendarFilter';
 
 /**
  * @deprecated Use CalendarFilterOutput from "./CalendarFilter" instead
@@ -23,7 +23,7 @@ export {
  */
 export interface ICalendarFilterOutput {
   /** Filter type: single date, range, or clear */
-  type: "single" | "range" | "clear";
+  type: 'single' | 'range' | 'clear';
   /** Single date selection (ISO format) */
   date?: string;
   /** Range start date (ISO format) */
@@ -50,7 +50,7 @@ export interface IEventDateIndicator {
  */
 export interface ICalendarConfig {
   /** Display mode: single month or multi-month stack */
-  displayMode: "month" | "multiMonth";
+  displayMode: 'month' | 'multiMonth';
   /** Number of months to display in multiMonth mode */
   monthsToShow?: number;
   /** Start day of week (0 = Sunday, 1 = Monday) */
@@ -64,7 +64,7 @@ export interface ICalendarConfig {
  */
 export interface ICalendarSelection {
   /** Selection mode: single date or range */
-  mode: "single" | "range";
+  mode: 'single' | 'range';
   /** Selected date(s) */
   selectedDate?: Date;
   /** Range start */
@@ -90,4 +90,4 @@ export interface IRangeSelection {
  * Control version constant
  * Task 006: Updated to 1.0.4
  */
-export const CONTROL_VERSION = "1.0.4";
+export const CONTROL_VERSION = '1.0.4';

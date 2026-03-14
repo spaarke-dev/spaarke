@@ -1,9 +1,9 @@
-import type { ITokenResult, ITokenStrategy, TokenCacheEntry } from "../types";
-import { TOKEN_EXPIRY_BUFFER_MS } from "../config";
+import type { ITokenResult, ITokenStrategy, TokenCacheEntry } from '../types';
+import { TOKEN_EXPIRY_BUFFER_MS } from '../config';
 
 /** In-memory token cache strategy (fastest, no I/O). */
 export class CacheStrategy implements ITokenStrategy {
-  readonly name = "cache" as const;
+  readonly name = 'cache' as const;
 
   private _entry: TokenCacheEntry | null = null;
 
@@ -17,7 +17,7 @@ export class CacheStrategy implements ITokenStrategy {
     return {
       accessToken: this._entry.accessToken,
       expiresOn: this._entry.expiresOn,
-      source: "cache",
+      source: 'cache',
     };
   }
 

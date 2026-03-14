@@ -23,30 +23,30 @@
  * Event entity schema names from spec.md
  */
 export const EventSchemaNames = {
-  entityName: "sprk_event",
-  entitySetName: "sprk_events",
+  entityName: 'sprk_event',
+  entitySetName: 'sprk_events',
   fields: {
-    eventId: "sprk_eventid",
-    eventName: "sprk_eventname",
-    dueDate: "sprk_duedate",
-    baseDate: "sprk_basedate",
-    finalDueDate: "sprk_finalduedate",
+    eventId: 'sprk_eventid',
+    eventName: 'sprk_eventname',
+    dueDate: 'sprk_duedate',
+    baseDate: 'sprk_basedate',
+    finalDueDate: 'sprk_finalduedate',
     /** Custom Event Status field - primary status indicator */
-    eventStatus: "sprk_eventstatus",
+    eventStatus: 'sprk_eventstatus',
     /** @deprecated Use eventStatus instead. Kept for Archive detection. */
-    stateCode: "statecode",
+    stateCode: 'statecode',
     /** @deprecated Use eventStatus instead. */
-    statusCode: "statuscode",
-    priority: "sprk_priority",
-    eventType: "_sprk_eventtype_ref_value",
-    eventTypeName: "_sprk_eventtype_ref_value",
-    owner: "ownerid",
-    ownerName: "_ownerid_value",
-    regardingRecordType: "sprk_regardingrecordtype",
-    regardingRecordName: "sprk_regardingrecordname",
-    regardingRecordId: "sprk_regardingrecordid",
-    createdOn: "createdon",
-    modifiedOn: "modifiedon",
+    statusCode: 'statuscode',
+    priority: 'sprk_priority',
+    eventType: '_sprk_eventtype_ref_value',
+    eventTypeName: '_sprk_eventtype_ref_value',
+    owner: 'ownerid',
+    ownerName: '_ownerid_value',
+    regardingRecordType: 'sprk_regardingrecordtype',
+    regardingRecordName: 'sprk_regardingrecordname',
+    regardingRecordId: 'sprk_regardingrecordid',
+    createdOn: 'createdon',
+    modifiedOn: 'modifiedon',
   },
 } as const;
 
@@ -86,11 +86,7 @@ export const EventStateCode = {
  * Actionable event status values (not terminal)
  * These events require user action
  */
-export const ACTIONABLE_EVENT_STATUSES = [
-  EventStatus.Draft,
-  EventStatus.Open,
-  EventStatus.OnHold,
-] as const;
+export const ACTIONABLE_EVENT_STATUSES = [EventStatus.Draft, EventStatus.Open, EventStatus.OnHold] as const;
 
 /**
  * @deprecated Use ACTIONABLE_EVENT_STATUSES instead
@@ -112,13 +108,13 @@ export interface IEventData {
   statuscode?: number;
   sprk_priority?: number;
   _sprk_eventtype_ref_value?: string;
-  "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"?: string;
+  '_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'?: string;
   /** Formatted value for sprk_eventstatus */
-  "sprk_eventstatus@OData.Community.Display.V1.FormattedValue"?: string;
+  'sprk_eventstatus@OData.Community.Display.V1.FormattedValue'?: string;
   /** @deprecated Use sprk_eventstatus formatted value instead */
-  "statuscode@OData.Community.Display.V1.FormattedValue"?: string;
+  'statuscode@OData.Community.Display.V1.FormattedValue'?: string;
   _ownerid_value?: string;
-  "_ownerid_value@OData.Community.Display.V1.FormattedValue"?: string;
+  '_ownerid_value@OData.Community.Display.V1.FormattedValue'?: string;
   sprk_regardingrecordid?: string;
   sprk_regardingrecordname?: string;
 }
@@ -236,23 +232,19 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
     schema.fields.regardingRecordName,
     schema.fields.ownerName,
   ];
-  const $select = selectFields.join(",");
+  const $select = selectFields.join(',');
 
   // Build filter conditions
   const filterConditions: string[] = [];
 
   // 1. Filter by parent record ID (if provided)
   if (parentRecordId) {
-    filterConditions.push(
-      `${schema.fields.regardingRecordId} eq '${parentRecordId}'`,
-    );
+    filterConditions.push(`${schema.fields.regardingRecordId} eq '${parentRecordId}'`);
   }
 
   // 2. Filter by actionable event statuses (Draft=0, Open=1, On Hold=4)
   // Using 'or' for multiple values on sprk_eventstatus
-  const statusFilter = ACTIONABLE_EVENT_STATUSES.map(
-    (code) => `${schema.fields.eventStatus} eq ${code}`,
-  ).join(" or ");
+  const statusFilter = ACTIONABLE_EVENT_STATUSES.map(code => `${schema.fields.eventStatus} eq ${code}`).join(' or ');
   filterConditions.push(`(${statusFilter})`);
 
   // 3. Filter by date range:
@@ -266,16 +258,14 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
 
   if (includeOverdue) {
     // Include overdue (before today) OR within window (between today and endDate)
-    filterConditions.push(
-      `(${schema.fields.dueDate} lt ${todayStr} or ${schema.fields.dueDate} le ${endDateStr})`,
-    );
+    filterConditions.push(`(${schema.fields.dueDate} lt ${todayStr} or ${schema.fields.dueDate} le ${endDateStr})`);
   } else {
     // Only within window
     filterConditions.push(`${schema.fields.dueDate} ge ${todayStr}`);
     filterConditions.push(`${schema.fields.dueDate} le ${endDateStr}`);
   }
 
-  const $filter = filterConditions.join(" and ");
+  const $filter = filterConditions.join(' and ');
 
   // 4. Order by due date ascending (most urgent first)
   // Overdue items will naturally appear first since they have earlier dates
@@ -292,7 +282,7 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
     `$top=${$top}`,
   ];
 
-  return `${schema.entitySetName}?${queryParts.join("&")}`;
+  return `${schema.entitySetName}?${queryParts.join('&')}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,21 +293,21 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
  * Event Status labels for display (fallback if formatted value not available)
  */
 const EVENT_STATUS_LABELS: Record<number, string> = {
-  [EventStatus.Draft]: "Draft",
-  [EventStatus.Open]: "Open",
-  [EventStatus.Completed]: "Completed",
-  [EventStatus.Closed]: "Closed",
-  [EventStatus.OnHold]: "On Hold",
-  [EventStatus.Cancelled]: "Cancelled",
-  [EventStatus.Reassigned]: "Reassigned",
-  [EventStatus.Archived]: "Archived",
+  [EventStatus.Draft]: 'Draft',
+  [EventStatus.Open]: 'Open',
+  [EventStatus.Completed]: 'Completed',
+  [EventStatus.Closed]: 'Closed',
+  [EventStatus.OnHold]: 'On Hold',
+  [EventStatus.Cancelled]: 'Cancelled',
+  [EventStatus.Reassigned]: 'Reassigned',
+  [EventStatus.Archived]: 'Archived',
 };
 
 /**
  * Get status label for an event status value
  */
 export function getEventStatusLabel(status: number): string {
-  return EVENT_STATUS_LABELS[status] ?? "Unknown";
+  return EVENT_STATUS_LABELS[status] ?? 'Unknown';
 }
 
 /**
@@ -341,30 +331,25 @@ export function transformEventData(rawEvent: IEventData): IEventItem | null {
   const isOverdue = daysUntilDue < 0;
 
   // Get event status - prefer sprk_eventstatus, fallback to statuscode for backward compat
-  const eventStatus =
-    rawEvent.sprk_eventstatus ?? rawEvent.statuscode ?? EventStatus.Open;
+  const eventStatus = rawEvent.sprk_eventstatus ?? rawEvent.statuscode ?? EventStatus.Open;
 
   // Get status name - prefer formatted value, fallback to label lookup
   const statusName =
-    rawEvent["sprk_eventstatus@OData.Community.Display.V1.FormattedValue"] ||
-    rawEvent["statuscode@OData.Community.Display.V1.FormattedValue"] ||
+    rawEvent['sprk_eventstatus@OData.Community.Display.V1.FormattedValue'] ||
+    rawEvent['statuscode@OData.Community.Display.V1.FormattedValue'] ||
     getEventStatusLabel(eventStatus);
 
   return {
     id: rawEvent.sprk_eventid,
-    name: rawEvent.sprk_eventname || "(Unnamed Event)",
+    name: rawEvent.sprk_eventname || '(Unnamed Event)',
     dueDate,
-    eventType: rawEvent["_sprk_eventtype_ref_value"] || "",
-    eventTypeName:
-      rawEvent[
-        "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"
-      ] || "Event",
+    eventType: rawEvent['_sprk_eventtype_ref_value'] || '',
+    eventTypeName: rawEvent['_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'] || 'Event',
     eventStatus,
     statusName,
     priority: rawEvent.sprk_priority,
-    ownerId: rawEvent["_ownerid_value"],
-    ownerName:
-      rawEvent["_ownerid_value@OData.Community.Display.V1.FormattedValue"],
+    ownerId: rawEvent['_ownerid_value'],
+    ownerName: rawEvent['_ownerid_value@OData.Community.Display.V1.FormattedValue'],
     isOverdue,
     daysUntilDue,
   };
@@ -374,9 +359,7 @@ export function transformEventData(rawEvent: IEventData): IEventItem | null {
  * Transform array of raw events, filtering out nulls
  */
 export function transformEventDataArray(rawEvents: IEventData[]): IEventItem[] {
-  return rawEvents
-    .map(transformEventData)
-    .filter((event): event is IEventItem => event !== null);
+  return rawEvents.map(transformEventData).filter((event): event is IEventItem => event !== null);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,15 +391,11 @@ export function buildEventCountQuery(params: IEventFilterParams): string {
 
   // 1. Filter by parent record ID (if provided)
   if (parentRecordId) {
-    filterConditions.push(
-      `${schema.fields.regardingRecordId} eq '${parentRecordId}'`,
-    );
+    filterConditions.push(`${schema.fields.regardingRecordId} eq '${parentRecordId}'`);
   }
 
   // 2. Filter by actionable event statuses (Draft=0, Open=1, On Hold=4)
-  const statusFilter = ACTIONABLE_EVENT_STATUSES.map(
-    (code) => `${schema.fields.eventStatus} eq ${code}`,
-  ).join(" or ");
+  const statusFilter = ACTIONABLE_EVENT_STATUSES.map(code => `${schema.fields.eventStatus} eq ${code}`).join(' or ');
   filterConditions.push(`(${statusFilter})`);
 
   // 3. Filter by date range
@@ -425,15 +404,13 @@ export function buildEventCountQuery(params: IEventFilterParams): string {
   filterConditions.push(`${schema.fields.dueDate} ne null`);
 
   if (includeOverdue) {
-    filterConditions.push(
-      `(${schema.fields.dueDate} lt ${todayStr} or ${schema.fields.dueDate} le ${endDateStr})`,
-    );
+    filterConditions.push(`(${schema.fields.dueDate} lt ${todayStr} or ${schema.fields.dueDate} le ${endDateStr})`);
   } else {
     filterConditions.push(`${schema.fields.dueDate} ge ${todayStr}`);
     filterConditions.push(`${schema.fields.dueDate} le ${endDateStr}`);
   }
 
-  const $filter = filterConditions.join(" and ");
+  const $filter = filterConditions.join(' and ');
 
   // Only select ID for count (minimize data transfer)
   const $select = schema.fields.eventId;
@@ -447,7 +424,7 @@ export function buildEventCountQuery(params: IEventFilterParams): string {
  */
 export async function fetchUpcomingEvents(
   webAPI: ComponentFramework.WebApi,
-  params: IEventFilterParams,
+  params: IEventFilterParams
 ): Promise<IEventItem[]> {
   const queryUrl = buildUpcomingEventsQuery(params);
 
@@ -455,13 +432,13 @@ export async function fetchUpcomingEvents(
     // Use retrieveMultipleRecords which handles auth automatically
     const result = await webAPI.retrieveMultipleRecords(
       EventSchemaNames.entityName,
-      `?${queryUrl.split("?")[1]}`, // Extract query string portion
+      `?${queryUrl.split('?')[1]}` // Extract query string portion
     );
 
     const rawEvents = result.entities as unknown as IEventData[];
     return transformEventDataArray(rawEvents);
   } catch (error) {
-    console.error("[EventFilterService] Error fetching events:", error);
+    console.error('[EventFilterService] Error fetching events:', error);
     throw error;
   }
 }
@@ -472,7 +449,7 @@ export async function fetchUpcomingEvents(
  */
 export async function fetchUpcomingEventsWithCount(
   webAPI: ComponentFramework.WebApi,
-  params: IEventFilterParams,
+  params: IEventFilterParams
 ): Promise<IFetchEventsResult> {
   const eventsQueryUrl = buildUpcomingEventsQuery(params);
   const countQueryUrl = buildEventCountQuery(params);
@@ -480,14 +457,8 @@ export async function fetchUpcomingEventsWithCount(
   try {
     // Execute both queries in parallel
     const [eventsResult, countResult] = await Promise.all([
-      webAPI.retrieveMultipleRecords(
-        EventSchemaNames.entityName,
-        `?${eventsQueryUrl.split("?")[1]}`,
-      ),
-      webAPI.retrieveMultipleRecords(
-        EventSchemaNames.entityName,
-        `?${countQueryUrl.split("?")[1]}`,
-      ),
+      webAPI.retrieveMultipleRecords(EventSchemaNames.entityName, `?${eventsQueryUrl.split('?')[1]}`),
+      webAPI.retrieveMultipleRecords(EventSchemaNames.entityName, `?${countQueryUrl.split('?')[1]}`),
     ]);
 
     const rawEvents = eventsResult.entities as unknown as IEventData[];
@@ -496,10 +467,7 @@ export async function fetchUpcomingEventsWithCount(
 
     return { events, totalCount };
   } catch (error) {
-    console.error(
-      "[EventFilterService] Error fetching events with count:",
-      error,
-    );
+    console.error('[EventFilterService] Error fetching events with count:', error);
     throw error;
   }
 }

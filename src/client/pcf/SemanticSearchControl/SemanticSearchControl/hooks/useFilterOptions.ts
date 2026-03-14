@@ -7,9 +7,9 @@
  * @see spec.md for filter requirements
  */
 
-import { useState, useEffect, useMemo } from "react";
-import { FilterOption } from "../types";
-import { DataverseMetadataService } from "../services";
+import { useState, useEffect, useMemo } from 'react';
+import { FilterOption } from '../types';
+import { DataverseMetadataService } from '../services';
 
 /**
  * Loading state for individual filter options
@@ -97,7 +97,7 @@ export function useFilterOptions(): UseFilterOptionsResult {
    * Fetch all options
    */
   const fetchOptions = async (): Promise<void> => {
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
       // Fetch all options in parallel
@@ -115,11 +115,11 @@ export function useFilterOptions(): UseFilterOptionsResult {
         error: null,
       });
     } catch (err) {
-      console.error("Failed to fetch filter options:", err);
-      setState((prev) => ({
+      console.error('Failed to fetch filter options:', err);
+      setState(prev => ({
         ...prev,
         isLoading: false,
-        error: "Failed to load filter options",
+        error: 'Failed to load filter options',
       }));
     }
   };

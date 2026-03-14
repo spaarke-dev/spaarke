@@ -5,32 +5,29 @@
  * Receives PCF context as props and manages the component tree.
  */
 
-import * as React from "react";
-import { IInputs } from "../generated/ManifestTypes";
+import * as React from 'react';
+import { IInputs } from '../generated/ManifestTypes';
 import {
   GridConfiguration,
   CalendarFilter,
   OptimisticRowUpdateRequest,
   OptimisticUpdateResult,
   SpaarkeGridApi,
-} from "../types";
-import { CommandBar } from "./CommandBar";
-import { DatasetGrid } from "./DatasetGrid";
-import { ConfirmDialog } from "./ConfirmDialog";
-import { SdapApiClientFactory } from "../services/SdapApiClientFactory";
-import { FileDownloadService } from "../services/FileDownloadService";
-import { FileDeleteService } from "../services/FileDeleteService";
-import { FileReplaceService } from "../services/FileReplaceService";
-import { logger } from "../utils/logger";
-import { applyDateFilter } from "../utils/dateFilter";
+} from '../types';
+import { CommandBar } from './CommandBar';
+import { DatasetGrid } from './DatasetGrid';
+import { ConfirmDialog } from './ConfirmDialog';
+import { SdapApiClientFactory } from '../services/SdapApiClientFactory';
+import { FileDownloadService } from '../services/FileDownloadService';
+import { FileDeleteService } from '../services/FileDeleteService';
+import { FileReplaceService } from '../services/FileReplaceService';
+import { logger } from '../utils/logger';
+import { applyDateFilter } from '../utils/dateFilter';
 
 /**
  * Debounce utility to limit function call frequency
  */
-function debounce<T extends (...args: unknown[]) => void>(
-  func: T,
-  wait: number,
-): (...args: Parameters<T>) => void {
+function debounce<T extends (...args: unknown[]) => void>(func: T, wait: number): (...args: Parameters<T>) => void {
   let timeout: ReturnType<typeof setTimeout> | null = null;
 
   return (...args: Parameters<T>) => {
@@ -74,9 +71,13 @@ interface UniversalDatasetGridRootProps {
  * This component is rendered once in init() and receives updated
  * props in updateView() - no DOM recreation.
  */
-export const UniversalDatasetGridRoot: React.FC<
-  UniversalDatasetGridRootProps
-> = ({ context, notifyOutputChanged, config, calendarFilter, onRowClick }) => {
+export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> = ({
+  context,
+  notifyOutputChanged,
+  config,
+  calendarFilter,
+  onRowClick,
+}) => {
   // Get dataset from context
   const dataset = context.parameters.dataset;
 
@@ -86,9 +87,7 @@ export const UniversalDatasetGridRoot: React.FC<
   // Apply calendar filter to dataset when it changes (Task 011)
   React.useEffect(() => {
     // Serialize filter for comparison
-    const currentFilterJson = calendarFilter
-      ? JSON.stringify(calendarFilter)
-      : null;
+    const currentFilterJson = calendarFilter ? JSON.stringify(calendarFilter) : null;
     const prevFilterJson = prevFilterRef.current;
 
     // Skip if filter hasn't changed
@@ -101,29 +100,17 @@ export const UniversalDatasetGridRoot: React.FC<
 
     // Apply or clear the filter
     if (calendarFilter) {
-      logger.info(
-        "UniversalDatasetGridRoot",
-        "Applying calendar filter:",
-        calendarFilter,
-      );
+      logger.info('UniversalDatasetGridRoot', 'Applying calendar filter:', calendarFilter);
       const wasApplied = applyDateFilter(dataset, calendarFilter);
-      logger.info(
-        "UniversalDatasetGridRoot",
-        `Filter ${wasApplied ? "applied" : "cleared"}`,
-      );
+      logger.info('UniversalDatasetGridRoot', `Filter ${wasApplied ? 'applied' : 'cleared'}`);
     } else {
-      logger.debug(
-        "UniversalDatasetGridRoot",
-        "No calendar filter - clearing any existing filter",
-      );
+      logger.debug('UniversalDatasetGridRoot', 'No calendar filter - clearing any existing filter');
       applyDateFilter(dataset, null);
     }
   }, [calendarFilter, dataset]);
 
   // Track selected record IDs in React state
-  const [selectedRecordIds, setSelectedRecordIds] = React.useState<string[]>(
-    dataset.getSelectedRecordIds() || [],
-  );
+  const [selectedRecordIds, setSelectedRecordIds] = React.useState<string[]>(dataset.getSelectedRecordIds() || []);
 
   // State for delete confirmation dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
@@ -135,10 +122,7 @@ export const UniversalDatasetGridRoot: React.FC<
   } | null>(null);
 
   // Debounce notifyOutputChanged to reduce PCF call frequency (Task C.2)
-  const debouncedNotify = React.useMemo(
-    () => debounce(notifyOutputChanged, 300),
-    [notifyOutputChanged],
-  );
+  const debouncedNotify = React.useMemo(() => debounce(notifyOutputChanged, 300), [notifyOutputChanged]);
 
   // Sync selection with Power Apps
   const handleSelectionChange = React.useCallback(
@@ -147,20 +131,18 @@ export const UniversalDatasetGridRoot: React.FC<
       dataset.setSelectedRecordIds(recordIds);
       debouncedNotify(); // Debounced to prevent excessive PCF calls
     },
-    [dataset, debouncedNotify],
+    [dataset, debouncedNotify]
   );
 
   // Update selection when context changes
   React.useEffect(() => {
     const contextSelection = dataset.getSelectedRecordIds() || [];
-    console.log("[UniversalDatasetGridRoot] Selection changed:", {
+    console.log('[UniversalDatasetGridRoot] Selection changed:', {
       contextSelection,
       currentSelection: selectedRecordIds,
       recordCount: Object.keys(dataset.records).length,
     });
-    if (
-      JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)
-    ) {
+    if (JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)) {
       setSelectedRecordIds(contextSelection);
     }
   }, [dataset, selectedRecordIds]);
@@ -172,17 +154,11 @@ export const UniversalDatasetGridRoot: React.FC<
     try {
       // Validate selection
       if (selectedRecordIds.length === 0) {
-        logger.warn(
-          "UniversalDatasetGridRoot",
-          "Download requires at least one selected record",
-        );
+        logger.warn('UniversalDatasetGridRoot', 'Download requires at least one selected record');
         return;
       }
 
-      logger.info(
-        "UniversalDatasetGridRoot",
-        `Downloading ${selectedRecordIds.length} file(s)`,
-      );
+      logger.info('UniversalDatasetGridRoot', `Downloading ${selectedRecordIds.length} file(s)`);
 
       // Get SDAP API base URL from config
       const baseUrl = config.sdapConfig.baseUrl;
@@ -196,66 +172,43 @@ export const UniversalDatasetGridRoot: React.FC<
         const record = dataset.records[recordId];
 
         if (!record) {
-          logger.warn(
-            "UniversalDatasetGridRoot",
-            `Record not found: ${recordId}`,
-          );
+          logger.warn('UniversalDatasetGridRoot', `Record not found: ${recordId}`);
           continue;
         }
 
         // Get file metadata from Dataverse record
-        const driveId = record.getFormattedValue(
-          config.fieldMappings.graphDriveId,
-        );
-        const itemId = record.getFormattedValue(
-          config.fieldMappings.graphItemId,
-        );
-        const fileName = record.getFormattedValue(
-          config.fieldMappings.fileName,
-        );
+        const driveId = record.getFormattedValue(config.fieldMappings.graphDriveId);
+        const itemId = record.getFormattedValue(config.fieldMappings.graphItemId);
+        const fileName = record.getFormattedValue(config.fieldMappings.fileName);
 
         if (!driveId || !itemId || !fileName) {
-          logger.error(
-            "UniversalDatasetGridRoot",
-            "Missing required fields for download",
-            {
-              recordId,
-              hasDriveId: !!driveId,
-              hasItemId: !!itemId,
-              hasFileName: !!fileName,
-            },
-          );
+          logger.error('UniversalDatasetGridRoot', 'Missing required fields for download', {
+            recordId,
+            hasDriveId: !!driveId,
+            hasItemId: !!itemId,
+            hasFileName: !!fileName,
+          });
           continue;
         }
 
         // Download file
-        const result = await downloadService.downloadFile(
-          driveId,
-          itemId,
-          fileName,
-        );
+        const result = await downloadService.downloadFile(driveId, itemId, fileName);
 
         if (result.success) {
-          logger.info(
-            "UniversalDatasetGridRoot",
-            `File downloaded: ${fileName}`,
-          );
+          logger.info('UniversalDatasetGridRoot', `File downloaded: ${fileName}`);
         } else {
-          logger.error(
-            "UniversalDatasetGridRoot",
-            `Download failed: ${result.error}`,
-          );
+          logger.error('UniversalDatasetGridRoot', `Download failed: ${result.error}`);
         }
 
         // Small delay between downloads if multiple files
         if (selectedRecordIds.length > 1) {
-          await new Promise((resolve) => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
 
-      logger.info("UniversalDatasetGridRoot", "Download complete");
+      logger.info('UniversalDatasetGridRoot', 'Download complete');
     } catch (error) {
-      logger.error("UniversalDatasetGridRoot", "Download handler error", error);
+      logger.error('UniversalDatasetGridRoot', 'Download handler error', error);
     }
   }, [selectedRecordIds, dataset, context, config]);
 
@@ -266,39 +219,30 @@ export const UniversalDatasetGridRoot: React.FC<
     try {
       // Validate selection
       if (selectedRecordIds.length !== 1) {
-        logger.warn(
-          "UniversalDatasetGridRoot",
-          "Delete requires exactly one selected record",
-        );
+        logger.warn('UniversalDatasetGridRoot', 'Delete requires exactly one selected record');
         return;
       }
 
       const record = dataset.records[selectedRecordIds[0]];
 
       if (!record) {
-        logger.warn("UniversalDatasetGridRoot", "Record not found");
+        logger.warn('UniversalDatasetGridRoot', 'Record not found');
         return;
       }
 
       // Get file metadata from Dataverse record
       const documentId = record.getRecordId();
-      const driveId = record.getFormattedValue(
-        config.fieldMappings.graphDriveId,
-      );
+      const driveId = record.getFormattedValue(config.fieldMappings.graphDriveId);
       const itemId = record.getFormattedValue(config.fieldMappings.graphItemId);
       const fileName = record.getFormattedValue(config.fieldMappings.fileName);
 
       if (!documentId || !driveId || !itemId || !fileName) {
-        logger.error(
-          "UniversalDatasetGridRoot",
-          "Missing required fields for delete",
-          {
-            hasDocumentId: !!documentId,
-            hasDriveId: !!driveId,
-            hasItemId: !!itemId,
-            hasFileName: !!fileName,
-          },
-        );
+        logger.error('UniversalDatasetGridRoot', 'Missing required fields for delete', {
+          hasDocumentId: !!documentId,
+          hasDriveId: !!driveId,
+          hasItemId: !!itemId,
+          hasFileName: !!fileName,
+        });
         return;
       }
 
@@ -306,11 +250,7 @@ export const UniversalDatasetGridRoot: React.FC<
       setFileToDelete({ documentId, driveId, itemId, fileName });
       setDeleteDialogOpen(true);
     } catch (error) {
-      logger.error(
-        "UniversalDatasetGridRoot",
-        "Delete click handler error",
-        error,
-      );
+      logger.error('UniversalDatasetGridRoot', 'Delete click handler error', error);
     }
   }, [selectedRecordIds, dataset, config]);
 
@@ -321,10 +261,7 @@ export const UniversalDatasetGridRoot: React.FC<
     if (!fileToDelete) return;
 
     try {
-      logger.info(
-        "UniversalDatasetGridRoot",
-        `Confirming delete: ${fileToDelete.fileName}`,
-      );
+      logger.info('UniversalDatasetGridRoot', `Confirming delete: ${fileToDelete.fileName}`);
 
       // Get SDAP API base URL from config
       const baseUrl = config.sdapConfig.baseUrl;
@@ -338,27 +275,20 @@ export const UniversalDatasetGridRoot: React.FC<
         fileToDelete.documentId,
         fileToDelete.driveId,
         fileToDelete.itemId,
-        fileToDelete.fileName,
+        fileToDelete.fileName
       );
 
       if (result.success) {
-        logger.info("UniversalDatasetGridRoot", "File deleted successfully");
+        logger.info('UniversalDatasetGridRoot', 'File deleted successfully');
 
         // Refresh grid to show updated record (hasFile = false)
         dataset.refresh();
         notifyOutputChanged();
       } else {
-        logger.error(
-          "UniversalDatasetGridRoot",
-          `Delete failed: ${result.error}`,
-        );
+        logger.error('UniversalDatasetGridRoot', `Delete failed: ${result.error}`);
       }
     } catch (error) {
-      logger.error(
-        "UniversalDatasetGridRoot",
-        "Delete confirmation handler error",
-        error,
-      );
+      logger.error('UniversalDatasetGridRoot', 'Delete confirmation handler error', error);
     } finally {
       // Close dialog and clear state
       setDeleteDialogOpen(false);
@@ -370,7 +300,7 @@ export const UniversalDatasetGridRoot: React.FC<
    * Handle delete cancellation
    */
   const handleDeleteCancel = React.useCallback(() => {
-    logger.debug("UniversalDatasetGridRoot", "Delete cancelled");
+    logger.debug('UniversalDatasetGridRoot', 'Delete cancelled');
     setDeleteDialogOpen(false);
     setFileToDelete(null);
   }, []);
@@ -382,41 +312,32 @@ export const UniversalDatasetGridRoot: React.FC<
     try {
       // Validate selection
       if (selectedRecordIds.length !== 1) {
-        logger.warn(
-          "UniversalDatasetGridRoot",
-          "Replace requires exactly one selected record",
-        );
+        logger.warn('UniversalDatasetGridRoot', 'Replace requires exactly one selected record');
         return;
       }
 
       const record = dataset.records[selectedRecordIds[0]];
 
       if (!record) {
-        logger.warn("UniversalDatasetGridRoot", "Record not found");
+        logger.warn('UniversalDatasetGridRoot', 'Record not found');
         return;
       }
 
       // Get file metadata from Dataverse record
       const documentId = record.getRecordId();
-      const driveId = record.getFormattedValue(
-        config.fieldMappings.graphDriveId,
-      );
+      const driveId = record.getFormattedValue(config.fieldMappings.graphDriveId);
       const itemId = record.getFormattedValue(config.fieldMappings.graphItemId);
 
       if (!documentId || !driveId || !itemId) {
-        logger.error(
-          "UniversalDatasetGridRoot",
-          "Missing required fields for replace",
-          {
-            hasDocumentId: !!documentId,
-            hasDriveId: !!driveId,
-            hasItemId: !!itemId,
-          },
-        );
+        logger.error('UniversalDatasetGridRoot', 'Missing required fields for replace', {
+          hasDocumentId: !!documentId,
+          hasDriveId: !!driveId,
+          hasItemId: !!itemId,
+        });
         return;
       }
 
-      logger.info("UniversalDatasetGridRoot", "Starting file replace");
+      logger.info('UniversalDatasetGridRoot', 'Starting file replace');
 
       // Get SDAP API base URL from config
       const baseUrl = config.sdapConfig.baseUrl;
@@ -426,69 +347,54 @@ export const UniversalDatasetGridRoot: React.FC<
       const replaceService = new FileReplaceService(apiClient, context);
 
       // Show file picker and execute replace
-      const result = await replaceService.pickAndReplaceFile(
-        documentId,
-        driveId,
-        itemId,
-      );
+      const result = await replaceService.pickAndReplaceFile(documentId, driveId, itemId);
 
       if (result.success) {
-        logger.info("UniversalDatasetGridRoot", "File replaced successfully");
+        logger.info('UniversalDatasetGridRoot', 'File replaced successfully');
 
         // Refresh grid to show updated record
         dataset.refresh();
         notifyOutputChanged();
       } else {
         // User may have cancelled or error occurred
-        if (result.error !== "Replace cancelled by user") {
-          logger.error(
-            "UniversalDatasetGridRoot",
-            `Replace failed: ${result.error}`,
-          );
+        if (result.error !== 'Replace cancelled by user') {
+          logger.error('UniversalDatasetGridRoot', `Replace failed: ${result.error}`);
         }
       }
     } catch (error) {
-      logger.error("UniversalDatasetGridRoot", "Replace handler error", error);
+      logger.error('UniversalDatasetGridRoot', 'Replace handler error', error);
     }
   }, [selectedRecordIds, dataset, context, config, notifyOutputChanged]);
 
   // Handle command execution
   const handleCommandExecute = React.useCallback(
     async (commandId: string) => {
-      logger.info("UniversalDatasetGridRoot", `Command executed: ${commandId}`);
+      logger.info('UniversalDatasetGridRoot', `Command executed: ${commandId}`);
 
       switch (commandId) {
-        case "addFile":
-          logger.info(
-            "UniversalDatasetGridRoot",
-            "Add File - will implement in future task",
-          );
+        case 'addFile':
+          logger.info('UniversalDatasetGridRoot', 'Add File - will implement in future task');
           break;
-        case "removeFile":
+        case 'removeFile':
           await handleDeleteFile();
           break;
-        case "updateFile":
+        case 'updateFile':
           await handleReplaceFile();
           break;
-        case "downloadFile":
+        case 'downloadFile':
           await handleDownloadFile();
           break;
         default:
-          logger.warn(
-            "UniversalDatasetGridRoot",
-            `Unknown command: ${commandId}`,
-          );
+          logger.warn('UniversalDatasetGridRoot', `Unknown command: ${commandId}`);
       }
     },
-    [handleDownloadFile, handleDeleteFile, handleReplaceFile],
+    [handleDownloadFile, handleDeleteFile, handleReplaceFile]
   );
 
   // Get selected records for command bar
   const selectedRecords = React.useMemo(() => {
-    const records = selectedRecordIds
-      .map((id) => dataset.records[id])
-      .filter((record) => record != null);
-    console.log("[UniversalDatasetGridRoot] Selected records for CommandBar:", {
+    const records = selectedRecordIds.map(id => dataset.records[id]).filter(record => record != null);
+    console.log('[UniversalDatasetGridRoot] Selected records for CommandBar:', {
       selectedRecordIds,
       recordsFound: records.length,
       totalRecords: Object.keys(dataset.records).length,
@@ -498,7 +404,7 @@ export const UniversalDatasetGridRoot: React.FC<
 
   // Handle dataset refresh
   const handleRefresh = React.useCallback(() => {
-    console.log("[UniversalDatasetGridRoot] Refreshing dataset");
+    console.log('[UniversalDatasetGridRoot] Refreshing dataset');
     dataset.refresh();
   }, [dataset]);
 
@@ -519,16 +425,11 @@ export const UniversalDatasetGridRoot: React.FC<
    * Called during DatasetGrid initialization.
    */
   const handleRegisterOptimisticUpdate = React.useCallback(
-    (
-      updateFn: (request: OptimisticRowUpdateRequest) => OptimisticUpdateResult,
-    ) => {
+    (updateFn: (request: OptimisticRowUpdateRequest) => OptimisticUpdateResult) => {
       optimisticUpdateHandlerRef.current = updateFn;
-      logger.info(
-        "UniversalDatasetGridRoot",
-        "Optimistic update handler registered",
-      );
+      logger.info('UniversalDatasetGridRoot', 'Optimistic update handler registered');
     },
-    [],
+    []
   );
 
   /**
@@ -538,46 +439,32 @@ export const UniversalDatasetGridRoot: React.FC<
   React.useEffect(() => {
     // Create the API object
     const gridApi: SpaarkeGridApi = {
-      updateRow: (
-        request: OptimisticRowUpdateRequest,
-      ): OptimisticUpdateResult => {
+      updateRow: (request: OptimisticRowUpdateRequest): OptimisticUpdateResult => {
         if (!optimisticUpdateHandlerRef.current) {
-          logger.warn(
-            "UniversalDatasetGridRoot",
-            "Optimistic update called before handler registered",
-          );
+          logger.warn('UniversalDatasetGridRoot', 'Optimistic update called before handler registered');
           return {
             success: false,
-            error: "Grid not ready - optimistic update handler not registered",
+            error: 'Grid not ready - optimistic update handler not registered',
             rollback: () => {},
           };
         }
 
-        logger.info(
-          "UniversalDatasetGridRoot",
-          `window.spaarkeGrid.updateRow called for record ${request.recordId}`,
-        );
+        logger.info('UniversalDatasetGridRoot', `window.spaarkeGrid.updateRow called for record ${request.recordId}`);
         return optimisticUpdateHandlerRef.current(request);
       },
       refresh: () => {
-        logger.info(
-          "UniversalDatasetGridRoot",
-          "window.spaarkeGrid.refresh called",
-        );
+        logger.info('UniversalDatasetGridRoot', 'window.spaarkeGrid.refresh called');
         dataset.refresh();
       },
     };
 
     // Attach to window
     window.spaarkeGrid = gridApi;
-    logger.info("UniversalDatasetGridRoot", "window.spaarkeGrid API exposed");
+    logger.info('UniversalDatasetGridRoot', 'window.spaarkeGrid API exposed');
 
     // Cleanup on unmount
     return () => {
-      logger.info(
-        "UniversalDatasetGridRoot",
-        "Cleaning up window.spaarkeGrid API",
-      );
+      logger.info('UniversalDatasetGridRoot', 'Cleaning up window.spaarkeGrid API');
       delete window.spaarkeGrid;
     };
   }, [dataset]);
@@ -585,11 +472,11 @@ export const UniversalDatasetGridRoot: React.FC<
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        width: "100%",
-        position: "relative",
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        width: '100%',
+        position: 'relative',
       }}
     >
       {/* Fluent UI Toolbar - Task A.3 */}
@@ -625,13 +512,13 @@ export const UniversalDatasetGridRoot: React.FC<
       {/* Version indicator */}
       <div
         style={{
-          position: "absolute",
-          bottom: "2px",
-          right: "5px",
-          fontSize: "8px",
-          color: "#666",
-          userSelect: "none",
-          pointerEvents: "none",
+          position: 'absolute',
+          bottom: '2px',
+          right: '5px',
+          fontSize: '8px',
+          color: '#666',
+          userSelect: 'none',
+          pointerEvents: 'none',
           zIndex: 1000,
         }}
       >

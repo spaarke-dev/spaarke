@@ -15,7 +15,7 @@
  * All changes flow through canvasStore.updateNodeData().
  */
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -30,27 +30,27 @@ import {
   Button,
   Text,
   Divider,
-} from "@fluentui/react-components";
-import { Delete20Regular } from "@fluentui/react-icons";
-import type { PlaybookNode } from "../../types/canvas";
-import { useCanvasStore } from "../../stores/canvasStore";
+} from '@fluentui/react-components';
+import { Delete20Regular } from '@fluentui/react-icons';
+import type { PlaybookNode } from '../../types/canvas';
+import { useCanvasStore } from '../../stores/canvasStore';
 
 // Sub-components
-import { ActionSelector } from "./ActionSelector";
-import { ModelSelector } from "./ModelSelector";
-import { ScopeSelector } from "./ScopeSelector";
-import { ConditionEditor } from "./ConditionEditor";
-import { DeliverOutputForm } from "./DeliverOutputForm";
-import { DeliverToIndexForm } from "./DeliverToIndexForm";
-import { SendEmailForm } from "./SendEmailForm";
-import { CreateTaskForm } from "./CreateTaskForm";
-import { AiCompletionForm } from "./AiCompletionForm";
-import { WaitForm } from "./WaitForm";
-import { UpdateRecordForm } from "./UpdateRecordForm";
-import { NodeValidationBadge } from "./NodeValidationBadge";
-import { PromptSchemaForm } from "./PromptSchemaForm";
-import { PromptSchemaEditor } from "./PromptSchemaEditor";
-import type { PromptSchema } from "../../types/promptSchema";
+import { ActionSelector } from './ActionSelector';
+import { ModelSelector } from './ModelSelector';
+import { ScopeSelector } from './ScopeSelector';
+import { ConditionEditor } from './ConditionEditor';
+import { DeliverOutputForm } from './DeliverOutputForm';
+import { DeliverToIndexForm } from './DeliverToIndexForm';
+import { SendEmailForm } from './SendEmailForm';
+import { CreateTaskForm } from './CreateTaskForm';
+import { AiCompletionForm } from './AiCompletionForm';
+import { WaitForm } from './WaitForm';
+import { UpdateRecordForm } from './UpdateRecordForm';
+import { NodeValidationBadge } from './NodeValidationBadge';
+import { PromptSchemaForm } from './PromptSchemaForm';
+import { PromptSchemaEditor } from './PromptSchemaEditor';
+import type { PromptSchema } from '../../types/promptSchema';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -66,38 +66,38 @@ interface NodePropertiesFormProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("0px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('0px'),
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "12px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '12px'),
   },
   headerLeft: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
   },
   typeBadge: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    textTransform: "capitalize" as const,
+    textTransform: 'capitalize' as const,
   },
   accordionPanel: {
-    ...shorthands.padding("12px", "16px", "16px"),
+    ...shorthands.padding('12px', '16px', '16px'),
   },
   fieldGroup: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("6px"),
-    marginBottom: "12px",
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('6px'),
+    marginBottom: '12px',
   },
   deleteSection: {
-    ...shorthands.padding("12px"),
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.padding('12px'),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
   },
 });
 
@@ -106,42 +106,40 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  start: "Start",
-  aiAnalysis: "AI Analysis",
-  aiCompletion: "AI Completion",
-  condition: "Condition",
-  deliverOutput: "Deliver Output",
-  updateRecord: "Update Record",
-  createTask: "Create Task",
-  sendEmail: "Send Email",
-  wait: "Wait",
+  start: 'Start',
+  aiAnalysis: 'AI Analysis',
+  aiCompletion: 'AI Completion',
+  condition: 'Condition',
+  deliverOutput: 'Deliver Output',
+  updateRecord: 'Update Record',
+  createTask: 'Create Task',
+  sendEmail: 'Send Email',
+  wait: 'Wait',
 };
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export const NodePropertiesForm = memo(function NodePropertiesForm({
-  node,
-}: NodePropertiesFormProps) {
+export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: NodePropertiesFormProps) {
   const styles = useStyles();
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const removeNode = useCanvasStore((s) => s.removeNode);
+  const updateNodeData = useCanvasStore(s => s.updateNodeData);
+  const removeNode = useCanvasStore(s => s.removeNode);
 
   const nodeType = node.data.type;
-  const isAiNode = nodeType === "aiAnalysis" || nodeType === "aiCompletion";
-  const isConditionNode = nodeType === "condition";
-  const isStartNode = nodeType === "start";
+  const isAiNode = nodeType === 'aiAnalysis' || nodeType === 'aiCompletion';
+  const isConditionNode = nodeType === 'condition';
+  const isStartNode = nodeType === 'start';
 
   // Determine which type-specific form to show
   const hasTypeForm = [
-    "deliverOutput",
-    "deliverToIndex",
-    "updateRecord",
-    "sendEmail",
-    "createTask",
-    "aiCompletion",
-    "wait",
+    'deliverOutput',
+    'deliverToIndex',
+    'updateRecord',
+    'sendEmail',
+    'createTask',
+    'aiCompletion',
+    'wait',
   ].includes(nodeType);
 
   // Generic field updater
@@ -149,7 +147,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
     (field: string, value: unknown) => {
       updateNodeData(node.id, { [field]: value });
     },
-    [node.id, updateNodeData],
+    [node.id, updateNodeData]
   );
 
   // configJson handler for type-specific forms
@@ -157,7 +155,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
     (json: string) => {
       updateNodeData(node.id, { configJson: json });
     },
-    [node.id, updateNodeData],
+    [node.id, updateNodeData]
   );
 
   const handleDelete = useCallback(() => {
@@ -165,17 +163,17 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
   }, [node.id, removeNode]);
 
   // Prompt Configuration editor mode: "form" (Level 1) or "editor" (Level 2)
-  const [editorMode, setEditorMode] = useState<"form" | "editor">("form");
+  const [editorMode, setEditorMode] = useState<'form' | 'editor'>('form');
 
   const handlePromptSchemaChange = useCallback(
     (schema: PromptSchema) => {
       updateNodeData(node.id, { promptSchema: schema });
     },
-    [node.id, updateNodeData],
+    [node.id, updateNodeData]
   );
 
   // Default open accordion items — only "basic" tab open initially
-  const defaultOpenItems = useMemo(() => ["basic"], []);
+  const defaultOpenItems = useMemo(() => ['basic'], []);
 
   return (
     <div className={styles.root}>
@@ -183,14 +181,10 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
       <div className={styles.header}>
         <div className={styles.headerLeft}>
           <Text weight="semibold" size={400}>
-            {node.data.label || "Unnamed Node"}
+            {node.data.label || 'Unnamed Node'}
           </Text>
-          <Text className={styles.typeBadge}>
-            {NODE_TYPE_LABELS[nodeType] ?? nodeType}
-          </Text>
-          <NodeValidationBadge
-            validationErrors={node.data.validationErrors ?? []}
-          />
+          <Text className={styles.typeBadge}>{NODE_TYPE_LABELS[nodeType] ?? nodeType}</Text>
+          <NodeValidationBadge validationErrors={node.data.validationErrors ?? []} />
         </div>
       </div>
 
@@ -209,7 +203,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                 id={`${node.id}-name`}
                 size="small"
                 value={node.data.label}
-                onChange={(_, data) => handleUpdate("label", data.value)}
+                onChange={(_, data) => handleUpdate('label', data.value)}
               />
             </div>
             {!isStartNode && (
@@ -220,10 +214,8 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                 <Input
                   id={`${node.id}-outputVar`}
                   size="small"
-                  value={node.data.outputVariable ?? ""}
-                  onChange={(_, data) =>
-                    handleUpdate("outputVariable", data.value)
-                  }
+                  value={node.data.outputVariable ?? ''}
+                  onChange={(_, data) => handleUpdate('outputVariable', data.value)}
                   placeholder={`output_${nodeType}`}
                 />
               </div>
@@ -238,7 +230,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
             <AccordionPanel className={styles.accordionPanel}>
               <ActionSelector
                 selectedActionId={node.data.actionId}
-                onActionChange={(id) => handleUpdate("actionId", id)}
+                onActionChange={id => handleUpdate('actionId', id)}
               />
             </AccordionPanel>
           </AccordionItem>
@@ -251,7 +243,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
             <AccordionPanel className={styles.accordionPanel}>
               <ModelSelector
                 modelDeploymentId={node.data.modelDeploymentId}
-                onModelChange={(id) => handleUpdate("modelDeploymentId", id)}
+                onModelChange={id => handleUpdate('modelDeploymentId', id)}
               />
             </AccordionPanel>
           </AccordionItem>
@@ -262,18 +254,18 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
           <AccordionItem value="promptConfig">
             <AccordionHeader size="small">Prompt Configuration</AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
-              {editorMode === "form" ? (
+              {editorMode === 'form' ? (
                 <PromptSchemaForm
                   schema={node.data.promptSchema ?? null}
                   onChange={handlePromptSchemaChange}
-                  onSwitchToEditor={() => setEditorMode("editor")}
+                  onSwitchToEditor={() => setEditorMode('editor')}
                   nodeId={node.id}
                 />
               ) : (
                 <PromptSchemaEditor
                   schema={node.data.promptSchema ?? null}
                   onChange={handlePromptSchemaChange}
-                  onSwitchToForm={() => setEditorMode("form")}
+                  onSwitchToForm={() => setEditorMode('form')}
                 />
               )}
             </AccordionPanel>
@@ -285,52 +277,44 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
           <AccordionItem value="typeConfig">
             <AccordionHeader size="small">Configuration</AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
-              {nodeType === "deliverOutput" && (
-                <DeliverOutputForm
-                  nodeId={node.id}
-                  data={node.data}
-                  onUpdate={handleUpdate}
-                />
+              {nodeType === 'deliverOutput' && (
+                <DeliverOutputForm nodeId={node.id} data={node.data} onUpdate={handleUpdate} />
               )}
-              {nodeType === "deliverToIndex" && (
-                <DeliverToIndexForm
-                  nodeId={node.id}
-                  data={node.data}
-                  onUpdate={handleUpdate}
-                />
+              {nodeType === 'deliverToIndex' && (
+                <DeliverToIndexForm nodeId={node.id} data={node.data} onUpdate={handleUpdate} />
               )}
-              {nodeType === "updateRecord" && (
+              {nodeType === 'updateRecord' && (
                 <UpdateRecordForm
                   nodeId={node.id}
-                  configJson={node.data.configJson ?? "{}"}
+                  configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}
                 />
               )}
-              {nodeType === "sendEmail" && (
+              {nodeType === 'sendEmail' && (
                 <SendEmailForm
                   nodeId={node.id}
-                  configJson={node.data.configJson ?? "{}"}
+                  configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}
                 />
               )}
-              {nodeType === "createTask" && (
+              {nodeType === 'createTask' && (
                 <CreateTaskForm
                   nodeId={node.id}
-                  configJson={node.data.configJson ?? "{}"}
+                  configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}
                 />
               )}
-              {nodeType === "aiCompletion" && (
+              {nodeType === 'aiCompletion' && (
                 <AiCompletionForm
                   nodeId={node.id}
-                  configJson={node.data.configJson ?? "{}"}
+                  configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}
                 />
               )}
-              {nodeType === "wait" && (
+              {nodeType === 'wait' && (
                 <WaitForm
                   nodeId={node.id}
-                  configJson={node.data.configJson ?? "{}"}
+                  configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}
                 />
               )}
@@ -349,7 +333,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                 knowledgeIds={node.data.knowledgeIds ?? []}
                 toolIds={node.data.toolIds ?? []}
                 showSkills
-                onSkillsChange={(ids) => handleUpdate("skillIds", ids)}
+                onSkillsChange={ids => handleUpdate('skillIds', ids)}
                 onKnowledgeChange={() => {}}
                 onToolsChange={() => {}}
               />
@@ -369,7 +353,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                 toolIds={node.data.toolIds ?? []}
                 showKnowledge
                 onSkillsChange={() => {}}
-                onKnowledgeChange={(ids) => handleUpdate("knowledgeIds", ids)}
+                onKnowledgeChange={ids => handleUpdate('knowledgeIds', ids)}
                 onToolsChange={() => {}}
               />
             </AccordionPanel>
@@ -389,7 +373,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                 showTools
                 onSkillsChange={() => {}}
                 onKnowledgeChange={() => {}}
-                onToolsChange={(ids) => handleUpdate("toolIds", ids)}
+                onToolsChange={ids => handleUpdate('toolIds', ids)}
               />
             </AccordionPanel>
           </AccordionItem>
@@ -401,10 +385,8 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
             <AccordionHeader size="small">Condition</AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
               <ConditionEditor
-                conditionJson={node.data.conditionJson ?? "{}"}
-                onConditionChange={(json) =>
-                  handleUpdate("conditionJson", json)
-                }
+                conditionJson={node.data.conditionJson ?? '{}'}
+                onConditionChange={json => handleUpdate('conditionJson', json)}
               />
             </AccordionPanel>
           </AccordionItem>
@@ -423,9 +405,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                   max={3600}
                   step={30}
                   value={node.data.timeoutSeconds ?? 300}
-                  onChange={(_, data) =>
-                    handleUpdate("timeoutSeconds", data.value ?? 300)
-                  }
+                  onChange={(_, data) => handleUpdate('timeoutSeconds', data.value ?? 300)}
                 />
               </div>
               <div className={styles.fieldGroup}>
@@ -436,9 +416,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({
                   max={5}
                   step={1}
                   value={node.data.retryCount ?? 0}
-                  onChange={(_, data) =>
-                    handleUpdate("retryCount", data.value ?? 0)
-                  }
+                  onChange={(_, data) => handleUpdate('retryCount', data.value ?? 0)}
                 />
               </div>
             </AccordionPanel>

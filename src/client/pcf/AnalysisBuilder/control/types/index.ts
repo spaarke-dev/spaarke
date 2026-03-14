@@ -38,21 +38,21 @@ export interface IAction extends IScopeItem {
 }
 
 export interface ISkill extends IScopeItem {
-  type: "extraction" | "analysis" | "generation" | "transformation";
+  type: 'extraction' | 'analysis' | 'generation' | 'transformation';
 }
 
 export interface IKnowledge extends IScopeItem {
-  source: "dataverse" | "sharepoint" | "external";
+  source: 'dataverse' | 'sharepoint' | 'external';
   connectionString?: string;
 }
 
 export interface ITool extends IScopeItem {
-  toolType: "search" | "calculation" | "api" | "workflow";
+  toolType: 'search' | 'calculation' | 'api' | 'workflow';
   endpoint?: string;
 }
 
 export interface IOutputFormat extends IScopeItem {
-  format: "markdown" | "json" | "html" | "pdf";
+  format: 'markdown' | 'json' | 'html' | 'pdf';
   template?: string;
 }
 
@@ -60,7 +60,7 @@ export interface IOutputFormat extends IScopeItem {
 // Tab Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ScopeTabId = "action" | "skills" | "knowledge" | "tools" | "output";
+export type ScopeTabId = 'action' | 'skills' | 'knowledge' | 'tools' | 'output';
 
 export interface IScopeTab {
   id: ScopeTabId;
@@ -149,7 +149,7 @@ export interface IApiResponse<T> {
 
 export interface IAnalysisResult {
   analysisId: string;
-  status: "created" | "queued" | "processing" | "completed" | "failed";
+  status: 'created' | 'queued' | 'processing' | 'completed' | 'failed';
   workspaceUrl?: string;
 }
 

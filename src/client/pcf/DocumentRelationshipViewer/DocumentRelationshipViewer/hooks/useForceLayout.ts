@@ -8,7 +8,7 @@
  * Example: similarity=0.8 → distance=40, similarity=0.5 → distance=100
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   forceSimulation,
   forceLink,
@@ -18,12 +18,8 @@ import {
   Simulation,
   SimulationNodeDatum,
   SimulationLinkDatum,
-} from "d3-force";
-import type {
-  DocumentNode,
-  DocumentEdge,
-  ForceLayoutOptions,
-} from "../types/graph";
+} from 'd3-force';
+import type { DocumentNode, DocumentEdge, ForceLayoutOptions } from '../types/graph';
 
 // Default layout options - tuned for better distribution
 const DEFAULT_OPTIONS: Required<ForceLayoutOptions> = {
@@ -76,14 +72,12 @@ export interface UseForceLayoutResult {
 export function useForceLayout(
   nodes: DocumentNode[],
   edges: DocumentEdge[],
-  options?: ForceLayoutOptions,
+  options?: ForceLayoutOptions
 ): UseForceLayoutResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const [layoutNodes, setLayoutNodes] = React.useState<DocumentNode[]>(nodes);
   const [isSimulating, setIsSimulating] = React.useState(false);
-  const simulationRef = React.useRef<Simulation<ForceNode, ForceLink> | null>(
-    null,
-  );
+  const simulationRef = React.useRef<Simulation<ForceNode, ForceLink> | null>(null);
 
   /**
    * Run force simulation and update node positions
@@ -97,7 +91,7 @@ export function useForceLayout(
     setIsSimulating(true);
 
     // Create force nodes from input with radial initial positioning
-    const nonSourceNodes = nodes.filter((n) => !n.data.isSource);
+    const nonSourceNodes = nodes.filter(n => !n.data.isSource);
     const numNonSource = nonSourceNodes.length;
 
     const forceNodes: ForceNode[] = nodes.map((node, _index) => {
@@ -114,7 +108,7 @@ export function useForceLayout(
       }
 
       // Calculate radial position for non-source nodes
-      const nodeIndex = nonSourceNodes.findIndex((n) => n.id === node.id);
+      const nodeIndex = nonSourceNodes.findIndex(n => n.id === node.id);
       const angle = (2 * Math.PI * nodeIndex) / numNonSource - Math.PI / 2;
       const radius = 150; // Initial radius for radial placement
 
@@ -132,7 +126,7 @@ export function useForceLayout(
     // Create force links with distance based on similarity
     // Distance = distanceMultiplier * (1 - similarity)
     // Higher similarity = shorter distance
-    const forceLinks: ForceLink[] = edges.map((edge) => ({
+    const forceLinks: ForceLink[] = edges.map(edge => ({
       source: edge.source,
       target: edge.target,
       similarity: edge.data?.similarity ?? 0.5,
@@ -147,26 +141,23 @@ export function useForceLayout(
     const simulation = forceSimulation<ForceNode, ForceLink>(forceNodes)
       // Link force: edge length based on similarity
       .force(
-        "link",
+        'link',
         forceLink<ForceNode, ForceLink>(forceLinks)
-          .id((d) => d.id)
-          .distance((link) => {
+          .id(d => d.id)
+          .distance(link => {
             // Edge distance = 200 * (1 - similarity)
             // similarity 0.8 → distance 40
             // similarity 0.5 → distance 100
             return opts.distanceMultiplier * (1 - link.similarity);
           })
-          .strength(0.5),
+          .strength(0.5)
       )
       // Charge force: nodes repel each other
-      .force("charge", forceManyBody<ForceNode>().strength(opts.chargeStrength))
+      .force('charge', forceManyBody<ForceNode>().strength(opts.chargeStrength))
       // Center force: pull toward center
-      .force("center", forceCenter<ForceNode>(opts.centerX, opts.centerY))
+      .force('center', forceCenter<ForceNode>(opts.centerX, opts.centerY))
       // Collision force: prevent node overlap
-      .force(
-        "collide",
-        forceCollide<ForceNode>().radius(opts.collisionRadius).strength(0.7),
-      )
+      .force('collide', forceCollide<ForceNode>().radius(opts.collisionRadius).strength(0.7))
       // Faster convergence
       .alphaDecay(0.05)
       .velocityDecay(0.3);
@@ -174,10 +165,10 @@ export function useForceLayout(
     simulationRef.current = simulation;
 
     // Run simulation to completion
-    simulation.on("tick", () => {
+    simulation.on('tick', () => {
       // Update node positions during simulation
-      const updatedNodes = nodes.map((node) => {
-        const forceNode = forceNodes.find((fn) => fn.id === node.id);
+      const updatedNodes = nodes.map(node => {
+        const forceNode = forceNodes.find(fn => fn.id === node.id);
         return {
           ...node,
           position: {
@@ -189,21 +180,13 @@ export function useForceLayout(
       setLayoutNodes(updatedNodes);
     });
 
-    simulation.on("end", () => {
+    simulation.on('end', () => {
       setIsSimulating(false);
     });
 
     // Let simulation run for sufficient iterations
     simulation.alpha(1).restart();
-  }, [
-    nodes,
-    edges,
-    opts.distanceMultiplier,
-    opts.collisionRadius,
-    opts.centerX,
-    opts.centerY,
-    opts.chargeStrength,
-  ]);
+  }, [nodes, edges, opts.distanceMultiplier, opts.collisionRadius, opts.centerX, opts.centerY, opts.chargeStrength]);
 
   // Run simulation when nodes/edges change
   React.useEffect(() => {

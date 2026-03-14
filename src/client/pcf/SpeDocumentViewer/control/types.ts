@@ -8,11 +8,11 @@
  */
 export enum DocumentViewerState {
   /** Initial state: authenticating, acquiring token */
-  Loading = "loading",
+  Loading = 'loading',
   /** Ready state: React component can render */
-  Ready = "ready",
+  Ready = 'ready',
   /** Error state: initialization failed */
-  Error = "error",
+  Error = 'error',
 }
 
 /**
@@ -20,11 +20,11 @@ export enum DocumentViewerState {
  */
 export enum ViewMode {
   /** Read-only preview using embed.aspx */
-  Preview = "preview",
+  Preview = 'preview',
   /** Full editing using Office Online embedview */
-  Edit = "edit",
+  Edit = 'edit',
   /** Processing (check-in in progress) */
-  Processing = "processing",
+  Processing = 'processing',
 }
 
 /**

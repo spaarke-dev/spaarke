@@ -13,15 +13,15 @@
  * - "custom": Custom scope using documentIds (future)
  */
 export type SearchScope =
-  | "all"
-  | "entity"
-  | "matter"
-  | "project"
-  | "invoice"
-  | "account"
-  | "contact"
-  | "document"
-  | "custom"
+  | 'all'
+  | 'entity'
+  | 'matter'
+  | 'project'
+  | 'invoice'
+  | 'account'
+  | 'contact'
+  | 'document'
+  | 'custom'
   | (string & {});
 
 /**
@@ -30,7 +30,7 @@ export type SearchScope =
  * - "vectorOnly": Pure semantic/concept search
  * - "keywordOnly": Pure BM25 keyword search
  */
-export type SearchMode = "hybrid" | "vectorOnly" | "keywordOnly";
+export type SearchMode = 'hybrid' | 'vectorOnly' | 'keywordOnly';
 
 /**
  * Date range filter
@@ -116,12 +116,7 @@ export interface SearchResponse {
 /**
  * Search state for hook management
  */
-export type SearchState =
-  | "idle"
-  | "loading"
-  | "loadingMore"
-  | "error"
-  | "success";
+export type SearchState = 'idle' | 'loading' | 'loadingMore' | 'error' | 'success';
 
 /**
  * Error information

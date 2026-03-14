@@ -9,7 +9,7 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -28,7 +28,7 @@ import {
   MessageBarBody,
   Card,
   Spinner,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Play20Regular,
   Dismiss20Regular,
@@ -38,7 +38,7 @@ import {
   Flash20Regular,
   Rocket20Regular,
   Info16Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
 // ============================================================================
 // Types
@@ -47,7 +47,7 @@ import {
 /**
  * Test execution mode.
  */
-export type TestMode = "mock" | "quick" | "production";
+export type TestMode = 'mock' | 'quick' | 'production';
 
 /**
  * Test options selected by the user.
@@ -66,12 +66,12 @@ export interface TestOptions {
 
 const useStyles = makeStyles({
   dialogSurface: {
-    maxWidth: "560px",
-    width: "90vw",
+    maxWidth: '560px',
+    width: '90vw',
   },
   titleContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   sectionTitle: {
@@ -79,27 +79,27 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   radioGroup: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalM),
   },
   modeCard: {
-    cursor: "pointer",
+    cursor: 'pointer',
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
-    "&:hover": {
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   modeCardSelected: {
     ...shorthands.borderColor(tokens.colorBrandStroke1),
     backgroundColor: tokens.colorBrandBackground2,
-    "&:hover": {
+    '&:hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
   modeHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   modeIcon: {
@@ -111,7 +111,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   modeBadge: {
-    marginLeft: "auto",
+    marginLeft: 'auto',
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
   },
@@ -122,14 +122,14 @@ const useStyles = makeStyles({
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
   },
   uploadInput: {
-    display: "none",
+    display: 'none',
   },
   uploadButton: {
     marginTop: tokens.spacingVerticalS,
   },
   uploadedFile: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     marginTop: tokens.spacingVerticalS,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -138,13 +138,13 @@ const useStyles = makeStyles({
   },
   uploadedFileName: {
     flex: 1,
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   infoSection: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     ...shorthands.gap(tokens.spacingHorizontalS),
     marginTop: tokens.spacingVerticalL,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -155,7 +155,7 @@ const useStyles = makeStyles({
   },
   infoIcon: {
     flexShrink: 0,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   productionNote: {
     marginTop: tokens.spacingVerticalL,
@@ -195,33 +195,30 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // State
-  const [selectedMode, setSelectedMode] = useState<TestMode>("quick");
+  const [selectedMode, setSelectedMode] = useState<TestMode>('quick');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [documentId, setDocumentId] = useState("");
+  const [documentId, setDocumentId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Mode descriptions
   const modeInfo = {
     mock: {
       icon: <Beaker20Regular className={styles.modeIcon} />,
-      label: "Mock Test",
-      description:
-        "Uses sample data based on document type. No document needed.",
-      badge: "~5s",
+      label: 'Mock Test',
+      description: 'Uses sample data based on document type. No document needed.',
+      badge: '~5s',
     },
     quick: {
       icon: <Flash20Regular className={styles.modeIcon} />,
-      label: "Quick Test",
-      description:
-        "Upload a document for real extraction. Temp storage with 24hr TTL.",
-      badge: "~20-30s",
+      label: 'Quick Test',
+      description: 'Upload a document for real extraction. Temp storage with 24hr TTL.',
+      badge: '~20-30s',
     },
     production: {
       icon: <Rocket20Regular className={styles.modeIcon} />,
-      label: "Production Test",
-      description:
-        "Full flow with existing SPE document. Creates test records in Dataverse.",
-      badge: "~30-60s",
+      label: 'Production Test',
+      description: 'Full flow with existing SPE document. Creates test records in Dataverse.',
+      badge: '~30-60s',
     },
   };
 
@@ -232,21 +229,18 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
   }, []);
 
   // Handle file upload
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        // Validate file size (max 50MB)
-        if (file.size > 50 * 1024 * 1024) {
-          setError("File size exceeds 50MB limit");
-          return;
-        }
-        setUploadedFile(file);
-        setError(null);
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        setError('File size exceeds 50MB limit');
+        return;
       }
-    },
-    [],
-  );
+      setUploadedFile(file);
+      setError(null);
+    }
+  }, []);
 
   // Handle file upload button click
   const handleUploadClick = useCallback(() => {
@@ -257,25 +251,25 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
   const handleRemoveFile = useCallback(() => {
     setUploadedFile(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+      fileInputRef.current.value = '';
     }
   }, []);
 
   // Handle start test
   const handleStartTest = useCallback(() => {
     // Validate based on mode
-    if (selectedMode === "quick" && !uploadedFile) {
-      setError("Please upload a document for Quick test mode");
+    if (selectedMode === 'quick' && !uploadedFile) {
+      setError('Please upload a document for Quick test mode');
       return;
     }
 
-    if (selectedMode === "production") {
+    if (selectedMode === 'production') {
       if (!playbookSaved) {
-        setError("Please save the playbook first to use Production test mode");
+        setError('Please save the playbook first to use Production test mode');
         return;
       }
       if (!documentId.trim()) {
-        setError("Please enter a document ID for Production test mode");
+        setError('Please enter a document ID for Production test mode');
         return;
       }
     }
@@ -284,11 +278,11 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
       mode: selectedMode,
     };
 
-    if (selectedMode === "quick" && uploadedFile) {
+    if (selectedMode === 'quick' && uploadedFile) {
       options.documentFile = uploadedFile;
     }
 
-    if (selectedMode === "production" && documentId) {
+    if (selectedMode === 'production' && documentId) {
       options.documentId = documentId.trim();
     }
 
@@ -298,9 +292,9 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
   // Handle close
   const handleClose = useCallback(() => {
     if (!isExecuting) {
-      setSelectedMode("quick");
+      setSelectedMode('quick');
       setUploadedFile(null);
-      setDocumentId("");
+      setDocumentId('');
       setError(null);
       onClose();
     }
@@ -309,8 +303,8 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
   // Check if start button should be disabled
   const isStartDisabled =
     isExecuting ||
-    (selectedMode === "quick" && !uploadedFile) ||
-    (selectedMode === "production" && (!playbookSaved || !documentId.trim()));
+    (selectedMode === 'quick' && !uploadedFile) ||
+    (selectedMode === 'production' && (!playbookSaved || !documentId.trim()));
 
   return (
     <Dialog open={open} onOpenChange={(_, data) => !data.open && handleClose()}>
@@ -326,10 +320,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
           <DialogContent>
             {/* Error message */}
             {error && (
-              <MessageBar
-                intent="error"
-                style={{ marginBottom: tokens.spacingVerticalM }}
-              >
+              <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                 <MessageBarBody>{error}</MessageBarBody>
               </MessageBar>
             )}
@@ -337,14 +328,10 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
             {/* Test mode selection */}
             <Label className={styles.sectionTitle}>Select Test Mode</Label>
             <div className={styles.radioGroup}>
-              {(
-                Object.entries(modeInfo) as [TestMode, typeof modeInfo.mock][]
-              ).map(([mode, info]) => (
+              {(Object.entries(modeInfo) as [TestMode, typeof modeInfo.mock][]).map(([mode, info]) => (
                 <Card
                   key={mode}
-                  className={`${styles.modeCard} ${
-                    selectedMode === mode ? styles.modeCardSelected : ""
-                  }`}
+                  className={`${styles.modeCard} ${selectedMode === mode ? styles.modeCardSelected : ''}`}
                   onClick={() => handleModeSelect(mode)}
                 >
                   <div className={styles.modeHeader}>
@@ -352,15 +339,13 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                     <Text weight="semibold">{info.label}</Text>
                     <Text className={styles.modeBadge}>{info.badge}</Text>
                   </div>
-                  <Text className={styles.modeDescription}>
-                    {info.description}
-                  </Text>
+                  <Text className={styles.modeDescription}>{info.description}</Text>
                 </Card>
               ))}
             </div>
 
             {/* Quick mode: File upload */}
-            {selectedMode === "quick" && (
+            {selectedMode === 'quick' && (
               <div className={styles.uploadSection}>
                 <Label>Upload Test Document</Label>
                 <input
@@ -383,9 +368,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 ) : (
                   <div className={styles.uploadedFile}>
                     <Document20Regular />
-                    <Text className={styles.uploadedFileName}>
-                      {uploadedFile.name}
-                    </Text>
+                    <Text className={styles.uploadedFileName}>{uploadedFile.name}</Text>
                     <Button
                       appearance="subtle"
                       size="small"
@@ -398,26 +381,20 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 <div className={styles.infoSection}>
                   <Info16Regular className={styles.infoIcon} />
                   <Text>
-                    Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size:
-                    50MB. Document will be processed using Azure Document
-                    Intelligence.
+                    Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size: 50MB. Document will be processed using Azure
+                    Document Intelligence.
                   </Text>
                 </div>
               </div>
             )}
 
             {/* Production mode: Document selection */}
-            {selectedMode === "production" && (
+            {selectedMode === 'production' && (
               <div className={styles.productionNote}>
                 <Label>Document ID</Label>
                 {!playbookSaved && (
-                  <MessageBar
-                    intent="warning"
-                    style={{ marginTop: tokens.spacingVerticalS }}
-                  >
-                    <MessageBarBody>
-                      Playbook must be saved before running Production tests.
-                    </MessageBarBody>
+                  <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
+                    <MessageBarBody>Playbook must be saved before running Production tests.</MessageBarBody>
                   </MessageBar>
                 )}
                 <Input
@@ -430,25 +407,20 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 <div className={styles.infoSection}>
                   <Info16Regular className={styles.infoIcon} />
                   <Text>
-                    Production test uses an existing document from SharePoint
-                    Embedded. This creates test records in Dataverse with the
-                    IsTestExecution flag.
+                    Production test uses an existing document from SharePoint Embedded. This creates test records in
+                    Dataverse with the IsTestExecution flag.
                   </Text>
                 </div>
               </div>
             )}
 
             {/* Mock mode: Info */}
-            {selectedMode === "mock" && (
-              <div
-                className={styles.infoSection}
-                style={{ marginTop: tokens.spacingVerticalL }}
-              >
+            {selectedMode === 'mock' && (
+              <div className={styles.infoSection} style={{ marginTop: tokens.spacingVerticalL }}>
                 <Info16Regular className={styles.infoIcon} />
                 <Text>
-                  Mock test generates sample data based on document type
-                  definitions. Use this for rapid iteration when designing
-                  playbook logic.
+                  Mock test generates sample data based on document type definitions. Use this for rapid iteration when
+                  designing playbook logic.
                 </Text>
               </div>
             )}
@@ -456,12 +428,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
         </DialogBody>
 
         <DialogActions>
-          <Button
-            appearance="secondary"
-            icon={<Dismiss20Regular />}
-            onClick={handleClose}
-            disabled={isExecuting}
-          >
+          <Button appearance="secondary" icon={<Dismiss20Regular />} onClick={handleClose} disabled={isExecuting}>
             Cancel
           </Button>
           <Button
@@ -470,7 +437,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
             onClick={handleStartTest}
             disabled={isStartDisabled}
           >
-            {isExecuting ? "Running..." : "Start Test"}
+            {isExecuting ? 'Running...' : 'Start Test'}
           </Button>
         </DialogActions>
       </DialogSurface>

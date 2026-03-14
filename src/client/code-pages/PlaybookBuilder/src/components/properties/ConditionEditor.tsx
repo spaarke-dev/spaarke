@@ -8,7 +8,7 @@
  * "exists" is unary (no right operand).
  */
 
-import { memo, useMemo, useCallback } from "react";
+import { memo, useMemo, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
@@ -19,7 +19,7 @@ import {
   Label,
   Text,
   Divider,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,29 +35,19 @@ interface ConditionExpression {
   falseBranch: string;
 }
 
-type OperatorType =
-  | "eq"
-  | "ne"
-  | "gt"
-  | "lt"
-  | "gte"
-  | "lte"
-  | "contains"
-  | "startsWith"
-  | "endsWith"
-  | "exists";
+type OperatorType = 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'startsWith' | 'endsWith' | 'exists';
 
 const OPERATORS: { value: OperatorType; label: string }[] = [
-  { value: "eq", label: "Equals (==)" },
-  { value: "ne", label: "Not Equals (!=)" },
-  { value: "gt", label: "Greater Than (>)" },
-  { value: "lt", label: "Less Than (<)" },
-  { value: "gte", label: "Greater or Equal (>=)" },
-  { value: "lte", label: "Less or Equal (<=)" },
-  { value: "contains", label: "Contains" },
-  { value: "startsWith", label: "Starts With" },
-  { value: "endsWith", label: "Ends With" },
-  { value: "exists", label: "Exists (not null)" },
+  { value: 'eq', label: 'Equals (==)' },
+  { value: 'ne', label: 'Not Equals (!=)' },
+  { value: 'gt', label: 'Greater Than (>)' },
+  { value: 'lt', label: 'Less Than (<)' },
+  { value: 'gte', label: 'Greater or Equal (>=)' },
+  { value: 'lte', label: 'Less or Equal (<=)' },
+  { value: 'contains', label: 'Contains' },
+  { value: 'startsWith', label: 'Starts With' },
+  { value: 'endsWith', label: 'Ends With' },
+  { value: 'exists', label: 'Exists (not null)' },
 ];
 
 interface ConditionEditorProps {
@@ -71,24 +61,24 @@ interface ConditionEditorProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("12px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('12px'),
   },
   fieldGroup: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('4px'),
   },
   branchRow: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
   },
   branchDot: {
-    width: "10px",
-    height: "10px",
-    ...shorthands.borderRadius("50%"),
+    width: '10px',
+    height: '10px',
+    ...shorthands.borderRadius('50%'),
     flexShrink: 0,
   },
   trueDot: {
@@ -111,49 +101,36 @@ function parseCondition(json: string): ConditionExpression {
   try {
     const parsed = JSON.parse(json);
     // Handle new format
-    if (parsed.condition && typeof parsed.condition.operator === "string") {
+    if (parsed.condition && typeof parsed.condition.operator === 'string') {
       return {
         condition: {
           operator: parsed.condition.operator as OperatorType,
-          left:
-            typeof parsed.condition.left === "string"
-              ? parsed.condition.left
-              : "",
-          right:
-            typeof parsed.condition.right === "string"
-              ? parsed.condition.right
-              : undefined,
+          left: typeof parsed.condition.left === 'string' ? parsed.condition.left : '',
+          right: typeof parsed.condition.right === 'string' ? parsed.condition.right : undefined,
         },
-        trueBranch:
-          typeof parsed.trueBranch === "string" ? parsed.trueBranch : "True",
-        falseBranch:
-          typeof parsed.falseBranch === "string" ? parsed.falseBranch : "False",
+        trueBranch: typeof parsed.trueBranch === 'string' ? parsed.trueBranch : 'True',
+        falseBranch: typeof parsed.falseBranch === 'string' ? parsed.falseBranch : 'False',
       };
     }
     // Handle legacy format { field, operator, value }
-    if (typeof parsed.field === "string") {
+    if (typeof parsed.field === 'string') {
       return {
         condition: {
-          operator: (parsed.operator as OperatorType) || "eq",
+          operator: (parsed.operator as OperatorType) || 'eq',
           left: parsed.field,
-          right:
-            typeof parsed.value === "string"
-              ? parsed.value
-              : String(parsed.value ?? ""),
+          right: typeof parsed.value === 'string' ? parsed.value : String(parsed.value ?? ''),
         },
-        trueBranch:
-          typeof parsed.trueBranch === "string" ? parsed.trueBranch : "True",
-        falseBranch:
-          typeof parsed.falseBranch === "string" ? parsed.falseBranch : "False",
+        trueBranch: typeof parsed.trueBranch === 'string' ? parsed.trueBranch : 'True',
+        falseBranch: typeof parsed.falseBranch === 'string' ? parsed.falseBranch : 'False',
       };
     }
   } catch {
     // malformed JSON
   }
   return {
-    condition: { operator: "eq", left: "", right: "" },
-    trueBranch: "True",
-    falseBranch: "False",
+    condition: { operator: 'eq', left: '', right: '' },
+    trueBranch: 'True',
+    falseBranch: 'False',
   };
 }
 
@@ -167,10 +144,7 @@ export const ConditionEditor = memo(function ConditionEditor({
 }: ConditionEditorProps) {
   const styles = useStyles();
 
-  const expression = useMemo(
-    () => parseCondition(conditionJson),
-    [conditionJson],
-  );
+  const expression = useMemo(() => parseCondition(conditionJson), [conditionJson]);
 
   const update = useCallback(
     (patch: Partial<ConditionExpression>) => {
@@ -181,10 +155,10 @@ export const ConditionEditor = memo(function ConditionEditor({
       };
       onConditionChange(JSON.stringify(updated));
     },
-    [expression, onConditionChange],
+    [expression, onConditionChange]
   );
 
-  const needsRightOperand = expression.condition.operator !== "exists";
+  const needsRightOperand = expression.condition.operator !== 'exists';
 
   return (
     <div className={styles.root}>
@@ -195,13 +169,9 @@ export const ConditionEditor = memo(function ConditionEditor({
           size="small"
           placeholder="{{nodeName.output.field}}"
           value={expression.condition.left}
-          onChange={(_, data) =>
-            update({ condition: { ...expression.condition, left: data.value } })
-          }
+          onChange={(_, data) => update({ condition: { ...expression.condition, left: data.value } })}
         />
-        <Text className={styles.hint}>
-          Use template variable syntax: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.hint}>Use template variable syntax: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* Operator */}
@@ -209,21 +179,18 @@ export const ConditionEditor = memo(function ConditionEditor({
         <Label size="small">Operator</Label>
         <Dropdown
           size="small"
-          value={
-            OPERATORS.find((o) => o.value === expression.condition.operator)
-              ?.label ?? "Equals (==)"
-          }
+          value={OPERATORS.find(o => o.value === expression.condition.operator)?.label ?? 'Equals (==)'}
           selectedOptions={[expression.condition.operator]}
           onOptionSelect={(_, data) =>
             update({
               condition: {
                 ...expression.condition,
-                operator: (data.optionValue as OperatorType) ?? "eq",
+                operator: (data.optionValue as OperatorType) ?? 'eq',
               },
             })
           }
         >
-          {OPERATORS.map((op) => (
+          {OPERATORS.map(op => (
             <Option key={op.value} value={op.value}>
               {op.label}
             </Option>
@@ -238,7 +205,7 @@ export const ConditionEditor = memo(function ConditionEditor({
           <Input
             size="small"
             placeholder="Value or {{variable}}"
-            value={expression.condition.right ?? ""}
+            value={expression.condition.right ?? ''}
             onChange={(_, data) =>
               update({
                 condition: { ...expression.condition, right: data.value },

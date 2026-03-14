@@ -44,12 +44,7 @@ export interface AnalysisRecord {
 }
 
 /** Possible statuses for an analysis record */
-export type AnalysisStatus =
-  | "draft"
-  | "in_progress"
-  | "completed"
-  | "error"
-  | "archived";
+export type AnalysisStatus = 'draft' | 'in_progress' | 'completed' | 'error' | 'archived';
 
 // ---------------------------------------------------------------------------
 // Document Metadata
@@ -129,13 +124,13 @@ export interface ProblemDetails {
 // ---------------------------------------------------------------------------
 
 /** State of an auto-save operation */
-export type SaveState = "idle" | "saving" | "saved" | "error";
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 /** State of an export operation */
-export type ExportState = "idle" | "exporting" | "completed" | "error";
+export type ExportState = 'idle' | 'exporting' | 'completed' | 'error';
 
 /** Supported export formats */
-export type ExportFormat = "docx" | "pdf";
+export type ExportFormat = 'docx' | 'pdf';
 
 // ---------------------------------------------------------------------------
 // Host Context
@@ -173,7 +168,7 @@ export interface SelectionEventPayload {
   /** Viewport-relative bounding rectangle of the selection */
   boundingRect: SelectionBoundingRect;
   /** Identifies the originating panel */
-  source: "analysis-editor";
+  source: 'analysis-editor';
 }
 
 /** Viewport-relative bounding rectangle for a text selection */

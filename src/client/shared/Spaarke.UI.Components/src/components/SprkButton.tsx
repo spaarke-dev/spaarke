@@ -7,16 +7,16 @@
  * - Consistent styling
  */
 
-import * as React from "react";
-import { Button } from "@fluentui/react-button";
-import { Tooltip } from "@fluentui/react-tooltip";
+import * as React from 'react';
+import { Button } from '@fluentui/react-button';
+import { Tooltip } from '@fluentui/react-tooltip';
 
 export interface SprkButtonProps {
   /** Tooltip text (optional - shows on hover) */
   tooltip?: string;
 
   /** Button appearance */
-  appearance?: "primary" | "secondary" | "subtle";
+  appearance?: 'primary' | 'secondary' | 'subtle';
 
   /** Icon element */
   icon?: React.ReactElement;
@@ -48,21 +48,9 @@ export interface SprkButtonProps {
  * </SprkButton>
  * ```
  */
-export const SprkButton: React.FC<SprkButtonProps> = ({
-  tooltip,
-  appearance,
-  icon,
-  disabled,
-  onClick,
-  children,
-}) => {
+export const SprkButton: React.FC<SprkButtonProps> = ({ tooltip, appearance, icon, disabled, onClick, children }) => {
   const button = (
-    <Button
-      appearance={appearance}
-      icon={icon}
-      disabled={disabled}
-      onClick={onClick}
-    >
+    <Button appearance={appearance} icon={icon} disabled={disabled} onClick={onClick}>
       {children}
     </Button>
   );

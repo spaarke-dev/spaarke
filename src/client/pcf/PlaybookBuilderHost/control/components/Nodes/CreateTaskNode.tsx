@@ -2,11 +2,11 @@
  * Create Task Node - creates a Dataverse task record.
  */
 
-import * as React from "react";
-import { Text, tokens } from "@fluentui/react-components";
-import { TaskListSquareLtr20Regular } from "@fluentui/react-icons";
-import { BaseNode } from "./BaseNode";
-import type { PlaybookNodeData } from "../../stores";
+import * as React from 'react';
+import { Text, tokens } from '@fluentui/react-components';
+import { TaskListSquareLtr20Regular } from '@fluentui/react-icons';
+import { BaseNode } from './BaseNode';
+import type { PlaybookNodeData } from '../../stores';
 
 interface CreateTaskNodeProps {
   data: PlaybookNodeData;
@@ -17,17 +17,9 @@ interface CreateTaskNodeProps {
  * Create Task node - creates a Dataverse task record.
  * Use for: follow-up actions, workflow assignments.
  */
-export const CreateTaskNode = React.memo(function CreateTaskNode({
-  data,
-  selected,
-}: CreateTaskNodeProps) {
+export const CreateTaskNode = React.memo(function CreateTaskNode({ data, selected }: CreateTaskNodeProps) {
   return (
-    <BaseNode
-      data={data}
-      selected={selected}
-      icon={<TaskListSquareLtr20Regular />}
-      typeLabel="Create Task"
-    >
+    <BaseNode data={data} selected={selected} icon={<TaskListSquareLtr20Regular />} typeLabel="Create Task">
       {data.outputVariable && (
         <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
           Output: {data.outputVariable}

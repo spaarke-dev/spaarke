@@ -28,8 +28,8 @@
  * ```
  */
 
-import * as React from "react";
-import type { RichTextEditorRef } from "../components/RichTextEditor";
+import * as React from 'react';
+import type { RichTextEditorRef } from '../components/RichTextEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -69,7 +69,7 @@ const DEFAULT_MAX_VERSIONS = 20;
  */
 export function useDocumentHistory(
   editorRef: React.RefObject<RichTextEditorRef | null>,
-  maxVersions: number = DEFAULT_MAX_VERSIONS,
+  maxVersions: number = DEFAULT_MAX_VERSIONS
 ): UseDocumentHistoryReturn {
   // Version stack stored as ref to avoid re-renders on every push
   const stackRef = React.useRef<string[]>([]);

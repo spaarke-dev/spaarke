@@ -12,12 +12,12 @@
  * @version 1.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import { initializeAuth } from "./authInit";
-import { EmailProcessingDashboard } from "./EmailProcessingDashboard";
-import { MonitorState } from "./types";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { initializeAuth } from './authInit';
+import { EmailProcessingDashboard } from './EmailProcessingDashboard';
+import { MonitorState } from './types';
 
 // ============================================================================
 // Theme Storage Utilities (from Spaarke.UI.Components)
@@ -25,25 +25,25 @@ import { MonitorState } from "./types";
 // See: ADR-012, projects/mda-darkmode-theme/spec.md Section 3.4
 // ============================================================================
 
-const THEME_STORAGE_KEY = "spaarke-theme";
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_STORAGE_KEY = 'spaarke-theme';
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-type ThemePreference = "light" | "dark" | "auto";
+type ThemePreference = 'light' | 'dark' | 'auto';
 
 function getUserThemePreference(): ThemePreference {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === "light" || stored === "dark" || stored === "auto") {
+  if (stored === 'light' || stored === 'dark' || stored === 'auto') {
     return stored;
   }
-  return "auto";
+  return 'auto';
 }
 
 function getEffectiveDarkMode(context?: any): boolean {
   const preference = getUserThemePreference();
 
   // Explicit user choice
-  if (preference === "dark") return true;
-  if (preference === "light") return false;
+  if (preference === 'dark') return true;
+  if (preference === 'light') return false;
 
   // Auto mode: check Power Platform context first
   if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
@@ -54,22 +54,17 @@ function getEffectiveDarkMode(context?: any): boolean {
   const navbar = document.querySelector("[data-id='navbar-container']");
   if (navbar) {
     const bg = getComputedStyle(navbar).backgroundColor;
-    if (bg === "rgb(10, 10, 10)") return true;
-    if (bg === "rgb(240, 240, 240)") return false;
+    if (bg === 'rgb(10, 10, 10)') return true;
+    if (bg === 'rgb(240, 240, 240)') return false;
   }
 
   // Final fallback to system preference
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
 }
 
-interface ThemeChangeHandler {
-  (isDark: boolean): void;
-}
+type ThemeChangeHandler = (isDark: boolean) => void;
 
-function setupThemeListener(
-  onChange: ThemeChangeHandler,
-  context?: any,
-): () => void {
+function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => void {
   const handleStorageChange = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY) {
       onChange(getEffectiveDarkMode(context));
@@ -81,30 +76,27 @@ function setupThemeListener(
   };
 
   const handleSystemChange = (event: MediaQueryListEvent) => {
-    if (getUserThemePreference() === "auto") {
+    if (getUserThemePreference() === 'auto') {
       onChange(event.matches);
     }
   };
 
-  window.addEventListener("storage", handleStorageChange);
+  window.addEventListener('storage', handleStorageChange);
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
 
-  const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
-  mediaQuery?.addEventListener("change", handleSystemChange);
+  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+  mediaQuery?.addEventListener('change', handleSystemChange);
 
   return () => {
-    window.removeEventListener("storage", handleStorageChange);
+    window.removeEventListener('storage', handleStorageChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener("change", handleSystemChange);
+    mediaQuery?.removeEventListener('change', handleSystemChange);
   };
 }
 
 // ============================================================================
 
-export class EmailProcessingMonitor implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class EmailProcessingMonitor implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   // PCF container element
   private container: HTMLDivElement;
 
@@ -115,10 +107,10 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
   private authInitialized = false;
 
   // Configuration from manifest properties
-  private bffApiUrl = "";
-  private clientAppId = "";
-  private bffAppId = "";
-  private tenantId = "";
+  private bffApiUrl = '';
+  private clientAppId = '';
+  private bffAppId = '';
+  private tenantId = '';
   private refreshIntervalSeconds = 30;
 
   // State machine for component lifecycle
@@ -137,12 +129,10 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
   private _cleanupThemeListener: (() => void) | null = null;
 
   // Control version for footer display
-  private readonly VERSION = "1.0.0";
+  private readonly VERSION = '1.0.0';
 
   constructor() {
-    console.log(
-      `[EmailProcessingMonitor] Control instance created. Version: ${this.VERSION}`,
-    );
+    console.log(`[EmailProcessingMonitor] Control instance created. Version: ${this.VERSION}`);
   }
 
   /**
@@ -152,7 +142,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): Promise<void> {
     this.container = container;
     this._notifyOutputChanged = notifyOutputChanged;
@@ -165,28 +155,23 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
     // Apply responsive height styling
     const controlHeight = context.parameters.controlHeight?.raw ?? 400;
     this.container.style.minHeight = `${controlHeight}px`;
-    this.container.style.height = "100%";
-    this.container.style.display = "flex";
-    this.container.style.flexDirection = "column";
+    this.container.style.height = '100%';
+    this.container.style.display = 'flex';
+    this.container.style.flexDirection = 'column';
 
-    console.log("[EmailProcessingMonitor] Initializing control...");
+    console.log('[EmailProcessingMonitor] Initializing control...');
 
     try {
       // Extract configuration from manifest properties
-      this.tenantId = context.parameters.tenantId.raw || "";
-      this.clientAppId = context.parameters.clientAppId.raw || "";
-      this.bffAppId = context.parameters.bffAppId.raw || "";
-      this.bffApiUrl =
-        context.parameters.bffApiUrl.raw ||
-        "https://spe-api-dev-67e2xz.azurewebsites.net";
-      this.refreshIntervalSeconds =
-        context.parameters.refreshIntervalSeconds?.raw ?? 30;
+      this.tenantId = context.parameters.tenantId.raw || '';
+      this.clientAppId = context.parameters.clientAppId.raw || '';
+      this.bffAppId = context.parameters.bffAppId.raw || '';
+      this.bffApiUrl = context.parameters.bffApiUrl.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+      this.refreshIntervalSeconds = context.parameters.refreshIntervalSeconds?.raw ?? 30;
 
       // Validate configuration
       if (!this.tenantId || !this.clientAppId || !this.bffAppId) {
-        throw new Error(
-          "Missing required configuration: tenantId, clientAppId, and bffAppId must be provided",
-        );
+        throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
       }
 
       console.log(`[EmailProcessingMonitor] Configuration:`, {
@@ -198,31 +183,25 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
       });
 
       // Initialize @spaarke/auth (replaces local AuthService)
-      await initializeAuth(
-        this.tenantId,
-        this.clientAppId,
-        this.bffAppId,
-        this.bffApiUrl,
-      );
+      await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
       this.authInitialized = true;
-      console.log("[EmailProcessingMonitor] @spaarke/auth initialized");
+      console.log('[EmailProcessingMonitor] @spaarke/auth initialized');
 
       // Set up theme listener for global theme changes
-      this._cleanupThemeListener = setupThemeListener((isDark) => {
+      this._cleanupThemeListener = setupThemeListener(isDark => {
         console.log(`[EmailProcessingMonitor] Theme changed: isDark=${isDark}`);
         if (this._context && this._state === MonitorState.Ready) {
           this.renderControl(this._context);
         }
       }, context);
-      console.log("[EmailProcessingMonitor] Theme listener initialized");
+      console.log('[EmailProcessingMonitor] Theme listener initialized');
 
       // Transition to Ready and render React component
       this.transitionTo(MonitorState.Ready);
       this.renderBasedOnState();
     } catch (error) {
-      console.error("[EmailProcessingMonitor] Initialization failed:", error);
-      this._errorMessage =
-        error instanceof Error ? error.message : String(error);
+      console.error('[EmailProcessingMonitor] Initialization failed:', error);
+      this._errorMessage = error instanceof Error ? error.message : String(error);
       this.transitionTo(MonitorState.Error);
       this.renderBasedOnState();
     }
@@ -250,9 +229,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
     const previousState = this._state;
     this._state = newState;
 
-    console.log(
-      `[EmailProcessingMonitor] State: ${previousState} → ${newState}`,
-    );
+    console.log(`[EmailProcessingMonitor] State: ${previousState} → ${newState}`);
 
     // Notify PCF framework of state change
     this._notifyOutputChanged?.();
@@ -272,7 +249,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
         }
         break;
       case MonitorState.Error:
-        this.renderError(this._errorMessage || "An unknown error occurred");
+        this.renderError(this._errorMessage || 'An unknown error occurred');
         break;
     }
   }
@@ -281,23 +258,23 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
    * Render loading overlay with spinner
    */
   private renderLoading(): void {
-    const overlay = document.createElement("div");
-    overlay.className = "email-monitor-loading-overlay";
-    overlay.setAttribute("role", "status");
-    overlay.setAttribute("aria-busy", "true");
-    overlay.setAttribute("aria-label", "Loading email processing statistics");
+    const overlay = document.createElement('div');
+    overlay.className = 'email-monitor-loading-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-busy', 'true');
+    overlay.setAttribute('aria-label', 'Loading email processing statistics');
 
-    const spinner = document.createElement("div");
-    spinner.className = "email-monitor-loading-spinner";
+    const spinner = document.createElement('div');
+    spinner.className = 'email-monitor-loading-spinner';
 
-    const text = document.createElement("span");
-    text.className = "email-monitor-loading-text";
-    text.textContent = "Loading statistics...";
+    const text = document.createElement('span');
+    text.className = 'email-monitor-loading-text';
+    text.textContent = 'Loading statistics...';
 
     overlay.appendChild(spinner);
     overlay.appendChild(text);
 
-    this.container.innerHTML = "";
+    this.container.innerHTML = '';
     this.container.appendChild(overlay);
   }
 
@@ -306,18 +283,14 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
    */
   private renderControl(context: ComponentFramework.Context<IInputs>): void {
     if (!this.authInitialized) {
-      console.warn(
-        "[EmailProcessingMonitor] Auth not initialized, skipping render",
-      );
+      console.warn('[EmailProcessingMonitor] Auth not initialized, skipping render');
       return;
     }
 
     // Get effective dark mode from shared theme utilities
     const isDarkTheme = getEffectiveDarkMode(context);
 
-    console.log(
-      `[EmailProcessingMonitor] Rendering dashboard. Dark mode: ${isDarkTheme}`,
-    );
+    console.log(`[EmailProcessingMonitor] Rendering dashboard. Dark mode: ${isDarkTheme}`);
 
     // React 16 API: Use ReactDOM.render instead of createRoot
     ReactDOM.render(
@@ -327,10 +300,10 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
         refreshIntervalSeconds: this.refreshIntervalSeconds,
         version: this.VERSION,
         onError: (error: string) => {
-          console.error("[EmailProcessingMonitor] Dashboard error:", error);
+          console.error('[EmailProcessingMonitor] Dashboard error:', error);
         },
       }),
-      this.container,
+      this.container
     );
     this.isReactMounted = true;
   }
@@ -352,7 +325,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
    * Escape HTML to prevent XSS
    */
   private escapeHtml(text: string): string {
-    const div = document.createElement("div");
+    const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
@@ -368,7 +341,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
    * Cleanup when control is removed
    */
   public destroy(): void {
-    console.log("[EmailProcessingMonitor] Destroying control...");
+    console.log('[EmailProcessingMonitor] Destroying control...');
 
     // Clean up theme listener
     if (this._cleanupThemeListener) {

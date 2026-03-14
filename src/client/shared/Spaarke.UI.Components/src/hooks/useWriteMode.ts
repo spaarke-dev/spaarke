@@ -33,17 +33,17 @@
  * ```
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** Presentation mode for AI-generated content. */
-export type WriteMode = "stream" | "diff";
+export type WriteMode = 'stream' | 'diff';
 
 /** Source of the current write mode decision. */
-export type WriteModeSource = "auto" | "user-override";
+export type WriteModeSource = 'auto' | 'user-override';
 
 /**
  * Type of AI operation, used for automatic mode resolution.
@@ -54,12 +54,7 @@ export type WriteModeSource = "auto" | "user-override";
  * - `reanalysis` - Full document re-analysis with complete replacement
  * - `unknown` - Unrecognized operation (defaults to stream)
  */
-export type OperationType =
-  | "addition"
-  | "revision"
-  | "selection-revision"
-  | "reanalysis"
-  | "unknown";
+export type OperationType = 'addition' | 'revision' | 'selection-revision' | 'reanalysis' | 'unknown';
 
 /** Options for the useWriteMode hook. */
 export interface UseWriteModeOptions {
@@ -113,7 +108,7 @@ export interface WriteModeCommand {
   /** The slash command text that triggers this command */
   command: string;
   /** Category for action menu grouping */
-  category: "settings";
+  category: 'settings';
 }
 
 /**
@@ -127,26 +122,25 @@ export interface WriteModeCommand {
  */
 export const WRITE_MODE_COMMANDS: ReadonlyArray<WriteModeCommand> = [
   {
-    id: "mode_stream",
-    label: "Mode: Stream",
-    description: "Stream AI output directly into the editor in real-time",
-    command: "/mode stream",
-    category: "settings",
+    id: 'mode_stream',
+    label: 'Mode: Stream',
+    description: 'Stream AI output directly into the editor in real-time',
+    command: '/mode stream',
+    category: 'settings',
   },
   {
-    id: "mode_diff",
-    label: "Mode: Diff Review",
-    description: "Show AI revisions in a side-by-side diff view for review",
-    command: "/mode diff",
-    category: "settings",
+    id: 'mode_diff',
+    label: 'Mode: Diff Review',
+    description: 'Show AI revisions in a side-by-side diff view for review',
+    command: '/mode diff',
+    category: 'settings',
   },
   {
-    id: "mode_auto",
-    label: "Mode: Auto",
-    description:
-      "Automatically choose stream or diff based on the operation type",
-    command: "/mode auto",
-    category: "settings",
+    id: 'mode_auto',
+    label: 'Mode: Auto',
+    description: 'Automatically choose stream or diff based on the operation type',
+    command: '/mode auto',
+    category: 'settings',
   },
 ];
 
@@ -155,7 +149,7 @@ export const WRITE_MODE_COMMANDS: ReadonlyArray<WriteModeCommand> = [
 // ---------------------------------------------------------------------------
 
 /** sessionStorage key prefix for persisting user write mode overrides. */
-const STORAGE_KEY_PREFIX = "sprk-write-mode-override";
+const STORAGE_KEY_PREFIX = 'sprk-write-mode-override';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,13 +167,11 @@ function buildStorageKey(sessionId: string | undefined): string {
  * Read the persisted user override from sessionStorage.
  * Returns null if no override is stored or sessionStorage is unavailable.
  */
-function readPersistedOverride(
-  sessionId: string | undefined,
-): WriteMode | null {
+function readPersistedOverride(sessionId: string | undefined): WriteMode | null {
   try {
     const key = buildStorageKey(sessionId);
     const stored = sessionStorage.getItem(key);
-    if (stored === "stream" || stored === "diff") {
+    if (stored === 'stream' || stored === 'diff') {
       return stored;
     }
   } catch {
@@ -191,10 +183,7 @@ function readPersistedOverride(
 /**
  * Persist a user override to sessionStorage, or remove it when null.
  */
-function persistOverride(
-  sessionId: string | undefined,
-  mode: WriteMode | null,
-): void {
+function persistOverride(sessionId: string | undefined, mode: WriteMode | null): void {
   try {
     const key = buildStorageKey(sessionId);
     if (mode === null) {
@@ -220,17 +209,17 @@ function persistOverride(
  */
 export function resolveAutoMode(operationType: OperationType): WriteMode {
   switch (operationType) {
-    case "addition":
-      return "stream";
-    case "revision":
-      return "diff";
-    case "selection-revision":
-      return "diff";
-    case "reanalysis":
-      return "stream";
-    case "unknown":
+    case 'addition':
+      return 'stream';
+    case 'revision':
+      return 'diff';
+    case 'selection-revision':
+      return 'diff';
+    case 'reanalysis':
+      return 'stream';
+    case 'unknown':
     default:
-      return "stream";
+      return 'stream';
   }
 }
 
@@ -267,10 +256,8 @@ export function resolveAutoMode(operationType: OperationType): WriteMode {
  * }
  * ```
  */
-export function useWriteMode(
-  options: UseWriteModeOptions = {},
-): UseWriteModeResult {
-  const { defaultMode = "stream", sessionId } = options;
+export function useWriteMode(options: UseWriteModeOptions = {}): UseWriteModeResult {
+  const { defaultMode = 'stream', sessionId } = options;
 
   // Read persisted override on initial render only
   const [userOverride, setUserOverride] = useState<WriteMode | null>(() => {
@@ -293,8 +280,7 @@ export function useWriteMode(
 
   // Derive the current mode and source
   const mode: WriteMode = userOverride ?? defaultMode;
-  const source: WriteModeSource =
-    userOverride !== null ? "user-override" : "auto";
+  const source: WriteModeSource = userOverride !== null ? 'user-override' : 'auto';
 
   /**
    * Set a user override for write mode.
@@ -305,7 +291,7 @@ export function useWriteMode(
       setUserOverride(newMode);
       persistOverride(sessionId, newMode);
     },
-    [sessionId],
+    [sessionId]
   );
 
   /**
@@ -329,7 +315,7 @@ export function useWriteMode(
       }
       return resolveAutoMode(operationType);
     },
-    [userOverride],
+    [userOverride]
   );
 
   return {

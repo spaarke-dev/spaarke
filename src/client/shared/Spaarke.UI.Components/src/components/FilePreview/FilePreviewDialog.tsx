@@ -13,7 +13,7 @@
  *   - Open File: lazy-fetch open links, cascade desktop -> web -> download
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -30,7 +30,7 @@ import {
   makeStyles,
   shorthands,
   tokens,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Dismiss24Regular,
   Open24Regular,
@@ -38,8 +38,8 @@ import {
   LinkRegular,
   StarRegular,
   StarFilled,
-} from "@fluentui/react-icons";
-import type { IFilePreviewServices } from "./filePreviewTypes";
+} from '@fluentui/react-icons';
+import type { IFilePreviewServices } from './filePreviewTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -64,33 +64,33 @@ export interface IFilePreviewDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    width: "85vw",
-    maxWidth: "880px",
-    height: "85vh",
-    maxHeight: "85vh",
-    ...shorthands.padding("0px"),
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.overflow("hidden"),
+    width: '85vw',
+    maxWidth: '880px',
+    height: '85vh',
+    maxHeight: '85vh',
+    ...shorthands.padding('0px'),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.overflow('hidden'),
     ...shorthands.borderRadius(tokens.borderRadiusXLarge),
   },
   titleBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalS,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   titleText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     flex: 1,
     minWidth: 0,
   },
@@ -99,32 +99,32 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   body: {
-    ...shorthands.padding("0px"),
+    ...shorthands.padding('0px'),
     flex: 1,
     minHeight: 0,
-    position: "relative" as const,
+    position: 'relative' as const,
   },
   iframe: {
-    position: "absolute" as const,
+    position: 'absolute' as const,
     top: 0,
     left: 0,
-    width: "100%",
-    height: "100%",
-    borderWidth: "0px",
+    width: '100%',
+    height: '100%',
+    borderWidth: '0px',
   },
   centerContent: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
     gap: tokens.spacingVerticalM,
   },
 });
@@ -211,20 +211,20 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         return;
       }
       if (links.webUrl) {
-        window.open(links.webUrl, "_blank", "noopener,noreferrer");
+        window.open(links.webUrl, '_blank', 'noopener,noreferrer');
         return;
       }
     }
     if (previewUrl) {
-      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
     }
   }, [documentId, previewUrl, services]);
 
   // Open Record (new tab)
   const handleOpenRecord = React.useCallback(() => {
     services.navigateToEntity({
-      action: "openRecord",
-      entityName: "sprk_document",
+      action: 'openRecord',
+      entityName: 'sprk_document',
       entityId: documentId,
       openInNewWindow: true,
     });
@@ -258,15 +258,10 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         {/* Title bar */}
         <div className={styles.titleBar}>
           <DialogTitle action={null} className={styles.titleText}>
-            {documentName || "Document Preview"}
+            {documentName || 'Document Preview'}
           </DialogTitle>
           <Tooltip content="Close" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              aria-label="Close"
-              onClick={onClose}
-            />
+            <Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />
           </Tooltip>
         </div>
 
@@ -288,15 +283,9 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
               Copy Link
             </ToolbarButton>
           </Tooltip>
-          <Tooltip
-            content={inWorkspace ? "Remove from workspace" : "Add to workspace"}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={inWorkspace ? <StarFilled /> : <StarRegular />}
-              onClick={handleToggleWorkspace}
-            >
-              {inWorkspace ? "Remove from Workspace" : "Add to Workspace"}
+          <Tooltip content={inWorkspace ? 'Remove from workspace' : 'Add to workspace'} relationship="label">
+            <ToolbarButton icon={inWorkspace ? <StarFilled /> : <StarRegular />} onClick={handleToggleWorkspace}>
+              {inWorkspace ? 'Remove from Workspace' : 'Add to Workspace'}
             </ToolbarButton>
           </Tooltip>
         </Toolbar>
@@ -306,11 +295,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           <DialogContent className={styles.body}>
             {loading && (
               <div className={styles.centerContent}>
-                <Spinner
-                  size="large"
-                  label="Loading preview..."
-                  labelPosition="below"
-                />
+                <Spinner size="large" label="Loading preview..." labelPosition="below" />
               </div>
             )}
             {error && !loading && (
@@ -318,12 +303,8 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
                 <Text size={400} weight="semibold">
                   Preview not available
                 </Text>
-                <Text
-                  size={200}
-                  style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                  Unable to load the document preview. The file may be
-                  unsupported or temporarily unavailable.
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                  Unable to load the document preview. The file may be unsupported or temporarily unavailable.
                 </Text>
                 <Button appearance="primary" onClick={handleRetry}>
                   Retry
@@ -345,4 +326,4 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   );
 };
 
-FilePreviewDialog.displayName = "FilePreviewDialog";
+FilePreviewDialog.displayName = 'FilePreviewDialog';

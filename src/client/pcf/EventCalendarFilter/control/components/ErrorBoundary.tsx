@@ -5,23 +5,17 @@
  * Prevents the entire PCF control from crashing on component errors.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  shorthands,
-} from "@fluentui/react-components";
-import { ErrorCircle20Regular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Button, shorthands } from '@fluentui/react-components';
+import { ErrorCircle20Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     ...shorthands.padding(tokens.spacingVerticalL),
     backgroundColor: tokens.colorStatusDangerBackground1,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
@@ -37,7 +31,7 @@ const useStyles = makeStyles({
   },
   message: {
     color: tokens.colorNeutralForeground1,
-    textAlign: "center",
+    textAlign: 'center',
     marginBottom: tokens.spacingVerticalM,
   },
 });
@@ -51,10 +45,7 @@ interface IErrorBoundaryProps {
   children: React.ReactNode;
 }
 
-export class ErrorBoundary extends React.Component<
-  IErrorBoundaryProps,
-  IErrorBoundaryState
-> {
+export class ErrorBoundary extends React.Component<IErrorBoundaryProps, IErrorBoundaryState> {
   constructor(props: IErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -66,7 +57,7 @@ export class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     // Log error for debugging
-    console.error("[EventCalendarFilter] Component error:", error, errorInfo);
+    console.error('[EventCalendarFilter] Component error:', error, errorInfo);
   }
 
   handleRetry = (): void => {

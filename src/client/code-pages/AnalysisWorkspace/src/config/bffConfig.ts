@@ -26,13 +26,13 @@
 // ---------------------------------------------------------------------------
 
 /** Dev-environment BFF API base URL (includes /api path segment). */
-const DEFAULT_BFF_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+const DEFAULT_BFF_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
 
 /**
  * Window-level property name that the host page or PCF bridge can set
  * to communicate the BFF base URL to the workspace iframe.
  */
-const GLOBAL_BFF_URL_KEY = "__SPAARKE_BFF_BASE_URL__";
+const GLOBAL_BFF_URL_KEY = '__SPAARKE_BFF_BASE_URL__';
 
 // ---------------------------------------------------------------------------
 // URL resolution
@@ -54,9 +54,7 @@ export function getBffBaseUrl(): string {
 
   // 2. Parent frame global (when embedded in a PCF host frame)
   try {
-    const parentUrl = (window.parent as any)?.[GLOBAL_BFF_URL_KEY] as
-      | string
-      | undefined;
+    const parentUrl = (window.parent as any)?.[GLOBAL_BFF_URL_KEY] as string | undefined;
     if (parentUrl) {
       return normalizeUrl(parentUrl);
     }
@@ -76,8 +74,8 @@ export function getBffBaseUrl(): string {
  */
 function normalizeUrl(raw: string): string {
   let url = raw.trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = `https://${url}`;
   }
-  return url.replace(/\/+$/, "");
+  return url.replace(/\/+$/, '');
 }

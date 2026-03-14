@@ -10,26 +10,10 @@
  *
  * All colors via Fluent v9 semantic tokens — zero hardcoded values.
  */
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Button,
-  Tooltip,
-} from "@fluentui/react-components";
-import {
-  DocumentPdfRegular,
-  DocumentRegular,
-  TableRegular,
-  DismissRegular,
-} from "@fluentui/react-icons";
-import {
-  IUploadedFileListProps,
-  IUploadedFile,
-  UploadedFileType,
-} from "./fileUploadTypes";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Button, Tooltip } from '@fluentui/react-components';
+import { DocumentPdfRegular, DocumentRegular, TableRegular, DismissRegular } from '@fluentui/react-icons';
+import { IUploadedFileListProps, IUploadedFile, UploadedFileType } from './fileUploadTypes';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -37,16 +21,16 @@ import {
 
 const useStyles = makeStyles({
   list: {
-    listStyle: "none",
-    margin: "0px",
-    padding: "0px",
-    display: "flex",
-    flexDirection: "column",
+    listStyle: 'none',
+    margin: '0px',
+    padding: '0px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   row: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
@@ -54,27 +38,27 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalS,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
-    borderTopWidth: "1px",
-    borderRightWidth: "1px",
-    borderBottomWidth: "1px",
-    borderLeftWidth: "1px",
-    borderTopStyle: "solid",
-    borderRightStyle: "solid",
-    borderBottomStyle: "solid",
-    borderLeftStyle: "solid",
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     borderRightColor: tokens.colorNeutralStroke2,
     borderBottomColor: tokens.colorNeutralStroke2,
     borderLeftColor: tokens.colorNeutralStroke2,
-    transition: "background-color 0.15s ease",
-    ":hover": {
+    transition: 'background-color 0.15s ease',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground3,
     },
   },
   fileIcon: {
     flexShrink: 0,
     color: tokens.colorNeutralForeground3,
-    fontSize: "20px",
+    fontSize: '20px',
   },
   fileIconPdf: {
     color: tokens.colorPaletteRedForeground1,
@@ -86,17 +70,17 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
   },
   fileInfo: {
-    display: "flex",
-    flexDirection: "column",
-    flex: "1 1 auto",
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 auto',
     minWidth: 0,
-    gap: "1px",
+    gap: '1px',
   },
   fileName: {
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   fileSize: {
     color: tokens.colorNeutralForeground4,
@@ -129,31 +113,16 @@ interface IFileIconProps {
 const FileTypeIcon: React.FC<IFileIconProps> = ({ fileType }) => {
   const styles = useStyles();
 
-  if (fileType === "pdf") {
-    return (
-      <DocumentPdfRegular
-        className={mergeClasses(styles.fileIcon, styles.fileIconPdf)}
-        aria-hidden="true"
-      />
-    );
+  if (fileType === 'pdf') {
+    return <DocumentPdfRegular className={mergeClasses(styles.fileIcon, styles.fileIconPdf)} aria-hidden="true" />;
   }
 
-  if (fileType === "xlsx") {
-    return (
-      <TableRegular
-        className={mergeClasses(styles.fileIcon, styles.fileIconXlsx)}
-        aria-hidden="true"
-      />
-    );
+  if (fileType === 'xlsx') {
+    return <TableRegular className={mergeClasses(styles.fileIcon, styles.fileIconXlsx)} aria-hidden="true" />;
   }
 
   // docx (default)
-  return (
-    <DocumentRegular
-      className={mergeClasses(styles.fileIcon, styles.fileIconDocx)}
-      aria-hidden="true"
-    />
-  );
+  return <DocumentRegular className={mergeClasses(styles.fileIcon, styles.fileIconDocx)} aria-hidden="true" />;
 };
 
 // ---------------------------------------------------------------------------
@@ -207,11 +176,7 @@ const FileRow: React.FC<IFileRowProps> = ({ file, onRemove, disabled }) => {
 // UploadedFileList (exported)
 // ---------------------------------------------------------------------------
 
-export const UploadedFileList: React.FC<IUploadedFileListProps> = ({
-  files,
-  onRemove,
-  disabled = false,
-}) => {
+export const UploadedFileList: React.FC<IUploadedFileListProps> = ({ files, onRemove, disabled = false }) => {
   const styles = useStyles();
 
   if (files.length === 0) {
@@ -220,13 +185,8 @@ export const UploadedFileList: React.FC<IUploadedFileListProps> = ({
 
   return (
     <ol className={styles.list} aria-label={`Uploaded files (${files.length})`}>
-      {files.map((file) => (
-        <FileRow
-          key={file.id}
-          file={file}
-          onRemove={onRemove}
-          disabled={disabled}
-        />
+      {files.map(file => (
+        <FileRow key={file.id} file={file} onRemove={onRemove} disabled={disabled} />
       ))}
     </ol>
   );

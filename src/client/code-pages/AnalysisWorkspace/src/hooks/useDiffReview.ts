@@ -23,15 +23,15 @@
  * @see ADR-012 - Shared component library
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { RichTextEditorRef } from "@spaarke/ui-components";
-import type { SprkChatBridge } from "@spaarke/ui-components/services/SprkChatBridge";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RichTextEditorRef } from '@spaarke/ui-components';
+import type { SprkChatBridge } from '@spaarke/ui-components/services/SprkChatBridge';
 import type {
   DocumentStreamStartPayload,
   DocumentStreamTokenPayload,
   DocumentStreamEndPayload,
-} from "@spaarke/ui-components/services/SprkChatBridge";
-import type { DiffReviewState } from "../types";
+} from '@spaarke/ui-components/services/SprkChatBridge';
+import type { DiffReviewState } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,8 +68,8 @@ export interface UseDiffReviewResult {
 
 const INITIAL_DIFF_STATE: DiffReviewState = {
   isOpen: false,
-  originalText: "",
-  proposedText: "",
+  originalText: '',
+  proposedText: '',
   operationId: null,
 };
 
@@ -77,19 +77,16 @@ const INITIAL_DIFF_STATE: DiffReviewState = {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useDiffReview(
-  options: UseDiffReviewOptions,
-): UseDiffReviewResult {
+export function useDiffReview(options: UseDiffReviewOptions): UseDiffReviewResult {
   const { bridge, editorRef, enabled, pushUndoVersion } = options;
 
-  const [diffState, setDiffState] =
-    useState<DiffReviewState>(INITIAL_DIFF_STATE);
+  const [diffState, setDiffState] = useState<DiffReviewState>(INITIAL_DIFF_STATE);
   const [isDiffStreaming, setIsDiffStreaming] = useState(false);
 
   // Mutable refs for token buffering (avoids re-renders per token)
   const tokenBufferRef = useRef<string[]>([]);
   const activeDiffOpRef = useRef<string | null>(null);
-  const originalContentRef = useRef<string>("");
+  const originalContentRef = useRef<string>('');
   // Track isOpen via ref to avoid stale closures in bridge event handlers
   const isOpenRef = useRef(false);
   isOpenRef.current = diffState.isOpen;
@@ -99,7 +96,7 @@ export function useDiffReview(
     (acceptedText: string) => {
       const editor = editorRef.current;
       if (!editor) {
-        console.warn("[useDiffReview] Editor ref is null; cannot apply diff.");
+        console.warn('[useDiffReview] Editor ref is null; cannot apply diff.');
         setDiffState(INITIAL_DIFF_STATE);
         return;
       }
@@ -116,7 +113,7 @@ export function useDiffReview(
       // Close panel
       setDiffState(INITIAL_DIFF_STATE);
     },
-    [editorRef, pushUndoVersion],
+    [editorRef, pushUndoVersion]
   );
 
   // ---- Reject handler ----
@@ -136,70 +133,61 @@ export function useDiffReview(
     // Handler: document_stream_start
     // When operationType is "diff", capture the current editor content
     // and start buffering tokens instead of writing to the editor.
-    const unsubStart = bridge.subscribe(
-      "document_stream_start",
-      (payload: DocumentStreamStartPayload) => {
-        // Auto-reject any existing open diff review when a new stream starts
-        if (isOpenRef.current) {
-          setDiffState(INITIAL_DIFF_STATE);
-        }
+    const unsubStart = bridge.subscribe('document_stream_start', (payload: DocumentStreamStartPayload) => {
+      // Auto-reject any existing open diff review when a new stream starts
+      if (isOpenRef.current) {
+        setDiffState(INITIAL_DIFF_STATE);
+      }
 
-        // Only handle diff-mode streams
-        if (payload.operationType !== "diff") {
-          activeDiffOpRef.current = null;
-          return;
-        }
+      // Only handle diff-mode streams
+      if (payload.operationType !== 'diff') {
+        activeDiffOpRef.current = null;
+        return;
+      }
 
-        // Capture current editor content as the "original" for comparison
-        const currentContent = editorRef.current?.getHtml() ?? "";
-        originalContentRef.current = currentContent;
+      // Capture current editor content as the "original" for comparison
+      const currentContent = editorRef.current?.getHtml() ?? '';
+      originalContentRef.current = currentContent;
 
-        // Reset token buffer
-        tokenBufferRef.current = [];
-        activeDiffOpRef.current = payload.operationId;
-        setIsDiffStreaming(true);
-      },
-    );
+      // Reset token buffer
+      tokenBufferRef.current = [];
+      activeDiffOpRef.current = payload.operationId;
+      setIsDiffStreaming(true);
+    });
 
     // Handler: document_stream_token
     // If this is a diff-mode stream, buffer the token instead of writing.
-    const unsubToken = bridge.subscribe(
-      "document_stream_token",
-      (payload: DocumentStreamTokenPayload) => {
-        if (activeDiffOpRef.current !== payload.operationId) {
-          return; // Not a diff-mode stream, let DocumentStreamBridge handle it
-        }
-        tokenBufferRef.current.push(payload.token);
-      },
-    );
+    const unsubToken = bridge.subscribe('document_stream_token', (payload: DocumentStreamTokenPayload) => {
+      if (activeDiffOpRef.current !== payload.operationId) {
+        return; // Not a diff-mode stream, let DocumentStreamBridge handle it
+      }
+      tokenBufferRef.current.push(payload.token);
+    });
 
     // Handler: document_stream_end
     // If this is a diff-mode stream, join the buffer and open DiffReviewPanel.
-    const unsubEnd = bridge.subscribe(
-      "document_stream_end",
-      (payload: DocumentStreamEndPayload) => {
-        if (activeDiffOpRef.current !== payload.operationId) {
-          return; // Not a diff-mode stream
-        }
+    const unsubEnd = bridge.subscribe('document_stream_end', (payload: DocumentStreamEndPayload) => {
+      if (activeDiffOpRef.current !== payload.operationId) {
+        return; // Not a diff-mode stream
+      }
 
-        const proposedText = tokenBufferRef.current.join("");
-        setIsDiffStreaming(false);
+      const proposedText = tokenBufferRef.current.join('');
+      setIsDiffStreaming(false);
 
-        // Only open panel if we have proposed content and it wasn't cancelled
-        if (!payload.cancelled && proposedText.length > 0) {
-          setDiffState({
-            isOpen: true,
-            originalText: originalContentRef.current,
-            proposedText,
-            operationId: payload.operationId,
-          });
-        }
+      // Only open panel if we have proposed content and it wasn't cancelled
+      if (!payload.cancelled && proposedText.length > 0) {
+        setDiffState({
+          isOpen: true,
+          originalText: originalContentRef.current,
+          proposedText,
+          operationId: payload.operationId,
+        });
+      }
 
-        // Clean up buffer
-        tokenBufferRef.current = [];
-        activeDiffOpRef.current = null;
-      },
-    );
+      // Clean up buffer
+      tokenBufferRef.current = [];
+      activeDiffOpRef.current = null;
+    });
 
     return () => {
       unsubStart();

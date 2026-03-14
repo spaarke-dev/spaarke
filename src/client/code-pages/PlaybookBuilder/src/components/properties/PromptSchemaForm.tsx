@@ -17,7 +17,7 @@
  * @see ADR-013 - AI Architecture
  */
 
-import { useCallback, useState, useEffect, useMemo, memo } from "react";
+import { useCallback, useState, useEffect, useMemo, memo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -34,30 +34,19 @@ import {
   Badge,
   Caption1,
   Tooltip,
-} from "@fluentui/react-components";
-import type {
-  OptionOnSelectData,
-  SelectionEvents,
-  CheckboxOnChangeData,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
+import type { OptionOnSelectData, SelectionEvents, CheckboxOnChangeData } from '@fluentui/react-components';
 import {
   Add20Regular,
   Delete20Regular,
   Code20Regular,
   Link20Regular,
   LinkDismiss20Regular,
-} from "@fluentui/react-icons";
-import type {
-  PromptSchema,
-  OutputFieldDefinition,
-  OutputFieldType,
-} from "../../types/promptSchema";
-import {
-  OUTPUT_FIELD_TYPES,
-  createDefaultPromptSchema,
-} from "../../types/promptSchema";
-import { useCanvasStore } from "../../stores/canvasStore";
-import type { PlaybookNode, PlaybookEdge } from "../../types/canvas";
+} from '@fluentui/react-icons';
+import type { PromptSchema, OutputFieldDefinition, OutputFieldType } from '../../types/promptSchema';
+import { OUTPUT_FIELD_TYPES, createDefaultPromptSchema } from '../../types/promptSchema';
+import { useCanvasStore } from '../../stores/canvasStore';
+import type { PlaybookNode, PlaybookEdge } from '../../types/canvas';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -65,13 +54,13 @@ import type { PlaybookNode, PlaybookEdge } from "../../types/canvas";
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -79,19 +68,19 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   promptArea: {
-    minHeight: "80px",
+    minHeight: '80px',
   },
   constraintRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   constraintInput: {
     flex: 1,
   },
   outputFieldRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
@@ -99,28 +88,28 @@ const useStyles = makeStyles({
   },
   outputFieldName: {
     flex: 1,
-    minWidth: "100px",
+    minWidth: '100px',
   },
   outputFieldType: {
-    minWidth: "110px",
-    maxWidth: "110px",
+    minWidth: '110px',
+    maxWidth: '110px',
   },
   outputFieldDescription: {
     flex: 2,
-    minWidth: "140px",
+    minWidth: '140px',
   },
   outputFieldList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   addButton: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
   },
   choicesRow: {
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "wrap",
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
   },
@@ -130,21 +119,21 @@ const useStyles = makeStyles({
     marginRight: tokens.spacingHorizontalXS,
   },
   choicesBadge: {
-    cursor: "default",
+    cursor: 'default',
   },
   choicesLinked: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
     color: tokens.colorBrandForeground1,
     fontSize: tokens.fontSizeBase100,
   },
   footer: {
-    display: "flex",
-    justifyContent: "flex-start",
-    ...shorthands.padding(tokens.spacingVerticalS, "0"),
-    ...shorthands.borderWidth("1px", "0", "0", "0"),
-    ...shorthands.borderStyle("solid"),
+    display: 'flex',
+    justifyContent: 'flex-start',
+    ...shorthands.padding(tokens.spacingVerticalS, '0'),
+    ...shorthands.borderWidth('1px', '0', '0', '0'),
+    ...shorthands.borderStyle('solid'),
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
   },
 });
@@ -154,11 +143,11 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 const TYPE_LABELS: Record<OutputFieldType, string> = {
-  string: "String",
-  number: "Number",
-  boolean: "Boolean",
-  array: "Array",
-  object: "Object",
+  string: 'String',
+  number: 'Number',
+  boolean: 'Boolean',
+  array: 'Array',
+  object: 'Object',
 };
 
 // ---------------------------------------------------------------------------
@@ -191,36 +180,34 @@ interface DownstreamChoiceInfo {
 function findDownstreamChoiceFields(
   nodeId: string,
   edges: PlaybookEdge[],
-  nodes: PlaybookNode[],
+  nodes: PlaybookNode[]
 ): Map<string, DownstreamChoiceInfo> {
   const result = new Map<string, DownstreamChoiceInfo>();
 
   // Find all edges originating from this node
-  const outgoingEdges = edges.filter((e) => e.source === nodeId);
+  const outgoingEdges = edges.filter(e => e.source === nodeId);
 
   for (const edge of outgoingEdges) {
-    const targetNode = nodes.find((n) => n.id === edge.target);
-    if (!targetNode || targetNode.data.type !== "updateRecord") continue;
+    const targetNode = nodes.find(n => n.id === edge.target);
+    if (!targetNode || targetNode.data.type !== 'updateRecord') continue;
 
     const configJson = targetNode.data.configJson;
     if (!configJson) continue;
 
     try {
       const parsed = JSON.parse(configJson);
-      const fieldMappings = Array.isArray(parsed.fieldMappings)
-        ? parsed.fieldMappings
-        : [];
+      const fieldMappings = Array.isArray(parsed.fieldMappings) ? parsed.fieldMappings : [];
 
       for (const mapping of fieldMappings) {
         if (
-          mapping.type === "choice" &&
+          mapping.type === 'choice' &&
           mapping.field &&
           mapping.options &&
-          typeof mapping.options === "object" &&
+          typeof mapping.options === 'object' &&
           Object.keys(mapping.options).length > 0
         ) {
           result.set(mapping.field, {
-            nodeLabel: targetNode.data.label || "Update Record",
+            nodeLabel: targetNode.data.label || 'Update Record',
             nodeOutputVariable: targetNode.data.outputVariable || targetNode.id,
             fieldName: mapping.field,
             options: Object.keys(mapping.options),
@@ -244,7 +231,7 @@ function findDownstreamChoiceFields(
  */
 function resolveLinkedOptions(
   choicesRef: string,
-  downstreamChoices: Map<string, DownstreamChoiceInfo>,
+  downstreamChoices: Map<string, DownstreamChoiceInfo>
 ): string[] | undefined {
   // Format: "downstream:{nodeVar}.{fieldName}"
   const match = choicesRef.match(/^downstream:[^.]+\.(.+)$/);
@@ -283,14 +270,12 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
   const styles = useStyles();
 
   // -- Local state derived from props --
-  const [local, setLocal] = useState<PromptSchema>(
-    () => schema ?? createDefaultPromptSchema(),
-  );
+  const [local, setLocal] = useState<PromptSchema>(() => schema ?? createDefaultPromptSchema());
   // taskTouched removed — Task field is now optional (override only)
 
   // -- Downstream $choices discovery from canvas state --
-  const canvasNodes = useCanvasStore((s) => s.nodes);
-  const canvasEdges = useCanvasStore((s) => s.edges);
+  const canvasNodes = useCanvasStore(s => s.nodes);
+  const canvasEdges = useCanvasStore(s => s.edges);
 
   const downstreamChoices = useMemo(() => {
     if (!nodeId) return new Map<string, DownstreamChoiceInfo>();
@@ -312,7 +297,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
       setLocal(next);
       onChange(next);
     },
-    [onChange],
+    [onChange]
   );
 
   // -----------------------------------------------------------------------
@@ -330,7 +315,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, emit],
+    [local, emit]
   );
 
   // -----------------------------------------------------------------------
@@ -347,7 +332,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, emit],
+    [local, emit]
   );
 
   // handleTaskBlur removed — Task field no longer validates on blur
@@ -372,7 +357,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, constraints, emit],
+    [local, constraints, emit]
   );
 
   const handleRemoveConstraint = useCallback(
@@ -386,7 +371,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, constraints, emit],
+    [local, constraints, emit]
   );
 
   const handleAddConstraint = useCallback(() => {
@@ -394,7 +379,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
       ...local,
       instruction: {
         ...local.instruction,
-        constraints: [...constraints, ""],
+        constraints: [...constraints, ''],
       },
     });
   }, [local, constraints, emit]);
@@ -417,7 +402,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, outputFields, emit],
+    [local, outputFields, emit]
   );
 
   const handleRemoveOutputField = useCallback(
@@ -433,14 +418,14 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
               : undefined,
       });
     },
-    [local, outputFields, emit],
+    [local, outputFields, emit]
   );
 
   const handleAddOutputField = useCallback(() => {
     const newField: OutputFieldDefinition = {
-      name: "",
-      type: "string",
-      description: "",
+      name: '',
+      type: 'string',
+      description: '',
     };
     emit({
       ...local,
@@ -486,7 +471,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, outputFields, emit],
+    [local, outputFields, emit]
   );
 
   // -----------------------------------------------------------------------
@@ -507,7 +492,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         },
       });
     },
-    [local, outputFields, emit],
+    [local, outputFields, emit]
   );
 
   // -----------------------------------------------------------------------
@@ -522,21 +507,16 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
         <Textarea
           size="small"
           className={styles.promptArea}
-          value={local.instruction.role ?? ""}
+          value={local.instruction.role ?? ''}
           onChange={handleRoleChange}
           placeholder="e.g., You are a document analysis assistant..."
           resize="vertical"
         />
-        <Text className={styles.fieldHint}>
-          System-level identity that defines the AI's persona
-        </Text>
+        <Text className={styles.fieldHint}>System-level identity that defines the AI's persona</Text>
       </div>
 
       {/* Task */}
-      <Field
-        validationMessage={taskError}
-        validationState={taskError ? "error" : "none"}
-      >
+      <Field validationMessage={taskError} validationState={taskError ? 'error' : 'none'}>
         <Label size="small">Task</Label>
         <Textarea
           size="small"
@@ -546,9 +526,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
           placeholder="Inherited from action — override here if needed"
           resize="vertical"
         />
-        <Text className={styles.fieldHint}>
-          Override the action's task instruction for this node (optional)
-        </Text>
+        <Text className={styles.fieldHint}>Override the action's task instruction for this node (optional)</Text>
       </Field>
 
       {/* Constraints */}
@@ -560,7 +538,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
               className={styles.constraintInput}
               size="small"
               value={constraint}
-              onChange={(e) => handleConstraintChange(index, e.target.value)}
+              onChange={e => handleConstraintChange(index, e.target.value)}
               placeholder="e.g., Only use information present in the document"
             />
             <Button
@@ -586,22 +564,16 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
       {/* Output Fields */}
       <div className={styles.field}>
         <Label size="small">Output Fields</Label>
-        <Text className={styles.fieldHint}>
-          Define the structure of the AI's JSON output
-        </Text>
+        <Text className={styles.fieldHint}>Define the structure of the AI's JSON output</Text>
         <div className={styles.outputFieldList}>
           {outputFields.map((field, index) => {
             // Check for matching downstream choice field
             const matchingChoice =
-              field.type === "string" && field.name
-                ? downstreamChoices.get(field.name)
-                : undefined;
+              field.type === 'string' && field.name ? downstreamChoices.get(field.name) : undefined;
             const isLinked = !!field.$choices;
 
             // If already linked, resolve the options from the reference
-            const linkedOptions = isLinked
-              ? resolveLinkedOptions(field.$choices!, downstreamChoices)
-              : undefined;
+            const linkedOptions = isLinked ? resolveLinkedOptions(field.$choices!, downstreamChoices) : undefined;
 
             return (
               <div key={index}>
@@ -610,7 +582,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                     className={styles.outputFieldName}
                     size="small"
                     value={field.name}
-                    onChange={(e) =>
+                    onChange={e =>
                       handleOutputFieldChange(index, {
                         name: e.target.value,
                       })
@@ -622,10 +594,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                     size="small"
                     value={TYPE_LABELS[field.type]}
                     selectedOptions={[field.type]}
-                    onOptionSelect={(
-                      _event: SelectionEvents,
-                      data: OptionOnSelectData,
-                    ) => {
+                    onOptionSelect={(_event: SelectionEvents, data: OptionOnSelectData) => {
                       if (data.optionValue) {
                         handleOutputFieldChange(index, {
                           type: data.optionValue as OutputFieldType,
@@ -633,7 +602,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                       }
                     }}
                   >
-                    {OUTPUT_FIELD_TYPES.map((t) => (
+                    {OUTPUT_FIELD_TYPES.map(t => (
                       <Option key={t} value={t}>
                         {TYPE_LABELS[t]}
                       </Option>
@@ -642,8 +611,8 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                   <Input
                     className={styles.outputFieldDescription}
                     size="small"
-                    value={field.description ?? ""}
-                    onChange={(e) =>
+                    value={field.description ?? ''}
+                    onChange={e =>
                       handleOutputFieldChange(index, {
                         description: e.target.value || undefined,
                       })
@@ -662,16 +631,9 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                 {/* $choices: show suggestion when a matching downstream choice exists */}
                 {matchingChoice && !isLinked && (
                   <div className={styles.choicesRow}>
-                    <Caption1 className={styles.choicesHint}>
-                      Values from: {matchingChoice.nodeLabel}
-                    </Caption1>
-                    {matchingChoice.options.map((opt) => (
-                      <Badge
-                        key={opt}
-                        size="small"
-                        appearance="outline"
-                        className={styles.choicesBadge}
-                      >
+                    <Caption1 className={styles.choicesHint}>Values from: {matchingChoice.nodeLabel}</Caption1>
+                    {matchingChoice.options.map(opt => (
+                      <Badge key={opt} size="small" appearance="outline" className={styles.choicesBadge}>
                         {opt}
                       </Badge>
                     ))}
@@ -683,9 +645,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                         size="small"
                         appearance="subtle"
                         icon={<Link20Regular />}
-                        onClick={() =>
-                          handleToggleChoices(index, matchingChoice)
-                        }
+                        onClick={() => handleToggleChoices(index, matchingChoice)}
                         aria-label="Link to downstream choices"
                       />
                     </Tooltip>
@@ -695,12 +655,10 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                 {/* $choices: show linked state with resolved labels */}
                 {isLinked && (
                   <div className={styles.choicesRow}>
-                    <Caption1 className={styles.choicesLinked}>
-                      $choices: {field.$choices}
-                    </Caption1>
+                    <Caption1 className={styles.choicesLinked}>$choices: {field.$choices}</Caption1>
                     {linkedOptions && linkedOptions.length > 0 && (
                       <>
-                        {linkedOptions.map((opt) => (
+                        {linkedOptions.map(opt => (
                           <Badge
                             key={opt}
                             size="small"
@@ -713,10 +671,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
                         ))}
                       </>
                     )}
-                    <Tooltip
-                      content="Remove $choices link"
-                      relationship="label"
-                    >
+                    <Tooltip content="Remove $choices link" relationship="label">
                       <Button
                         size="small"
                         appearance="subtle"
@@ -751,12 +706,7 @@ export const PromptSchemaForm = memo(function PromptSchemaForm({
 
       {/* Switch to JSON Editor */}
       <div className={styles.footer}>
-        <Button
-          size="small"
-          appearance="secondary"
-          icon={<Code20Regular />}
-          onClick={onSwitchToEditor}
-        >
+        <Button size="small" appearance="secondary" icon={<Code20Regular />} onClick={onSwitchToEditor}>
           Switch to JSON Editor
         </Button>
       </div>

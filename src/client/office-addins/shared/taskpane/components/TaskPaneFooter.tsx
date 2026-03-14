@@ -1,5 +1,5 @@
-import React from "react";
-import { makeStyles, tokens, Link } from "@fluentui/react-components";
+import React from 'react';
+import { makeStyles, tokens, Link } from '@fluentui/react-components';
 
 /**
  * TaskPaneFooter - Footer component for Office Add-in task pane.
@@ -10,10 +10,10 @@ import { makeStyles, tokens, Link } from "@fluentui/react-components";
 
 const useStyles = makeStyles({
   footer: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
@@ -26,27 +26,27 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   left: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   right: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   link: {
-    fontSize: "inherit",
+    fontSize: 'inherit',
   },
   status: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   statusIndicator: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorPaletteGreenBorder1,
   },
   statusIndicatorError: {
@@ -57,7 +57,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type ConnectionStatus = "connected" | "disconnected" | "connecting";
+export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 
 export interface TaskPaneFooterProps {
   /** Application version string */
@@ -79,16 +79,13 @@ export interface TaskPaneFooterProps {
 /**
  * Gets the status indicator class based on connection status.
  */
-function getStatusClass(
-  status: ConnectionStatus,
-  styles: ReturnType<typeof useStyles>,
-): string {
+function getStatusClass(status: ConnectionStatus, styles: ReturnType<typeof useStyles>): string {
   switch (status) {
-    case "connected":
+    case 'connected':
       return styles.statusIndicator;
-    case "disconnected":
+    case 'disconnected':
       return `${styles.statusIndicator} ${styles.statusIndicatorError}`;
-    case "connecting":
+    case 'connecting':
       return `${styles.statusIndicator} ${styles.statusIndicatorWarning}`;
     default:
       return styles.statusIndicator;
@@ -100,31 +97,29 @@ function getStatusClass(
  */
 function getStatusText(status: ConnectionStatus): string {
   switch (status) {
-    case "connected":
-      return "Connected";
-    case "disconnected":
-      return "Disconnected";
-    case "connecting":
-      return "Connecting...";
+    case 'connected':
+      return 'Connected';
+    case 'disconnected':
+      return 'Disconnected';
+    case 'connecting':
+      return 'Connecting...';
     default:
-      return "";
+      return '';
   }
 }
 
 export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
-  version = "1.0.1",
+  version = '1.0.1',
   buildDate,
-  appName = "Spaarke DMS",
+  appName = 'Spaarke DMS',
   connectionStatus,
   showHelpLink = false,
-  helpUrl = "https://help.spaarke.com",
+  helpUrl = 'https://help.spaarke.com',
   compact = false,
 }) => {
   const styles = useStyles();
 
-  const footerClassName = compact
-    ? `${styles.footer} ${styles.footerCompact}`
-    : styles.footer;
+  const footerClassName = compact ? `${styles.footer} ${styles.footerCompact}` : styles.footer;
 
   return (
     <footer className={footerClassName}>
@@ -132,10 +127,7 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
         <span>{appName}</span>
         {connectionStatus && (
           <div className={styles.status}>
-            <span
-              className={getStatusClass(connectionStatus, styles)}
-              aria-hidden="true"
-            />
+            <span className={getStatusClass(connectionStatus, styles)} aria-hidden="true" />
             {!compact && <span>{getStatusText(connectionStatus)}</span>}
           </div>
         )}
@@ -143,18 +135,13 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
 
       <div className={styles.right}>
         {showHelpLink && (
-          <Link
-            href={helpUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.link}
-          >
+          <Link href={helpUrl} target="_blank" rel="noopener noreferrer" className={styles.link}>
             Help
           </Link>
         )}
         <span>
           v{version}
-          {buildDate ? ` (${buildDate})` : ""}
+          {buildDate ? ` (${buildDate})` : ''}
         </span>
       </div>
     </footer>

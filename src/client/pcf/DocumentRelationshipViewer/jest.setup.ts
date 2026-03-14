@@ -7,7 +7,7 @@
  * - React Flow and d3-force mocks
  */
 
-import "@testing-library/jest-dom";
+import '@testing-library/jest-dom';
 
 // Mock Xrm.Navigation for Dataverse navigation testing
 const mockXrmNavigation = {
@@ -20,7 +20,7 @@ const mockXrmNavigation = {
 
 // Mock window.open for SharePoint file viewing
 const mockWindowOpen = jest.fn();
-Object.defineProperty(window, "open", {
+Object.defineProperty(window, 'open', {
   writable: true,
   value: mockWindowOpen,
 });

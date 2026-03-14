@@ -7,14 +7,14 @@
  * @see docs/architecture/universal-dataset-grid-architecture.md
  */
 
-import type { XrmContext } from "../utils/xrmContext";
-import type { IViewDefinition } from "../types/FetchXmlTypes";
+import type { XrmContext } from '../utils/xrmContext';
+import type { IViewDefinition } from '../types/FetchXmlTypes';
 import type {
   IGridConfiguration,
   IGridConfigurationRecord,
   IGridConfigJson,
   GridConfigViewType,
-} from "../types/ConfigurationTypes";
+} from '../types/ConfigurationTypes';
 
 /**
  * Service for reading grid configurations from sprk_gridconfiguration.
@@ -22,10 +22,7 @@ import type {
  */
 export class ConfigurationService {
   private xrm: XrmContext;
-  private cache: Map<
-    string,
-    { configs: IGridConfiguration[]; timestamp: number }
-  > = new Map();
+  private cache: Map<string, { configs: IGridConfiguration[]; timestamp: number }> = new Map();
   private cacheTTL: number = 5 * 60 * 1000; // 5 minutes
   private entityExists: boolean | null = null;
 
@@ -42,9 +39,7 @@ export class ConfigurationService {
    * @param entityLogicalName - Entity to get configurations for
    * @returns Promise resolving to array of grid configurations
    */
-  async getConfigurations(
-    entityLogicalName: string,
-  ): Promise<IGridConfiguration[]> {
+  async getConfigurations(entityLogicalName: string): Promise<IGridConfiguration[]> {
     // Check if entity exists
     if (this.entityExists === false) {
       return [];
@@ -59,34 +54,34 @@ export class ConfigurationService {
     try {
       const filter = [
         `sprk_entitylogicalname eq '${entityLogicalName}'`,
-        "statecode eq 0", // Active only
-      ].join(" and ");
+        'statecode eq 0', // Active only
+      ].join(' and ');
 
       const select = [
-        "sprk_gridconfigurationid",
-        "sprk_name",
-        "sprk_entitylogicalname",
-        "sprk_viewtype",
-        "sprk_savedviewid",
-        "sprk_fetchxml",
-        "sprk_layoutxml",
-        "sprk_configjson",
-        "sprk_isdefault",
-        "sprk_sortorder",
-        "sprk_iconname",
-        "sprk_description",
-        "statecode",
-      ].join(",");
+        'sprk_gridconfigurationid',
+        'sprk_name',
+        'sprk_entitylogicalname',
+        'sprk_viewtype',
+        'sprk_savedviewid',
+        'sprk_fetchxml',
+        'sprk_layoutxml',
+        'sprk_configjson',
+        'sprk_isdefault',
+        'sprk_sortorder',
+        'sprk_iconname',
+        'sprk_description',
+        'statecode',
+      ].join(',');
 
       const result = await this.xrm.WebApi.retrieveMultipleRecords(
-        "sprk_gridconfiguration",
-        `?$select=${select}&$filter=${filter}&$orderby=sprk_sortorder`,
+        'sprk_gridconfiguration',
+        `?$select=${select}&$filter=${filter}&$orderby=sprk_sortorder`
       );
 
       this.entityExists = true;
 
-      const configs = (result.entities as IGridConfigurationRecord[]).map(
-        (record) => this.mapRecordToConfiguration(record),
+      const configs = (result.entities as IGridConfigurationRecord[]).map(record =>
+        this.mapRecordToConfiguration(record)
       );
 
       // Cache results
@@ -97,15 +92,10 @@ export class ConfigurationService {
       // Entity might not exist - handle gracefully
       if (this.isEntityNotFoundError(error)) {
         this.entityExists = false;
-        console.debug(
-          "[ConfigurationService] sprk_gridconfiguration entity not found",
-        );
+        console.debug('[ConfigurationService] sprk_gridconfiguration entity not found');
         return [];
       }
-      console.error(
-        "[ConfigurationService] Failed to fetch configurations:",
-        error,
-      );
+      console.error('[ConfigurationService] Failed to fetch configurations:', error);
       return [];
     }
   }
@@ -115,13 +105,11 @@ export class ConfigurationService {
    * @param entityLogicalName - Entity to get default for
    * @returns Promise resolving to default configuration or undefined
    */
-  async getDefaultConfiguration(
-    entityLogicalName: string,
-  ): Promise<IGridConfiguration | undefined> {
+  async getDefaultConfiguration(entityLogicalName: string): Promise<IGridConfiguration | undefined> {
     const configs = await this.getConfigurations(entityLogicalName);
 
     // Find configuration marked as default
-    const defaultConfig = configs.find((c) => c.isDefault);
+    const defaultConfig = configs.find(c => c.isDefault);
     if (defaultConfig) {
       return defaultConfig;
     }
@@ -135,12 +123,10 @@ export class ConfigurationService {
    * @param configurationId - Configuration ID (sprk_gridconfigurationid)
    * @returns Promise resolving to configuration or undefined
    */
-  async getConfigurationById(
-    configurationId: string,
-  ): Promise<IGridConfiguration | undefined> {
+  async getConfigurationById(configurationId: string): Promise<IGridConfiguration | undefined> {
     // Check cache first
     for (const cached of this.cache.values()) {
-      const found = cached.configs.find((c) => c.id === configurationId);
+      const found = cached.configs.find(c => c.id === configurationId);
       if (found) {
         return found;
       }
@@ -153,25 +139,25 @@ export class ConfigurationService {
 
     try {
       const select = [
-        "sprk_gridconfigurationid",
-        "sprk_name",
-        "sprk_entitylogicalname",
-        "sprk_viewtype",
-        "sprk_savedviewid",
-        "sprk_fetchxml",
-        "sprk_layoutxml",
-        "sprk_configjson",
-        "sprk_isdefault",
-        "sprk_sortorder",
-        "sprk_iconname",
-        "sprk_description",
-        "statecode",
-      ].join(",");
+        'sprk_gridconfigurationid',
+        'sprk_name',
+        'sprk_entitylogicalname',
+        'sprk_viewtype',
+        'sprk_savedviewid',
+        'sprk_fetchxml',
+        'sprk_layoutxml',
+        'sprk_configjson',
+        'sprk_isdefault',
+        'sprk_sortorder',
+        'sprk_iconname',
+        'sprk_description',
+        'statecode',
+      ].join(',');
 
       const record = await this.xrm.WebApi.retrieveRecord(
-        "sprk_gridconfiguration",
+        'sprk_gridconfiguration',
         configurationId,
-        `?$select=${select}`,
+        `?$select=${select}`
       );
 
       this.entityExists = true;
@@ -195,10 +181,10 @@ export class ConfigurationService {
       id: config.id,
       name: config.name,
       entityLogicalName: config.entityLogicalName,
-      fetchXml: config.fetchXml || "",
-      layoutXml: config.layoutXml || "",
+      fetchXml: config.fetchXml || '',
+      layoutXml: config.layoutXml || '',
       isDefault: config.isDefault,
-      viewType: "custom",
+      viewType: 'custom',
       sortOrder: config.sortOrder,
       iconName: config.iconName,
     };
@@ -210,7 +196,7 @@ export class ConfigurationService {
    * @returns Array of view definitions
    */
   toViewDefinitions(configs: IGridConfiguration[]): IViewDefinition[] {
-    return configs.map((c) => this.toViewDefinition(c));
+    return configs.map(c => this.toViewDefinition(c));
   }
 
   /**
@@ -237,8 +223,8 @@ export class ConfigurationService {
     try {
       // Try to fetch a single record to check if entity exists
       await this.xrm.WebApi.retrieveMultipleRecords(
-        "sprk_gridconfiguration",
-        "?$top=1&$select=sprk_gridconfigurationid",
+        'sprk_gridconfiguration',
+        '?$top=1&$select=sprk_gridconfigurationid'
       );
       this.entityExists = true;
       return true;
@@ -259,19 +245,14 @@ export class ConfigurationService {
   /**
    * Map Dataverse record to IGridConfiguration
    */
-  private mapRecordToConfiguration(
-    record: IGridConfigurationRecord,
-  ): IGridConfiguration {
+  private mapRecordToConfiguration(record: IGridConfigurationRecord): IGridConfiguration {
     let configJson: IGridConfigJson | undefined;
 
     if (record.sprk_configjson) {
       try {
         configJson = JSON.parse(record.sprk_configjson) as IGridConfigJson;
       } catch {
-        console.warn(
-          "[ConfigurationService] Failed to parse configjson for",
-          record.sprk_name,
-        );
+        console.warn('[ConfigurationService] Failed to parse configjson for', record.sprk_name);
       }
     }
 
@@ -298,10 +279,7 @@ export class ConfigurationService {
   private isEntityNotFoundError(error: unknown): boolean {
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
-      return (
-        message.includes("entity") &&
-        (message.includes("not found") || message.includes("doesn't exist"))
-      );
+      return message.includes('entity') && (message.includes('not found') || message.includes("doesn't exist"));
     }
     return false;
   }
@@ -316,4 +294,4 @@ export type {
   IRowFormattingRule,
   IGridFeatures,
   GridConfigViewType,
-} from "../types/ConfigurationTypes";
+} from '../types/ConfigurationTypes';

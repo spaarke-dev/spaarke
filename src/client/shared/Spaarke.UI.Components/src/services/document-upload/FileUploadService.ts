@@ -10,14 +10,9 @@
  * @version 1.0.0
  */
 
-import { SdapApiClient } from "./SdapApiClient";
-import type {
-  ILogger,
-  SpeFileMetadata,
-  ServiceResult,
-  FileUploadRequest,
-} from "./types";
-import { consoleLogger } from "./types";
+import { SdapApiClient } from './SdapApiClient';
+import type { ILogger, SpeFileMetadata, ServiceResult, FileUploadRequest } from './types';
+import { consoleLogger } from './types';
 
 /**
  * Service for uploading files to SharePoint Embedded.
@@ -27,7 +22,7 @@ export class FileUploadService {
 
   constructor(
     private readonly apiClient: SdapApiClient,
-    logger?: ILogger,
+    logger?: ILogger
   ) {
     this.logger = logger ?? consoleLogger;
   }
@@ -38,11 +33,9 @@ export class FileUploadService {
    * @param request - File upload request
    * @returns Service result with SPE file metadata
    */
-  async uploadFile(
-    request: FileUploadRequest,
-  ): Promise<ServiceResult<SpeFileMetadata>> {
+  async uploadFile(request: FileUploadRequest): Promise<ServiceResult<SpeFileMetadata>> {
     try {
-      this.logger.info("FileUploadService", "Starting file upload", {
+      this.logger.info('FileUploadService', 'Starting file upload', {
         fileName: request.file.name,
         fileSize: request.file.size,
         driveId: request.driveId,
@@ -50,11 +43,11 @@ export class FileUploadService {
 
       // Validate request
       if (!request.file) {
-        return { success: false, error: "No file provided" };
+        return { success: false, error: 'No file provided' };
       }
 
       if (!request.driveId) {
-        return { success: false, error: "No drive ID provided" };
+        return { success: false, error: 'No drive ID provided' };
       }
 
       // Upload file via SDAP API (authentication handled by ITokenProvider)
@@ -69,11 +62,11 @@ export class FileUploadService {
         ...apiResponse,
         driveItemId: apiResponse.id,
         fileName: apiResponse.name,
-        sharePointUrl: apiResponse.webUrl || "",
+        sharePointUrl: apiResponse.webUrl || '',
         fileSize: apiResponse.size,
       };
 
-      this.logger.info("FileUploadService", "File uploaded successfully", {
+      this.logger.info('FileUploadService', 'File uploaded successfully', {
         fileName: speMetadata.fileName,
         driveItemId: speMetadata.driveItemId,
         sharePointUrl: speMetadata.sharePointUrl,
@@ -81,14 +74,11 @@ export class FileUploadService {
 
       return { success: true, data: speMetadata };
     } catch (error) {
-      this.logger.error("FileUploadService", "File upload failed", error);
+      this.logger.error('FileUploadService', 'File upload failed', error);
 
       return {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown error occurred during file upload",
+        error: error instanceof Error ? error.message : 'Unknown error occurred during file upload',
       };
     }
   }

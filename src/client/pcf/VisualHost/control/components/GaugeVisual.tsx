@@ -10,15 +10,10 @@
  * Layout: Pure CSS Grid with auto-fill + minmax() — same pattern as MetricCardMatrix.
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type {
-  IAggregatedDataPoint,
-  ICardConfig,
-  ColorTokenSet,
-  IColorThreshold,
-} from "../types";
-import { formatValue } from "../utils/valueFormatters";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { IAggregatedDataPoint, ICardConfig, ColorTokenSet, IColorThreshold } from '../types';
+import { formatValue } from '../utils/valueFormatters';
 
 // ============= Props =============
 
@@ -44,9 +39,9 @@ const GAUGE_GAP = 8;
 
 /** Card size -> CSS min-width for auto-fill grid */
 const CARD_SIZE_MAP: Record<string, string> = {
-  small: "80px",
-  medium: "100px",
-  large: "160px",
+  small: '80px',
+  medium: '100px',
+  large: '160px',
 };
 
 // SVG geometry constants
@@ -74,27 +69,27 @@ interface IGaugeColorTokens {
  */
 function getTokenSetColors(tokenSet: ColorTokenSet): IGaugeColorTokens {
   switch (tokenSet) {
-    case "brand":
+    case 'brand':
       return {
         arcColor: tokens.colorBrandBackground,
         valueTextColor: tokens.colorBrandForeground1,
       };
-    case "warning":
+    case 'warning':
       return {
         arcColor: tokens.colorPaletteYellowBorderActive,
         valueTextColor: tokens.colorPaletteYellowForeground2,
       };
-    case "danger":
+    case 'danger':
       return {
         arcColor: tokens.colorPaletteRedBorderActive,
         valueTextColor: tokens.colorPaletteRedForeground1,
       };
-    case "success":
+    case 'success':
       return {
         arcColor: tokens.colorPaletteGreenBorderActive,
         valueTextColor: tokens.colorPaletteGreenForeground1,
       };
-    case "neutral":
+    case 'neutral':
     default:
       return {
         arcColor: tokens.colorNeutralStroke1,
@@ -107,23 +102,20 @@ function getTokenSetColors(tokenSet: ColorTokenSet): IGaugeColorTokens {
  * Resolve gauge arc color based on config and data point value.
  * Mirrors the resolveCardColors logic from MetricCardMatrix.
  */
-function resolveGaugeColor(
-  dp: IAggregatedDataPoint,
-  config?: ICardConfig,
-): IGaugeColorTokens {
+function resolveGaugeColor(dp: IAggregatedDataPoint, config?: ICardConfig): IGaugeColorTokens {
   if (!config) {
     return { arcColor: tokens.colorBrandBackground };
   }
 
   switch (config.colorSource) {
-    case "optionSetColor": {
+    case 'optionSetColor': {
       if (dp.color) {
         return { arcColor: dp.color };
       }
       return { arcColor: tokens.colorNeutralStroke1 };
     }
 
-    case "valueThreshold": {
+    case 'valueThreshold': {
       if (!config.colorThresholds || config.colorThresholds.length === 0) {
         return { arcColor: tokens.colorBrandBackground };
       }
@@ -134,20 +126,20 @@ function resolveGaugeColor(
           return getTokenSetColors(threshold.tokenSet);
         }
       }
-      return getTokenSetColors("neutral");
+      return getTokenSetColors('neutral');
     }
 
-    case "signBased": {
+    case 'signBased': {
       const invert = config.invertSign ?? false;
       if (dp.value < 0) {
-        return getTokenSetColors(invert ? "success" : "danger");
+        return getTokenSetColors(invert ? 'success' : 'danger');
       } else if (dp.value > 0) {
-        return getTokenSetColors(invert ? "danger" : "success");
+        return getTokenSetColors(invert ? 'danger' : 'success');
       }
-      return getTokenSetColors("neutral");
+      return getTokenSetColors('neutral');
     }
 
-    case "none":
+    case 'none':
     default:
       return { arcColor: tokens.colorBrandBackground };
   }
@@ -159,12 +151,7 @@ function resolveGaugeColor(
  * Convert polar coordinates to cartesian for SVG path commands.
  * Angle 0 = right (3 o'clock), increases counter-clockwise.
  */
-function polarToCartesian(
-  cx: number,
-  cy: number,
-  radius: number,
-  angleDegrees: number,
-): { x: number; y: number } {
+function polarToCartesian(cx: number, cy: number, radius: number, angleDegrees: number): { x: number; y: number } {
   const angleRad = (angleDegrees * Math.PI) / 180;
   return {
     x: cx + radius * Math.cos(angleRad),
@@ -177,13 +164,7 @@ function polarToCartesian(
  * Angles: 180 = left (9 o'clock), 0 = right (3 o'clock).
  * Arc sweeps from left to right (180 -> 0) for a bottom-up semicircle.
  */
-function describeArc(
-  cx: number,
-  cy: number,
-  radius: number,
-  startAngleDeg: number,
-  endAngleDeg: number,
-): string {
+function describeArc(cx: number, cy: number, radius: number, startAngleDeg: number, endAngleDeg: number): string {
   const start = polarToCartesian(cx, cy, radius, startAngleDeg);
   const end = polarToCartesian(cx, cy, radius, endAngleDeg);
 
@@ -193,19 +174,7 @@ function describeArc(
 
   // sweep-flag = 1 means clockwise in SVG (y-axis down), which draws
   // the arc UPWARD from left to right — correct for a gauge semicircle.
-  return [
-    "M",
-    start.x,
-    start.y,
-    "A",
-    radius,
-    radius,
-    0,
-    largeArcFlag,
-    1,
-    end.x,
-    end.y,
-  ].join(" ");
+  return ['M', start.x, start.y, 'A', radius, radius, 0, largeArcFlag, 1, end.x, end.y].join(' ');
 }
 
 // ============= Sort Utilities =============
@@ -213,22 +182,19 @@ function describeArc(
 /**
  * Sort data points according to config sortBy (same logic as MetricCardMatrix)
  */
-function sortDataPoints(
-  points: IAggregatedDataPoint[],
-  sortBy: string,
-): IAggregatedDataPoint[] {
+function sortDataPoints(points: IAggregatedDataPoint[], sortBy: string): IAggregatedDataPoint[] {
   const sorted = [...points];
   switch (sortBy) {
-    case "value":
+    case 'value':
       sorted.sort((a, b) => b.value - a.value);
       break;
-    case "valueAsc":
+    case 'valueAsc':
       sorted.sort((a, b) => a.value - b.value);
       break;
-    case "optionSetOrder":
+    case 'optionSetOrder':
       sorted.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
       break;
-    case "label":
+    case 'label':
     default:
       sorted.sort((a, b) => a.label.localeCompare(b.label));
       break;
@@ -240,56 +206,56 @@ function sortDataPoints(
 
 const useStyles = makeStyles({
   wrapper: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    boxSizing: "border-box",
-    marginBottom: "20px",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    boxSizing: 'border-box',
+    marginBottom: '20px',
   },
   title: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    paddingBottom: "4px",
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    paddingBottom: '4px',
     flexShrink: 0,
   },
   grid: {
-    display: "grid",
+    display: 'grid',
     gap: `${GAUGE_GAP}px`,
   },
   gaugeContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box",
-    padding: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    padding: '2px',
   },
   gaugeSvg: {
-    width: "100%",
-    height: "auto",
+    width: '100%',
+    height: 'auto',
   },
   gaugeLabel: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
     lineHeight: tokens.lineHeightBase200,
-    textAlign: "center",
-    marginTop: "2px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    maxWidth: "100%",
+    textAlign: 'center',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '100%',
   },
   noDataWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    width: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    width: '100%',
     padding: tokens.spacingVerticalM,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
   noDataText: {
     fontSize: tokens.fontSizeBase300,
@@ -312,14 +278,9 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
   const dp = dataPoint;
 
   // Resolve display format
-  const effectiveFormat =
-    dp.valueFormat ?? config?.valueFormat ?? "shortNumber";
-  const effectiveNullDisplay = config?.nullDisplay ?? "\u2014";
-  const formattedValue = formatValue(
-    dp.value,
-    effectiveFormat,
-    effectiveNullDisplay,
-  );
+  const effectiveFormat = dp.valueFormat ?? config?.valueFormat ?? 'shortNumber';
+  const effectiveNullDisplay = config?.nullDisplay ?? '\u2014';
+  const formattedValue = formatValue(dp.value, effectiveFormat, effectiveNullDisplay);
 
   // Resolve color
   const colorTokens = resolveGaugeColor(dp, config);
@@ -337,35 +298,18 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
   const fgEndAngle = 180 - fillFraction * 180;
 
   // Background arc path (always full semicircle)
-  const bgArcPath = describeArc(
-    ARC_CENTER_X,
-    ARC_CENTER_Y,
-    ARC_RADIUS,
-    bgStartAngle,
-    bgEndAngle,
-  );
+  const bgArcPath = describeArc(ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS, bgStartAngle, bgEndAngle);
 
   // Foreground arc path (partial, proportional to value)
   // Only render if there is measurable fill
   const hasFill = fillFraction > 0.005;
-  const fgArcPath = hasFill
-    ? describeArc(
-        ARC_CENTER_X,
-        ARC_CENTER_Y,
-        ARC_RADIUS,
-        fgStartAngle,
-        fgEndAngle,
-      )
-    : "";
+  const fgArcPath = hasFill ? describeArc(ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS, fgStartAngle, fgEndAngle) : '';
 
   // Endpoint dot position (at the end of the foreground arc)
-  const dotPos = hasFill
-    ? polarToCartesian(ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS, fgEndAngle)
-    : null;
+  const dotPos = hasFill ? polarToCartesian(ARC_CENTER_X, ARC_CENTER_Y, ARC_RADIUS, fgEndAngle) : null;
 
   // Value text position (centered in the semicircle)
-  const valueFontSize =
-    formattedValue.length <= 2 ? 28 : formattedValue.length <= 4 ? 22 : 18;
+  const valueFontSize = formattedValue.length <= 2 ? 28 : formattedValue.length <= 4 ? 22 : 18;
 
   return (
     <div
@@ -404,14 +348,7 @@ const SingleGauge: React.FC<ISingleGaugeProps> = ({ dataPoint, config }) => {
         )}
 
         {/* Endpoint dot at the tip of the foreground arc */}
-        {hasFill && dotPos && (
-          <circle
-            cx={dotPos.x}
-            cy={dotPos.y}
-            r={DOT_RADIUS}
-            fill={colorTokens.arcColor}
-          />
-        )}
+        {hasFill && dotPos && <circle cx={dotPos.x} cy={dotPos.y} r={DOT_RADIUS} fill={colorTokens.arcColor} />}
 
         {/* Center value text */}
         <text
@@ -450,8 +387,8 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
   const styles = useStyles();
 
   const config = cardConfig;
-  const effectiveCardSize = config?.cardSize ?? "medium";
-  const effectiveSortBy = config?.sortBy ?? "label";
+  const effectiveCardSize = config?.cardSize ?? 'medium';
+  const effectiveSortBy = config?.sortBy ?? 'label';
   const effectiveColumns = config?.columns ?? columnsProp;
   const effectiveMaxCards = config?.maxCards;
   const showTitle = config?.showTitle ?? false;
@@ -465,9 +402,7 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
   const count = sortedPoints.length;
 
   // Wrapper min-height from height prop
-  const wrapperStyle: React.CSSProperties = height
-    ? { minHeight: `${height}px` }
-    : {};
+  const wrapperStyle: React.CSSProperties = height ? { minHeight: `${height}px` } : {};
 
   // No-data state
   if (count === 0) {
@@ -487,7 +422,7 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
       effectiveColumns && effectiveColumns > 0
         ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
         : `repeat(${count}, 1fr)`,
-    alignContent: "start",
+    alignContent: 'start',
   };
 
   return (
@@ -495,11 +430,7 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
       {showTitle && title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.grid} style={gridStyle}>
         {sortedPoints.map((dp, idx) => (
-          <SingleGauge
-            key={`${dp.label}-${idx}`}
-            dataPoint={dp}
-            config={config}
-          />
+          <SingleGauge key={`${dp.label}-${idx}`} dataPoint={dp} config={config} />
         ))}
       </div>
     </div>

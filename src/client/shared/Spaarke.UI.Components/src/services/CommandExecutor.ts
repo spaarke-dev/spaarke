@@ -2,33 +2,22 @@
  * CommandExecutor - Executes commands with error handling
  */
 
-import { ICommand, ICommandContext } from "../types/CommandTypes";
+import { ICommand, ICommandContext } from '../types/CommandTypes';
 
 export class CommandExecutor {
   /**
    * Execute a command with error handling and confirmation
    */
-  static async execute(
-    command: ICommand,
-    context: ICommandContext,
-  ): Promise<void> {
+  static async execute(command: ICommand, context: ICommandContext): Promise<void> {
     try {
       // Validation: Check if selection required
       if (command.requiresSelection && context.selectedRecords.length === 0) {
-        throw new Error(
-          `${command.label} requires at least one record to be selected`,
-        );
+        throw new Error(`${command.label} requires at least one record to be selected`);
       }
 
       // Validation: Check single selection
-      if (
-        command.requiresSelection &&
-        !command.multiSelectSupport &&
-        context.selectedRecords.length > 1
-      ) {
-        throw new Error(
-          `${command.label} can only be performed on a single record`,
-        );
+      if (command.requiresSelection && !command.multiSelectSupport && context.selectedRecords.length > 1) {
+        throw new Error(`${command.label} can only be performed on a single record`);
       }
 
       // Confirmation dialog (if required)
@@ -55,11 +44,7 @@ export class CommandExecutor {
       return false;
     }
 
-    if (
-      command.requiresSelection &&
-      !command.multiSelectSupport &&
-      context.selectedRecords.length > 1
-    ) {
+    if (command.requiresSelection && !command.multiSelectSupport && context.selectedRecords.length > 1) {
       return false;
     }
 

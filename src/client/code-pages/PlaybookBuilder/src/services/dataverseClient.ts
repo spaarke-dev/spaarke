@@ -18,13 +18,9 @@
  * @see spec.md - PCF Coupling Points to Replace (11 Total)
  */
 
-import {
-  getAccessToken,
-  getClientUrl,
-  isSameOriginDataverse,
-} from "./authInit";
+import { getAccessToken, getClientUrl, isSameOriginDataverse } from './authInit';
 
-const LOG_PREFIX = "[PlaybookBuilder:DataverseClient]";
+const LOG_PREFIX = '[PlaybookBuilder:DataverseClient]';
 
 export interface DataverseRecord {
   [key: string]: unknown;
@@ -42,15 +38,12 @@ function getBaseUrl(): string {
   return `${window.location.origin}/api/data/v9.2`;
 }
 
-async function fetchWithAuth(
-  url: string,
-  options: RequestInit = {},
-): Promise<Response> {
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   const headers: Record<string, string> = {
-    Accept: "application/json",
-    "OData-MaxVersion": "4.0",
-    "OData-Version": "4.0",
-    "Content-Type": "application/json; charset=utf-8",
+    Accept: 'application/json',
+    'OData-MaxVersion': '4.0',
+    'OData-Version': '4.0',
+    'Content-Type': 'application/json; charset=utf-8',
   };
 
   // When running inside Dataverse (same origin), rely on session cookies.
@@ -58,18 +51,15 @@ async function fetchWithAuth(
   if (!isSameOriginDataverse()) {
     try {
       const token = await getAccessToken();
-      headers["Authorization"] = `Bearer ${token}`;
+      headers['Authorization'] = `Bearer ${token}`;
     } catch (err) {
-      console.warn(
-        `${LOG_PREFIX} Token acquisition failed, proceeding without auth header`,
-        err,
-      );
+      console.warn(`${LOG_PREFIX} Token acquisition failed, proceeding without auth header`, err);
     }
   }
 
   const response = await fetch(url, {
     ...options,
-    credentials: "include",
+    credentials: 'include',
     headers: {
       ...headers,
       ...options.headers,
@@ -77,11 +67,8 @@ async function fetchWithAuth(
   });
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    console.error(
-      `${LOG_PREFIX} ${options.method || "GET"} ${url} failed: ${response.status}`,
-      errorBody,
-    );
+    const errorBody = await response.text().catch(() => '');
+    console.error(`${LOG_PREFIX} ${options.method || 'GET'} ${url} failed: ${response.status}`, errorBody);
     throw new Error(`Dataverse API ${response.status}: ${response.statusText}`);
   }
 
@@ -92,42 +79,33 @@ async function fetchWithAuth(
  * Create a new record in a Dataverse table.
  * @returns The ID of the created record (GUID without braces).
  */
-export async function createRecord(
-  entitySetName: string,
-  data: DataverseRecord,
-): Promise<string> {
+export async function createRecord(entitySetName: string, data: DataverseRecord): Promise<string> {
   const url = `${getBaseUrl()}/${entitySetName}`;
   const response = await fetchWithAuth(url, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify(data),
-    headers: { Prefer: "return=representation" },
+    headers: { Prefer: 'return=representation' },
   });
 
   // Extract ID from OData-EntityId header or response body
-  const entityIdHeader = response.headers.get("OData-EntityId");
+  const entityIdHeader = response.headers.get('OData-EntityId');
   if (entityIdHeader) {
     const match = entityIdHeader.match(/\(([0-9a-f-]+)\)/i);
     if (match) return match[1];
   }
 
   const body = await response.json();
-  const idKey = Object.keys(body).find(
-    (k) => k.endsWith("id") && typeof body[k] === "string",
-  );
-  if (idKey) return (body[idKey] as string).replace(/[{}]/g, "");
+  const idKey = Object.keys(body).find(k => k.endsWith('id') && typeof body[k] === 'string');
+  if (idKey) return (body[idKey] as string).replace(/[{}]/g, '');
 
-  throw new Error("Could not extract record ID from create response");
+  throw new Error('Could not extract record ID from create response');
 }
 
 /**
  * Retrieve a single record by ID.
  */
-export async function retrieveRecord(
-  entitySetName: string,
-  id: string,
-  options?: string,
-): Promise<DataverseRecord> {
-  const cleanId = id.replace(/[{}]/g, "");
+export async function retrieveRecord(entitySetName: string, id: string, options?: string): Promise<DataverseRecord> {
+  const cleanId = id.replace(/[{}]/g, '');
   let url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
   if (options) url += `?${options}`;
 
@@ -138,15 +116,11 @@ export async function retrieveRecord(
 /**
  * Update an existing record by ID.
  */
-export async function updateRecord(
-  entitySetName: string,
-  id: string,
-  data: DataverseRecord,
-): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, "");
+export async function updateRecord(entitySetName: string, id: string, data: DataverseRecord): Promise<void> {
+  const cleanId = id.replace(/[{}]/g, '');
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
   await fetchWithAuth(url, {
-    method: "PATCH",
+    method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
@@ -154,13 +128,10 @@ export async function updateRecord(
 /**
  * Delete a record by ID.
  */
-export async function deleteRecord(
-  entitySetName: string,
-  id: string,
-): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, "");
+export async function deleteRecord(entitySetName: string, id: string): Promise<void> {
+  const cleanId = id.replace(/[{}]/g, '');
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
-  await fetchWithAuth(url, { method: "DELETE" });
+  await fetchWithAuth(url, { method: 'DELETE' });
 }
 
 /**
@@ -169,7 +140,7 @@ export async function deleteRecord(
  */
 export async function retrieveMultipleRecords(
   entitySetName: string,
-  queryOptions?: string,
+  queryOptions?: string
 ): Promise<RetrieveMultipleResult> {
   let url = `${getBaseUrl()}/${entitySetName}`;
   if (queryOptions) url += `?${queryOptions}`;
@@ -179,7 +150,7 @@ export async function retrieveMultipleRecords(
 
   return {
     entities: body.value ?? [],
-    nextLink: body["@odata.nextLink"],
+    nextLink: body['@odata.nextLink'],
   };
 }
 
@@ -192,15 +163,15 @@ export async function associate(
   id: string,
   navigationProperty: string,
   relatedEntitySetName: string,
-  relatedId: string,
+  relatedId: string
 ): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, "");
-  const cleanRelatedId = relatedId.replace(/[{}]/g, "");
+  const cleanId = id.replace(/[{}]/g, '');
+  const cleanRelatedId = relatedId.replace(/[{}]/g, '');
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}/$ref`;
   await fetchWithAuth(url, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({
-      "@odata.id": `${getBaseUrl()}/${relatedEntitySetName}(${cleanRelatedId})`,
+      '@odata.id': `${getBaseUrl()}/${relatedEntitySetName}(${cleanRelatedId})`,
     }),
   });
 }
@@ -213,10 +184,10 @@ export async function disassociate(
   entitySetName: string,
   id: string,
   navigationProperty: string,
-  relatedId: string,
+  relatedId: string
 ): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, "");
-  const cleanRelatedId = relatedId.replace(/[{}]/g, "");
+  const cleanId = id.replace(/[{}]/g, '');
+  const cleanRelatedId = relatedId.replace(/[{}]/g, '');
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}(${cleanRelatedId})/$ref`;
-  await fetchWithAuth(url, { method: "DELETE" });
+  await fetchWithAuth(url, { method: 'DELETE' });
 }

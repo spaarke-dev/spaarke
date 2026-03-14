@@ -9,8 +9,8 @@
  * @see ChatEndpoints.cs - GET /api/ai/chat/playbooks
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { IPlaybookOption } from "../types";
+import { useState, useEffect, useCallback } from 'react';
+import { IPlaybookOption } from '../types';
 
 interface UseChatPlaybooksOptions {
   /** Base URL for the BFF API */
@@ -46,9 +46,7 @@ export interface IUseChatPlaybooksResult {
  * });
  * ```
  */
-export function useChatPlaybooks(
-  options: UseChatPlaybooksOptions,
-): IUseChatPlaybooksResult {
+export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlaybooksResult {
   const { apiBaseUrl, accessToken, nameFilter } = options;
 
   const [playbooks, setPlaybooks] = useState<IPlaybookOption[]>([]);
@@ -56,14 +54,14 @@ export function useChatPlaybooks(
   const [error, setError] = useState<Error | null>(null);
 
   // Normalize URL
-  const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
 
   /**
    * Extract tenant ID from JWT for X-Tenant-Id header.
    */
   const extractTenantId = (token: string): string | null => {
     try {
-      const parts = token.split(".");
+      const parts = token.split('.');
       if (parts.length !== 3) return null;
       const payload = JSON.parse(atob(parts[1]));
       return payload.tid || null;
@@ -78,47 +76,34 @@ export function useChatPlaybooks(
 
     try {
       const tenantId = extractTenantId(accessToken);
-      const params = nameFilter
-        ? `?nameFilter=${encodeURIComponent(nameFilter)}`
-        : "";
-      const response = await fetch(
-        `${baseUrl}/api/ai/chat/playbooks${params}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-            ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
-          },
+      const params = nameFilter ? `?nameFilter=${encodeURIComponent(nameFilter)}` : '';
+      const response = await fetch(`${baseUrl}/api/ai/chat/playbooks${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
         },
-      );
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Failed to load playbooks (${response.status}): ${errorText}`,
-        );
+        throw new Error(`Failed to load playbooks (${response.status}): ${errorText}`);
       }
 
       const data = await response.json();
       const playbookOptions: IPlaybookOption[] = (data.playbooks || []).map(
-        (pb: {
-          id: string;
-          name: string;
-          description?: string;
-          isPublic?: boolean;
-        }) => ({
+        (pb: { id: string; name: string; description?: string; isPublic?: boolean }) => ({
           id: pb.id,
           name: pb.name,
           description: pb.description,
           isPublic: pb.isPublic,
-        }),
+        })
       );
 
       setPlaybooks(playbookOptions);
     } catch (err: unknown) {
-      const errorObj =
-        err instanceof Error ? err : new Error("Failed to load playbooks");
+      const errorObj = err instanceof Error ? err : new Error('Failed to load playbooks');
       setError(errorObj);
     } finally {
       setIsLoading(false);

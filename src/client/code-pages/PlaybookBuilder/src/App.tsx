@@ -1,6 +1,6 @@
-import { makeStyles, tokens, Spinner, Text } from "@fluentui/react-components";
-import { useAuth } from "./hooks/useAuth";
-import { BuilderLayout } from "./components/BuilderLayout";
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import { useAuth } from './hooks/useAuth';
+import { BuilderLayout } from './components/BuilderLayout';
 
 interface AppProps {
   playbookId: string;
@@ -8,19 +8,19 @@ interface AppProps {
 
 const useStyles = makeStyles({
   loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     gap: tokens.spacingHorizontalM,
   },
   error: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorPaletteRedForeground1,
     gap: tokens.spacingVerticalM,

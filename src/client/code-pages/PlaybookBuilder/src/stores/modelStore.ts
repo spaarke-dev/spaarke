@@ -8,12 +8,12 @@
  * @see spec.md Section 8.2 — Scope Tables
  */
 
-import { create } from "zustand";
-import { retrieveMultipleRecords } from "../services/dataverseClient";
-import type { DataverseRecord } from "../services/dataverseClient";
-import type { AiModelDeployment, AiCapability } from "../types/scopeTypes";
+import { create } from 'zustand';
+import { retrieveMultipleRecords } from '../services/dataverseClient';
+import type { DataverseRecord } from '../services/dataverseClient';
+import type { AiModelDeployment, AiCapability } from '../types/scopeTypes';
 
-const LOG_PREFIX = "[PlaybookBuilder:ModelStore]";
+const LOG_PREFIX = '[PlaybookBuilder:ModelStore]';
 
 // ---------------------------------------------------------------------------
 // Dataverse → typed record mapper
@@ -21,13 +21,13 @@ const LOG_PREFIX = "[PlaybookBuilder:ModelStore]";
 
 function mapModelDeployment(record: DataverseRecord): AiModelDeployment {
   return {
-    id: (record["sprk_aimodeldeploymentid"] as string) ?? "",
-    name: (record["sprk_name"] as string) ?? "",
-    provider: (record["sprk_provider"] as string) ?? "",
-    capability: (record["sprk_capability"] as string) ?? "",
-    modelId: (record["sprk_modelid"] as string) ?? "",
-    contextWindow: (record["sprk_contextwindow"] as number) ?? 0,
-    isActive: (record["sprk_isactive"] as boolean) ?? false,
+    id: (record['sprk_aimodeldeploymentid'] as string) ?? '',
+    name: (record['sprk_name'] as string) ?? '',
+    provider: (record['sprk_provider'] as string) ?? '',
+    capability: (record['sprk_capability'] as string) ?? '',
+    modelId: (record['sprk_modelid'] as string) ?? '',
+    contextWindow: (record['sprk_contextwindow'] as number) ?? 0,
+    isActive: (record['sprk_isactive'] as boolean) ?? false,
     description: undefined,
   };
 }
@@ -76,17 +76,14 @@ export const useModelStore = create<ModelStoreState>()((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const result = await retrieveMultipleRecords(
-        "sprk_aimodeldeployments",
-        "$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive&$filter=statecode eq 0&$orderby=sprk_name",
+        'sprk_aimodeldeployments',
+        '$select=sprk_aimodeldeploymentid,sprk_name,sprk_provider,sprk_capability,sprk_modelid,sprk_contextwindow,sprk_isactive&$filter=statecode eq 0&$orderby=sprk_name'
       );
       const models = result.entities.map(mapModelDeployment);
       set({ models, isLoading: false });
-      console.info(
-        `${LOG_PREFIX} Loaded ${models.length} model deployments from Dataverse`,
-      );
+      console.info(`${LOG_PREFIX} Loaded ${models.length} model deployments from Dataverse`);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load model deployments";
+      const message = err instanceof Error ? err.message : 'Failed to load model deployments';
       console.error(`${LOG_PREFIX} ${message}`, err);
       set({ isLoading: false, error: message });
     }
@@ -95,21 +92,19 @@ export const useModelStore = create<ModelStoreState>()((set, get) => ({
   // ----- Selectors -----
 
   getActiveModels: (): AiModelDeployment[] => {
-    return get().models.filter((m) => m.isActive);
+    return get().models.filter(m => m.isActive);
   },
 
   getModelsByCapability: (capability: AiCapability): AiModelDeployment[] => {
-    return get().models.filter(
-      (m) => m.isActive && m.capability === capability,
-    );
+    return get().models.filter(m => m.isActive && m.capability === capability);
   },
 
   getChatModels: (): AiModelDeployment[] => {
-    return get().models.filter((m) => m.isActive && m.capability === "Chat");
+    return get().models.filter(m => m.isActive && m.capability === 'Chat');
   },
 
   getModelById: (id: string): AiModelDeployment | undefined => {
-    return get().models.find((m) => m.id === id);
+    return get().models.find(m => m.id === id);
   },
 
   getDefaultModel: (): AiModelDeployment | undefined => {

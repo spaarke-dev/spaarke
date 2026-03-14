@@ -23,15 +23,15 @@
  * @see ADR-015 - No auth tokens via BroadcastChannel
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
-import type { SprkChatBridge } from "../../../services/SprkChatBridge";
+import { useEffect, useRef, useCallback, useState } from 'react';
+import type { SprkChatBridge } from '../../../services/SprkChatBridge';
 import type {
   DocumentStreamStartPayload,
   DocumentStreamTokenPayload,
   DocumentStreamEndPayload,
-} from "../../../services/SprkChatBridge";
-import type { RichTextEditorRef } from "../RichTextEditor";
-import type { StreamingInsertHandle } from "../plugins/StreamingInsertPlugin";
+} from '../../../services/SprkChatBridge';
+import type { RichTextEditorRef } from '../RichTextEditor';
+import type { StreamingInsertHandle } from '../plugins/StreamingInsertPlugin';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -123,17 +123,8 @@ export interface UseDocumentStreamConsumerResult {
  * }
  * ```
  */
-export function useDocumentStreamConsumer(
-  options: UseDocumentStreamConsumerOptions,
-): UseDocumentStreamConsumerResult {
-  const {
-    bridge,
-    editorRef,
-    onBeforeStreamStart,
-    onStreamStart,
-    onStreamEnd,
-    onTokenReceived,
-  } = options;
+export function useDocumentStreamConsumer(options: UseDocumentStreamConsumerOptions): UseDocumentStreamConsumerResult {
+  const { bridge, editorRef, onBeforeStreamStart, onStreamStart, onStreamEnd, onTokenReceived } = options;
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [operationId, setOperationId] = useState<string | null>(null);
@@ -162,15 +153,12 @@ export function useDocumentStreamConsumer(
     (payload: DocumentStreamStartPayload) => {
       const editor = editorRef.current;
       if (!editor) {
-        console.warn(
-          "[useDocumentStreamConsumer] Editor ref is null; cannot start streaming.",
-        );
+        console.warn('[useDocumentStreamConsumer] Editor ref is null; cannot start streaming.');
         return;
       }
 
       // Map bridge targetPosition to editor position parameter
-      const position: "end" | "cursor" =
-        payload.targetPosition === "cursor" ? "cursor" : "end";
+      const position: 'end' | 'cursor' = payload.targetPosition === 'cursor' ? 'cursor' : 'end';
 
       try {
         // FR-07: Snapshot pre-stream state BEFORE beginning the streaming insert.
@@ -188,13 +176,10 @@ export function useDocumentStreamConsumer(
 
         onStreamStartRef.current?.(payload.operationId);
       } catch (err) {
-        console.error(
-          "[useDocumentStreamConsumer] Failed to begin streaming insert:",
-          err,
-        );
+        console.error('[useDocumentStreamConsumer] Failed to begin streaming insert:', err);
       }
     },
-    [editorRef],
+    [editorRef]
   );
 
   const handleStreamToken = useCallback(
@@ -211,12 +196,12 @@ export function useDocumentStreamConsumer(
       }
 
       editor.appendStreamToken(handle, payload.token);
-      setTokenCount((prev) => prev + 1);
+      setTokenCount(prev => prev + 1);
 
       // Latency measurement callback
       onTokenReceivedRef.current?.(payload.index, performance.now());
     },
-    [editorRef],
+    [editorRef]
   );
 
   const handleStreamEnd = useCallback(
@@ -246,7 +231,7 @@ export function useDocumentStreamConsumer(
 
       onStreamEndRef.current?.(payload.operationId, payload.cancelled);
     },
-    [editorRef],
+    [editorRef]
   );
 
   // ─────────────────────────────────────────────────────────────────────
@@ -258,15 +243,9 @@ export function useDocumentStreamConsumer(
       return;
     }
 
-    const unsubStart = bridge.subscribe(
-      "document_stream_start",
-      handleStreamStart,
-    );
-    const unsubToken = bridge.subscribe(
-      "document_stream_token",
-      handleStreamToken,
-    );
-    const unsubEnd = bridge.subscribe("document_stream_end", handleStreamEnd);
+    const unsubStart = bridge.subscribe('document_stream_start', handleStreamStart);
+    const unsubToken = bridge.subscribe('document_stream_token', handleStreamToken);
+    const unsubEnd = bridge.subscribe('document_stream_end', handleStreamEnd);
 
     return () => {
       unsubStart();

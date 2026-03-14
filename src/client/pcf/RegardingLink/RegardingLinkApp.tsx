@@ -4,21 +4,21 @@
  * Displays a navigation link to the parent (regarding) record.
  */
 
-import * as React from "react";
-import { Link, Text, makeStyles, tokens } from "@fluentui/react-components";
-import { Open16Regular } from "@fluentui/react-icons";
+import * as React from 'react';
+import { Link, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Open16Regular } from '@fluentui/react-icons';
 
 // STUB: [CONFIG] - S007: Hardcoded entity type map - must match AssociationResolver ENTITY_CONFIGS (Task 020)
 // Values correspond to sprk_event.sprk_regardingrecordtype optionset
 const ENTITY_TYPE_MAP: Record<number, string> = {
-  0: "sprk_project",
-  1: "sprk_matter",
-  2: "sprk_invoice",
-  3: "sprk_analysis",
-  4: "account",
-  5: "contact",
-  6: "sprk_workassignment",
-  7: "sprk_budget",
+  0: 'sprk_project',
+  1: 'sprk_matter',
+  2: 'sprk_invoice',
+  3: 'sprk_analysis',
+  4: 'account',
+  5: 'contact',
+  6: 'sprk_workassignment',
+  7: 'sprk_budget',
 };
 
 interface RegardingLinkAppProps {
@@ -30,24 +30,24 @@ interface RegardingLinkAppProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalXS,
   },
   link: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   emptyState: {
     color: tokens.colorNeutralForeground3,
-    fontStyle: "italic",
+    fontStyle: 'italic',
   },
   versionText: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
-    marginLeft: "auto",
+    marginLeft: 'auto',
   },
 });
 
@@ -64,10 +64,7 @@ export const RegardingLinkApp: React.FC<RegardingLinkAppProps> = ({
 
     const entityLogicalName = ENTITY_TYPE_MAP[regardingRecordType];
     if (!entityLogicalName) {
-      console.error(
-        "[RegardingLink] Unknown entity type:",
-        regardingRecordType,
-      );
+      console.error('[RegardingLink] Unknown entity type:', regardingRecordType);
       return;
     }
 
@@ -79,7 +76,7 @@ export const RegardingLinkApp: React.FC<RegardingLinkAppProps> = ({
         entityId: regardingRecordId,
       });
     } else {
-      console.error("[RegardingLink] Xrm.Navigation.openForm not available");
+      console.error('[RegardingLink] Xrm.Navigation.openForm not available');
     }
   };
 

@@ -33,9 +33,7 @@ export class MetadataService {
    * @param context - PCF context
    * @returns Environment URL or 'default' if unavailable
    */
-  private static getEnvironmentUrl(
-    context: ComponentFramework.Context<any>,
-  ): string {
+  private static getEnvironmentUrl(context: ComponentFramework.Context<any>): string {
     // Try multiple methods to get environment URL
     // context.page.getClientUrl is available in Custom Pages and Model-Driven Apps
     const clientUrl = (context as any).page?.getClientUrl?.();
@@ -52,10 +50,8 @@ export class MetadataService {
     }
 
     // Last resort: use 'default' (all queries in same org will share cache)
-    console.warn(
-      "MetadataService: Unable to determine environment URL, using default cache key",
-    );
-    return "default";
+    console.warn('MetadataService: Unable to determine environment URL, using default cache key');
+    return 'default';
   }
 
   /**
@@ -67,11 +63,7 @@ export class MetadataService {
    * @param identifier - Unique identifier (relationship name, entity name, etc.)
    * @returns Cache key string
    */
-  private static buildCacheKey(
-    env: string,
-    cacheType: string,
-    identifier: string,
-  ): string {
+  private static buildCacheKey(env: string, cacheType: string, identifier: string): string {
     return `${env}::${cacheType}::${identifier}`;
   }
 
@@ -97,14 +89,10 @@ export class MetadataService {
   static async getLookupNavProp(
     context: ComponentFramework.Context<any>,
     childEntityLogicalName: string,
-    relationshipSchemaName: string,
+    relationshipSchemaName: string
   ): Promise<string> {
     const env = this.getEnvironmentUrl(context);
-    const cacheKey = this.buildCacheKey(
-      env,
-      "lookup",
-      `${childEntityLogicalName}::${relationshipSchemaName}`,
-    );
+    const cacheKey = this.buildCacheKey(env, 'lookup', `${childEntityLogicalName}::${relationshipSchemaName}`);
 
     // Check cache first
     const cached = this.cache.get(cacheKey);
@@ -122,16 +110,13 @@ export class MetadataService {
       `)`;
 
     try {
-      const result = await context.webAPI.retrieveMultipleRecords(
-        "EntityDefinitions",
-        query,
-      );
+      const result = await context.webAPI.retrieveMultipleRecords('EntityDefinitions', query);
 
       // Defensive check: ensure entities array exists and has data
       if (!result.entities || result.entities.length === 0) {
         throw new Error(
           `Metadata query returned no results for entity '${childEntityLogicalName}'. ` +
-            `This may indicate insufficient permissions to access EntityDefinitions metadata.`,
+            `This may indicate insufficient permissions to access EntityDefinitions metadata.`
         );
       }
 
@@ -142,7 +127,7 @@ export class MetadataService {
       if (!relationships || relationships.length === 0) {
         throw new Error(
           `No ManyToOneRelationship found for schema name '${relationshipSchemaName}' ` +
-            `on entity '${childEntityLogicalName}'. Verify the relationship exists in Dataverse.`,
+            `on entity '${childEntityLogicalName}'. Verify the relationship exists in Dataverse.`
         );
       }
 
@@ -152,47 +137,36 @@ export class MetadataService {
       if (!navProp) {
         throw new Error(
           `ReferencingEntityNavigationPropertyName is null or empty for relationship '${relationshipSchemaName}'. ` +
-            `This indicates a metadata configuration issue.`,
+            `This indicates a metadata configuration issue.`
         );
       }
 
       // Cache and return THE EXACT VALUE from metadata (preserves case!)
       this.cache.set(cacheKey, navProp);
-      console.log(
-        `MetadataService: Resolved navigation property for ${relationshipSchemaName}: ${navProp}`,
-      );
+      console.log(`MetadataService: Resolved navigation property for ${relationshipSchemaName}: ${navProp}`);
       return navProp;
     } catch (error: any) {
       // Provide friendly error message for common issues
-      if (
-        error.message?.includes("401") ||
-        error.message?.includes("Unauthorized")
-      ) {
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
         throw new Error(
           `Permission denied: Unable to access EntityDefinitions metadata. ` +
             `Please ensure your user account has 'Read' permission on Entity Definitions. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
-      if (
-        error.message?.includes("404") ||
-        error.message?.includes("Not Found")
-      ) {
+      if (error.message?.includes('404') || error.message?.includes('Not Found')) {
         throw new Error(
           `Entity or relationship not found: Verify that entity '${childEntityLogicalName}' ` +
             `and relationship '${relationshipSchemaName}' exist in this Dataverse environment. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
       // Re-throw with context if not a friendly error already
-      if (
-        !error.message?.includes("Metadata query") &&
-        !error.message?.includes("Permission denied")
-      ) {
+      if (!error.message?.includes('Metadata query') && !error.message?.includes('Permission denied')) {
         throw new Error(
-          `Metadata query failed for ${childEntityLogicalName}.${relationshipSchemaName}: ${error.message}`,
+          `Metadata query failed for ${childEntityLogicalName}.${relationshipSchemaName}: ${error.message}`
         );
       }
 
@@ -214,12 +188,9 @@ export class MetadataService {
    * @returns Entity set name (plural)
    * @throws Error if metadata query fails or entity set name not found
    */
-  static async getEntitySetName(
-    context: ComponentFramework.Context<any>,
-    entityLogicalName: string,
-  ): Promise<string> {
+  static async getEntitySetName(context: ComponentFramework.Context<any>, entityLogicalName: string): Promise<string> {
     const env = this.getEnvironmentUrl(context);
-    const cacheKey = this.buildCacheKey(env, "entityset", entityLogicalName);
+    const cacheKey = this.buildCacheKey(env, 'entityset', entityLogicalName);
 
     // Check cache first
     const cached = this.cache.get(cacheKey);
@@ -231,16 +202,13 @@ export class MetadataService {
     const query = `?$filter=LogicalName eq '${entityLogicalName}'&$select=EntitySetName`;
 
     try {
-      const result = await context.webAPI.retrieveMultipleRecords(
-        "EntityDefinitions",
-        query,
-      );
+      const result = await context.webAPI.retrieveMultipleRecords('EntityDefinitions', query);
 
       // Defensive check: ensure entities array exists and has data
       if (!result.entities || result.entities.length === 0) {
         throw new Error(
           `Metadata query returned no results for entity '${entityLogicalName}'. ` +
-            `Verify the entity exists in Dataverse or check metadata access permissions.`,
+            `Verify the entity exists in Dataverse or check metadata access permissions.`
         );
       }
 
@@ -250,7 +218,7 @@ export class MetadataService {
       if (!entitySetName) {
         throw new Error(
           `EntitySetName is null or empty for entity '${entityLogicalName}'. ` +
-            `This indicates a metadata configuration issue.`,
+            `This indicates a metadata configuration issue.`
         );
       }
 
@@ -259,35 +227,24 @@ export class MetadataService {
       return entitySetName;
     } catch (error: any) {
       // Provide friendly error message for common issues
-      if (
-        error.message?.includes("401") ||
-        error.message?.includes("Unauthorized")
-      ) {
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
         throw new Error(
           `Permission denied: Unable to access EntityDefinitions metadata. ` +
             `Please ensure your user account has 'Read' permission on Entity Definitions. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
-      if (
-        error.message?.includes("404") ||
-        error.message?.includes("Not Found")
-      ) {
+      if (error.message?.includes('404') || error.message?.includes('Not Found')) {
         throw new Error(
           `Entity not found: Verify that entity '${entityLogicalName}' exists in this Dataverse environment. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
       // Re-throw with context if not a friendly error already
-      if (
-        !error.message?.includes("Metadata query") &&
-        !error.message?.includes("Permission denied")
-      ) {
-        throw new Error(
-          `Failed to get EntitySetName for '${entityLogicalName}': ${error.message}`,
-        );
+      if (!error.message?.includes('Metadata query') && !error.message?.includes('Permission denied')) {
+        throw new Error(`Failed to get EntitySetName for '${entityLogicalName}': ${error.message}`);
       }
 
       throw error;
@@ -313,14 +270,10 @@ export class MetadataService {
   static async getCollectionNavProp(
     context: ComponentFramework.Context<any>,
     parentEntityLogicalName: string,
-    relationshipSchemaName: string,
+    relationshipSchemaName: string
   ): Promise<string> {
     const env = this.getEnvironmentUrl(context);
-    const cacheKey = this.buildCacheKey(
-      env,
-      "collection",
-      `${parentEntityLogicalName}::${relationshipSchemaName}`,
-    );
+    const cacheKey = this.buildCacheKey(env, 'collection', `${parentEntityLogicalName}::${relationshipSchemaName}`);
 
     // Check cache first
     const cached = this.cache.get(cacheKey);
@@ -338,16 +291,13 @@ export class MetadataService {
       `)`;
 
     try {
-      const result = await context.webAPI.retrieveMultipleRecords(
-        "EntityDefinitions",
-        query,
-      );
+      const result = await context.webAPI.retrieveMultipleRecords('EntityDefinitions', query);
 
       // Defensive check: ensure entities array exists and has data
       if (!result.entities || result.entities.length === 0) {
         throw new Error(
           `Metadata query returned no results for entity '${parentEntityLogicalName}'. ` +
-            `This may indicate insufficient permissions to access EntityDefinitions metadata.`,
+            `This may indicate insufficient permissions to access EntityDefinitions metadata.`
         );
       }
 
@@ -358,7 +308,7 @@ export class MetadataService {
       if (!relationships || relationships.length === 0) {
         throw new Error(
           `No OneToManyRelationship found for schema name '${relationshipSchemaName}' ` +
-            `on entity '${parentEntityLogicalName}'. Verify the relationship exists in Dataverse.`,
+            `on entity '${parentEntityLogicalName}'. Verify the relationship exists in Dataverse.`
         );
       }
 
@@ -368,7 +318,7 @@ export class MetadataService {
       if (!navProp) {
         throw new Error(
           `ReferencedEntityNavigationPropertyName is null or empty for relationship '${relationshipSchemaName}'. ` +
-            `This indicates a metadata configuration issue.`,
+            `This indicates a metadata configuration issue.`
         );
       }
 
@@ -377,35 +327,26 @@ export class MetadataService {
       return navProp;
     } catch (error: any) {
       // Provide friendly error message for common issues
-      if (
-        error.message?.includes("401") ||
-        error.message?.includes("Unauthorized")
-      ) {
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
         throw new Error(
           `Permission denied: Unable to access EntityDefinitions metadata. ` +
             `Please ensure your user account has 'Read' permission on Entity Definitions. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
-      if (
-        error.message?.includes("404") ||
-        error.message?.includes("Not Found")
-      ) {
+      if (error.message?.includes('404') || error.message?.includes('Not Found')) {
         throw new Error(
           `Entity or relationship not found: Verify that entity '${parentEntityLogicalName}' ` +
             `and relationship '${relationshipSchemaName}' exist in this Dataverse environment. ` +
-            `Original error: ${error.message}`,
+            `Original error: ${error.message}`
         );
       }
 
       // Re-throw with context if not a friendly error already
-      if (
-        !error.message?.includes("Metadata query") &&
-        !error.message?.includes("Permission denied")
-      ) {
+      if (!error.message?.includes('Metadata query') && !error.message?.includes('Permission denied')) {
         throw new Error(
-          `Metadata query failed for ${parentEntityLogicalName}.${relationshipSchemaName}: ${error.message}`,
+          `Metadata query failed for ${parentEntityLogicalName}.${relationshipSchemaName}: ${error.message}`
         );
       }
 

@@ -19,16 +19,12 @@ export class MockBroadcastChannel {
 
   postMessage(data: unknown): void {
     if (this.closed) {
-      throw new DOMException("BroadcastChannel is closed");
+      throw new DOMException('BroadcastChannel is closed');
     }
     for (const instance of MockBroadcastChannel.instances) {
-      if (
-        instance !== this &&
-        instance.name === this.name &&
-        !instance.closed
-      ) {
+      if (instance !== this && instance.name === this.name && !instance.closed) {
         if (instance.onmessage) {
-          instance.onmessage(new MessageEvent("message", { data }));
+          instance.onmessage(new MessageEvent('message', { data }));
         }
       }
     }
@@ -63,8 +59,7 @@ export class MockBroadcastChannel {
    */
   static install(): () => void {
     const original = (globalThis as Record<string, unknown>).BroadcastChannel;
-    (globalThis as Record<string, unknown>).BroadcastChannel =
-      MockBroadcastChannel;
+    (globalThis as Record<string, unknown>).BroadcastChannel = MockBroadcastChannel;
     return () => {
       MockBroadcastChannel.reset();
       if (original) {

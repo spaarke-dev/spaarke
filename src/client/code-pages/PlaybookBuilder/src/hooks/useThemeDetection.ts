@@ -12,17 +12,12 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useState, useEffect, useCallback } from "react";
-import {
-  type Theme,
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-} from "@fluentui/react-components";
+import { useState, useEffect, useCallback } from 'react';
+import { type Theme, webLightTheme, webDarkTheme, teamsHighContrastTheme } from '@fluentui/react-components';
 
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-export type ThemeName = "light" | "dark" | "highcontrast";
+export type ThemeName = 'light' | 'dark' | 'highcontrast';
 
 export interface UseThemeDetectionResult {
   theme: Theme;
@@ -32,9 +27,8 @@ export interface UseThemeDetectionResult {
 
 function getThemeFromUrlParam(params?: URLSearchParams): ThemeName | null {
   if (!params) return null;
-  const value = params.get("theme")?.toLowerCase();
-  if (value === "dark" || value === "light" || value === "highcontrast")
-    return value;
+  const value = params.get('theme')?.toLowerCase();
+  if (value === 'dark' || value === 'light' || value === 'highcontrast') return value;
   return null;
 }
 
@@ -48,8 +42,7 @@ function getThemeFromXrmFrameWalk(): ThemeName | null {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top!);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
   } catch {
     /* cross-origin */
   }
@@ -63,7 +56,7 @@ function getThemeFromXrmFrameWalk(): ThemeName | null {
         const themeInfo = ctx.getCurrentTheme();
         if (themeInfo?.backgroundcolor) {
           const dark = isColorDark(themeInfo.backgroundcolor);
-          if (dark !== null) return dark ? "dark" : "light";
+          if (dark !== null) return dark ? 'dark' : 'light';
         }
       }
     } catch {
@@ -73,16 +66,10 @@ function getThemeFromXrmFrameWalk(): ThemeName | null {
 
   for (const frame of frames) {
     try {
-      const bgColor = (frame as any).getComputedStyle(
-        (frame as any).document.body,
-      ).backgroundColor;
-      if (
-        bgColor &&
-        bgColor !== "rgba(0, 0, 0, 0)" &&
-        bgColor !== "transparent"
-      ) {
+      const bgColor = (frame as any).getComputedStyle((frame as any).document.body).backgroundColor;
+      if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
         const dark = isColorDark(bgColor);
-        if (dark !== null) return dark ? "dark" : "light";
+        if (dark !== null) return dark ? 'dark' : 'light';
       }
     } catch {
       /* cross-origin */
@@ -98,8 +85,8 @@ function isColorDark(color: string): boolean | null {
   const rgbMatch = color.match(/\d+/g)?.map(Number);
   if (rgbMatch && rgbMatch.length >= 3) {
     [r, g, b] = rgbMatch;
-  } else if (color.startsWith("#")) {
-    const hex = color.replace("#", "");
+  } else if (color.startsWith('#')) {
+    const hex = color.replace('#', '');
     if (hex.length === 3) {
       r = parseInt(hex[0] + hex[0], 16);
       g = parseInt(hex[1] + hex[1], 16);
@@ -122,12 +109,9 @@ function isColorDark(color: string): boolean | null {
 
 function getSystemThemePreference(): ThemeName | null {
   try {
-    if (window.matchMedia("(forced-colors: active)").matches)
-      return "highcontrast";
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-      return "dark";
-    if (window.matchMedia("(prefers-color-scheme: light)").matches)
-      return "light";
+    if (window.matchMedia('(forced-colors: active)').matches) return 'highcontrast';
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
   } catch {
     /* matchMedia not available */
   }
@@ -136,9 +120,9 @@ function getSystemThemePreference(): ThemeName | null {
 
 function themeNameToFluentTheme(name: ThemeName): Theme {
   switch (name) {
-    case "dark":
+    case 'dark':
       return webDarkTheme;
-    case "highcontrast":
+    case 'highcontrast':
       return teamsHighContrastTheme;
     default:
       return webLightTheme;
@@ -153,32 +137,28 @@ function resolveThemeName(params?: URLSearchParams): ThemeName {
     if (xrmTheme) return xrmTheme;
     const systemTheme = getSystemThemePreference();
     if (systemTheme) return systemTheme;
-    return "light";
+    return 'light';
   } catch {
-    return "light";
+    return 'light';
   }
 }
 
-export function useThemeDetection(
-  params?: URLSearchParams,
-): UseThemeDetectionResult {
-  const [themeName, setThemeName] = useState<ThemeName>(() =>
-    resolveThemeName(params),
-  );
+export function useThemeDetection(params?: URLSearchParams): UseThemeDetectionResult {
+  const [themeName, setThemeName] = useState<ThemeName>(() => resolveThemeName(params));
 
   const reResolve = useCallback(() => {
     setThemeName(resolveThemeName(params));
   }, [params]);
 
   useEffect(() => {
-    const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    darkQuery.addEventListener("change", reResolve);
-    const hcQuery = window.matchMedia("(forced-colors: active)");
-    hcQuery.addEventListener("change", reResolve);
+    const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    darkQuery.addEventListener('change', reResolve);
+    const hcQuery = window.matchMedia('(forced-colors: active)');
+    hcQuery.addEventListener('change', reResolve);
     window.addEventListener(THEME_CHANGE_EVENT, reResolve);
     return () => {
-      darkQuery.removeEventListener("change", reResolve);
-      hcQuery.removeEventListener("change", reResolve);
+      darkQuery.removeEventListener('change', reResolve);
+      hcQuery.removeEventListener('change', reResolve);
       window.removeEventListener(THEME_CHANGE_EVENT, reResolve);
     };
   }, [reResolve]);
@@ -186,6 +166,6 @@ export function useThemeDetection(
   return {
     theme: themeNameToFluentTheme(themeName),
     themeName,
-    isDark: themeName === "dark",
+    isDark: themeName === 'dark',
   };
 }

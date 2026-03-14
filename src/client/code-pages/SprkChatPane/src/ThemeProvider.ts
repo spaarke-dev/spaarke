@@ -19,22 +19,17 @@
  * @see theme-management.md pattern
  */
 
-import {
-  Theme,
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-} from "@fluentui/react-components";
+import { Theme, webLightTheme, webDarkTheme, teamsHighContrastTheme } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const THEME_STORAGE_KEY = "spaarke-theme";
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_STORAGE_KEY = 'spaarke-theme';
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
-type ThemeValue = "light" | "dark" | "highcontrast";
-type ThemePreference = "auto" | "light" | "dark";
+type ThemeValue = 'light' | 'dark' | 'highcontrast';
+type ThemePreference = 'auto' | 'light' | 'dark';
 
 // ---------------------------------------------------------------------------
 // Level 1: User preference (localStorage)
@@ -46,11 +41,9 @@ type ThemePreference = "auto" | "light" | "dark";
  */
 function getThemeFromUserPreference(): ThemeValue | null {
   try {
-    const pref = localStorage.getItem(
-      THEME_STORAGE_KEY,
-    ) as ThemePreference | null;
-    if (pref === "dark") return "dark";
-    if (pref === "light") return "light";
+    const pref = localStorage.getItem(THEME_STORAGE_KEY) as ThemePreference | null;
+    if (pref === 'dark') return 'dark';
+    if (pref === 'light') return 'light';
   } catch {
     /* localStorage unavailable (iframe sandbox) */
   }
@@ -68,8 +61,8 @@ function getThemeFromUserPreference(): ThemeValue | null {
  */
 function getThemeFromParams(params?: URLSearchParams): ThemeValue | null {
   if (!params) return null;
-  const value = params.get("theme")?.toLowerCase();
-  if (value === "dark" || value === "light" || value === "highcontrast") {
+  const value = params.get('theme')?.toLowerCase();
+  if (value === 'dark' || value === 'light' || value === 'highcontrast') {
     return value;
   }
   return null;
@@ -100,8 +93,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
   } catch {
     /* cross-origin */
   }
@@ -119,7 +111,7 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
         // The navbar color is the brand color and does NOT indicate light/dark mode.
         if (themeInfo?.backgroundcolor) {
           const dark = isColorDark(themeInfo.backgroundcolor);
-          if (dark !== null) return dark ? "dark" : "light";
+          if (dark !== null) return dark ? 'dark' : 'light';
         }
       }
     } catch {
@@ -130,13 +122,9 @@ function getThemeFromXrmFrameWalk(): ThemeValue | null {
   // Fallback: check the document body background (content area, not branded navbar)
   try {
     const bgColor = window.getComputedStyle(document.body).backgroundColor;
-    if (
-      bgColor &&
-      bgColor !== "rgba(0, 0, 0, 0)" &&
-      bgColor !== "transparent"
-    ) {
+    if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
       const dark = isColorDark(bgColor);
-      if (dark !== null) return dark ? "dark" : "light";
+      if (dark !== null) return dark ? 'dark' : 'light';
     }
   } catch {
     /* DOM access failed */
@@ -159,8 +147,8 @@ function isColorDark(color: string): boolean | null {
   const rgbMatch = color.match(/\d+/g)?.map(Number);
   if (rgbMatch && rgbMatch.length >= 3) {
     [r, g, b] = rgbMatch;
-  } else if (color.startsWith("#")) {
-    const hex = color.replace("#", "");
+  } else if (color.startsWith('#')) {
+    const hex = color.replace('#', '');
     if (hex.length === 3) {
       r = parseInt(hex[0] + hex[0], 16);
       g = parseInt(hex[1] + hex[1], 16);
@@ -189,13 +177,10 @@ function isColorDark(color: string): boolean | null {
 
 function getSystemThemePreference(): ThemeValue | null {
   try {
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-      return "dark";
-    if (window.matchMedia("(prefers-color-scheme: light)").matches)
-      return "light";
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
     // If forced-colors is active, treat as high contrast
-    if (window.matchMedia("(forced-colors: active)").matches)
-      return "highcontrast";
+    if (window.matchMedia('(forced-colors: active)').matches) return 'highcontrast';
   } catch {
     /* matchMedia not available */
   }
@@ -211,11 +196,11 @@ function getSystemThemePreference(): ThemeValue | null {
  */
 function themeValueToFluentTheme(value: ThemeValue): Theme {
   switch (value) {
-    case "dark":
+    case 'dark':
       return webDarkTheme;
-    case "highcontrast":
+    case 'highcontrast':
       return teamsHighContrastTheme;
-    case "light":
+    case 'light':
     default:
       return webLightTheme;
   }
@@ -284,19 +269,19 @@ export function setupThemeListener(callback: () => void): () => void {
   const handleChange = () => callback();
 
   // System preference changes
-  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  darkQuery.addEventListener("change", handleChange);
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  darkQuery.addEventListener('change', handleChange);
 
   // Forced colors (high contrast) changes
-  const hcQuery = window.matchMedia("(forced-colors: active)");
-  hcQuery.addEventListener("change", handleChange);
+  const hcQuery = window.matchMedia('(forced-colors: active)');
+  hcQuery.addEventListener('change', handleChange);
 
   // Custom spaarke theme change event (user preference toggle)
   window.addEventListener(THEME_CHANGE_EVENT, handleChange);
 
   return () => {
-    darkQuery.removeEventListener("change", handleChange);
-    hcQuery.removeEventListener("change", handleChange);
+    darkQuery.removeEventListener('change', handleChange);
+    hcQuery.removeEventListener('change', handleChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleChange);
   };
 }

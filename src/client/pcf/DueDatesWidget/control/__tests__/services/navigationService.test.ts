@@ -18,25 +18,20 @@ import {
   closeEventDetailPane,
   isEventDetailPaneOpen,
   NavigateToEventParams,
-} from "../../services/navigationService";
-import {
-  getMockXrm,
-  resetXrmMocks,
-  createMockSidePane,
-  createMockFormTab,
-} from "../setupTests";
+} from '../../services/navigationService';
+import { getMockXrm, resetXrmMocks, createMockSidePane, createMockFormTab } from '../setupTests';
 
-describe("navigationService", () => {
+describe('navigationService', () => {
   beforeEach(() => {
     resetXrmMocks();
   });
 
-  describe("isNavigationAvailable", () => {
-    it("returns true when sidePanes API is available", () => {
+  describe('isNavigationAvailable', () => {
+    it('returns true when sidePanes API is available', () => {
       expect(isNavigationAvailable()).toBe(true);
     });
 
-    it("returns false when Xrm is undefined", () => {
+    it('returns false when Xrm is undefined', () => {
       const originalXrm = (global as { Xrm: unknown }).Xrm;
       delete (global as { Xrm?: unknown }).Xrm;
 
@@ -46,12 +41,12 @@ describe("navigationService", () => {
     });
   });
 
-  describe("isTabNavigationAvailable", () => {
-    it("returns true when form context is available", () => {
+  describe('isTabNavigationAvailable', () => {
+    it('returns true when form context is available', () => {
       expect(isTabNavigationAvailable()).toBe(true);
     });
 
-    it("returns false when Xrm.Page is undefined", () => {
+    it('returns false when Xrm.Page is undefined', () => {
       const mockXrm = getMockXrm();
       delete (mockXrm as { Page?: unknown }).Page;
 
@@ -59,35 +54,35 @@ describe("navigationService", () => {
     });
   });
 
-  describe("navigateToEvent", () => {
-    it("returns error for empty eventId", async () => {
+  describe('navigateToEvent', () => {
+    it('returns error for empty eventId', async () => {
       const result = await navigateToEvent({
-        eventId: "",
-        eventType: "type-123",
+        eventId: '',
+        eventType: 'type-123',
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("eventId is required");
+      expect(result.error).toContain('eventId is required');
     });
 
-    it("returns error for whitespace eventId", async () => {
+    it('returns error for whitespace eventId', async () => {
       const result = await navigateToEvent({
-        eventId: "   ",
-        eventType: "type-123",
+        eventId: '   ',
+        eventType: 'type-123',
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("eventId is required");
+      expect(result.error).toContain('eventId is required');
     });
 
-    it("attempts tab navigation when navigateToTab is true", async () => {
+    it('attempts tab navigation when navigateToTab is true', async () => {
       const mockXrm = getMockXrm();
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       await navigateToEvent({
-        eventId: "event-123",
-        eventType: "type-456",
+        eventId: 'event-123',
+        eventType: 'type-456',
         navigateToTab: true,
       });
 
@@ -95,14 +90,14 @@ describe("navigationService", () => {
       expect(mockXrm.Page.ui.tabs.get).toHaveBeenCalled();
     });
 
-    it("skips tab navigation when navigateToTab is false", async () => {
+    it('skips tab navigation when navigateToTab is false', async () => {
       const mockXrm = getMockXrm();
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       await navigateToEvent({
-        eventId: "event-123",
-        eventType: "type-456",
+        eventId: 'event-123',
+        eventType: 'type-456',
         navigateToTab: false,
       });
 
@@ -110,39 +105,39 @@ describe("navigationService", () => {
       // Note: The implementation tries tab navigation by default
     });
 
-    it("creates new pane when none exists", async () => {
+    it('creates new pane when none exists', async () => {
       const mockXrm = getMockXrm();
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
 
       mockXrm.App.sidePanes.getPane.mockReturnValue(undefined);
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       const result = await navigateToEvent({
-        eventId: "event-123",
-        eventType: "type-456",
+        eventId: 'event-123',
+        eventType: 'type-456',
       });
 
       expect(mockXrm.App.sidePanes.createPane).toHaveBeenCalledWith(
         expect.objectContaining({
-          paneId: "eventDetailPane",
+          paneId: 'eventDetailPane',
           canClose: true,
           width: 400,
-        }),
+        })
       );
       expect(mockPane.navigate).toHaveBeenCalled();
       expect(result.openedSidePane).toBe(true);
       expect(result.success).toBe(true);
     });
 
-    it("reuses existing pane when one exists", async () => {
+    it('reuses existing pane when one exists', async () => {
       const mockXrm = getMockXrm();
-      const existingPane = createMockSidePane("eventDetailPane");
+      const existingPane = createMockSidePane('eventDetailPane');
 
       mockXrm.App.sidePanes.getPane.mockReturnValue(existingPane);
 
       const result = await navigateToEvent({
-        eventId: "event-123",
-        eventType: "type-456",
+        eventId: 'event-123',
+        eventType: 'type-456',
       });
 
       expect(mockXrm.App.sidePanes.createPane).not.toHaveBeenCalled();
@@ -152,26 +147,24 @@ describe("navigationService", () => {
       expect(result.success).toBe(true);
     });
 
-    it("calls onNavigationComplete callback on success", async () => {
+    it('calls onNavigationComplete callback on success', async () => {
       const mockXrm = getMockXrm();
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       const onComplete = jest.fn();
 
       await navigateToEvent({
-        eventId: "event-123",
+        eventId: 'event-123',
         onNavigationComplete: onComplete,
       });
 
       expect(onComplete).toHaveBeenCalled();
     });
 
-    it("calls onNavigationError callback on failure", async () => {
+    it('calls onNavigationError callback on failure', async () => {
       const mockXrm = getMockXrm();
-      mockXrm.App.sidePanes.createPane.mockRejectedValue(
-        new Error("Pane creation failed"),
-      );
+      mockXrm.App.sidePanes.createPane.mockRejectedValue(new Error('Pane creation failed'));
       mockXrm.App.sidePanes.getPane.mockReturnValue(undefined);
 
       // Also make tab navigation fail
@@ -180,37 +173,37 @@ describe("navigationService", () => {
       const onError = jest.fn();
 
       await navigateToEvent({
-        eventId: "event-123",
+        eventId: 'event-123',
         onNavigationError: onError,
       });
 
       expect(onError).toHaveBeenCalled();
     });
 
-    it("includes eventType in page input when provided", async () => {
+    it('includes eventType in page input when provided', async () => {
       const mockXrm = getMockXrm();
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       await navigateToEvent({
-        eventId: "event-123",
-        eventType: "type-456",
+        eventId: 'event-123',
+        eventType: 'type-456',
       });
 
       // Check that navigate was called with proper page input
       expect(mockPane.navigate).toHaveBeenCalledWith(
         expect.objectContaining({
-          pageType: "custom",
-        }),
+          pageType: 'custom',
+        })
       );
     });
 
-    it("handles sidePanes API not available gracefully", async () => {
+    it('handles sidePanes API not available gracefully', async () => {
       const mockXrm = getMockXrm();
       delete (mockXrm.App as { sidePanes?: unknown }).sidePanes;
 
       const result = await navigateToEvent({
-        eventId: "event-123",
+        eventId: 'event-123',
       });
 
       // Should still complete (possibly with tab navigation only)
@@ -218,10 +211,10 @@ describe("navigationService", () => {
     });
   });
 
-  describe("closeEventDetailPane", () => {
-    it("closes existing pane and returns true", () => {
+  describe('closeEventDetailPane', () => {
+    it('closes existing pane and returns true', () => {
       const mockXrm = getMockXrm();
-      const existingPane = createMockSidePane("eventDetailPane");
+      const existingPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.getPane.mockReturnValue(existingPane);
 
       const result = closeEventDetailPane();
@@ -230,7 +223,7 @@ describe("navigationService", () => {
       expect(result).toBe(true);
     });
 
-    it("returns false when no pane exists", () => {
+    it('returns false when no pane exists', () => {
       const mockXrm = getMockXrm();
       mockXrm.App.sidePanes.getPane.mockReturnValue(undefined);
 
@@ -239,7 +232,7 @@ describe("navigationService", () => {
       expect(result).toBe(false);
     });
 
-    it("returns false when sidePanes API not available", () => {
+    it('returns false when sidePanes API not available', () => {
       const mockXrm = getMockXrm();
       delete (mockXrm.App as { sidePanes?: unknown }).sidePanes;
 
@@ -249,23 +242,23 @@ describe("navigationService", () => {
     });
   });
 
-  describe("isEventDetailPaneOpen", () => {
-    it("returns true when pane exists", () => {
+  describe('isEventDetailPaneOpen', () => {
+    it('returns true when pane exists', () => {
       const mockXrm = getMockXrm();
-      const existingPane = createMockSidePane("eventDetailPane");
+      const existingPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.getPane.mockReturnValue(existingPane);
 
       expect(isEventDetailPaneOpen()).toBe(true);
     });
 
-    it("returns false when no pane exists", () => {
+    it('returns false when no pane exists', () => {
       const mockXrm = getMockXrm();
       mockXrm.App.sidePanes.getPane.mockReturnValue(undefined);
 
       expect(isEventDetailPaneOpen()).toBe(false);
     });
 
-    it("returns false when sidePanes API not available", () => {
+    it('returns false when sidePanes API not available', () => {
       const mockXrm = getMockXrm();
       delete (mockXrm.App as { sidePanes?: unknown }).sidePanes;
 
@@ -273,12 +266,12 @@ describe("navigationService", () => {
     });
   });
 
-  describe("navigateToEventsPage", () => {
-    it("first attempts tab navigation", async () => {
+  describe('navigateToEventsPage', () => {
+    it('first attempts tab navigation', async () => {
       const mockXrm = getMockXrm();
-      const mockTab = createMockFormTab("events");
+      const mockTab = createMockFormTab('events');
       mockXrm.Page.ui.tabs.get.mockImplementation((name?: string) => {
-        if (name === "events") return mockTab;
+        if (name === 'events') return mockTab;
         return undefined;
       });
 
@@ -288,7 +281,7 @@ describe("navigationService", () => {
       expect(result).toBe(true);
     });
 
-    it("falls back to custom page navigation when tab not found", async () => {
+    it('falls back to custom page navigation when tab not found', async () => {
       const mockXrm = getMockXrm();
       mockXrm.Page.ui.tabs.get.mockReturnValue(undefined);
       mockXrm.Page.ui.tabs.forEach.mockImplementation(() => {});
@@ -298,9 +291,9 @@ describe("navigationService", () => {
       expect(mockXrm.Navigation.navigateTo).toHaveBeenCalled();
     });
 
-    it("calls onNavigationComplete callback on success", async () => {
+    it('calls onNavigationComplete callback on success', async () => {
       const mockXrm = getMockXrm();
-      const mockTab = createMockFormTab("events");
+      const mockTab = createMockFormTab('events');
       mockXrm.Page.ui.tabs.get.mockReturnValue(mockTab);
 
       const onComplete = jest.fn();
@@ -310,7 +303,7 @@ describe("navigationService", () => {
       expect(onComplete).toHaveBeenCalled();
     });
 
-    it("calls onNavigationError callback when all methods fail", async () => {
+    it('calls onNavigationError callback when all methods fail', async () => {
       const originalXrm = (global as { Xrm: unknown }).Xrm;
       delete (global as { Xrm?: unknown }).Xrm;
 
@@ -324,38 +317,38 @@ describe("navigationService", () => {
     });
   });
 
-  describe("tab navigation edge cases", () => {
-    it("finds events tab by common name variations", async () => {
+  describe('tab navigation edge cases', () => {
+    it('finds events tab by common name variations', async () => {
       const mockXrm = getMockXrm();
-      const mockTab = createMockFormTab("Events");
+      const mockTab = createMockFormTab('Events');
       mockXrm.Page.ui.tabs.get.mockImplementation((name?: string) => {
-        if (name === "Events") return mockTab;
+        if (name === 'Events') return mockTab;
         return undefined;
       });
 
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       const result = await navigateToEvent({
-        eventId: "event-123",
+        eventId: 'event-123',
         navigateToTab: true,
       });
 
       expect(result.navigatedToTab).toBe(true);
     });
 
-    it("handles hidden tab by making it visible", async () => {
+    it('handles hidden tab by making it visible', async () => {
       const mockXrm = getMockXrm();
-      const mockTab = createMockFormTab("events");
+      const mockTab = createMockFormTab('events');
       mockTab.getVisible.mockReturnValue(false);
 
       mockXrm.Page.ui.tabs.get.mockReturnValue(mockTab);
 
-      const mockPane = createMockSidePane("eventDetailPane");
+      const mockPane = createMockSidePane('eventDetailPane');
       mockXrm.App.sidePanes.createPane.mockResolvedValue(mockPane);
 
       await navigateToEvent({
-        eventId: "event-123",
+        eventId: 'event-123',
         navigateToTab: true,
       });
 

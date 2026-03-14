@@ -15,15 +15,12 @@
  * @version 1.0.0
  */
 
-import { EntityFieldConfiguration } from "../types/FieldMetadata";
+import { EntityFieldConfiguration } from '../types/FieldMetadata';
 
 /**
  * Entity field definitions for supported entity types
  */
-export const ENTITY_FIELD_DEFINITIONS: Record<
-  string,
-  EntityFieldConfiguration
-> = {
+export const ENTITY_FIELD_DEFINITIONS: Record<string, EntityFieldConfiguration> = {
   /**
    * Document Entity (sprk_document)
    *
@@ -31,20 +28,20 @@ export const ENTITY_FIELD_DEFINITIONS: Record<
    * Supports file upload with SPE metadata.
    */
   sprk_document: {
-    entityName: "sprk_document",
+    entityName: 'sprk_document',
     supportsFileUpload: true,
     fields: [
       {
-        name: "sprk_documenttitle",
-        label: "Document Title",
-        type: "text",
+        name: 'sprk_documenttitle',
+        label: 'Document Title',
+        type: 'text',
         required: true,
         maxLength: 200,
       },
       {
-        name: "sprk_description",
-        label: "Description",
-        type: "textarea",
+        name: 'sprk_description',
+        label: 'Description',
+        type: 'textarea',
         required: false,
       },
     ],
@@ -57,37 +54,37 @@ export const ENTITY_FIELD_DEFINITIONS: Record<
    * Does not support file upload.
    */
   task: {
-    entityName: "task",
+    entityName: 'task',
     supportsFileUpload: false,
     fields: [
       {
-        name: "subject",
-        label: "Subject",
-        type: "text",
+        name: 'subject',
+        label: 'Subject',
+        type: 'text',
         required: true,
         maxLength: 200,
       },
       {
-        name: "description",
-        label: "Description",
-        type: "textarea",
+        name: 'description',
+        label: 'Description',
+        type: 'textarea',
         required: false,
       },
       {
-        name: "scheduledend",
-        label: "Due Date",
-        type: "date",
+        name: 'scheduledend',
+        label: 'Due Date',
+        type: 'date',
         required: false,
       },
       {
-        name: "prioritycode",
-        label: "Priority",
-        type: "optionset",
+        name: 'prioritycode',
+        label: 'Priority',
+        type: 'optionset',
         required: false,
         options: [
-          { label: "Low", value: 0 },
-          { label: "Normal", value: 1 },
-          { label: "High", value: 2 },
+          { label: 'Low', value: 0 },
+          { label: 'Normal', value: 1 },
+          { label: 'High', value: 2 },
         ],
       },
     ],
@@ -100,34 +97,34 @@ export const ENTITY_FIELD_DEFINITIONS: Record<
    * Does not support file upload.
    */
   contact: {
-    entityName: "contact",
+    entityName: 'contact',
     supportsFileUpload: false,
     fields: [
       {
-        name: "firstname",
-        label: "First Name",
-        type: "text",
+        name: 'firstname',
+        label: 'First Name',
+        type: 'text',
         required: true,
         maxLength: 50,
       },
       {
-        name: "lastname",
-        label: "Last Name",
-        type: "text",
+        name: 'lastname',
+        label: 'Last Name',
+        type: 'text',
         required: true,
         maxLength: 50,
       },
       {
-        name: "emailaddress1",
-        label: "Email",
-        type: "text",
+        name: 'emailaddress1',
+        label: 'Email',
+        type: 'text',
         required: false,
         maxLength: 100,
       },
       {
-        name: "telephone1",
-        label: "Phone",
-        type: "text",
+        name: 'telephone1',
+        label: 'Phone',
+        type: 'text',
         required: false,
         maxLength: 50,
       },
@@ -150,8 +147,6 @@ export const ENTITY_FIELD_DEFINITIONS: Record<
  * }
  * ```
  */
-export function getEntityFieldConfiguration(
-  entityName: string,
-): EntityFieldConfiguration | null {
+export function getEntityFieldConfiguration(entityName: string): EntityFieldConfiguration | null {
   return ENTITY_FIELD_DEFINITIONS[entityName] || null;
 }

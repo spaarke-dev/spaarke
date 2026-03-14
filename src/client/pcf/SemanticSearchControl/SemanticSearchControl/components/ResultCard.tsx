@@ -11,16 +11,9 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useCallback, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-  Tooltip,
-  shorthands,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { useCallback, useState } from 'react';
+import { makeStyles, tokens, Text, Button, Tooltip, shorthands } from '@fluentui/react-components';
 import {
   DocumentRegular,
   DocumentPdfRegular,
@@ -33,10 +26,10 @@ import {
   Sparkle20Regular,
   DocumentSearchRegular,
   FolderOpenRegular,
-} from "@fluentui/react-icons";
-import { AiSummaryPopover } from "@spaarke/ui-components/dist/components/AiSummaryPopover";
-import { IResultCardProps } from "../types";
-import { FilePreviewDialog } from "./FilePreviewDialog";
+} from '@fluentui/react-icons';
+import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
+import { IResultCardProps } from '../types';
+import { FilePreviewDialog } from './FilePreviewDialog';
 
 // ---------------------------------------------------------------------------
 // File icon mapping (mirrors LegalWorkspace fileIconMap.ts)
@@ -45,32 +38,32 @@ import { FilePreviewDialog } from "./FilePreviewDialog";
 type IconComponent = typeof DocumentRegular;
 
 function getFileIcon(fileType: string): IconComponent {
-  const ext = fileType?.toLowerCase().trim() ?? "";
+  const ext = fileType?.toLowerCase().trim() ?? '';
   switch (ext) {
-    case "pdf":
+    case 'pdf':
       return DocumentPdfRegular;
-    case "doc":
-    case "docx":
-    case "rtf":
-    case "odt":
-    case "txt":
+    case 'doc':
+    case 'docx':
+    case 'rtf':
+    case 'odt':
+    case 'txt':
       return DocumentTextRegular;
-    case "xls":
-    case "xlsx":
-    case "csv":
+    case 'xls':
+    case 'xlsx':
+    case 'csv':
       return TableRegular;
-    case "ppt":
-    case "pptx":
+    case 'ppt':
+    case 'pptx':
       return SlideTextRegular;
-    case "jpg":
-    case "jpeg":
-    case "png":
-    case "gif":
-    case "bmp":
-    case "svg":
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'bmp':
+    case 'svg':
       return ImageRegular;
-    case "msg":
-    case "eml":
+    case 'msg':
+    case 'eml':
       return MailRegular;
     default:
       return DocumentRegular;
@@ -82,17 +75,17 @@ function getFileIcon(fileType: string): IconComponent {
 // ---------------------------------------------------------------------------
 
 function formatShortDate(dateString: string | null): string {
-  if (!dateString) return "";
+  if (!dateString) return '';
   try {
     const d = new Date(dateString);
-    if (isNaN(d.getTime())) return "";
+    if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
     });
   } catch {
-    return "";
+    return '';
   }
 }
 
@@ -102,8 +95,8 @@ function formatShortDate(dateString: string | null): string {
 
 const useStyles = makeStyles({
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -112,91 +105,91 @@ const useStyles = makeStyles({
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     boxShadow: tokens.shadow2,
     marginBottom: tokens.spacingVerticalXS,
-    borderLeftWidth: "3px",
-    borderLeftStyle: "solid",
+    borderLeftWidth: '3px',
+    borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorBrandStroke1,
-    cursor: "pointer",
-    transitionProperty: "background-color, box-shadow",
+    cursor: 'pointer',
+    transitionProperty: 'background-color, box-shadow',
     transitionDuration: tokens.durationFaster,
     transitionTimingFunction: tokens.curveEasyEase,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
       boxShadow: tokens.shadow4,
     },
-    ":focus-visible": {
-      outlineStyle: "solid",
-      outlineWidth: "2px",
+    ':focus-visible': {
+      outlineStyle: 'solid',
+      outlineWidth: '2px',
       outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: "-2px",
+      outlineOffset: '-2px',
     },
   },
   mainRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalL,
   },
   typeIconCircle: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
-    width: "40px",
-    height: "40px",
-    ...shorthands.borderRadius("50%"),
+    width: '40px',
+    height: '40px',
+    ...shorthands.borderRadius('50%'),
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   contentColumn: {
-    flex: "1 1 0",
+    flex: '1 1 0',
     minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   primaryRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "nowrap",
+    flexWrap: 'nowrap',
     minWidth: 0,
   },
   title: {
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
     flexShrink: 1,
     minWidth: 0,
   },
   description: {
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground3,
     flexShrink: 1,
     minWidth: 0,
   },
   secondaryRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   metaText: {
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground3,
   },
   actionsColumn: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
     flexShrink: 0,
     marginLeft: tokens.spacingHorizontalL,
@@ -214,18 +207,18 @@ const ScoreBadge: React.FC<{ score: number }> = ({ score }) => {
       role="img"
       aria-label={`Relevance: ${pct}%`}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: tokens.borderRadiusSmall,
-        paddingTop: "1px",
-        paddingBottom: "1px",
+        paddingTop: '1px',
+        paddingBottom: '1px',
         paddingLeft: tokens.spacingHorizontalXS,
         paddingRight: tokens.spacingHorizontalXS,
         fontSize: tokens.fontSizeBase100,
         fontWeight: tokens.fontWeightSemibold,
         lineHeight: tokens.lineHeightBase100,
-        whiteSpace: "nowrap",
+        whiteSpace: 'nowrap',
         backgroundColor: tokens.colorBrandBackground2,
         color: tokens.colorBrandForeground1,
         flexShrink: 0,
@@ -273,20 +266,20 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   // Card single-click selects the document
   const handleCardClick = useCallback(
     (ev: React.MouseEvent) => {
-      if ((ev.target as HTMLElement).closest("button")) return;
+      if ((ev.target as HTMLElement).closest('button')) return;
       onClick();
     },
-    [onClick],
+    [onClick]
   );
 
   const handleCardKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         e.preventDefault();
         onOpenRecord(false);
       }
     },
-    [onOpenRecord],
+    [onOpenRecord]
   );
 
   // Stop propagation on action clicks
@@ -304,9 +297,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   const handleOpenFileClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onOpenFile("desktop");
+      onOpenFile('desktop');
     },
-    [onOpenFile],
+    [onOpenFile]
   );
 
   // Open record in new tab (for FilePreviewDialog toolbar)
@@ -317,13 +310,9 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   const formattedDate = formatShortDate(result.createdAt);
 
   // Build aria label
-  const cardAriaLabel = [
-    result.name,
-    result.documentType,
-    formattedDate ? `Created: ${formattedDate}` : "",
-  ]
+  const cardAriaLabel = [result.name, result.documentType, formattedDate ? `Created: ${formattedDate}` : '']
     .filter(Boolean)
-    .join(", ");
+    .join(', ');
 
   return (
     <>
@@ -338,11 +327,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
       >
         <div className={styles.mainRow}>
           {/* File type icon in 40px circle */}
-          <div
-            className={styles.typeIconCircle}
-            aria-label={result.fileType || "Document"}
-            role="img"
-          >
+          <div className={styles.typeIconCircle} aria-label={result.fileType || 'Document'} role="img">
             <IconComponent fontSize={20} />
           </div>
 
@@ -377,11 +362,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
           </div>
 
           {/* Actions: icon-only buttons — Preview, Summary, Open File, Find Similar */}
-          <div
-            className={styles.actionsColumn}
-            role="toolbar"
-            onClick={handleActionsClick}
-          >
+          <div className={styles.actionsColumn} role="toolbar" onClick={handleActionsClick}>
             {/* 1. Preview */}
             <Tooltip content="Preview" relationship="label">
               <Button
@@ -403,7 +384,7 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                     size="medium"
                     icon={<Sparkle20Regular aria-hidden="true" />}
                     aria-label="AI Summary"
-                    onClick={(ev) => ev.stopPropagation()}
+                    onClick={ev => ev.stopPropagation()}
                   />
                 </Tooltip>
               }

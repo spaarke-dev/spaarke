@@ -11,24 +11,24 @@
  * @see notes/spikes/gridconfiguration-schema.md — Option A (AS-IS)
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { getOrgUrl } from "../services/DataverseWebApiService";
-import type { SavedSearch } from "../types";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { getOrgUrl } from '../services/DataverseWebApiService';
+import type { SavedSearch } from '../types';
 
 // =============================================
 // Constants
 // =============================================
 
-const ENTITY_SET = "sprk_gridconfigurations";
-const CONFIG_TYPE = "semantic-search";
+const ENTITY_SET = 'sprk_gridconfigurations';
+const CONFIG_TYPE = 'semantic-search';
 const CONFIG_VERSION = 1;
 
 /** OData headers for Dataverse WebAPI calls. */
 const ODATA_HEADERS: HeadersInit = {
-  Accept: "application/json",
-  "Content-Type": "application/json",
-  "OData-MaxVersion": "4.0",
-  "OData-Version": "4.0",
+  Accept: 'application/json',
+  'Content-Type': 'application/json',
+  'OData-MaxVersion': '4.0',
+  'OData-Version': '4.0',
 };
 
 // =============================================
@@ -47,7 +47,7 @@ interface ConfigJson {
   _version: number;
   searchDomain: string;
   query: string;
-  filters: SavedSearch["filters"];
+  filters: SavedSearch['filters'];
   viewMode: string;
   columns: string[];
   sortColumn: string;
@@ -66,7 +66,7 @@ function getCurrentUserId(): string | null {
     const xrm = (window as any).Xrm;
     if (xrm?.Utility?.getGlobalContext) {
       // getUserId() returns GUID with braces: "{GUID}"
-      return xrm.Utility.getGlobalContext().getUserId().replace(/[{}]/g, "");
+      return xrm.Utility.getGlobalContext().getUserId().replace(/[{}]/g, '');
     }
   } catch {
     /* Xrm not available */
@@ -85,14 +85,14 @@ function parseRecord(record: GridConfigRecord): SavedSearch | null {
     return {
       id: record.sprk_gridconfigurationid,
       name: record.sprk_name,
-      searchDomain: json.searchDomain as SavedSearch["searchDomain"],
-      query: json.query ?? "",
+      searchDomain: json.searchDomain as SavedSearch['searchDomain'],
+      query: json.query ?? '',
       filters: json.filters,
-      viewMode: json.viewMode as SavedSearch["viewMode"],
+      viewMode: json.viewMode as SavedSearch['viewMode'],
       columns: json.columns ?? [],
-      sortColumn: json.sortColumn ?? "similarity",
-      sortDirection: json.sortDirection as SavedSearch["sortDirection"],
-      graphClusterBy: json.graphClusterBy as SavedSearch["graphClusterBy"],
+      sortColumn: json.sortColumn ?? 'similarity',
+      sortDirection: json.sortDirection as SavedSearch['sortDirection'],
+      graphClusterBy: json.graphClusterBy as SavedSearch['graphClusterBy'],
     };
   } catch {
     return null;
@@ -145,15 +145,14 @@ export function useSavedSearches(): UseSavedSearchesResult {
     try {
       const userId = getCurrentUserId();
       const baseUrl = getOrgUrl();
-      const select =
-        "$select=sprk_gridconfigurationid,sprk_name,sprk_configjson,_createdby_value";
+      const select = '$select=sprk_gridconfigurationid,sprk_name,sprk_configjson,_createdby_value';
       const filter = [
         "sprk_entitylogicalname eq 'semantic_search'",
-        "statecode eq 0",
-        userId ? `_createdby_value eq '${userId}'` : "",
+        'statecode eq 0',
+        userId ? `_createdby_value eq '${userId}'` : '',
       ]
         .filter(Boolean)
-        .join(" and ");
+        .join(' and ');
 
       const url = `${baseUrl}/api/data/v9.2/${ENTITY_SET}?${select}&$filter=${encodeURIComponent(filter)}&$orderby=sprk_name asc`;
 
@@ -164,18 +163,14 @@ export function useSavedSearches(): UseSavedSearchesResult {
 
       const data = await response.json();
       const records: GridConfigRecord[] = data.value ?? [];
-      const searches = records
-        .map(parseRecord)
-        .filter((s): s is SavedSearch => s !== null);
+      const searches = records.map(parseRecord).filter((s): s is SavedSearch => s !== null);
 
       if (mountedRef.current) {
         setSavedSearches(searches);
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load saved searches",
-        );
+        setError(err instanceof Error ? err.message : 'Failed to load saved searches');
       }
     } finally {
       if (mountedRef.current) {
@@ -193,13 +188,13 @@ export function useSavedSearches(): UseSavedSearchesResult {
         const baseUrl = getOrgUrl();
         const body = {
           sprk_name: search.name,
-          sprk_entitylogicalname: "semantic_search",
+          sprk_entitylogicalname: 'semantic_search',
           sprk_viewtype: 2,
           sprk_configjson: buildConfigJson(search),
         };
 
         const response = await fetch(`${baseUrl}/api/data/v9.2/${ENTITY_SET}`, {
-          method: "POST",
+          method: 'POST',
           headers: ODATA_HEADERS,
           body: JSON.stringify(body),
         });
@@ -211,9 +206,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         await loadSavedSearches();
       } catch (err) {
         if (mountedRef.current) {
-          setError(
-            err instanceof Error ? err.message : "Failed to save search",
-          );
+          setError(err instanceof Error ? err.message : 'Failed to save search');
         }
       } finally {
         if (mountedRef.current) {
@@ -221,7 +214,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         }
       }
     },
-    [loadSavedSearches],
+    [loadSavedSearches]
   );
 
   const updateSearch = useCallback(
@@ -236,14 +229,11 @@ export function useSavedSearches(): UseSavedSearchesResult {
           sprk_configjson: buildConfigJson(search),
         };
 
-        const response = await fetch(
-          `${baseUrl}/api/data/v9.2/${ENTITY_SET}(${id})`,
-          {
-            method: "PATCH",
-            headers: ODATA_HEADERS,
-            body: JSON.stringify(body),
-          },
-        );
+        const response = await fetch(`${baseUrl}/api/data/v9.2/${ENTITY_SET}(${id})`, {
+          method: 'PATCH',
+          headers: ODATA_HEADERS,
+          body: JSON.stringify(body),
+        });
 
         if (!response.ok) {
           throw new Error(`Failed to update search: ${response.status}`);
@@ -252,9 +242,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         await loadSavedSearches();
       } catch (err) {
         if (mountedRef.current) {
-          setError(
-            err instanceof Error ? err.message : "Failed to update search",
-          );
+          setError(err instanceof Error ? err.message : 'Failed to update search');
         }
       } finally {
         if (mountedRef.current) {
@@ -262,7 +250,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         }
       }
     },
-    [loadSavedSearches],
+    [loadSavedSearches]
   );
 
   const deleteSearch = useCallback(
@@ -273,14 +261,11 @@ export function useSavedSearches(): UseSavedSearchesResult {
       try {
         const baseUrl = getOrgUrl();
         // Soft delete: set statecode=1 (inactive)
-        const response = await fetch(
-          `${baseUrl}/api/data/v9.2/${ENTITY_SET}(${id})`,
-          {
-            method: "PATCH",
-            headers: ODATA_HEADERS,
-            body: JSON.stringify({ statecode: 1 }),
-          },
-        );
+        const response = await fetch(`${baseUrl}/api/data/v9.2/${ENTITY_SET}(${id})`, {
+          method: 'PATCH',
+          headers: ODATA_HEADERS,
+          body: JSON.stringify({ statecode: 1 }),
+        });
 
         if (!response.ok) {
           throw new Error(`Failed to delete search: ${response.status}`);
@@ -289,9 +274,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         await loadSavedSearches();
       } catch (err) {
         if (mountedRef.current) {
-          setError(
-            err instanceof Error ? err.message : "Failed to delete search",
-          );
+          setError(err instanceof Error ? err.message : 'Failed to delete search');
         }
       } finally {
         if (mountedRef.current) {
@@ -299,7 +282,7 @@ export function useSavedSearches(): UseSavedSearchesResult {
         }
       }
     },
-    [loadSavedSearches],
+    [loadSavedSearches]
   );
 
   // Load on mount

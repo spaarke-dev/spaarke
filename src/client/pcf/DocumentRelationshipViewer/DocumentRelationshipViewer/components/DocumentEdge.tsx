@@ -12,10 +12,10 @@
  * - ADR-022: React 16 compatible APIs
  */
 
-import * as React from "react";
-import { EdgeProps, getBezierPath, getEdgeCenter } from "react-flow-renderer";
-import { tokens } from "@fluentui/react-components";
-import type { DocumentEdgeData } from "../types/graph";
+import * as React from 'react';
+import { EdgeProps, getBezierPath, getEdgeCenter } from 'react-flow-renderer';
+import { tokens } from '@fluentui/react-components';
+import type { DocumentEdgeData } from '../types/graph';
 
 /**
  * Edge style configuration based on similarity score
@@ -64,7 +64,7 @@ const getEdgeStyle = (similarity: number): EdgeStyle => {
   return {
     strokeWidth: 1.5,
     stroke: tokens.colorNeutralStroke1,
-    strokeDasharray: "5,5",
+    strokeDasharray: '5,5',
     opacity: 0.5,
   };
 };
@@ -75,11 +75,11 @@ const getEdgeStyle = (similarity: number): EdgeStyle => {
  */
 const getLabelStyle = (similarity: number): React.CSSProperties => {
   const baseStyle: React.CSSProperties = {
-    fontSize: "10px",
+    fontSize: '10px',
     fontWeight: 500,
-    padding: "2px 6px",
-    borderRadius: "4px",
-    pointerEvents: "all",
+    padding: '2px 6px',
+    borderRadius: '4px',
+    pointerEvents: 'all',
   };
 
   if (similarity >= 0.9) {
@@ -167,7 +167,7 @@ export const DocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = ({
           stroke: edgeStyle.stroke,
           strokeDasharray: edgeStyle.strokeDasharray,
           opacity: selected ? 1 : edgeStyle.opacity,
-          fill: "none",
+          fill: 'none',
         }}
       />
 
@@ -181,11 +181,11 @@ export const DocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = ({
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            width: "100%",
-            height: "100%",
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '100%',
+            height: '100%',
           }}
         >
           <div style={getLabelStyle(similarity)} className="nodrag nopan">
@@ -200,9 +200,7 @@ export const DocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = ({
 /**
  * Animated version of DocumentEdge for highlighting paths
  */
-export const AnimatedDocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = (
-  props,
-) => {
+export const AnimatedDocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = props => {
   const similarity = props.data?.similarity ?? 0.5;
   const edgeStyle = getEdgeStyle(similarity);
 
@@ -233,9 +231,9 @@ export const AnimatedDocumentEdge: React.FC<EdgeProps<DocumentEdgeData>> = (
         style={{
           strokeWidth: edgeStyle.strokeWidth,
           stroke: edgeStyle.stroke,
-          strokeDasharray: "10,10",
+          strokeDasharray: '10,10',
           opacity: edgeStyle.opacity,
-          animation: "dashdraw 0.5s linear infinite",
+          animation: 'dashdraw 0.5s linear infinite',
         }}
         className="react-flow__edge-path"
         d={edgePath}

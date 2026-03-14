@@ -51,8 +51,8 @@ export interface AnalysisAction {
 // AI Model Deployment (sprk_aimodeldeployments)
 // ---------------------------------------------------------------------------
 
-export type AiProvider = "AzureOpenAI" | "OpenAI" | "Anthropic";
-export type AiCapability = "Chat" | "Completion" | "Embedding";
+export type AiProvider = 'AzureOpenAI' | 'OpenAI' | 'Anthropic';
+export type AiCapability = 'Chat' | 'Completion' | 'Embedding';
 
 export interface AiModelDeployment {
   id: string;

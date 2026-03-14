@@ -7,8 +7,8 @@
  * @see spec.md for filter behavior requirements
  */
 
-import { useState, useCallback, useMemo } from "react";
-import { SearchFilters, DateRange } from "../types";
+import { useState, useCallback, useMemo } from 'react';
+import { SearchFilters, DateRange } from '../types';
 
 /**
  * Initial/empty filter state
@@ -19,7 +19,7 @@ const initialFilters: SearchFilters = {
   dateRange: null,
   fileTypes: [],
   threshold: 0,
-  searchMode: "hybrid",
+  searchMode: 'hybrid',
 };
 
 /**
@@ -78,7 +78,7 @@ export function useFilters(): UseFiltersResult {
 
   // Set document types
   const setDocumentTypes = useCallback((types: string[]) => {
-    setFiltersState((prev) => ({
+    setFiltersState(prev => ({
       ...prev,
       documentTypes: types,
     }));
@@ -86,7 +86,7 @@ export function useFilters(): UseFiltersResult {
 
   // Set matter types
   const setMatterTypes = useCallback((types: string[]) => {
-    setFiltersState((prev) => ({
+    setFiltersState(prev => ({
       ...prev,
       matterTypes: types,
     }));
@@ -94,7 +94,7 @@ export function useFilters(): UseFiltersResult {
 
   // Set file types
   const setFileTypes = useCallback((types: string[]) => {
-    setFiltersState((prev) => ({
+    setFiltersState(prev => ({
       ...prev,
       fileTypes: types,
     }));
@@ -102,7 +102,7 @@ export function useFilters(): UseFiltersResult {
 
   // Set date range
   const setDateRange = useCallback((range: DateRange | null) => {
-    setFiltersState((prev) => ({
+    setFiltersState(prev => ({
       ...prev,
       dateRange: range,
     }));
@@ -126,7 +126,7 @@ export function useFilters(): UseFiltersResult {
       filters.fileTypes.length > 0 ||
       filters.dateRange !== null ||
       filters.threshold > 0 ||
-      filters.searchMode !== "hybrid"
+      filters.searchMode !== 'hybrid'
     );
   }, [filters]);
 

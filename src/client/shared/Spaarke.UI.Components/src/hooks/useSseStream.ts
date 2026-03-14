@@ -7,18 +7,12 @@
  * @version 1.0.0.0
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 /**
  * SSE stream status
  */
-export type SseStreamStatus =
-  | "idle"
-  | "connecting"
-  | "streaming"
-  | "complete"
-  | "error"
-  | "aborted";
+export type SseStreamStatus = 'idle' | 'connecting' | 'streaming' | 'complete' | 'error' | 'aborted';
 
 /**
  * SSE data chunk format from server
@@ -91,14 +85,14 @@ const parseSseLine = (line: string): SseDataChunk | null => {
   const trimmed = line.trim();
 
   // Skip empty lines and comments
-  if (!trimmed || trimmed.startsWith(":")) {
+  if (!trimmed || trimmed.startsWith(':')) {
     return null;
   }
 
   // Parse data: prefix
-  if (trimmed.startsWith("data:")) {
+  if (trimmed.startsWith('data:')) {
     const jsonStr = trimmed.slice(5).trim();
-    if (!jsonStr || jsonStr === "[DONE]") {
+    if (!jsonStr || jsonStr === '[DONE]') {
       return { done: true };
     }
     try {
@@ -134,17 +128,15 @@ const parseSseLine = (line: string): SseDataChunk | null => {
  * abort();
  * ```
  */
-export const useSseStream = (
-  options: UseSseStreamOptions,
-): UseSseStreamResult => {
+export const useSseStream = (options: UseSseStreamOptions): UseSseStreamResult => {
   const { url, body, token, onChunk, onComplete, onError } = options;
 
-  const [data, setData] = useState<string>("");
-  const [status, setStatus] = useState<SseStreamStatus>("idle");
+  const [data, setData] = useState<string>('');
+  const [status, setStatus] = useState<SseStreamStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  const dataRef = useRef<string>("");
+  const dataRef = useRef<string>('');
 
   /**
    * Reset to initial state
@@ -156,10 +148,10 @@ export const useSseStream = (
       abortControllerRef.current = null;
     }
 
-    setData("");
-    setStatus("idle");
+    setData('');
+    setStatus('idle');
     setError(null);
-    dataRef.current = "";
+    dataRef.current = '';
   }, []);
 
   /**
@@ -169,7 +161,7 @@ export const useSseStream = (
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
-      setStatus("aborted");
+      setStatus('aborted');
     }
   }, []);
 
@@ -178,28 +170,28 @@ export const useSseStream = (
    */
   const start = useCallback(async () => {
     // Reset state
-    setData("");
+    setData('');
     setError(null);
-    dataRef.current = "";
+    dataRef.current = '';
 
     // Create new AbortController
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
-    setStatus("connecting");
+    setStatus('connecting');
 
     try {
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       };
 
       if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+        headers['Authorization'] = `Bearer ${token}`;
       }
 
       const response = await fetch(url, {
-        method: "POST",
+        method: 'POST',
         headers,
         body: body ? JSON.stringify(body) : undefined,
         signal,
@@ -207,20 +199,18 @@ export const useSseStream = (
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          errorText || `HTTP ${response.status}: ${response.statusText}`,
-        );
+        throw new Error(errorText || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       if (!response.body) {
-        throw new Error("Response body is not readable");
+        throw new Error('Response body is not readable');
       }
 
-      setStatus("streaming");
+      setStatus('streaming');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -228,7 +218,7 @@ export const useSseStream = (
         if (done) {
           // Process any remaining buffer
           if (buffer.trim()) {
-            const lines = buffer.split("\n");
+            const lines = buffer.split('\n');
             for (const line of lines) {
               const chunk = parseSseLine(line);
               if (chunk) {
@@ -241,7 +231,7 @@ export const useSseStream = (
             }
           }
 
-          setStatus("complete");
+          setStatus('complete');
           onComplete?.(dataRef.current);
           break;
         }
@@ -250,16 +240,16 @@ export const useSseStream = (
         buffer += decoder.decode(value, { stream: true });
 
         // Process complete lines (SSE events are separated by double newlines)
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || ""; // Keep incomplete event in buffer
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || ''; // Keep incomplete event in buffer
 
         for (const event of events) {
-          const lines = event.split("\n");
+          const lines = event.split('\n');
           for (const line of lines) {
             const chunk = parseSseLine(line);
             if (chunk) {
               if (chunk.done) {
-                setStatus("complete");
+                setStatus('complete');
                 onComplete?.(dataRef.current);
                 return;
               }
@@ -280,16 +270,15 @@ export const useSseStream = (
       }
     } catch (err) {
       // Handle abort
-      if (err instanceof Error && err.name === "AbortError") {
-        setStatus("aborted");
+      if (err instanceof Error && err.name === 'AbortError') {
+        setStatus('aborted');
         return;
       }
 
       // Handle other errors
-      const errorMessage =
-        err instanceof Error ? err.message : "Unknown error occurred";
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(errorMessage);
-      setStatus("error");
+      setStatus('error');
       onError?.(errorMessage);
     }
   }, [url, body, token, onChunk, onComplete, onError]);

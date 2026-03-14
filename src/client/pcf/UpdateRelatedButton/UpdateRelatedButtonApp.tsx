@@ -16,7 +16,7 @@
  * - Calls POST /api/v1/field-mappings/push endpoint (Task 054)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Button,
   Spinner,
@@ -36,12 +36,8 @@ import {
   tokens,
   makeStyles,
   Text,
-} from "@fluentui/react-components";
-import {
-  ArrowSync20Regular,
-  ArrowSync20Filled,
-  bundleIcon,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { ArrowSync20Regular, ArrowSync20Filled, bundleIcon } from '@fluentui/react-icons';
 
 // Bundle regular and filled icons for proper hover behavior
 const ArrowSyncIcon = bundleIcon(ArrowSync20Filled, ArrowSync20Regular);
@@ -69,22 +65,22 @@ interface PushMappingsResponse {
   errors: { recordId: string; error: string }[];
 }
 
-type UpdateState = "idle" | "loading" | "success" | "error";
+type UpdateState = 'idle' | 'loading' | 'success' | 'error';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingVerticalS,
   },
   buttonContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   button: {
-    minWidth: "150px",
+    minWidth: '150px',
   },
   resultText: {
     fontSize: tokens.fontSizeBase200,
@@ -99,8 +95,8 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground1,
   },
   dialogContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   versionFooter: {
@@ -119,38 +115,24 @@ const useStyles = makeStyles({
 // 2. Here (UI footer)
 // 3. Solution.xml
 // 4. Controls/.../ControlManifest.xml (after build)
-const CONTROL_VERSION = "1.0.0";
-const BUILD_DATE = "2026-02-01";
+const CONTROL_VERSION = '1.0.0';
+const BUILD_DATE = '2026-02-01';
 
-export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
-  props,
-) => {
-  const {
-    buttonLabel,
-    sourceEntityId,
-    sourceEntityType,
-    mappingProfileId,
-    apiBaseUrl,
-    onUpdateComplete,
-  } = props;
+export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = props => {
+  const { buttonLabel, sourceEntityId, sourceEntityType, mappingProfileId, apiBaseUrl, onUpdateComplete } = props;
 
   const styles = useStyles();
-  const toasterId = useId("toaster");
+  const toasterId = useId('toaster');
   const { dispatchToast } = useToastController(toasterId);
 
-  const [state, setState] = React.useState<UpdateState>("idle");
+  const [state, setState] = React.useState<UpdateState>('idle');
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
-  const [lastResult, setLastResult] =
-    React.useState<PushMappingsResponse | null>(null);
+  const [lastResult, setLastResult] = React.useState<PushMappingsResponse | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   // Check if control is properly configured
   const isConfigured = React.useMemo(() => {
-    return (
-      Boolean(sourceEntityId) &&
-      Boolean(sourceEntityType) &&
-      Boolean(apiBaseUrl)
-    );
+    return Boolean(sourceEntityId) && Boolean(sourceEntityType) && Boolean(apiBaseUrl);
   }, [sourceEntityId, sourceEntityType, apiBaseUrl]);
 
   /**
@@ -158,12 +140,12 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
    */
   const executePush = React.useCallback(async () => {
     if (!isConfigured) {
-      setErrorMessage("Control is not properly configured");
-      setState("error");
+      setErrorMessage('Control is not properly configured');
+      setState('error');
       return;
     }
 
-    setState("loading");
+    setState('loading');
     setErrorMessage(null);
     setLastResult(null);
 
@@ -177,12 +159,12 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
 
       // Call the BFF API endpoint (Task 054)
       const response = await fetch(`${apiBaseUrl}/api/v1/field-mappings/push`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-        credentials: "include",
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -200,26 +182,20 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
       setLastResult(data);
 
       if (data.success && data.failedRecords === 0) {
-        setState("success");
+        setState('success');
         showSuccessToast(data);
-        onUpdateComplete(
-          true,
-          `Updated ${data.updatedRecords} of ${data.totalRecords} records`,
-        );
+        onUpdateComplete(true, `Updated ${data.updatedRecords} of ${data.totalRecords} records`);
       } else if (data.success && data.failedRecords > 0) {
         // Partial success
-        setState("success");
+        setState('success');
         showPartialSuccessToast(data);
         onUpdateComplete(
           true,
-          `Updated ${data.updatedRecords} of ${data.totalRecords} records (${data.failedRecords} failed)`,
+          `Updated ${data.updatedRecords} of ${data.totalRecords} records (${data.failedRecords} failed)`
         );
       } else {
-        setState("error");
-        const errorMsg =
-          data.errors && data.errors.length > 0
-            ? data.errors[0].error
-            : "Push operation failed";
+        setState('error');
+        const errorMsg = data.errors && data.errors.length > 0 ? data.errors[0].error : 'Push operation failed';
         setErrorMessage(errorMsg);
         showErrorToast(errorMsg);
         onUpdateComplete(false, errorMsg);
@@ -227,34 +203,24 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
 
       // Auto-reset to idle after a delay
       setTimeout(() => {
-        setState("idle");
+        setState('idle');
       }, 5000);
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
       setErrorMessage(errorMsg);
-      setState("error");
+      setState('error');
       showErrorToast(errorMsg);
       onUpdateComplete(false, errorMsg);
     }
-  }, [
-    sourceEntityId,
-    sourceEntityType,
-    mappingProfileId,
-    apiBaseUrl,
-    onUpdateComplete,
-    isConfigured,
-  ]);
+  }, [sourceEntityId, sourceEntityType, mappingProfileId, apiBaseUrl, onUpdateComplete, isConfigured]);
 
   /**
    * Handle button click - open confirmation dialog
    */
   const handleButtonClick = React.useCallback(() => {
     if (!isConfigured) {
-      setErrorMessage(
-        "Source entity ID, type, and API base URL must be configured",
-      );
-      setState("error");
+      setErrorMessage('Source entity ID, type, and API base URL must be configured');
+      setState('error');
       return;
     }
     setIsDialogOpen(true);
@@ -284,14 +250,14 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
         <Toast>
           <ToastTitle>Update Complete</ToastTitle>
           <ToastBody>
-            Successfully updated {result.updatedRecords} of{" "}
-            {result.totalRecords} {result.targetEntity || "related"} records.
+            Successfully updated {result.updatedRecords} of {result.totalRecords} {result.targetEntity || 'related'}{' '}
+            records.
           </ToastBody>
         </Toast>,
-        { intent: "success", timeout: 5000 },
+        { intent: 'success', timeout: 5000 }
       );
     },
-    [dispatchToast],
+    [dispatchToast]
   );
 
   /**
@@ -307,10 +273,10 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
             {result.failedRecords} record(s) failed.
           </ToastBody>
         </Toast>,
-        { intent: "warning", timeout: 8000 },
+        { intent: 'warning', timeout: 8000 }
       );
     },
-    [dispatchToast],
+    [dispatchToast]
   );
 
   /**
@@ -323,10 +289,10 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
           <ToastTitle>Update Failed</ToastTitle>
           <ToastBody>{message}</ToastBody>
         </Toast>,
-        { intent: "error", timeout: 8000 },
+        { intent: 'error', timeout: 8000 }
       );
     },
-    [dispatchToast],
+    [dispatchToast]
   );
 
   /**
@@ -335,20 +301,20 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
   const getEntityDisplayName = React.useCallback((): string => {
     // Map common entity logical names to display names
     const entityDisplayNames: Record<string, string> = {
-      sprk_matter: "Matter",
-      sprk_project: "Project",
-      sprk_invoice: "Invoice",
-      sprk_analysis: "Analysis",
-      account: "Account",
-      contact: "Contact",
-      sprk_workassignment: "Work Assignment",
-      sprk_budget: "Budget",
-      sprk_event: "Event",
+      sprk_matter: 'Matter',
+      sprk_project: 'Project',
+      sprk_invoice: 'Invoice',
+      sprk_analysis: 'Analysis',
+      account: 'Account',
+      contact: 'Contact',
+      sprk_workassignment: 'Work Assignment',
+      sprk_budget: 'Budget',
+      sprk_event: 'Event',
     };
     return entityDisplayNames[sourceEntityType] || sourceEntityType;
   }, [sourceEntityType]);
 
-  const isDisabled = state === "loading" || !isConfigured;
+  const isDisabled = state === 'loading' || !isConfigured;
 
   return (
     <div className={styles.container}>
@@ -358,55 +324,41 @@ export const UpdateRelatedButtonApp: React.FC<IUpdateRelatedButtonAppProps> = (
         <Button
           className={styles.button}
           appearance="primary"
-          icon={
-            state === "loading" ? <Spinner size="tiny" /> : <ArrowSyncIcon />
-          }
+          icon={state === 'loading' ? <Spinner size="tiny" /> : <ArrowSyncIcon />}
           disabled={isDisabled}
           onClick={handleButtonClick}
         >
-          {state === "loading" ? "Updating..." : buttonLabel}
+          {state === 'loading' ? 'Updating...' : buttonLabel}
         </Button>
 
         {/* Inline result text */}
-        {state === "success" && lastResult && (
+        {state === 'success' && lastResult && (
           <Text className={styles.successText}>
-            Updated {lastResult.updatedRecords} of {lastResult.totalRecords}{" "}
-            records
+            Updated {lastResult.updatedRecords} of {lastResult.totalRecords} records
           </Text>
         )}
-        {state === "error" && errorMessage && (
-          <Text className={styles.errorText}>{errorMessage}</Text>
-        )}
+        {state === 'error' && errorMessage && <Text className={styles.errorText}>{errorMessage}</Text>}
       </div>
 
       {/* Configuration warning */}
-      {!isConfigured && state === "idle" && (
+      {!isConfigured && state === 'idle' && (
         <Text className={styles.configWarning}>
-          Configuration required: Source entity ID, type, and API URL must be
-          set.
+          Configuration required: Source entity ID, type, and API URL must be set.
         </Text>
       )}
 
       {/* Confirmation Dialog */}
-      <Dialog
-        open={isDialogOpen}
-        onOpenChange={(_, data) => setIsDialogOpen(data.open)}
-      >
+      <Dialog open={isDialogOpen} onOpenChange={(_, data) => setIsDialogOpen(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle>Update Related Records</DialogTitle>
             <DialogContent className={styles.dialogContent}>
               <Text>
-                This will update all related records with the current values
-                from this {getEntityDisplayName()}.
+                This will update all related records with the current values from this {getEntityDisplayName()}.
               </Text>
+              <Text>Field mappings configured for this entity type will be applied to all child records.</Text>
               <Text>
-                Field mappings configured for this entity type will be applied
-                to all child records.
-              </Text>
-              <Text>
-                <strong>This action cannot be undone.</strong> Are you sure you
-                want to continue?
+                <strong>This action cannot be undone.</strong> Are you sure you want to continue?
               </Text>
             </DialogContent>
             <DialogActions>

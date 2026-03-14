@@ -37,8 +37,8 @@
  * @deprecated Superseded by streaming-e2e.test.ts (task R2-071). Retained for manual debugging only.
  */
 
-import * as React from "react";
-import { useState, useRef, useMemo, useCallback } from "react";
+import * as React from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import {
   Button,
   Text,
@@ -50,17 +50,13 @@ import {
   Divider,
   Textarea,
   type TextareaOnChangeData,
-} from "@fluentui/react-components";
-import {
-  Play20Regular,
-  Stop20Regular,
-  Delete20Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Play20Regular, Stop20Regular, Delete20Regular } from '@fluentui/react-icons';
 
-import { SprkChatBridge } from "../services/SprkChatBridge";
-import { RichTextEditor } from "../components/RichTextEditor/RichTextEditor";
-import type { RichTextEditorRef } from "../components/RichTextEditor/RichTextEditor";
-import { useDocumentStreamConsumer } from "../components/RichTextEditor/hooks/useDocumentStreamConsumer";
+import { SprkChatBridge } from '../services/SprkChatBridge';
+import { RichTextEditor } from '../components/RichTextEditor/RichTextEditor';
+import type { RichTextEditorRef } from '../components/RichTextEditor/RichTextEditor';
+import { useDocumentStreamConsumer } from '../components/RichTextEditor/hooks/useDocumentStreamConsumer';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -68,47 +64,47 @@ import { useDocumentStreamConsumer } from "../components/RichTextEditor/hooks/us
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "16px",
-    padding: "24px",
-    maxWidth: "960px",
-    margin: "0 auto",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    padding: '24px',
+    maxWidth: '960px',
+    margin: '0 auto',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
   },
   controls: {
-    display: "flex",
-    gap: "8px",
-    alignItems: "center",
-    flexWrap: "wrap",
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
   status: {
-    display: "flex",
-    gap: "12px",
-    alignItems: "center",
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
   },
   latencyLog: {
-    fontFamily: "monospace",
+    fontFamily: 'monospace',
     fontSize: tokens.fontSizeBase200,
-    maxHeight: "160px",
-    overflow: "auto",
-    padding: "8px",
+    maxHeight: '160px',
+    overflow: 'auto',
+    padding: '8px',
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
-    whiteSpace: "pre-wrap",
+    whiteSpace: 'pre-wrap',
   },
   editorSection: {
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
-    padding: "12px",
+    padding: '12px',
   },
   textArea: {
-    width: "100%",
-    minHeight: "80px",
+    width: '100%',
+    minHeight: '80px',
   },
 });
 
@@ -141,14 +137,8 @@ export function StreamingWriteHarness(): React.ReactElement {
 
   // Bridge: use a unique context so this harness doesn't interfere with production
   const bridgeContext = useMemo(() => `harness-${Date.now()}`, []);
-  const producerBridge = useMemo(
-    () => new SprkChatBridge({ context: bridgeContext }),
-    [bridgeContext],
-  );
-  const consumerBridge = useMemo(
-    () => new SprkChatBridge({ context: bridgeContext }),
-    [bridgeContext],
-  );
+  const producerBridge = useMemo(() => new SprkChatBridge({ context: bridgeContext }), [bridgeContext]);
+  const consumerBridge = useMemo(() => new SprkChatBridge({ context: bridgeContext }), [bridgeContext]);
 
   // Editor ref
   const editorRef = useRef<RichTextEditorRef>(null);
@@ -165,16 +155,10 @@ export function StreamingWriteHarness(): React.ReactElement {
     bridge: consumerBridge,
     editorRef,
     onStreamStart: (opId: string) => {
-      setLatencyLog((prev) => [
-        ...prev,
-        `[${new Date().toISOString()}] Stream started: ${opId}`,
-      ]);
+      setLatencyLog(prev => [...prev, `[${new Date().toISOString()}] Stream started: ${opId}`]);
     },
     onStreamEnd: (opId: string, cancelled: boolean) => {
-      setLatencyLog((prev) => [
-        ...prev,
-        `[${new Date().toISOString()}] Stream ended: ${opId} (cancelled=${cancelled})`,
-      ]);
+      setLatencyLog(prev => [...prev, `[${new Date().toISOString()}] Stream ended: ${opId} (cancelled=${cancelled})`]);
 
       // Report latency summary
       const times = tokenStartTimesRef.current;
@@ -194,10 +178,10 @@ export function StreamingWriteHarness(): React.ReactElement {
           const p95Idx = Math.floor(latencies.length * 0.95);
           const sortedLatencies = [...latencies].sort((a, b) => a - b);
           const p95 = sortedLatencies[p95Idx] ?? max;
-          setLatencyLog((prev) => [
+          setLatencyLog(prev => [
             ...prev,
             `  Latency: avg=${avg.toFixed(1)}ms, p95=${p95.toFixed(1)}ms, max=${max.toFixed(1)}ms (${latencies.length} intervals)`,
-            `  NFR-01 target: <100ms per token — ${p95 < 100 ? "PASS" : "FAIL"}`,
+            `  NFR-01 target: <100ms per token — ${p95 < 100 ? 'PASS' : 'FAIL'}`,
           ]);
         }
         tokenStartTimesRef.current.clear();
@@ -226,19 +210,19 @@ export function StreamingWriteHarness(): React.ReactElement {
     // Tokenize: split into individual characters (simulates per-token SSE)
     // In production, tokens are typically 1-4 words. Character-by-character
     // is a worst-case scenario for latency testing.
-    const tokens = textToStream.split("");
+    const tokens = textToStream.split('');
 
-    setLatencyLog((prev) => [
+    setLatencyLog(prev => [
       ...prev,
       `\n--- New Stream ---`,
       `[${new Date().toISOString()}] Emitting ${tokens.length} tokens via bridge`,
     ]);
 
     // Emit document_stream_start
-    producerBridge.emit("document_stream_start", {
+    producerBridge.emit('document_stream_start', {
       operationId: opId,
-      targetPosition: "end",
-      operationType: "insert",
+      targetPosition: 'end',
+      operationType: 'insert',
     });
 
     // Emit tokens with a realistic interval (~20ms per token, ~50 tokens/sec)
@@ -248,7 +232,7 @@ export function StreamingWriteHarness(): React.ReactElement {
     const emitNextToken = (): void => {
       if (index >= tokens.length) {
         // Emit document_stream_end
-        producerBridge.emit("document_stream_end", {
+        producerBridge.emit('document_stream_end', {
           operationId: opId,
           cancelled: false,
           totalTokens: tokens.length,
@@ -257,7 +241,7 @@ export function StreamingWriteHarness(): React.ReactElement {
         return;
       }
 
-      producerBridge.emit("document_stream_token", {
+      producerBridge.emit('document_stream_token', {
         operationId: opId,
         token: tokens[index],
         index,
@@ -277,7 +261,7 @@ export function StreamingWriteHarness(): React.ReactElement {
     }
 
     if (operationId) {
-      producerBridge.emit("document_stream_end", {
+      producerBridge.emit('document_stream_end', {
         operationId,
         cancelled: true,
         totalTokens: tokenCount,
@@ -295,13 +279,10 @@ export function StreamingWriteHarness(): React.ReactElement {
   }, []);
 
   const handleMockTextChange = useCallback(
-    (
-      _ev: React.ChangeEvent<HTMLTextAreaElement>,
-      data: TextareaOnChangeData,
-    ) => {
+    (_ev: React.ChangeEvent<HTMLTextAreaElement>, data: TextareaOnChangeData) => {
       setMockText(data.value);
     },
-    [],
+    []
   );
 
   // ─────────────────────────────────────────────────────────────────────
@@ -335,9 +316,8 @@ export function StreamingWriteHarness(): React.ReactElement {
       </div>
 
       <Text size={300}>
-        Validates the full E2E streaming write pipeline: Mock SSE events →
-        SprkChatBridge (BroadcastChannel) → useDocumentStreamConsumer →
-        RichTextEditor StreamingInsertPlugin. Not production code.
+        Validates the full E2E streaming write pipeline: Mock SSE events → SprkChatBridge (BroadcastChannel) →
+        useDocumentStreamConsumer → RichTextEditor StreamingInsertPlugin. Not production code.
       </Text>
 
       <Divider />
@@ -359,39 +339,21 @@ export function StreamingWriteHarness(): React.ReactElement {
 
       {/* Controls */}
       <div className={styles.controls}>
-        <Button
-          appearance="primary"
-          icon={<Play20Regular />}
-          onClick={startMockStream}
-          disabled={isStreaming}
-        >
+        <Button appearance="primary" icon={<Play20Regular />} onClick={startMockStream} disabled={isStreaming}>
           Start Streaming
         </Button>
-        <Button
-          appearance="secondary"
-          icon={<Stop20Regular />}
-          onClick={cancelMockStream}
-          disabled={!isStreaming}
-        >
+        <Button appearance="secondary" icon={<Stop20Regular />} onClick={cancelMockStream} disabled={!isStreaming}>
           Cancel
         </Button>
-        <Button
-          appearance="subtle"
-          icon={<Delete20Regular />}
-          onClick={clearEditor}
-          disabled={isStreaming}
-        >
+        <Button appearance="subtle" icon={<Delete20Regular />} onClick={clearEditor} disabled={isStreaming}>
           Clear
         </Button>
 
-        <Divider vertical style={{ height: "24px" }} />
+        <Divider vertical style={{ height: '24px' }} />
 
         <div className={styles.status}>
-          <Badge
-            appearance="filled"
-            color={isStreaming ? "success" : "informative"}
-          >
-            {isStreaming ? "Streaming" : "Idle"}
+          <Badge appearance="filled" color={isStreaming ? 'success' : 'informative'}>
+            {isStreaming ? 'Streaming' : 'Idle'}
           </Badge>
           {operationId && (
             <Text size={200}>
@@ -408,7 +370,7 @@ export function StreamingWriteHarness(): React.ReactElement {
         <Text weight="semibold" size={300}>
           RichTextEditor (Consumer — receives bridge events)
         </Text>
-        <div style={{ marginTop: "8px" }}>
+        <div style={{ marginTop: '8px' }}>
           <RichTextEditor
             ref={editorRef}
             value=""
@@ -424,18 +386,14 @@ export function StreamingWriteHarness(): React.ReactElement {
       {latencyLog.length > 0 && (
         <Card>
           <CardHeader header={<Text weight="semibold">Latency Log</Text>} />
-          <div className={styles.latencyLog}>{latencyLog.join("\n")}</div>
+          <div className={styles.latencyLog}>{latencyLog.join('\n')}</div>
         </Card>
       )}
 
       {/* Architecture Diagram */}
       <Card>
         <CardHeader header={<Text weight="semibold">Data Flow</Text>} />
-        <Text
-          size={200}
-          font="monospace"
-          style={{ whiteSpace: "pre", padding: "8px" }}
-        >
+        <Text size={200} font="monospace" style={{ whiteSpace: 'pre', padding: '8px' }}>
           {`  [Mock SSE Emitter]
         |
         v

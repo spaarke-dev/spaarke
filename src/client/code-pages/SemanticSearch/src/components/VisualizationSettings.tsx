@@ -23,7 +23,7 @@
  * @see ADR-021 for Fluent UI v9 design system requirements
  */
 
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -38,41 +38,32 @@ import {
   Popover,
   PopoverTrigger,
   PopoverSurface,
-} from "@fluentui/react-components";
-import {
-  ChevronDown20Regular,
-  ChevronUp20Regular,
-  Info20Regular,
-} from "@fluentui/react-icons";
-import type {
-  ViewMode,
-  HybridMode,
-  VisualizationColorBy,
-  TimelineDateField,
-} from "../types";
+} from '@fluentui/react-components';
+import { ChevronDown20Regular, ChevronUp20Regular, Info20Regular } from '@fluentui/react-icons';
+import type { ViewMode, HybridMode, VisualizationColorBy, TimelineDateField } from '../types';
 
 // =============================================
 // Option Constants
 // =============================================
 
 const CLUSTER_BY_OPTIONS: { value: VisualizationColorBy; label: string }[] = [
-  { value: "DocumentType", label: "Document Type" },
-  { value: "MatterType", label: "Entity Type" },
-  { value: "Organization", label: "Related Entity" },
-  { value: "PracticeArea", label: "File Type" },
-  { value: "PersonContact", label: "Created By" },
+  { value: 'DocumentType', label: 'Document Type' },
+  { value: 'MatterType', label: 'Entity Type' },
+  { value: 'Organization', label: 'Related Entity' },
+  { value: 'PracticeArea', label: 'File Type' },
+  { value: 'PersonContact', label: 'Created By' },
 ];
 
 const SEARCH_MODE_OPTIONS: { value: HybridMode; label: string }[] = [
-  { value: "rrf", label: "Hybrid (RRF)" },
-  { value: "vectorOnly", label: "Vector Only" },
-  { value: "keywordOnly", label: "Keyword Only" },
+  { value: 'rrf', label: 'Hybrid (RRF)' },
+  { value: 'vectorOnly', label: 'Vector Only' },
+  { value: 'keywordOnly', label: 'Keyword Only' },
 ];
 
 const DATE_FIELD_OPTIONS: { value: TimelineDateField; label: string }[] = [
-  { value: "createdAt", label: "Created Date" },
-  { value: "updatedAt", label: "Modified Date" },
-  { value: "modifiedAt", label: "Last Modified" },
+  { value: 'createdAt', label: 'Created Date' },
+  { value: 'updatedAt', label: 'Modified Date' },
+  { value: 'modifiedAt', label: 'Last Modified' },
 ];
 
 // =============================================
@@ -84,83 +75,80 @@ interface HelpSection {
   body: string;
 }
 
-const VIEW_HELP: Record<
-  ViewMode,
-  { heading: string; sections: HelpSection[] }
-> = {
+const VIEW_HELP: Record<ViewMode, { heading: string; sections: HelpSection[] }> = {
   grid: {
-    heading: "How the Results Grid Works",
+    heading: 'How the Results Grid Works',
     sections: [
       {
-        title: "Similarity Score",
+        title: 'Similarity Score',
         body: "The percentage badge indicates how closely a document's content matches your query's meaning. Higher = more relevant. Use the Relevance Threshold slider to hide low-scoring results.",
       },
       {
-        title: "Search Modes",
-        body: "Hybrid (default): Combines meaning-based and keyword search for best overall results. Concept Only: Pure meaning-based search \u2014 good for abstract queries. Keyword Only: Traditional exact-word matching \u2014 good for specific terms or clause numbers.",
+        title: 'Search Modes',
+        body: 'Hybrid (default): Combines meaning-based and keyword search for best overall results. Concept Only: Pure meaning-based search \u2014 good for abstract queries. Keyword Only: Traditional exact-word matching \u2014 good for specific terms or clause numbers.',
       },
       {
-        title: "Sorting & Selection",
-        body: "Click column headers to sort. Select rows to enable bulk actions (open, email, download) in the command bar above.",
+        title: 'Sorting & Selection',
+        body: 'Click column headers to sort. Select rows to enable bulk actions (open, email, download) in the command bar above.',
       },
     ],
   },
   map: {
-    heading: "How the Network Graph Works",
+    heading: 'How the Network Graph Works',
     sections: [
       {
-        title: "Nodes & Connections",
-        body: "Each circle represents a search result. Lines between circles indicate metadata similarity \u2014 results that share attributes (type, related entity, author) are connected. The percentage on each line shows the similarity strength.",
+        title: 'Nodes & Connections',
+        body: 'Each circle represents a search result. Lines between circles indicate metadata similarity \u2014 results that share attributes (type, related entity, author) are connected. The percentage on each line shows the similarity strength.',
       },
       {
-        title: "Circle Size & Color",
-        body: "Larger circles have higher relevance scores. Colors group results by the selected Cluster By category. Hover any node to see its details and highlight its connections.",
+        title: 'Circle Size & Color',
+        body: 'Larger circles have higher relevance scores. Colors group results by the selected Cluster By category. Hover any node to see its details and highlight its connections.',
       },
       {
-        title: "Cluster By",
-        body: "Groups results by a shared attribute: Document Type, Entity Type, Related Entity, File Type, or Created By. Connected clusters reveal how your results relate to each other.",
+        title: 'Cluster By',
+        body: 'Groups results by a shared attribute: Document Type, Entity Type, Related Entity, File Type, or Created By. Connected clusters reveal how your results relate to each other.',
       },
       {
-        title: "Interacting",
-        body: "Drag nodes to rearrange the layout. Scroll to zoom in/out. Click a node to open a document preview. Click and drag the background to pan.",
+        title: 'Interacting',
+        body: 'Drag nodes to rearrange the layout. Scroll to zoom in/out. Click a node to open a document preview. Click and drag the background to pan.',
       },
       {
-        title: "Minimum Similarity",
-        body: "Filters which results appear in the graph based on their search relevance score. Increase to focus on the most relevant results only.",
+        title: 'Minimum Similarity',
+        body: 'Filters which results appear in the graph based on their search relevance score. Increase to focus on the most relevant results only.',
       },
     ],
   },
   treemap: {
-    heading: "How the Treemap Works",
+    heading: 'How the Treemap Works',
     sections: [
       {
-        title: "Tile Size",
-        body: "Each rectangle represents a search result. Larger tiles have higher relevance scores. Results are grouped into colored regions by the selected Cluster By category.",
+        title: 'Tile Size',
+        body: 'Each rectangle represents a search result. Larger tiles have higher relevance scores. Results are grouped into colored regions by the selected Cluster By category.',
       },
       {
-        title: "Cluster By",
-        body: "Controls how results are grouped into regions: Document Type, Entity Type, Related Entity, File Type, or Created By. Larger regions contain more matching results.",
+        title: 'Cluster By',
+        body: 'Controls how results are grouped into regions: Document Type, Entity Type, Related Entity, File Type, or Created By. Larger regions contain more matching results.',
       },
       {
-        title: "Interacting",
-        body: "Click a tile to open the document preview. Toggle Show Labels to display result names on each tile.",
+        title: 'Interacting',
+        body: 'Click a tile to open the document preview. Toggle Show Labels to display result names on each tile.',
       },
     ],
   },
   timeline: {
-    heading: "How the Timeline Works",
+    heading: 'How the Timeline Works',
     sections: [
       {
-        title: "Date Axis",
-        body: "Results are plotted along a horizontal timeline based on the selected Date Field (Created Date, Modified Date, or Last Modified). This reveals when documents were created or last changed.",
+        title: 'Date Axis',
+        body: 'Results are plotted along a horizontal timeline based on the selected Date Field (Created Date, Modified Date, or Last Modified). This reveals when documents were created or last changed.',
       },
       {
-        title: "Cluster By",
-        body: "Colors results by a shared attribute so you can see patterns over time \u2014 for example, which document types were created in which periods.",
+        title: 'Cluster By',
+        body: 'Colors results by a shared attribute so you can see patterns over time \u2014 for example, which document types were created in which periods.',
       },
       {
-        title: "Interacting",
-        body: "Click a point to open the document preview. Hover to see details including the date value and relevance score.",
+        title: 'Interacting',
+        body: 'Click a point to open the document preview. Hover to see details including the date value and relevance score.',
       },
     ],
   },
@@ -205,19 +193,19 @@ export interface VisualizationSettingsProps {
 
 const useStyles = makeStyles({
   surface: {
-    width: "300px",
+    width: '300px',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    maxHeight: "70vh",
-    overflowY: "auto",
-    overflowX: "hidden",
-    boxSizing: "border-box",
+    maxHeight: '70vh',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    boxSizing: 'border-box',
   },
   section: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalS,
   },
@@ -227,27 +215,27 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   sliderRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   sliderValue: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
-    minWidth: "36px",
-    textAlign: "right" as const,
+    minWidth: '36px',
+    textAlign: 'right' as const,
   },
   hint: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
   },
   dropdown: {
-    width: "100%",
+    width: '100%',
     minWidth: 0,
   },
   triggerButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
   infoBox: {
     marginTop: tokens.spacingVerticalS,
@@ -259,9 +247,9 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalM,
   },
   infoHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: tokens.spacingVerticalXS,
   },
   infoHeading: {
@@ -278,12 +266,12 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground1,
     marginTop: tokens.spacingVerticalS,
-    marginBottom: "2px",
+    marginBottom: '2px',
   },
   infoBody: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    lineHeight: "1.4",
+    lineHeight: '1.4',
   },
 });
 
@@ -327,7 +315,7 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
     (_ev: unknown, data: { value: number }) => {
       onThresholdChange(data.value);
     },
-    [onThresholdChange],
+    [onThresholdChange]
   );
 
   const handleSearchModeChange = useCallback(
@@ -336,7 +324,7 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         onSearchModeChange(data.optionValue as HybridMode);
       }
     },
-    [onSearchModeChange],
+    [onSearchModeChange]
   );
 
   // --- Map handlers ---
@@ -346,14 +334,14 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         onMapColorByChange(data.optionValue as VisualizationColorBy);
       }
     },
-    [onMapColorByChange],
+    [onMapColorByChange]
   );
 
   const handleMapSimilarityChange = useCallback(
     (_ev: unknown, data: { value: number }) => {
       onMapMinSimilarityChange(data.value);
     },
-    [onMapMinSimilarityChange],
+    [onMapMinSimilarityChange]
   );
 
   // --- Treemap handlers ---
@@ -363,14 +351,14 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         onTreemapGroupByChange(data.optionValue as VisualizationColorBy);
       }
     },
-    [onTreemapGroupByChange],
+    [onTreemapGroupByChange]
   );
 
   const handleTreemapShowLabelsChange = useCallback(
-    (_ev: unknown, data: { checked: boolean | "mixed" }) => {
+    (_ev: unknown, data: { checked: boolean | 'mixed' }) => {
       onTreemapShowLabelsChange(data.checked === true);
     },
-    [onTreemapShowLabelsChange],
+    [onTreemapShowLabelsChange]
   );
 
   // --- Timeline handlers ---
@@ -380,7 +368,7 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         onTimelineDateFieldChange(data.optionValue as TimelineDateField);
       }
     },
-    [onTimelineDateFieldChange],
+    [onTimelineDateFieldChange]
   );
 
   const handleTimelineColorByChange = useCallback(
@@ -389,15 +377,11 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         onTimelineColorByChange(data.optionValue as VisualizationColorBy);
       }
     },
-    [onTimelineColorByChange],
+    [onTimelineColorByChange]
   );
 
   return (
-    <Popover
-      positioning="below-end"
-      open={isOpen}
-      onOpenChange={(_ev, data) => setIsOpen(data.open)}
-    >
+    <Popover positioning="below-end" open={isOpen} onOpenChange={(_ev, data) => setIsOpen(data.open)}>
       <PopoverTrigger disableButtonEnhancement>
         <Button
           className={styles.triggerButton}
@@ -431,15 +415,12 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
           <Dropdown
             className={styles.dropdown}
             size="small"
-            value={
-              SEARCH_MODE_OPTIONS.find((o) => o.value === searchMode)?.label ??
-              "Hybrid (RRF)"
-            }
+            value={SEARCH_MODE_OPTIONS.find(o => o.value === searchMode)?.label ?? 'Hybrid (RRF)'}
             selectedOptions={[searchMode]}
             onOptionSelect={handleSearchModeChange}
             aria-label="Search mode"
           >
-            {SEARCH_MODE_OPTIONS.map((opt) => (
+            {SEARCH_MODE_OPTIONS.map(opt => (
               <Option key={opt.value} value={opt.value}>
                 {opt.label}
               </Option>
@@ -448,7 +429,7 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         </div>
 
         {/* === Network-only settings === */}
-        {viewMode === "map" && (
+        {viewMode === 'map' && (
           <>
             <Divider />
             <div className={styles.section}>
@@ -456,15 +437,12 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
               <Dropdown
                 className={styles.dropdown}
                 size="small"
-                value={
-                  CLUSTER_BY_OPTIONS.find((o) => o.value === mapColorBy)
-                    ?.label ?? "Document Type"
-                }
+                value={CLUSTER_BY_OPTIONS.find(o => o.value === mapColorBy)?.label ?? 'Document Type'}
                 selectedOptions={[mapColorBy]}
                 onOptionSelect={handleMapColorByChange}
                 aria-label="Cluster by category"
               >
-                {CLUSTER_BY_OPTIONS.map((opt) => (
+                {CLUSTER_BY_OPTIONS.map(opt => (
                   <Option key={opt.value} value={opt.value}>
                     {opt.label}
                   </Option>
@@ -473,9 +451,7 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
             </div>
             <div className={styles.section}>
               <div className={styles.sliderRow}>
-                <Label className={styles.sectionTitle}>
-                  Minimum Similarity
-                </Label>
+                <Label className={styles.sectionTitle}>Minimum Similarity</Label>
                 <Text className={styles.sliderValue}>{mapMinSimilarity}%</Text>
               </div>
               <Slider
@@ -486,15 +462,13 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
                 onChange={handleMapSimilarityChange}
                 aria-label="Minimum similarity"
               />
-              <Text className={styles.hint}>
-                Filter out low-scoring results from graph
-              </Text>
+              <Text className={styles.hint}>Filter out low-scoring results from graph</Text>
             </div>
           </>
         )}
 
         {/* === Treemap-only settings === */}
-        {viewMode === "treemap" && (
+        {viewMode === 'treemap' && (
           <>
             <Divider />
             <div className={styles.section}>
@@ -502,15 +476,12 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
               <Dropdown
                 className={styles.dropdown}
                 size="small"
-                value={
-                  CLUSTER_BY_OPTIONS.find((o) => o.value === treemapGroupBy)
-                    ?.label ?? "Entity Type"
-                }
+                value={CLUSTER_BY_OPTIONS.find(o => o.value === treemapGroupBy)?.label ?? 'Entity Type'}
                 selectedOptions={[treemapGroupBy]}
                 onOptionSelect={handleTreemapGroupByChange}
                 aria-label="Cluster by category"
               >
-                {CLUSTER_BY_OPTIONS.map((opt) => (
+                {CLUSTER_BY_OPTIONS.map(opt => (
                   <Option key={opt.value} value={opt.value}>
                     {opt.label}
                   </Option>
@@ -518,18 +489,14 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
               </Dropdown>
             </div>
             <div className={styles.section}>
-              <Checkbox
-                checked={treemapShowLabels}
-                onChange={handleTreemapShowLabelsChange}
-                label="Show Labels"
-              />
+              <Checkbox checked={treemapShowLabels} onChange={handleTreemapShowLabelsChange} label="Show Labels" />
               <Text className={styles.hint}>Show result names on tiles</Text>
             </div>
           </>
         )}
 
         {/* === Timeline-only settings === */}
-        {viewMode === "timeline" && (
+        {viewMode === 'timeline' && (
           <>
             <Divider />
             <div className={styles.section}>
@@ -537,15 +504,12 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
               <Dropdown
                 className={styles.dropdown}
                 size="small"
-                value={
-                  DATE_FIELD_OPTIONS.find((o) => o.value === timelineDateField)
-                    ?.label ?? "Created Date"
-                }
+                value={DATE_FIELD_OPTIONS.find(o => o.value === timelineDateField)?.label ?? 'Created Date'}
                 selectedOptions={[timelineDateField]}
                 onOptionSelect={handleTimelineDateFieldChange}
                 aria-label="Date field"
               >
-                {DATE_FIELD_OPTIONS.map((opt) => (
+                {DATE_FIELD_OPTIONS.map(opt => (
                   <Option key={opt.value} value={opt.value}>
                     {opt.label}
                   </Option>
@@ -557,15 +521,12 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
               <Dropdown
                 className={styles.dropdown}
                 size="small"
-                value={
-                  CLUSTER_BY_OPTIONS.find((o) => o.value === timelineColorBy)
-                    ?.label ?? "Document Type"
-                }
+                value={CLUSTER_BY_OPTIONS.find(o => o.value === timelineColorBy)?.label ?? 'Document Type'}
                 selectedOptions={[timelineColorBy]}
                 onOptionSelect={handleTimelineColorByChange}
                 aria-label="Cluster by category"
               >
-                {CLUSTER_BY_OPTIONS.map((opt) => (
+                {CLUSTER_BY_OPTIONS.map(opt => (
                   <Option key={opt.value} value={opt.value}>
                     {opt.label}
                   </Option>
@@ -578,12 +539,10 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
         <Divider />
         <div className={styles.infoBox}>
           <div className={styles.infoHeader}>
-            <Text className={styles.infoHeading}>
-              {VIEW_HELP[viewMode].heading}
-            </Text>
+            <Text className={styles.infoHeading}>{VIEW_HELP[viewMode].heading}</Text>
             <Info20Regular className={styles.infoIcon} />
           </div>
-          {VIEW_HELP[viewMode].sections.map((sec) => (
+          {VIEW_HELP[viewMode].sections.map(sec => (
             <div key={sec.title}>
               <Text block className={styles.infoSectionTitle}>
                 {sec.title}

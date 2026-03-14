@@ -4,26 +4,17 @@
  * Central switching logic for the DrillThroughWorkspace PCF control
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type {
-  IChartDefinition,
-  DrillInteraction,
-  VisualType,
-  IChartData,
-} from "../../types";
-import { VisualType as VT } from "../../types";
-import { MetricCard } from "./MetricCard";
-import { BarChart } from "./BarChart";
-import { LineChart } from "./LineChart";
-import { DonutChart } from "./DonutChart";
-import { StatusDistributionBar } from "./StatusDistributionBar";
-import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
-import {
-  MiniTable,
-  type IMiniTableItem,
-  type IMiniTableColumn,
-} from "./MiniTable";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { IChartDefinition, DrillInteraction, VisualType, IChartData } from '../../types';
+import { VisualType as VT } from '../../types';
+import { MetricCard } from './MetricCard';
+import { BarChart } from './BarChart';
+import { LineChart } from './LineChart';
+import { DonutChart } from './DonutChart';
+import { StatusDistributionBar } from './StatusDistributionBar';
+import { CalendarVisual, type ICalendarEvent } from './CalendarVisual';
+import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from './MiniTable';
 
 export interface IChartRendererProps {
   /** Chart definition from Dataverse */
@@ -38,28 +29,28 @@ export interface IChartRendererProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
-    minHeight: "150px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    minHeight: '150px',
   },
   placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
     padding: tokens.spacingVerticalL,
   },
   unknownType: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     gap: tokens.spacingVerticalS,
     color: tokens.colorNeutralForeground3,
@@ -85,21 +76,21 @@ const parseConfig = (jsonString?: string): Record<string, unknown> => {
 const getVisualTypeName = (visualType: VisualType): string => {
   switch (visualType) {
     case VT.MetricCard:
-      return "Metric Card";
+      return 'Metric Card';
     case VT.BarChart:
-      return "Bar Chart";
+      return 'Bar Chart';
     case VT.LineChart:
-      return "Line Chart";
+      return 'Line Chart';
     case VT.AreaChart:
-      return "Area Chart";
+      return 'Area Chart';
     case VT.DonutChart:
-      return "Donut Chart";
+      return 'Donut Chart';
     case VT.StatusBar:
-      return "Status Distribution Bar";
+      return 'Status Distribution Bar';
     case VT.Calendar:
-      return "Calendar";
+      return 'Calendar';
     case VT.MiniTable:
-      return "Mini Table";
+      return 'Mini Table';
     default:
       return `Unknown (${visualType})`;
   }
@@ -115,47 +106,32 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   height = 300,
 }) => {
   const styles = useStyles();
-  const {
-    sprk_visualtype,
-    sprk_name,
-    sprk_configurationjson,
-    sprk_groupbyfield,
-  } = chartDefinition;
+  const { sprk_visualtype, sprk_name, sprk_configurationjson, sprk_groupbyfield } = chartDefinition;
 
   // Parse configuration options
   const config = parseConfig(sprk_configurationjson);
 
   // No data available
-  if (
-    !chartData ||
-    !chartData.dataPoints ||
-    chartData.dataPoints.length === 0
-  ) {
+  if (!chartData || !chartData.dataPoints || chartData.dataPoints.length === 0) {
     // Some chart types don't need data (e.g., MetricCard can show "0")
     if (sprk_visualtype !== VT.MetricCard) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
-          <Text size={200}>
-            {getVisualTypeName(sprk_visualtype)} requires data to display
-          </Text>
+          <Text size={200}>{getVisualTypeName(sprk_visualtype)} requires data to display</Text>
         </div>
       );
     }
   }
 
   const dataPoints = chartData?.dataPoints || [];
-  const drillField = sprk_groupbyfield || "";
+  const drillField = sprk_groupbyfield || '';
 
   switch (sprk_visualtype) {
     case VT.MetricCard: {
       // MetricCard shows a single value (first data point or total)
-      const metricValue =
-        dataPoints.length > 0
-          ? dataPoints[0].value
-          : chartData?.totalRecords || 0;
-      const metricLabel =
-        dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
+      const metricValue = dataPoints.length > 0 ? dataPoints[0].value : chartData?.totalRecords || 0;
+      const metricLabel = dataPoints.length > 0 ? dataPoints[0].label : sprk_name;
 
       return (
         <div className={styles.container}>
@@ -163,7 +139,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
             value={metricValue}
             label={metricLabel}
             description={chartDefinition.sprk_description}
-            trend={config.trend as "up" | "down" | "neutral" | undefined}
+            trend={config.trend as 'up' | 'down' | 'neutral' | undefined}
             trendValue={config.trendValue as number | undefined}
             onDrillInteraction={onDrillInteraction}
             drillField={drillField}
@@ -180,9 +156,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         <BarChart
           data={dataPoints}
           title={config.showTitle !== false ? sprk_name : undefined}
-          orientation={
-            config.orientation as "vertical" | "horizontal" | undefined
-          }
+          orientation={config.orientation as 'vertical' | 'horizontal' | undefined}
           showLabels={config.showLabels as boolean | undefined}
           showLegend={config.showLegend as boolean | undefined}
           onDrillInteraction={onDrillInteraction}
@@ -199,7 +173,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         <LineChart
           data={dataPoints}
           title={config.showTitle !== false ? sprk_name : undefined}
-          variant={sprk_visualtype === VT.AreaChart ? "area" : "line"}
+          variant={sprk_visualtype === VT.AreaChart ? 'area' : 'line'}
           showLegend={config.showLegend as boolean | undefined}
           onDrillInteraction={onDrillInteraction}
           drillField={drillField}
@@ -227,7 +201,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
 
     case VT.StatusBar: {
       // StatusDistributionBar expects data with label, value, color
-      const statusSegments = dataPoints.map((dp) => ({
+      const statusSegments = dataPoints.map(dp => ({
         label: dp.label,
         value: dp.value,
         color: dp.color,
@@ -250,11 +224,11 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
     case VT.Calendar: {
       // Calendar expects events with date, count, and optional label/fieldValue
       // Transform dataPoints to calendar events
-      const events: ICalendarEvent[] = dataPoints.map((dp) => ({
+      const events: ICalendarEvent[] = dataPoints.map(dp => ({
         date:
           dp.fieldValue instanceof Date
             ? dp.fieldValue
-            : typeof dp.fieldValue === "string"
+            : typeof dp.fieldValue === 'string'
               ? new Date(dp.fieldValue)
               : new Date(),
         count: dp.value,
@@ -286,8 +260,8 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       }));
 
       const tableColumns: IMiniTableColumn[] = [
-        { key: "label", header: "Name", width: "60%" },
-        { key: "value", header: "Value", width: "40%", isValue: true },
+        { key: 'label', header: 'Name', width: '60%' },
+        { key: 'value', header: 'Value', width: '40%', isValue: true },
       ];
 
       // If config has custom columns, use those
@@ -312,12 +286,9 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           <Text size={400} weight="semibold">
             Unsupported Visual Type
           </Text>
+          <Text size={200}>Visual type {sprk_visualtype} is not yet supported.</Text>
           <Text size={200}>
-            Visual type {sprk_visualtype} is not yet supported.
-          </Text>
-          <Text size={200}>
-            Supported types: MetricCard, BarChart, LineChart, AreaChart,
-            DonutChart, StatusBar, Calendar, MiniTable
+            Supported types: MetricCard, BarChart, LineChart, AreaChart, DonutChart, StatusBar, Calendar, MiniTable
           </Text>
         </div>
       );

@@ -9,9 +9,9 @@
  * @see config/domainColumns.ts — fallback column definitions
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import type { SearchDomain, GridColumnDef } from "../types";
-import { getColumnsForDomain } from "../config/domainColumns";
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { SearchDomain, GridColumnDef } from '../types';
+import { getColumnsForDomain } from '../config/domainColumns';
 
 // =============================================
 // Types
@@ -33,7 +33,7 @@ export interface SearchViewDefinition {
   name: string;
   domain: SearchDomain;
   columns: IViewColumnDef[];
-  defaultSort?: { column: string; direction: "asc" | "desc" };
+  defaultSort?: { column: string; direction: 'asc' | 'desc' };
   isDefault: boolean;
   sortOrder: number;
 }
@@ -68,16 +68,16 @@ export interface UseSearchViewDefinitionsResult {
 // Constants
 // =============================================
 
-const ENTITY_SET = "sprk_gridconfigurations";
-const VIEW_TYPE = "semantic-search-view";
-const CACHE_KEY_PREFIX = "sprk_searchViewDefs_";
+const ENTITY_SET = 'sprk_gridconfigurations';
+const VIEW_TYPE = 'semantic-search-view';
+const CACHE_KEY_PREFIX = 'sprk_searchViewDefs_';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const ODATA_HEADERS: HeadersInit = {
-  Accept: "application/json",
-  "Content-Type": "application/json",
-  "OData-MaxVersion": "4.0",
-  "OData-Version": "4.0",
+  Accept: 'application/json',
+  'Content-Type': 'application/json',
+  'OData-MaxVersion': '4.0',
+  'OData-Version': '4.0',
 };
 
 // =============================================
@@ -87,7 +87,7 @@ const ODATA_HEADERS: HeadersInit = {
 /** Resolve render hint or explicit dataType to a DataverseAttributeType/ExtendedDataType. */
 function resolveDataType(col: IViewColumnDef): string {
   if (col.dataType) return col.dataType;
-  return "SingleLine.Text";
+  return 'SingleLine.Text';
 }
 
 /** Convert IViewColumnDef → IDatasetColumn. */
@@ -104,24 +104,20 @@ function toDatasetColumn(col: IViewColumnDef): IDatasetColumn {
 /** Convert GridColumnDef (from domainColumns.ts fallback) → IDatasetColumn. */
 function fallbackToDatasetColumn(col: GridColumnDef): IDatasetColumn {
   // Infer dataType from the presence of a render function
-  let dataType = "SingleLine.Text";
+  let dataType = 'SingleLine.Text';
   // Use the column key to detect known types
-  if (col.key === "combinedScore" || col.key === "confidenceScore") {
-    dataType = "Percentage";
-  } else if (
-    col.key === "updatedAt" ||
-    col.key === "modifiedAt" ||
-    col.key === "createdAt"
-  ) {
-    dataType = "DateAndTime.DateOnly";
-  } else if (col.key === "fileType") {
-    dataType = "FileType";
-  } else if (col.key === "organizations" || col.key === "referenceNumbers") {
-    dataType = "StringArray";
-  } else if (col.key === "amount") {
-    dataType = "Currency";
-  } else if (col.key === "parentEntityName" || col.key === "parentMatter") {
-    dataType = "EntityLink";
+  if (col.key === 'combinedScore' || col.key === 'confidenceScore') {
+    dataType = 'Percentage';
+  } else if (col.key === 'updatedAt' || col.key === 'modifiedAt' || col.key === 'createdAt') {
+    dataType = 'DateAndTime.DateOnly';
+  } else if (col.key === 'fileType') {
+    dataType = 'FileType';
+  } else if (col.key === 'organizations' || col.key === 'referenceNumbers') {
+    dataType = 'StringArray';
+  } else if (col.key === 'amount') {
+    dataType = 'Currency';
+  } else if (col.key === 'parentEntityName' || col.key === 'parentMatter') {
+    dataType = 'EntityLink';
   }
 
   return {
@@ -145,25 +141,19 @@ function getOrgUrl(): string | null {
 }
 
 /** Parse a sprk_gridconfiguration record into a SearchViewDefinition. */
-function parseRecord(
-  record: Record<string, unknown>,
-): SearchViewDefinition | null {
+function parseRecord(record: Record<string, unknown>): SearchViewDefinition | null {
   try {
-    const configJson =
-      typeof record.sprk_configjson === "string"
-        ? JSON.parse(record.sprk_configjson)
-        : null;
+    const configJson = typeof record.sprk_configjson === 'string' ? JSON.parse(record.sprk_configjson) : null;
     if (!configJson || configJson._type !== VIEW_TYPE) return null;
 
     return {
-      id: String(record.sprk_gridconfigurationid ?? ""),
-      name: String(record.sprk_name ?? ""),
+      id: String(record.sprk_gridconfigurationid ?? ''),
+      name: String(record.sprk_name ?? ''),
       domain: configJson.domain as SearchDomain,
       columns: configJson.columns ?? [],
       defaultSort: configJson.defaultSort,
       isDefault: record.sprk_isdefault === true,
-      sortOrder:
-        typeof record.sprk_sortorder === "number" ? record.sprk_sortorder : 100,
+      sortOrder: typeof record.sprk_sortorder === 'number' ? record.sprk_sortorder : 100,
     };
   } catch {
     return null;
@@ -174,10 +164,7 @@ function parseRecord(
 // Simple session cache
 // =============================================
 
-const viewCache = new Map<
-  string,
-  { data: SearchViewDefinition[]; ts: number }
->();
+const viewCache = new Map<string, { data: SearchViewDefinition[]; ts: number }>();
 
 function getCached(domain: SearchDomain): SearchViewDefinition[] | null {
   const entry = viewCache.get(CACHE_KEY_PREFIX + domain);
@@ -193,9 +180,7 @@ function setCache(domain: SearchDomain, data: SearchViewDefinition[]): void {
 // Hook
 // =============================================
 
-export function useSearchViewDefinitions(
-  domain: SearchDomain,
-): UseSearchViewDefinitionsResult {
+export function useSearchViewDefinitions(domain: SearchDomain): UseSearchViewDefinitionsResult {
   const [views, setViews] = useState<SearchViewDefinition[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -213,10 +198,7 @@ export function useSearchViewDefinitions(
     const orgUrl = getOrgUrl();
     if (!orgUrl) {
       // No Xrm context — use fallback columns only
-      console.log(
-        "[useSearchViewDefinitions] No Xrm context, using fallback columns for:",
-        domain,
-      );
+      console.log('[useSearchViewDefinitions] No Xrm context, using fallback columns for:', domain);
       setViews([]);
       return;
     }
@@ -228,17 +210,13 @@ export function useSearchViewDefinitions(
       const entityLogicalName = `semantic_search_${domain}`;
       const filter = `sprk_entitylogicalname eq '${entityLogicalName}' and statecode eq 0`;
       const params = new URLSearchParams({
-        $select:
-          "sprk_gridconfigurationid,sprk_name,sprk_configjson,sprk_isdefault,sprk_sortorder",
+        $select: 'sprk_gridconfigurationid,sprk_name,sprk_configjson,sprk_isdefault,sprk_sortorder',
         $filter: filter,
-        $orderby: "sprk_sortorder asc",
+        $orderby: 'sprk_sortorder asc',
       });
       const url = `${orgUrl}/api/data/v9.2/${ENTITY_SET}?${params.toString()}`;
 
-      console.log(
-        "[useSearchViewDefinitions] Fetching views for domain:",
-        domain,
-      );
+      console.log('[useSearchViewDefinitions] Fetching views for domain:', domain);
       const response = await fetch(url, { headers: ODATA_HEADERS });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -251,22 +229,17 @@ export function useSearchViewDefinitions(
         .filter((v): v is SearchViewDefinition => v !== null)
         .sort((a, b) => a.sortOrder - b.sortOrder);
 
-      console.log(
-        "[useSearchViewDefinitions] Loaded",
-        parsed.length,
-        "view(s) for",
-        domain,
-      );
+      console.log('[useSearchViewDefinitions] Loaded', parsed.length, 'view(s) for', domain);
       setCache(domain, parsed);
       setViews(parsed);
     } catch (err) {
       // Non-critical — fallback to domainColumns.ts
       console.log(
-        "[useSearchViewDefinitions] Fetch failed, using fallback columns for:",
+        '[useSearchViewDefinitions] Fetch failed, using fallback columns for:',
         domain,
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       );
-      setError(err instanceof Error ? err.message : "Failed to load views");
+      setError(err instanceof Error ? err.message : 'Failed to load views');
       setViews([]);
     } finally {
       setIsLoading(false);
@@ -287,11 +260,11 @@ export function useSearchViewDefinitions(
   const activeView = useMemo(() => {
     if (views.length === 0) return null;
     if (activeViewId) {
-      const found = views.find((v) => v.id === activeViewId);
+      const found = views.find(v => v.id === activeViewId);
       if (found) return found;
     }
     // Default: first view with isDefault=true, or first view
-    return views.find((v) => v.isDefault) ?? views[0];
+    return views.find(v => v.isDefault) ?? views[0];
   }, [views, activeViewId]);
 
   // Derive columns: from active Dataverse view, or fallback to domainColumns.ts

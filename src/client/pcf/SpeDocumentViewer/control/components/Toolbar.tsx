@@ -8,7 +8,7 @@
  * Edit Mode buttons: Open Desktop, Check In, Discard
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -24,7 +24,7 @@ import {
   DialogActions,
   DialogTrigger,
   DialogBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ArrowClockwise24Regular,
   Edit24Regular,
@@ -35,62 +35,62 @@ import {
   Dismiss24Regular,
   Desktop24Regular,
   Globe24Regular,
-} from "@fluentui/react-icons";
-import { CheckoutStatus, DocumentInfo, ViewMode } from "../types";
-import { CheckoutStatusBadge } from "./CheckoutStatusBadge";
+} from '@fluentui/react-icons';
+import { CheckoutStatus, DocumentInfo, ViewMode } from '../types';
+import { CheckoutStatusBadge } from './CheckoutStatusBadge';
 
 const useStyles = makeStyles({
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding("8px", "12px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding('8px', '12px'),
     backgroundColor: tokens.colorNeutralBackground2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
-    minHeight: "48px",
+    minHeight: '48px',
     flexShrink: 0,
   },
   leftSection: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
-    ...shorthands.overflow("hidden"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
+    ...shorthands.overflow('hidden'),
     flex: 1,
     minWidth: 0,
   },
   centerSection: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
   },
   rightSection: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("4px"),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('4px'),
     flexShrink: 0,
   },
   docName: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: "14px",
+    fontSize: '14px',
     color: tokens.colorNeutralForeground1,
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   docSize: {
     color: tokens.colorNeutralForeground3,
-    fontSize: "12px",
+    fontSize: '12px',
     flexShrink: 0,
   },
   divider: {
-    width: "1px",
-    height: "24px",
+    width: '1px',
+    height: '24px',
     backgroundColor: tokens.colorNeutralStroke2,
-    marginLeft: "8px",
-    marginRight: "8px",
+    marginLeft: '8px',
+    marginRight: '8px',
   },
 });
 
@@ -155,9 +155,9 @@ export interface ToolbarProps {
  * Format file size for display
  */
 function formatFileSize(bytes: number | undefined | null): string {
-  if (bytes === undefined || bytes === null || bytes === 0) return "";
+  if (bytes === undefined || bytes === null || bytes === 0) return '';
 
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ['B', 'KB', 'MB', 'GB'];
   const k = 1024;
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
@@ -190,28 +190,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const styles = useStyles();
 
-  const documentName = documentInfo?.name || "Document";
+  const documentName = documentInfo?.name || 'Document';
   const documentSize = formatFileSize(documentInfo?.size);
 
   // Determine if edit button should be disabled
   // Disabled if: loading, OR document is checked out by another user
-  const isCheckedOutByOther =
-    checkoutStatus?.isCheckedOut && !checkoutStatus.isCurrentUser;
+  const isCheckedOutByOther = checkoutStatus?.isCheckedOut && !checkoutStatus.isCurrentUser;
   const editButtonDisabled = isLoading || isEditLoading || isCheckedOutByOther;
 
   // Edit button tooltip
   const editButtonTooltip = isCheckedOutByOther
-    ? `Checked out by ${checkoutStatus?.checkedOutBy?.name || "another user"}`
-    : "Edit document (check out for editing)";
+    ? `Checked out by ${checkoutStatus?.checkedOutBy?.name || 'another user'}`
+    : 'Edit document (check out for editing)';
 
   // Delete button disabled when document is checked out (by anyone)
-  const deleteButtonDisabled =
-    isLoading || isDeleteLoading || checkoutStatus?.isCheckedOut;
+  const deleteButtonDisabled = isLoading || isDeleteLoading || checkoutStatus?.isCheckedOut;
 
   // Delete button tooltip
   const deleteButtonTooltip = checkoutStatus?.isCheckedOut
-    ? "Cannot delete while document is checked out"
-    : "Delete document and file";
+    ? 'Cannot delete while document is checked out'
+    : 'Delete document and file';
 
   // Check-in button disabled when loading
   const checkInButtonDisabled = isLoading || isCheckInLoading;
@@ -223,17 +221,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <Text className={styles.docName} title={documentName}>
           {documentName}
         </Text>
-        {documentSize && (
-          <Text className={styles.docSize}>({documentSize})</Text>
-        )}
+        {documentSize && <Text className={styles.docSize}>({documentSize})</Text>}
       </div>
 
       {/* Center Section: Checkout Status */}
       <div className={styles.centerSection}>
-        <CheckoutStatusBadge
-          checkoutStatus={checkoutStatus}
-          isDarkTheme={isDarkTheme}
-        />
+        <CheckoutStatusBadge checkoutStatus={checkoutStatus} isDarkTheme={isDarkTheme} />
       </div>
 
       {/* Right Section: Action Buttons */}
@@ -259,9 +252,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <Button
                   appearance="subtle"
                   size="small"
-                  icon={
-                    isEditLoading ? <Spinner size="tiny" /> : <Edit24Regular />
-                  }
+                  icon={isEditLoading ? <Spinner size="tiny" /> : <Edit24Regular />}
                   onClick={onEdit}
                   disabled={editButtonDisabled}
                   aria-label="Edit"
@@ -306,13 +297,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <Button
                       appearance="subtle"
                       size="small"
-                      icon={
-                        isDeleteLoading ? (
-                          <Spinner size="tiny" />
-                        ) : (
-                          <Delete24Regular />
-                        )
-                      }
+                      icon={isDeleteLoading ? <Spinner size="tiny" /> : <Delete24Regular />}
                       disabled={deleteButtonDisabled}
                       aria-label="Delete"
                     />
@@ -323,8 +308,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <DialogTitle>Delete Document?</DialogTitle>
                     <DialogContent>
                       <Text>
-                        This will permanently delete "{documentName}" and the
-                        associated file. This action cannot be undone.
+                        This will permanently delete "{documentName}" and the associated file. This action cannot be
+                        undone.
                       </Text>
                     </DialogContent>
                     <DialogActions>
@@ -377,20 +362,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                         */}
 
             {/* Check In Button - Primary action */}
-            <Tooltip
-              content="Save changes and release lock"
-              relationship="label"
-            >
+            <Tooltip content="Save changes and release lock" relationship="label">
               <Button
                 appearance="primary"
                 size="small"
-                icon={
-                  isCheckInLoading ? (
-                    <Spinner size="tiny" />
-                  ) : (
-                    <Checkmark24Regular />
-                  )
-                }
+                icon={isCheckInLoading ? <Spinner size="tiny" /> : <Checkmark24Regular />}
                 onClick={onCheckIn}
                 disabled={checkInButtonDisabled}
               >
@@ -399,10 +375,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </Tooltip>
 
             {/* Discard Button */}
-            <Tooltip
-              content="Discard changes and release lock"
-              relationship="label"
-            >
+            <Tooltip content="Discard changes and release lock" relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -416,9 +389,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </>
         )}
 
-        {viewMode === ViewMode.Processing && (
-          <Spinner size="small" label="Processing..." />
-        )}
+        {viewMode === ViewMode.Processing && <Spinner size="small" label="Processing..." />}
       </div>
     </div>
   );

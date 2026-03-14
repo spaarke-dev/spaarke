@@ -23,7 +23,7 @@
  * ```
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -64,7 +64,7 @@ export interface UseDirtyFieldsResult {
 export function computeDirtyFields(
   original: Record<string, unknown> | null,
   current: Record<string, unknown>,
-  editableFields: string[],
+  editableFields: string[]
 ): DirtyFieldMap {
   if (!original) return {};
 
@@ -110,22 +110,16 @@ export function hasDirtyFields(dirtyFields: DirtyFieldMap): boolean {
 export function useDirtyFields(
   original: Record<string, unknown> | null,
   current: Record<string, unknown>,
-  editableFields: string[],
+  editableFields: string[]
 ): UseDirtyFieldsResult {
   const dirtyFields = React.useMemo(
     () => computeDirtyFields(original, current, editableFields),
-    [original, current, editableFields],
+    [original, current, editableFields]
   );
 
-  const isDirty = React.useMemo(
-    () => hasDirtyFields(dirtyFields),
-    [dirtyFields],
-  );
+  const isDirty = React.useMemo(() => hasDirtyFields(dirtyFields), [dirtyFields]);
 
-  const dirtyFieldNames = React.useMemo(
-    () => Object.keys(dirtyFields),
-    [dirtyFields],
-  );
+  const dirtyFieldNames = React.useMemo(() => Object.keys(dirtyFields), [dirtyFields]);
 
   return {
     dirtyFields,

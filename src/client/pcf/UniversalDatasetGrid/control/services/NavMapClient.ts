@@ -19,8 +19,8 @@
  * - ADR-010: Minimal dependencies (same pattern as SdapApiClient)
  */
 
-import { logger } from "../utils/logger";
-import { getAuthProvider } from "@spaarke/auth";
+import { logger } from '../utils/logger';
+import { getAuthProvider } from '@spaarke/auth';
 
 /**
  * Entity Set Name Response
@@ -102,13 +102,13 @@ export class NavMapClient {
   constructor(
     baseUrl: string,
     getAccessToken: () => Promise<string>,
-    timeout = 30000, // 30 seconds default (metadata queries are fast)
+    timeout = 30000 // 30 seconds default (metadata queries are fast)
   ) {
-    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+    this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     this.getAccessToken = getAccessToken;
     this.timeout = timeout;
 
-    logger.info("NavMapClient", "Initialized", {
+    logger.info('NavMapClient', 'Initialized', {
       baseUrl: this.baseUrl,
       timeout: this.timeout,
     });
@@ -125,10 +125,8 @@ export class NavMapClient {
    * @returns EntitySetNameResponse with plural entity set name
    * @throws Error if entity not found or API error
    */
-  async getEntitySetName(
-    entityLogicalName: string,
-  ): Promise<EntitySetNameResponse> {
-    logger.info("NavMapClient", "Getting entity set name", {
+  async getEntitySetName(entityLogicalName: string): Promise<EntitySetNameResponse> {
+    logger.info('NavMapClient', 'Getting entity set name', {
       entityLogicalName,
     });
 
@@ -138,16 +136,16 @@ export class NavMapClient {
       const url = `${this.baseUrl}/api/navmap/${encodeURIComponent(entityLogicalName)}/entityset`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "GET",
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: "application/json",
+          Accept: 'application/json',
         },
       });
 
       const result = await this.handleResponse<EntitySetNameResponse>(response);
 
-      logger.info("NavMapClient", "Entity set name retrieved", {
+      logger.info('NavMapClient', 'Entity set name retrieved', {
         entityLogicalName,
         entitySetName: result.entitySetName,
         source: result.source,
@@ -155,11 +153,8 @@ export class NavMapClient {
 
       return result;
     } catch (error) {
-      logger.error("NavMapClient", "Failed to get entity set name", error);
-      throw this.enhanceError(
-        error,
-        `Failed to get entity set name for ${entityLogicalName}`,
-      );
+      logger.error('NavMapClient', 'Failed to get entity set name', error);
+      throw this.enhanceError(error, `Failed to get entity set name for ${entityLogicalName}`);
     }
   }
 
@@ -178,11 +173,8 @@ export class NavMapClient {
    * @returns LookupNavigationResponse with case-sensitive navigation property name
    * @throws Error if relationship not found or API error
    */
-  async getLookupNavigation(
-    childEntity: string,
-    relationship: string,
-  ): Promise<LookupNavigationResponse> {
-    logger.info("NavMapClient", "Getting lookup navigation", {
+  async getLookupNavigation(childEntity: string, relationship: string): Promise<LookupNavigationResponse> {
+    logger.info('NavMapClient', 'Getting lookup navigation', {
       childEntity,
       relationship,
     });
@@ -193,17 +185,16 @@ export class NavMapClient {
       const url = `${this.baseUrl}/api/navmap/${encodeURIComponent(childEntity)}/${encodeURIComponent(relationship)}/lookup`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "GET",
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: "application/json",
+          Accept: 'application/json',
         },
       });
 
-      const result =
-        await this.handleResponse<LookupNavigationResponse>(response);
+      const result = await this.handleResponse<LookupNavigationResponse>(response);
 
-      logger.info("NavMapClient", "Lookup navigation retrieved", {
+      logger.info('NavMapClient', 'Lookup navigation retrieved', {
         childEntity,
         relationship,
         navigationPropertyName: result.navigationPropertyName,
@@ -213,11 +204,8 @@ export class NavMapClient {
 
       return result;
     } catch (error) {
-      logger.error("NavMapClient", "Failed to get lookup navigation", error);
-      throw this.enhanceError(
-        error,
-        `Failed to get lookup navigation for ${childEntity}.${relationship}`,
-      );
+      logger.error('NavMapClient', 'Failed to get lookup navigation', error);
+      throw this.enhanceError(error, `Failed to get lookup navigation for ${childEntity}.${relationship}`);
     }
   }
 
@@ -233,11 +221,8 @@ export class NavMapClient {
    * @returns CollectionNavigationResponse with collection property name
    * @throws Error if relationship not found or API error
    */
-  async getCollectionNavigation(
-    parentEntity: string,
-    relationship: string,
-  ): Promise<CollectionNavigationResponse> {
-    logger.info("NavMapClient", "Getting collection navigation", {
+  async getCollectionNavigation(parentEntity: string, relationship: string): Promise<CollectionNavigationResponse> {
+    logger.info('NavMapClient', 'Getting collection navigation', {
       parentEntity,
       relationship,
     });
@@ -248,17 +233,16 @@ export class NavMapClient {
       const url = `${this.baseUrl}/api/navmap/${encodeURIComponent(parentEntity)}/${encodeURIComponent(relationship)}/collection`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "GET",
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: "application/json",
+          Accept: 'application/json',
         },
       });
 
-      const result =
-        await this.handleResponse<CollectionNavigationResponse>(response);
+      const result = await this.handleResponse<CollectionNavigationResponse>(response);
 
-      logger.info("NavMapClient", "Collection navigation retrieved", {
+      logger.info('NavMapClient', 'Collection navigation retrieved', {
         parentEntity,
         relationship,
         collectionPropertyName: result.collectionPropertyName,
@@ -267,15 +251,8 @@ export class NavMapClient {
 
       return result;
     } catch (error) {
-      logger.error(
-        "NavMapClient",
-        "Failed to get collection navigation",
-        error,
-      );
-      throw this.enhanceError(
-        error,
-        `Failed to get collection navigation for ${parentEntity}.${relationship}`,
-      );
+      logger.error('NavMapClient', 'Failed to get collection navigation', error);
+      throw this.enhanceError(error, `Failed to get collection navigation for ${parentEntity}.${relationship}`);
     }
   }
 
@@ -287,10 +264,7 @@ export class NavMapClient {
    *
    * Same pattern as SdapApiClient for consistency.
    */
-  private async fetchWithTimeout(
-    url: string,
-    options: RequestInit,
-  ): Promise<Response> {
+  private async fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
     let attempt = 0;
     const maxAttempts = 2;
 
@@ -315,15 +289,11 @@ export class NavMapClient {
 
         // 401 Unauthorized - token may have expired during request
         if (response.status === 401 && attempt < maxAttempts) {
-          logger.warn(
-            "NavMapClient",
-            "401 Unauthorized response - clearing token cache and retrying",
-            {
-              url,
-              attempt,
-              maxAttempts,
-            },
-          );
+          logger.warn('NavMapClient', '401 Unauthorized response - clearing token cache and retrying', {
+            url,
+            attempt,
+            maxAttempts,
+          });
 
           // Clear @spaarke/auth cache to force fresh token acquisition
           getAuthProvider().clearCache();
@@ -333,11 +303,10 @@ export class NavMapClient {
 
           // Update Authorization header with fresh token
           if (options.headers) {
-            (options.headers as Record<string, string>)["Authorization"] =
-              `Bearer ${newToken}`;
+            (options.headers as Record<string, string>)['Authorization'] = `Bearer ${newToken}`;
           }
 
-          logger.info("NavMapClient", "Retrying request with fresh token");
+          logger.info('NavMapClient', 'Retrying request with fresh token');
 
           // Continue to next iteration (retry)
           continue;
@@ -348,7 +317,7 @@ export class NavMapClient {
       } catch (error) {
         clearTimeout(timeoutId);
 
-        if (error instanceof Error && error.name === "AbortError") {
+        if (error instanceof Error && error.name === 'AbortError') {
           throw new Error(`Request timeout after ${this.timeout}ms`);
         }
 
@@ -357,7 +326,7 @@ export class NavMapClient {
     }
 
     // Should never reach here, but TypeScript needs return
-    throw new Error("Unexpected error in fetchWithTimeout retry logic");
+    throw new Error('Unexpected error in fetchWithTimeout retry logic');
   }
 
   /**
@@ -369,12 +338,12 @@ export class NavMapClient {
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      let errorDetails = "";
+      let errorDetails = '';
 
       try {
         const errorData = await response.json();
         errorMessage = errorData.error || errorMessage;
-        errorDetails = errorData.details || "";
+        errorDetails = errorData.details || '';
       } catch {
         // If parsing fails, use text
         try {
@@ -385,10 +354,7 @@ export class NavMapClient {
       }
 
       // Create user-friendly error messages for common scenarios
-      const userFriendlyMessage = this.getUserFriendlyErrorMessage(
-        response.status,
-        errorMessage,
-      );
+      const userFriendlyMessage = this.getUserFriendlyErrorMessage(response.status, errorMessage);
 
       const error = new Error(userFriendlyMessage) as Error & {
         details?: string;
@@ -403,51 +369,45 @@ export class NavMapClient {
     }
 
     // For 204 No Content or empty responses
-    if (
-      response.status === 204 ||
-      response.headers.get("content-length") === "0"
-    ) {
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
       return undefined as T;
     }
 
     try {
       return await response.json();
     } catch (error) {
-      logger.error("NavMapClient", "Failed to parse response JSON", error);
-      throw new Error("Invalid JSON response from server");
+      logger.error('NavMapClient', 'Failed to parse response JSON', error);
+      throw new Error('Invalid JSON response from server');
     }
   }
 
   /**
    * Get user-friendly error message based on HTTP status code
    */
-  private getUserFriendlyErrorMessage(
-    status: number,
-    originalMessage: string,
-  ): string {
+  private getUserFriendlyErrorMessage(status: number, originalMessage: string): string {
     switch (status) {
       case 401:
-        return "Authentication failed. Your session may have expired. Please refresh the page and try again.";
+        return 'Authentication failed. Your session may have expired. Please refresh the page and try again.';
 
       case 403:
-        return "Access denied. You do not have permission to query metadata. Please contact your administrator.";
+        return 'Access denied. You do not have permission to query metadata. Please contact your administrator.';
 
       case 404:
-        return "Metadata not found. The entity or relationship may not exist in Dataverse.";
+        return 'Metadata not found. The entity or relationship may not exist in Dataverse.';
 
       case 408:
       case 504:
-        return "Request timeout. The metadata query took too long. Please try again.";
+        return 'Request timeout. The metadata query took too long. Please try again.';
 
       case 429:
-        return "Too many requests. Please wait a moment and try again.";
+        return 'Too many requests. Please wait a moment and try again.';
 
       case 500:
-        return "Server error occurred while querying metadata. Please try again later.";
+        return 'Server error occurred while querying metadata. Please try again later.';
 
       case 502:
       case 503:
-        return "The service is temporarily unavailable. Please try again in a few minutes.";
+        return 'The service is temporarily unavailable. Please try again in a few minutes.';
 
       default:
         // For other errors, return original message

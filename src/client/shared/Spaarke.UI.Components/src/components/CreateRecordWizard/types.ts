@@ -9,20 +9,17 @@
  * @see WizardShell — the underlying generic dialog shell
  * @see ADR-012 — Shared Component Library
  */
-import type * as React from "react";
-import type { IUploadedFile } from "../FileUpload/fileUploadTypes";
-import type { ILookupItem } from "../../types/LookupTypes";
-import type { IWizardSuccessConfig } from "../Wizard/wizardShellTypes";
+import type * as React from 'react';
+import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
+import type { ILookupItem } from '../../types/LookupTypes';
+import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 // ---------------------------------------------------------------------------
 // Follow-on action identifiers
 // ---------------------------------------------------------------------------
 
 /** Identifiers for the optional follow-on action cards shown in "Next Steps". */
-export type FollowOnActionId =
-  | "assign-counsel"
-  | "draft-summary"
-  | "send-email";
+export type FollowOnActionId = 'assign-counsel' | 'draft-summary' | 'send-email';
 
 // ---------------------------------------------------------------------------
 // Recipient item (used by Draft Summary and Send Email)
@@ -53,9 +50,7 @@ export interface IEntityInfoStep {
   /** Returns true when the user may advance past this step. */
   canAdvance: () => boolean;
   /** Renders the entity-specific form content. Receives the uploaded files from Step 1. */
-  renderContent: (
-    uploadedFiles: import("../FileUpload/fileUploadTypes").IUploadedFile[],
-  ) => React.ReactNode;
+  renderContent: (uploadedFiles: import('../FileUpload/fileUploadTypes').IUploadedFile[]) => React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,17 +177,10 @@ export interface ICreateRecordWizardProps {
     retrieveMultipleRecords(
       entityLogicalName: string,
       options?: string,
-      maxPageSize?: number,
+      maxPageSize?: number
     ): Promise<{ entities: Record<string, unknown>[]; nextLink?: string }>;
-    retrieveRecord(
-      entityLogicalName: string,
-      id: string,
-      options?: string,
-    ): Promise<Record<string, unknown>>;
-    createRecord(
-      entityLogicalName: string,
-      data: Record<string, unknown>,
-    ): Promise<{ id: string }>;
+    retrieveRecord(entityLogicalName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+    createRecord(entityLogicalName: string, data: Record<string, unknown>): Promise<{ id: string }>;
   };
   /** Entity-specific wizard configuration. */
   config: ICreateRecordWizardConfig;

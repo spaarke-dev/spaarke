@@ -1,14 +1,9 @@
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import {
-  FluentProvider,
-  Theme,
-  webLightTheme,
-  webDarkTheme,
-} from "@fluentui/react-components";
-import { resolveTheme, setupThemeListener } from "./services/ThemeService";
-import { SemanticSearchControl as SemanticSearchControlComponent } from "./SemanticSearchControl";
-import { ISemanticSearchControlProps } from "./types";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { resolveTheme, setupThemeListener } from './services/ThemeService';
+import { SemanticSearchControl as SemanticSearchControlComponent } from './SemanticSearchControl';
+import { ISemanticSearchControlProps } from './types';
 
 /**
  * SemanticSearchControl PCF Control
@@ -21,10 +16,7 @@ import { ISemanticSearchControlProps } from "./types";
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs with platform libraries
  */
-export class SemanticSearchControl implements ComponentFramework.ReactControl<
-  IInputs,
-  IOutputs
-> {
+export class SemanticSearchControl implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void;
   private selectedDocumentId: string | undefined;
   private _theme: Theme = webLightTheme;
@@ -41,7 +33,7 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
-    state: ComponentFramework.Dictionary,
+    state: ComponentFramework.Dictionary
   ): void {
     this.notifyOutputChanged = notifyOutputChanged;
     this._context = context;
@@ -50,7 +42,7 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<
     this._theme = resolveTheme(context);
 
     // Set up theme change listener for dynamic updates
-    this._cleanupThemeListener = setupThemeListener((isDark) => {
+    this._cleanupThemeListener = setupThemeListener(isDark => {
       this._theme = isDark ? webDarkTheme : webLightTheme;
       // Force re-render with new theme
       this.notifyOutputChanged();
@@ -63,9 +55,7 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<
    *
    * Wraps content in FluentProvider with theme from context.
    */
-  public updateView(
-    context: ComponentFramework.Context<IInputs>,
-  ): React.ReactElement {
+  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
     // Update context reference and re-resolve theme
     this._context = context;
     this._theme = resolveTheme(context);
@@ -88,13 +78,13 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<
       {
         theme: this._theme,
         style: {
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
         },
       },
-      content,
+      content
     );
   }
 

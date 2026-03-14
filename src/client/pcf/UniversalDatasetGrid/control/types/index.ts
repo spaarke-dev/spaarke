@@ -49,7 +49,7 @@ export interface CustomCommand {
   errorMessage: string;
 
   /** Button appearance (primary, secondary, subtle) */
-  appearance?: "primary" | "secondary" | "subtle";
+  appearance?: 'primary' | 'secondary' | 'subtle';
 }
 
 /**
@@ -90,51 +90,51 @@ export interface GridConfiguration {
  */
 export const DEFAULT_GRID_CONFIG: GridConfiguration = {
   fieldMappings: {
-    hasFile: "sprk_hasfile",
-    fileName: "sprk_filename",
-    fileSize: "sprk_filesize",
-    mimeType: "sprk_mimetype",
-    graphItemId: "sprk_graphitemid",
-    graphDriveId: "sprk_graphdriveid",
+    hasFile: 'sprk_hasfile',
+    fileName: 'sprk_filename',
+    fileSize: 'sprk_filesize',
+    mimeType: 'sprk_mimetype',
+    graphItemId: 'sprk_graphitemid',
+    graphDriveId: 'sprk_graphdriveid',
   },
   /** Enable checkbox selection by default (Task 014) */
   enableCheckboxSelection: true,
   customCommands: [
     {
-      id: "addFile",
-      label: "Add File",
-      icon: "Add24Regular",
-      enableRule: "selectedCount === 1 && !hasFile",
-      errorMessage: "Select a single document without a file",
-      appearance: "primary",
+      id: 'addFile',
+      label: 'Add File',
+      icon: 'Add24Regular',
+      enableRule: 'selectedCount === 1 && !hasFile',
+      errorMessage: 'Select a single document without a file',
+      appearance: 'primary',
     },
     {
-      id: "removeFile",
-      label: "Remove File",
-      icon: "Delete24Regular",
-      enableRule: "selectedCount === 1 && hasFile",
-      errorMessage: "Select a single document with a file",
-      appearance: "secondary",
+      id: 'removeFile',
+      label: 'Remove File',
+      icon: 'Delete24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
     },
     {
-      id: "updateFile",
-      label: "Update File",
-      icon: "ArrowUpload24Regular",
-      enableRule: "selectedCount === 1 && hasFile",
-      errorMessage: "Select a single document with a file",
-      appearance: "secondary",
+      id: 'updateFile',
+      label: 'Update File',
+      icon: 'ArrowUpload24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
     },
     {
-      id: "downloadFile",
-      label: "Download",
-      icon: "ArrowDownload24Regular",
-      enableRule: "selectedCount > 0 && (selectedCount > 1 || hasFile)",
-      errorMessage: "Select at least one document with a file",
-      appearance: "secondary",
+      id: 'downloadFile',
+      label: 'Download',
+      icon: 'ArrowDownload24Regular',
+      enableRule: 'selectedCount > 0 && (selectedCount > 1 || hasFile)',
+      errorMessage: 'Select at least one document with a file',
+      appearance: 'secondary',
     },
   ],
   sdapConfig: {
-    baseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
+    baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
     timeout: 300000, // 5 minutes
   },
 };
@@ -282,14 +282,14 @@ export interface ServiceResult<T = void> {
 /**
  * Filter type discriminator for calendar filter input
  */
-export type CalendarFilterType = "single" | "range" | "clear";
+export type CalendarFilterType = 'single' | 'range' | 'clear';
 
 /**
  * Single date filter
  * Format: {"type":"single","date":"YYYY-MM-DD"}
  */
 export interface ICalendarFilterSingle {
-  type: "single";
+  type: 'single';
   date: string;
 }
 
@@ -298,7 +298,7 @@ export interface ICalendarFilterSingle {
  * Format: {"type":"range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}
  */
 export interface ICalendarFilterRange {
-  type: "range";
+  type: 'range';
   start: string;
   end: string;
 }
@@ -308,48 +308,39 @@ export interface ICalendarFilterRange {
  * Format: {"type":"clear"}
  */
 export interface ICalendarFilterClear {
-  type: "clear";
+  type: 'clear';
 }
 
 /**
  * Union type for all calendar filter types
  */
-export type CalendarFilter =
-  | ICalendarFilterSingle
-  | ICalendarFilterRange
-  | ICalendarFilterClear;
+export type CalendarFilter = ICalendarFilterSingle | ICalendarFilterRange | ICalendarFilterClear;
 
 /**
  * Parse calendar filter JSON string
  * Returns null if invalid/empty
  */
-export function parseCalendarFilter(
-  json: string | null | undefined,
-): CalendarFilter | null {
-  if (!json || json.trim() === "") {
+export function parseCalendarFilter(json: string | null | undefined): CalendarFilter | null {
+  if (!json || json.trim() === '') {
     return null;
   }
 
   try {
     const parsed = JSON.parse(json);
 
-    if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
+    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) {
       return null;
     }
 
-    if (parsed.type === "single" && typeof parsed.date === "string") {
+    if (parsed.type === 'single' && typeof parsed.date === 'string') {
       return parsed as ICalendarFilterSingle;
     }
 
-    if (
-      parsed.type === "range" &&
-      typeof parsed.start === "string" &&
-      typeof parsed.end === "string"
-    ) {
+    if (parsed.type === 'range' && typeof parsed.start === 'string' && typeof parsed.end === 'string') {
       return parsed as ICalendarFilterRange;
     }
 
-    if (parsed.type === "clear") {
+    if (parsed.type === 'clear') {
       return parsed as ICalendarFilterClear;
     }
 
@@ -362,28 +353,22 @@ export function parseCalendarFilter(
 /**
  * Type guard: Check if filter is a single date
  */
-export function isSingleDateFilter(
-  filter: CalendarFilter,
-): filter is ICalendarFilterSingle {
-  return filter.type === "single";
+export function isSingleDateFilter(filter: CalendarFilter): filter is ICalendarFilterSingle {
+  return filter.type === 'single';
 }
 
 /**
  * Type guard: Check if filter is a date range
  */
-export function isRangeFilter(
-  filter: CalendarFilter,
-): filter is ICalendarFilterRange {
-  return filter.type === "range";
+export function isRangeFilter(filter: CalendarFilter): filter is ICalendarFilterRange {
+  return filter.type === 'range';
 }
 
 /**
  * Type guard: Check if filter is clear
  */
-export function isClearFilter(
-  filter: CalendarFilter,
-): filter is ICalendarFilterClear {
-  return filter.type === "clear";
+export function isClearFilter(filter: CalendarFilter): filter is ICalendarFilterClear {
+  return filter.type === 'clear';
 }
 
 // =============================================================================
@@ -436,9 +421,7 @@ export interface OptimisticUpdateResult {
  * Callback function type for optimistic row updates.
  * Exposed via window object for Side Pane to call.
  */
-export type OptimisticRowUpdateCallback = (
-  request: OptimisticRowUpdateRequest,
-) => OptimisticUpdateResult;
+export type OptimisticRowUpdateCallback = (request: OptimisticRowUpdateRequest) => OptimisticUpdateResult;
 
 /**
  * Global interface for grid communication.

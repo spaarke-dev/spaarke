@@ -12,19 +12,12 @@
  * ADR-022: React 16 APIs only. No createRoot.
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  MessageBar,
-  MessageBarBody,
-  Text,
-} from "@fluentui/react-components";
-import { ActionEditor } from "./ActionEditor";
-import { SkillEditor } from "./SkillEditor";
-import { KnowledgeSourceEditor } from "./KnowledgeSourceEditor";
-import { ToolEditor } from "./ToolEditor";
+import * as React from 'react';
+import { makeStyles, tokens, shorthands, MessageBar, MessageBarBody, Text } from '@fluentui/react-components';
+import { ActionEditor } from './ActionEditor';
+import { SkillEditor } from './SkillEditor';
+import { KnowledgeSourceEditor } from './KnowledgeSourceEditor';
+import { ToolEditor } from './ToolEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -47,11 +40,11 @@ export interface IScopeConfigEditorAppProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    boxSizing: "border-box",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    boxSizing: 'border-box',
+    minHeight: '200px',
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -62,7 +55,7 @@ const useStyles = makeStyles({
   versionFooter: {
     marginTop: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalXS,
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase100,
   },
@@ -83,28 +76,20 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
   const renderEditor = (): React.ReactElement => {
     const entity = entityLogicalName.toLowerCase();
 
-    if (entity === "sprk_analysisaction") {
+    if (entity === 'sprk_analysisaction') {
       return <ActionEditor value={fieldValue} onChange={onValueChange} />;
     }
 
-    if (entity === "sprk_analysisskill") {
+    if (entity === 'sprk_analysisskill') {
       return <SkillEditor value={fieldValue} onChange={onValueChange} />;
     }
 
-    if (entity === "sprk_analysisknowledge") {
-      return (
-        <KnowledgeSourceEditor value={fieldValue} onChange={onValueChange} />
-      );
+    if (entity === 'sprk_analysisknowledge') {
+      return <KnowledgeSourceEditor value={fieldValue} onChange={onValueChange} />;
     }
 
-    if (entity === "sprk_analysistool") {
-      return (
-        <ToolEditor
-          value={fieldValue}
-          apiBaseUrl={apiBaseUrl}
-          onChange={onValueChange}
-        />
-      );
+    if (entity === 'sprk_analysistool') {
+      return <ToolEditor value={fieldValue} apiBaseUrl={apiBaseUrl} onChange={onValueChange} />;
     }
 
     // Fallback: show informational message
@@ -113,8 +98,7 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
         <MessageBar intent="warning">
           <MessageBarBody>
             ScopeConfigEditor: unknown entity type &quot;{entityLogicalName}
-            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill,
-            sprk_analysisknowledge, sprk_analysistool.
+            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool.
           </MessageBarBody>
         </MessageBar>
       </div>
@@ -124,9 +108,7 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
   return (
     <div className={styles.root}>
       {renderEditor()}
-      <Text className={styles.versionFooter}>
-        v1.2.6 &bull; Built 2026-02-24
-      </Text>
+      <Text className={styles.versionFooter}>v1.2.6 &bull; Built 2026-02-24</Text>
     </div>
   );
 };

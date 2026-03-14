@@ -8,8 +8,8 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useState, useCallback, useMemo } from "react";
+import * as React from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -22,20 +22,20 @@ import {
   MenuList,
   MenuItem,
   useId,
-} from "@fluentui/react-components";
-import { ChevronDownRegular } from "@fluentui/react-icons";
-import { IDateRangeFilterProps, DateRange } from "../types";
+} from '@fluentui/react-components';
+import { ChevronDownRegular } from '@fluentui/react-icons';
+import { IDateRangeFilterProps, DateRange } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   inputGroup: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     gap: tokens.spacingVerticalXS,
   },
   fieldLabel: {
@@ -43,21 +43,21 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   dateInput: {
-    width: "100%",
+    width: '100%',
   },
   // Hide native date placeholder text when input is empty (Chromium/Edge)
   dateInputEmpty: {
-    width: "100%",
+    width: '100%',
     "& input[type='date']::-webkit-datetime-edit": {
-      color: "transparent",
+      color: 'transparent',
     },
   },
   titleButton: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
-    minWidth: "auto",
-    paddingLeft: "0px",
-    alignSelf: "flex-start",
+    minWidth: 'auto',
+    paddingLeft: '0px',
+    alignSelf: 'flex-start',
   },
 });
 
@@ -65,17 +65,17 @@ const useStyles = makeStyles({
  * Quick date presets
  */
 const DATE_PRESETS = [
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-  { label: "This year", days: -1 }, // Special case: start of year
-  { label: "Last year", days: -2 }, // Special case: previous year
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'This year', days: -1 }, // Special case: start of year
+  { label: 'Last year', days: -2 }, // Special case: previous year
 ];
 
 /**
  * Get date string in YYYY-MM-DD format
  */
 function formatDateForInput(date: Date): string {
-  return date.toISOString().split("T")[0];
+  return date.toISOString().split('T')[0];
 }
 
 /**
@@ -112,25 +112,20 @@ function calculatePresetRange(days: number): DateRange {
  * The section title is a Quick Select dropdown for common presets.
  * Below it are From/To date inputs for custom range.
  */
-export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
-  label,
-  value,
-  onChange,
-  disabled,
-}) => {
+export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({ label, value, onChange, disabled }) => {
   const styles = useStyles();
-  const fromId = useId("date-from");
-  const toId = useId("date-to");
+  const fromId = useId('date-from');
+  const toId = useId('date-to');
 
   // Local state for individual date inputs
-  const [fromDate, setFromDate] = useState<string>(value?.from ?? "");
-  const [toDate, setToDate] = useState<string>(value?.to ?? "");
+  const [fromDate, setFromDate] = useState<string>(value?.from ?? '');
+  const [toDate, setToDate] = useState<string>(value?.to ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Sync local state with prop changes
   React.useEffect(() => {
-    setFromDate(value?.from ?? "");
-    setToDate(value?.to ?? "");
+    setFromDate(value?.from ?? '');
+    setToDate(value?.to ?? '');
   }, [value]);
 
   // Validate and update range
@@ -147,7 +142,7 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
 
       // Validate: from must be <= to if both set
       if (from && to && from > to) {
-        setValidationError("From date must be before To date");
+        setValidationError('From date must be before To date');
         return;
       }
 
@@ -156,7 +151,7 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
         to: to || null,
       });
     },
-    [onChange],
+    [onChange]
   );
 
   // Handle from date change
@@ -166,7 +161,7 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
       setFromDate(newFrom);
       updateRange(newFrom, toDate);
     },
-    [toDate, updateRange],
+    [toDate, updateRange]
   );
 
   // Handle to date change
@@ -176,25 +171,25 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
       setToDate(newTo);
       updateRange(fromDate, newTo);
     },
-    [fromDate, updateRange],
+    [fromDate, updateRange]
   );
 
   // Handle preset selection
   const handlePresetSelect = useCallback(
     (days: number) => {
       const range = calculatePresetRange(days);
-      setFromDate(range.from ?? "");
-      setToDate(range.to ?? "");
+      setFromDate(range.from ?? '');
+      setToDate(range.to ?? '');
       onChange(range);
       setValidationError(null);
     },
-    [onChange],
+    [onChange]
   );
 
   // Handle clear
   const handleClear = useCallback(() => {
-    setFromDate("");
-    setToDate("");
+    setFromDate('');
+    setToDate('');
     onChange(null);
     setValidationError(null);
   }, [onChange]);
@@ -222,11 +217,8 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
-            {DATE_PRESETS.map((preset) => (
-              <MenuItem
-                key={preset.label}
-                onClick={() => handlePresetSelect(preset.days)}
-              >
+            {DATE_PRESETS.map(preset => (
+              <MenuItem key={preset.label} onClick={() => handlePresetSelect(preset.days)}>
                 {preset.label}
               </MenuItem>
             ))}
@@ -261,12 +253,7 @@ export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
           aria-label="To date"
         />
         {hasValue && (
-          <Button
-            appearance="subtle"
-            size="small"
-            onClick={handleClear}
-            disabled={disabled}
-          >
+          <Button appearance="subtle" size="small" onClick={handleClear} disabled={disabled}>
             Clear
           </Button>
         )}

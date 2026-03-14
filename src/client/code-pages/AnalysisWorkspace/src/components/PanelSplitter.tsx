@@ -15,7 +15,7 @@
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,25 +40,25 @@ export interface PanelSplitterProps {
 
 const useStyles = makeStyles({
   splitter: {
-    width: "4px",
-    cursor: "col-resize",
+    width: '4px',
+    cursor: 'col-resize',
     backgroundColor: tokens.colorNeutralStroke1,
-    transitionProperty: "background-color",
-    transitionDuration: "150ms",
-    transitionTimingFunction: "ease",
-    position: "relative",
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'ease',
+    position: 'relative',
     flexShrink: 0,
     // Focus ring via outline
-    outlineStyle: "none",
-    ":hover": {
+    outlineStyle: 'none',
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground,
     },
-    ":focus-visible": {
+    ':focus-visible': {
       backgroundColor: tokens.colorBrandBackground,
-      outlineWidth: "2px",
-      outlineStyle: "solid",
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
       outlineColor: tokens.colorStrokeFocus2,
-      outlineOffset: "-2px",
+      outlineOffset: '-2px',
     },
   },
   splitterDragging: {
@@ -66,18 +66,18 @@ const useStyles = makeStyles({
   },
   // Visual grip dots indicator (centered in the splitter)
   grip: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    display: "flex",
-    flexDirection: "column",
-    gap: "3px",
-    pointerEvents: "none",
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px',
+    pointerEvents: 'none',
   },
   gripDot: {
-    width: "3px",
-    height: "3px",
+    width: '3px',
+    height: '3px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorNeutralForeground3,
   },
@@ -101,10 +101,7 @@ export function PanelSplitter({
 
   return (
     <div
-      className={mergeClasses(
-        styles.splitter,
-        isDragging && styles.splitterDragging,
-      )}
+      className={mergeClasses(styles.splitter, isDragging && styles.splitterDragging)}
       role="separator"
       aria-orientation="vertical"
       aria-valuenow={valueNow}

@@ -42,7 +42,7 @@ export enum AnalysisStatusCode {
  */
 export interface IChatMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
   isStreaming?: boolean;
@@ -78,7 +78,7 @@ export interface IAnalysisExecuteRequest {
   skillIds?: string[];
   knowledgeIds?: string[];
   toolIds?: string[];
-  outputFormat?: "markdown" | "structured_json";
+  outputFormat?: 'markdown' | 'structured_json';
   maxTokens?: number;
 }
 
@@ -95,7 +95,7 @@ export interface IAnalysisContinueRequest {
  * SSE chunk from streaming response
  */
 export interface ISseChunk {
-  type: "content" | "error" | "done";
+  type: 'content' | 'error' | 'done';
   content?: string;
   error?: string;
   tokenUsage?: {

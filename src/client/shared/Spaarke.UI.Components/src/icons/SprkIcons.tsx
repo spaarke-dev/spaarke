@@ -12,7 +12,7 @@
  * Standard: All icons are 24x24 Regular variant for consistency
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   // File operations
   Add24Regular,
@@ -48,7 +48,7 @@ import {
   ChevronDown24Regular,
   ChevronLeft24Regular,
   ChevronUp24Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
 /**
  * Spaarke icon collection.

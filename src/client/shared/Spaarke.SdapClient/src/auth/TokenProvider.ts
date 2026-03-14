@@ -14,6 +14,6 @@ export class TokenProvider {
   public async getToken(): Promise<string> {
     // In PCF context, token is handled by Dataverse authentication
     // The browser session cookie will be used for authentication
-    return "";
+    return '';
   }
 }

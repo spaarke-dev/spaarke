@@ -5,7 +5,7 @@
  * and passed from the ReactControl entry point.
  */
 
-import { IInputs } from "../generated/ManifestTypes";
+import { IInputs } from '../generated/ManifestTypes';
 
 export interface IRelatedDocumentCountProps {
   /** PCF context for accessing framework APIs. */

@@ -7,8 +7,8 @@
  * @see spec.md — Status bar layout
  */
 
-import React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 
 // =============================================
 // Props
@@ -29,11 +29,11 @@ export interface StatusBarProps {
 
 const useStyles = makeStyles({
   bar: {
-    display: "flex",
-    alignItems: "center",
-    width: "100%",
-    height: "28px",
-    minHeight: "28px",
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    height: '28px',
+    minHeight: '28px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     gap: tokens.spacingHorizontalS,
@@ -54,17 +54,13 @@ const useStyles = makeStyles({
 // Component
 // =============================================
 
-export const StatusBar: React.FC<StatusBarProps> = ({
-  totalCount,
-  searchTime,
-  version,
-}) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ totalCount, searchTime, version }) => {
   const styles = useStyles();
 
   const getStatusText = (): string => {
-    if (totalCount === null) return "Ready";
-    if (totalCount === 0) return "No results found";
-    return `${totalCount} result${totalCount !== 1 ? "s" : ""} found`;
+    if (totalCount === null) return 'Ready';
+    if (totalCount === 0) return 'No results found';
+    return `${totalCount} result${totalCount !== 1 ? 's' : ''} found`;
   };
 
   return (

@@ -64,11 +64,7 @@ export interface IWebApiLike {
    * @returns Promise resolving to the entity record
    * @throws Error if record not found (404) or other API errors
    */
-  retrieveRecord(
-    entityType: string,
-    id: string,
-    options?: string,
-  ): Promise<Record<string, unknown>>;
+  retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
 
   /**
    * Retrieves multiple entity records based on OData query.
@@ -81,7 +77,7 @@ export interface IWebApiLike {
   retrieveMultipleRecords(
     entityType: string,
     options?: string,
-    maxPageSize?: number,
+    maxPageSize?: number
   ): Promise<IWebApiRetrieveMultipleResponse>;
 }
 
@@ -99,10 +95,7 @@ export interface IWebApiWithCreate extends IWebApiLike {
    * @param data - Entity payload with field values and @odata.bind lookups
    * @returns Promise resolving to an object with the created record's GUID
    */
-  createRecord(
-    entityType: string,
-    data: Record<string, unknown>,
-  ): Promise<{ id: string }>;
+  createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
 }
 
 /**
@@ -119,20 +112,15 @@ export interface IWebApiWithCreate extends IWebApiLike {
  * ```
  */
 export function createWebApiFromXrm(xrmWebApi: {
-  retrieveRecord: (
-    entityType: string,
-    id: string,
-    options?: string,
-  ) => Promise<Record<string, unknown>>;
+  retrieveRecord: (entityType: string, id: string, options?: string) => Promise<Record<string, unknown>>;
   retrieveMultipleRecords: (
     entityType: string,
     options?: string,
-    maxPageSize?: number,
+    maxPageSize?: number
   ) => Promise<IWebApiRetrieveMultipleResponse>;
 }): IWebApiLike {
   return {
-    retrieveRecord: (entityType, id, options) =>
-      xrmWebApi.retrieveRecord(entityType, id, options),
+    retrieveRecord: (entityType, id, options) => xrmWebApi.retrieveRecord(entityType, id, options),
     retrieveMultipleRecords: (entityType, options, maxPageSize) =>
       xrmWebApi.retrieveMultipleRecords(entityType, options, maxPageSize),
   };

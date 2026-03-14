@@ -9,43 +9,19 @@
  * @see ADR-021 for Fluent UI v9 and design token requirements
  */
 
-import * as React from "react";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-  Link,
-  Button,
-  Tooltip,
-} from "@fluentui/react-components";
-import { ChevronRight20Regular } from "@fluentui/react-icons";
-import {
-  ISemanticSearchControlProps,
-  SearchFilters,
-  SearchResult,
-  SearchScope,
-  SummaryData,
-} from "./types";
-import {
-  SearchInput,
-  FilterPanel,
-  ResultsList,
-  LoadingState,
-  EmptyState,
-  ErrorState,
-} from "./components";
-import { useSemanticSearch, useFilters } from "./hooks";
-import { SemanticSearchApiService, NavigationService } from "./services";
-import { initializeAuth } from "./authInit";
-import { authenticatedFetch } from "@spaarke/auth";
-import {
-  SendEmailDialog,
-  type ISendEmailPayload,
-} from "@spaarke/ui-components/dist/components/SendEmailDialog";
-import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
-import type { ILookupItem } from "@spaarke/ui-components/dist/types/LookupTypes";
+import * as React from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { makeStyles, tokens, shorthands, Text, Link, Button, Tooltip } from '@fluentui/react-components';
+import { ChevronRight20Regular } from '@fluentui/react-icons';
+import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
+import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
+import { useSemanticSearch, useFilters } from './hooks';
+import { SemanticSearchApiService, NavigationService } from './services';
+import { initializeAuth } from './authInit';
+import { authenticatedFetch } from '@spaarke/auth';
+import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
+import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
+import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -54,119 +30,96 @@ import type { ILookupItem } from "@spaarke/ui-components/dist/types/LookupTypes"
 const useStyles = makeStyles({
   // Root container
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    boxSizing: "border-box",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    boxSizing: 'border-box',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     fontFamily: tokens.fontFamilyBase,
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.overflow("hidden"),
+    ...shorthands.overflow('hidden'),
   },
 
   // Compact mode root adjustments
   rootCompact: {
-    maxHeight: "400px",
+    maxHeight: '400px',
   },
 
   // Header region (search input)
   header: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.padding(tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   // Main content area (sidebar + results)
   content: {
-    display: "flex",
+    display: 'flex',
     flex: 1,
-    ...shorthands.overflow("hidden"),
+    ...shorthands.overflow('hidden'),
   },
 
   // Sidebar region (filters) - hidden in compact mode
   sidebar: {
-    width: "250px",
+    width: '250px',
     flexShrink: 0,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
     ...shorthands.padding(tokens.spacingHorizontalS),
     backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
-    overflowY: "auto",
-    overflowX: "hidden",
+    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    overflowY: 'auto',
+    overflowX: 'hidden',
   },
 
   // Collapsed sidebar strip
   sidebarCollapsed: {
-    width: "36px",
+    width: '36px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
     paddingTop: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.borderRight(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.borderRight(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   // Main region (results list)
   main: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.overflow("hidden"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.overflow('hidden'),
   },
 
   // Footer for compact mode "View all" link
   footer: {
-    display: "flex",
-    justifyContent: "center",
+    display: 'flex',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingHorizontalS),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderTop(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   // Centered content container for states
   centeredState: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingHorizontalL),
   },
 
   // Version footer (always visible)
   versionFooter: {
-    display: "flex",
-    justifyContent: "flex-end",
-    ...shorthands.padding(
-      tokens.spacingHorizontalXS,
-      tokens.spacingHorizontalM,
-    ),
+    display: 'flex',
+    justifyContent: 'flex-end',
+    ...shorthands.padding(tokens.spacingHorizontalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderTop(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
   },
@@ -188,9 +141,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Get control properties from context
   const showFilters = context.parameters.showFilters?.raw ?? true;
   const compactMode = context.parameters.compactMode?.raw ?? false;
-  const placeholder =
-    context.parameters.placeholder?.raw ?? "Search documents...";
-  const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "";
+  const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
+  const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? '';
 
   // Auto-detect entity context from page (when on a record form)
   // Uses the record's GUID directly instead of relying on bound field
@@ -204,7 +156,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const pageEntityTypeName = pageContext?.entityTypeName ?? null;
 
   // DEBUG: Log page context detection
-  console.log("[SemanticSearchControl] Page context detection:", {
+  console.log('[SemanticSearchControl] Page context detection:', {
     pageContext,
     pageEntityId,
     pageEntityTypeName,
@@ -212,17 +164,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   });
 
   // Map Dataverse entity logical names to API entity types
-  const getEntityTypeFromLogicalName = (
-    logicalName: string | null,
-  ): string | null => {
+  const getEntityTypeFromLogicalName = (logicalName: string | null): string | null => {
     if (!logicalName) return null;
     const mapping: Record<string, string> = {
-      sprk_matter: "matter",
-      sprk_project: "project",
-      sprk_invoice: "invoice",
-      sprk_document: "document",
-      account: "account",
-      contact: "contact",
+      sprk_matter: 'matter',
+      sprk_project: 'project',
+      sprk_invoice: 'invoice',
+      sprk_document: 'document',
+      account: 'account',
+      contact: 'contact',
     };
     // Return mapped name, or fall back to the raw logical name so any entity
     // form still scopes correctly (the BFF accepts arbitrary entityType values).
@@ -233,8 +183,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Priority: 1) Page context auto-detection, 2) Configured scope parameter
   // When configured as "entity" (or legacy "matter"), auto-detect from form context.
   // When configured as "all" or "custom", use as-is.
-  const configuredScope = (context.parameters.searchScope?.raw ??
-    "entity") as SearchScope;
+  const configuredScope = (context.parameters.searchScope?.raw ?? 'entity') as SearchScope;
   const parameterScopeId = context.parameters.scopeId?.raw ?? null;
 
   // Auto-detect entity type from page context (works on any entity form)
@@ -264,7 +213,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const scopeId = pageEntityId ?? parameterScopeId;
 
   // DEBUG: Log final scope determination
-  console.log("[SemanticSearchControl] Scope determination:", {
+  console.log('[SemanticSearchControl] Scope determination:', {
     detectedEntityType,
     configuredScope,
     parameterScopeId,
@@ -273,27 +222,23 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   });
 
   // Query input state
-  const [queryInput, setQueryInput] = useState("");
+  const [queryInput, setQueryInput] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
 
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
   // Email dialog state
-  const [emailDialogResult, setEmailDialogResult] =
-    useState<SearchResult | null>(null);
+  const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
 
   // Filter pane collapse state
   const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(true);
   const handleToggleFilterPane = useCallback(() => {
-    setIsFilterPaneCollapsed((prev) => !prev);
+    setIsFilterPaneCollapsed(prev => !prev);
   }, []);
 
   // Initialize services (memoized to prevent recreation)
-  const apiService = useMemo(
-    () => new SemanticSearchApiService(apiBaseUrl),
-    [apiBaseUrl],
-  );
+  const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
 
   // Auth initialization state
@@ -304,18 +249,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
 
   // Search state management — declared BEFORE auth effects so useEffect can reference search
-  const {
-    results,
-    totalCount,
-    isLoading,
-    isLoadingMore,
-    error,
-    hasMore,
-    query,
-    search,
-    loadMore,
-    reset,
-  } = useSemanticSearch(apiService, searchScope, scopeId);
+  const { results, totalCount, isLoading, isLoadingMore, error, hasMore, query, search, loadMore, reset } =
+    useSemanticSearch(apiService, searchScope, scopeId);
 
   // Initialize @spaarke/auth on mount (replaces local MsalAuthProvider)
   useEffect(() => {
@@ -324,15 +259,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         await initializeAuth(apiBaseUrl);
         setIsAuthInitialized(true);
       } catch (err) {
-        console.error(
-          "[SemanticSearchControl] @spaarke/auth initialization failed:",
-          err,
-        );
-        setAuthError(
-          err instanceof Error
-            ? err.message
-            : "Authentication initialization failed",
-        );
+        console.error('[SemanticSearchControl] @spaarke/auth initialization failed:', err);
+        setAuthError(err instanceof Error ? err.message : 'Authentication initialization failed');
       }
     };
     void doInitAuth();
@@ -343,16 +271,14 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   useEffect(() => {
     if (isAuthInitialized) {
       setHasSearched(true);
-      void search("", filters);
+      void search('', filters);
     }
   }, [isAuthInitialized]);
 
   // Execute search — empty query is allowed (returns all documents in scope)
   const handleSearch = useCallback(() => {
     if (!isAuthInitialized) {
-      console.warn(
-        "[SemanticSearchControl] Cannot search - auth not initialized",
-      );
+      console.warn('[SemanticSearchControl] Cannot search - auth not initialized');
       return;
     }
     setHasSearched(true);
@@ -365,7 +291,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     (newFilters: SearchFilters) => {
       setFilters(newFilters);
     },
-    [setFilters],
+    [setFilters]
   );
 
   // Handle retry after error
@@ -381,7 +307,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       onDocumentSelect(result.documentId);
       notifyOutputChanged();
     },
-    [onDocumentSelect, notifyOutputChanged],
+    [onDocumentSelect, notifyOutputChanged]
   );
 
   // Handle open file — mode is "web" (browser) or "desktop" (Office app).
@@ -389,13 +315,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // SharePoint webUrl and desktop protocol URL (ms-word://, ms-excel://, etc.)
   // since search results do not pre-populate fileUrl.
   const handleOpenFile = useCallback(
-    (result: SearchResult, mode: "web" | "desktop") => {
+    (result: SearchResult, mode: 'web' | 'desktop') => {
       apiService
         .getOpenLinks(result.documentId)
-        .then(async (openLinks) => {
+        .then(async openLinks => {
           // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
           if (openLinks.desktopUrl) {
-            return window.open(openLinks.desktopUrl, "_self");
+            return window.open(openLinks.desktopUrl, '_self');
           }
           // No desktop protocol — download via BFF and let OS open with default app
           // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
@@ -406,9 +332,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             if (response.ok) {
               const blob = await response.blob();
               const objectUrl = URL.createObjectURL(blob);
-              const a = document.createElement("a");
+              const a = document.createElement('a');
               a.href = objectUrl;
-              a.download = openLinks.fileName ?? result.name ?? "document";
+              a.download = openLinks.fileName ?? result.name ?? 'document';
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -416,19 +342,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               return;
             }
           } catch (err) {
-            console.error(
-              "[SemanticSearchControl] Download failed, falling back:",
-              err,
-            );
+            console.error('[SemanticSearchControl] Download failed, falling back:', err);
           }
           // Final fallback to webUrl
-          return window.open(openLinks.webUrl, "_blank", "noopener,noreferrer");
+          return window.open(openLinks.webUrl, '_blank', 'noopener,noreferrer');
         })
-        .catch((err) => {
-          console.error("[SemanticSearchControl] Failed to open file:", err);
+        .catch(err => {
+          console.error('[SemanticSearchControl] Failed to open file:', err);
         });
     },
-    [apiService, apiBaseUrl],
+    [apiService, apiBaseUrl]
   );
 
   // Handle open record
@@ -440,7 +363,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         void navigationService.openRecordNewTab(result);
       }
     },
-    [navigationService],
+    [navigationService]
   );
 
   // Handle view all navigation (when DOM cap reached)
@@ -461,7 +384,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       const url = navigationService.getFindSimilarUrl(result, isDarkMode);
       if (url) setFindSimilarUrl(url);
     },
-    [navigationService, isDarkMode],
+    [navigationService, isDarkMode]
   );
 
   // Preview URL cache — avoids redundant BFF calls for the same document
@@ -481,14 +404,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         }
         return url;
       } catch (err) {
-        console.error(
-          "[SemanticSearchControl] Failed to get preview URL:",
-          err,
-        );
+        console.error('[SemanticSearchControl] Failed to get preview URL:', err);
         return null;
       }
     },
-    [apiService],
+    [apiService]
   );
 
   // Summary cache — avoids redundant Dataverse calls for the same document
@@ -503,9 +423,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       try {
         const record = await context.webAPI.retrieveRecord(
-          "sprk_document",
+          'sprk_document',
           result.documentId,
-          "?$select=sprk_filesummary,sprk_filetldr",
+          '?$select=sprk_filesummary,sprk_filetldr'
         );
         const entity = record as Record<string, unknown>;
         const data: SummaryData = {
@@ -515,28 +435,21 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         summaryCache.current.set(result.documentId, data);
         return data;
       } catch (err) {
-        console.error(
-          "[SemanticSearchControl] Failed to fetch summary from Dataverse:",
-          err,
-        );
+        console.error('[SemanticSearchControl] Failed to fetch summary from Dataverse:', err);
         return { summary: null, tldr: null };
       }
     },
-    [context.webAPI],
+    [context.webAPI]
   );
 
   // Handle Add Document — opens DocumentUploadWizard Code Page dialog
   const handleAddDocument = useCallback(() => {
-    void navigationService.openAddDocument(
-      scopeId,
-      searchScope !== "all" ? searchScope : null,
-      () => {
-        // Refresh search results after upload completes
-        if (query) {
-          void search(query, filters);
-        }
-      },
-    );
+    void navigationService.openAddDocument(scopeId, searchScope !== 'all' ? searchScope : null, () => {
+      // Refresh search results after upload completes
+      if (query) {
+        void search(query, filters);
+      }
+    });
   }, [navigationService, scopeId, searchScope, query, search, filters]);
 
   // Handle Email Document — opens SendEmailDialog with result context
@@ -549,16 +462,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     (result: SearchResult) => {
       try {
         const clientUrl =
-          (
-            context as unknown as { page?: { getClientUrl?: () => string } }
-          ).page?.getClientUrl?.() ?? window.location.origin;
+          (context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.() ??
+          window.location.origin;
         const recordUrl = `${clientUrl}/main.aspx?etn=sprk_document&id=${result.documentId}&pagetype=entityrecord`;
         void navigator.clipboard.writeText(recordUrl);
       } catch (err) {
-        console.error("[SemanticSearchControl] Failed to copy link:", err);
+        console.error('[SemanticSearchControl] Failed to copy link:', err);
       }
     },
-    [context],
+    [context]
   );
 
   // Workspace flag tracking — local set of document IDs marked as "in workspace"
@@ -568,9 +480,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   useEffect(() => {
     if (results.length === 0) return;
 
-    const documentIds = results.map((r) => r.documentId);
+    const documentIds = results.map(r => r.documentId);
     // Build OData filter: sprk_documentid eq 'id1' or sprk_documentid eq 'id2' ...
-    const filterClauses = documentIds.map((id) => `sprk_documentid eq '${id}'`);
+    const filterClauses = documentIds.map(id => `sprk_documentid eq '${id}'`);
     // Batch in groups of 50 to avoid overly long filter strings
     const batchSize = 50;
     const batches: string[][] = [];
@@ -582,20 +494,17 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       const inWorkspaceIds = new Set<string>();
       for (const batch of batches) {
         try {
-          const filter = batch.join(" or ");
+          const filter = batch.join(' or ');
           const resp = await context.webAPI.retrieveMultipleRecords(
-            "sprk_document",
-            `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`,
+            'sprk_document',
+            `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`
           );
           for (const entity of resp.entities || []) {
             const docId = entity.sprk_documentid as string;
             if (docId) inWorkspaceIds.add(docId);
           }
         } catch (err) {
-          console.warn(
-            "[SemanticSearchControl] Failed to load workspace flags:",
-            err,
-          );
+          console.warn('[SemanticSearchControl] Failed to load workspace flags:', err);
         }
       }
       setWorkspaceSet(inWorkspaceIds);
@@ -608,7 +517,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Uses functional setState to avoid stale-closure issues with workspaceSet.
   const handleToggleWorkspace = useCallback(
     (result: SearchResult) => {
-      setWorkspaceSet((prev) => {
+      setWorkspaceSet(prev => {
         const isCurrentlyIn = prev.has(result.documentId);
         const newFlag = !isCurrentlyIn;
         const next = new Set(prev);
@@ -619,16 +528,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         }
         // Update Dataverse (fire-and-forget with revert on failure)
         context.webAPI
-          .updateRecord("sprk_document", result.documentId, {
+          .updateRecord('sprk_document', result.documentId, {
             sprk_inworkspace: newFlag,
           })
           .catch((err: unknown) => {
-            console.error(
-              "[SemanticSearchControl] Failed to toggle workspace flag:",
-              err,
-            );
+            console.error('[SemanticSearchControl] Failed to toggle workspace flag:', err);
             // Revert on failure
-            setWorkspaceSet((revert) => {
+            setWorkspaceSet(revert => {
               const reverted = new Set(revert);
               if (isCurrentlyIn) {
                 reverted.add(result.documentId);
@@ -641,14 +547,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         return next;
       });
     },
-    [context.webAPI],
+    [context.webAPI]
   );
 
   // Check if a document is in the workspace
-  const isInWorkspace = useCallback(
-    (result: SearchResult) => workspaceSet.has(result.documentId),
-    [workspaceSet],
-  );
+  const isInWorkspace = useCallback((result: SearchResult) => workspaceSet.has(result.documentId), [workspaceSet]);
 
   // Email dialog: search users via Dataverse WebAPI
   const handleSearchUsers = useCallback(
@@ -656,21 +559,21 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       try {
         const filter = `contains(fullname,'${query.replace(/'/g, "''")}') or contains(internalemailaddress,'${query.replace(/'/g, "''")}')`;
         const result = await context.webAPI.retrieveMultipleRecords(
-          "systemuser",
-          `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`,
+          'systemuser',
+          `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`
         );
         return (result.entities || [])
           .filter((u: Record<string, unknown>) => u.internalemailaddress)
           .map((u: Record<string, unknown>) => ({
             id: u.systemuserid as string,
-            name: `${u.fullname || "Unknown"} (${u.internalemailaddress})`,
+            name: `${u.fullname || 'Unknown'} (${u.internalemailaddress})`,
           }));
       } catch (err) {
-        console.error("[SemanticSearchControl] User search failed:", err);
+        console.error('[SemanticSearchControl] User search failed:', err);
         return [];
       }
     },
-    [context.webAPI],
+    [context.webAPI]
   );
 
   // Email dialog: send email via BFF
@@ -680,42 +583,37 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       const emailMatch = payload.to.name.match(/\(([^)]+@[^)]+)\)/);
       const toEmail = emailMatch ? emailMatch[1] : payload.to.name;
 
-      const response = await authenticatedFetch(
-        `${apiBaseUrl}/api/communications/send`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to: [toEmail],
-            subject: payload.subject,
-            body: payload.body,
-            bodyFormat: "Text",
-            associations: emailDialogResult
-              ? [
-                  {
-                    entityType: "sprk_document",
-                    entityId: emailDialogResult.documentId,
-                  },
-                ]
-              : [],
-          }),
-        },
-      );
+      const response = await authenticatedFetch(`${apiBaseUrl}/api/communications/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: [toEmail],
+          subject: payload.subject,
+          body: payload.body,
+          bodyFormat: 'Text',
+          associations: emailDialogResult
+            ? [
+                {
+                  entityType: 'sprk_document',
+                  entityId: emailDialogResult.documentId,
+                },
+              ]
+            : [],
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to send email: ${response.status}`);
       }
     },
-    [apiBaseUrl, emailDialogResult],
+    [apiBaseUrl, emailDialogResult]
   );
 
   // Build email defaults from result context
-  const emailDefaultSubject = emailDialogResult
-    ? `Document: ${emailDialogResult.name}`
-    : "";
+  const emailDefaultSubject = emailDialogResult ? `Document: ${emailDialogResult.name}` : '';
   const emailDefaultBody = emailDialogResult
-    ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || "No summary available."}\n\n────\n\nKind regards`
-    : "";
+    ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
+    : '';
 
   // Determine what content to show in main area
   const renderMainContent = () => {
@@ -723,11 +621,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     if (authError) {
       return (
         <div className={styles.centeredState}>
-          <ErrorState
-            message={authError}
-            retryable={false}
-            onRetry={() => window.location.reload()}
-          />
+          <ErrorState message={authError} retryable={false} onRetry={() => window.location.reload()} />
         </div>
       );
     }
@@ -754,11 +648,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     if (error) {
       return (
         <div className={styles.centeredState}>
-          <ErrorState
-            message={error.message}
-            retryable={error.retryable}
-            onRetry={handleRetry}
-          />
+          <ErrorState message={error.message} retryable={error.retryable} onRetry={handleRetry} />
         </div>
       );
     }
@@ -809,9 +699,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   };
 
   // Combine root styles based on mode
-  const rootClassName = compactMode
-    ? `${styles.root} ${styles.rootCompact}`
-    : styles.root;
+  const rootClassName = compactMode ? `${styles.root} ${styles.rootCompact}` : styles.root;
 
   return (
     <div className={rootClassName}>
@@ -875,11 +763,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       </div>
 
       {/* Find Similar — shared iframe dialog */}
-      <FindSimilarDialog
-        open={!!findSimilarUrl}
-        onClose={() => setFindSimilarUrl(null)}
-        url={findSimilarUrl}
-      />
+      <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
       {/* Send Email Dialog */}
       <SendEmailDialog

@@ -10,7 +10,7 @@
  * - ADR-022: React 16 compatible APIs (using react-flow-renderer v10)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -22,18 +22,13 @@ import ReactFlow, {
   Edge,
   NodeTypes,
   EdgeTypes,
-} from "react-flow-renderer";
-import "react-flow-renderer/dist/style.css";
-import { makeStyles, tokens, Spinner, Text } from "@fluentui/react-components";
-import { useForceLayout } from "../hooks/useForceLayout";
-import { DocumentNode as DocumentNodeComponent } from "./DocumentNode";
-import { DocumentEdge as DocumentEdgeComponent } from "./DocumentEdge";
-import type {
-  DocumentNode,
-  DocumentEdge,
-  DocumentNodeData,
-  ForceLayoutOptions,
-} from "../types/graph";
+} from 'react-flow-renderer';
+import 'react-flow-renderer/dist/style.css';
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import { useForceLayout } from '../hooks/useForceLayout';
+import { DocumentNode as DocumentNodeComponent } from './DocumentNode';
+import { DocumentEdge as DocumentEdgeComponent } from './DocumentEdge';
+import type { DocumentNode, DocumentEdge, DocumentNodeData, ForceLayoutOptions } from '../types/graph';
 
 /**
  * Props for DocumentGraph component
@@ -64,31 +59,31 @@ export interface DocumentGraphProps {
  */
 const useStyles = makeStyles({
   container: {
-    width: "100%",
-    height: "100%",
-    minHeight: "300px",
-    position: "relative",
+    width: '100%',
+    height: '100%',
+    minHeight: '300px',
+    position: 'relative',
   },
   loadingOverlay: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: tokens.colorNeutralBackground1,
     opacity: 0.9,
     zIndex: 10,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
     gap: tokens.spacingVerticalM,
   },
@@ -99,7 +94,7 @@ const useStyles = makeStyles({
  * Uses custom DocumentNode component from Task 012
  */
 const nodeTypes: NodeTypes = {
-  document: DocumentNodeComponent as unknown as NodeTypes["default"],
+  document: DocumentNodeComponent as unknown as NodeTypes['default'],
 };
 
 /**
@@ -107,7 +102,7 @@ const nodeTypes: NodeTypes = {
  * Uses custom DocumentEdge component from Task 013
  */
 const edgeTypes: EdgeTypes = {
-  similarity: DocumentEdgeComponent as unknown as EdgeTypes["default"],
+  similarity: DocumentEdgeComponent as unknown as EdgeTypes['default'],
 };
 
 /**
@@ -132,19 +127,15 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
   const centerY = 0;
 
   // Use force layout hook to calculate positions
-  const { layoutNodes, layoutEdges, isSimulating } = useForceLayout(
-    inputNodes,
-    inputEdges,
-    {
-      ...layoutOptions,
-      centerX,
-      centerY,
-    },
-  );
+  const { layoutNodes, layoutEdges, isSimulating } = useForceLayout(inputNodes, inputEdges, {
+    ...layoutOptions,
+    centerX,
+    centerY,
+  });
 
   // React Flow state - add compactMode to node data
   const nodesWithCompactMode = React.useMemo(() => {
-    return layoutNodes.map((node) => ({
+    return layoutNodes.map(node => ({
       ...node,
       data: {
         ...node.data,
@@ -173,7 +164,7 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
         onNodeSelect(node as DocumentNode);
       }
     },
-    [onNodeSelect],
+    [onNodeSelect]
   );
 
   // Empty state
@@ -189,9 +180,9 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
   }
 
   // Apply custom edge type for similarity-based styling (Task 013)
-  const typedEdges = edges.map((edge) => ({
+  const typedEdges = edges.map(edge => ({
     ...edge,
-    type: "similarity", // Use custom DocumentEdge component
+    type: 'similarity', // Use custom DocumentEdge component
   }));
 
   return (
@@ -220,27 +211,18 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
         maxZoom={2}
         connectOnClick={false}
         attributionPosition="bottom-left"
-        style={{ width: "100%", height: "100%" }}
+        style={{ width: '100%', height: '100%' }}
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1}
-          color={isDarkMode ? "#444" : "#ddd"}
-        />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={isDarkMode ? '#444' : '#ddd'} />
         <Controls showZoom showFitView showInteractive={false} />
         {showMinimap && (
           <MiniMap
             nodeColor={(node: Node<DocumentNodeData>) => {
-              return node.data?.isSource
-                ? tokens.colorBrandBackground
-                : tokens.colorNeutralBackground3;
+              return node.data?.isSource ? tokens.colorBrandBackground : tokens.colorNeutralBackground3;
             }}
-            maskColor={isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)"}
+            maskColor={isDarkMode ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'}
             style={{
-              backgroundColor: isDarkMode
-                ? tokens.colorNeutralBackground2
-                : tokens.colorNeutralBackground1,
+              backgroundColor: isDarkMode ? tokens.colorNeutralBackground2 : tokens.colorNeutralBackground1,
             }}
           />
         )}

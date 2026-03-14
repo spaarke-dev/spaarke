@@ -35,17 +35,17 @@ export interface IAction extends IScopeItem {
 
 /** sprk_analysisskill — multi-select scope item. */
 export interface ISkill extends IScopeItem {
-  type?: "extraction" | "analysis" | "generation" | "transformation";
+  type?: 'extraction' | 'analysis' | 'generation' | 'transformation';
 }
 
 /** sprk_analysisknowledge — multi-select scope item. */
 export interface IKnowledge extends IScopeItem {
-  source?: "dataverse" | "sharepoint" | "external";
+  source?: 'dataverse' | 'sharepoint' | 'external';
 }
 
 /** sprk_analysistool — multi-select scope item. */
 export interface ITool extends IScopeItem {
-  toolType?: "search" | "calculation" | "api" | "workflow";
+  toolType?: 'search' | 'calculation' | 'api' | 'workflow';
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ export interface IPlaybookScopes {
 }
 
 /** Tab identifiers for scope configuration UI. */
-export type ScopeTabId = "action" | "skills" | "knowledge" | "tools";
+export type ScopeTabId = 'action' | 'skills' | 'knowledge' | 'tools';
 
 // ---------------------------------------------------------------------------
 // Analysis configuration
@@ -109,37 +109,37 @@ export interface IFollowUpAction {
 // ---------------------------------------------------------------------------
 
 export const ENTITY_NAMES = {
-  playbook: "sprk_analysisplaybook",
-  action: "sprk_analysisaction",
-  skill: "sprk_analysisskill",
-  knowledge: "sprk_analysisknowledge",
-  tool: "sprk_analysistool",
-  analysis: "sprk_analysis",
-  document: "sprk_document",
+  playbook: 'sprk_analysisplaybook',
+  action: 'sprk_analysisaction',
+  skill: 'sprk_analysisskill',
+  knowledge: 'sprk_analysisknowledge',
+  tool: 'sprk_analysistool',
+  analysis: 'sprk_analysis',
+  document: 'sprk_document',
 } as const;
 
 export const RELATIONSHIP_NAMES = {
   /** Playbook → Skills (N:N) */
-  playbookSkill: "sprk_playbook_skill",
+  playbookSkill: 'sprk_playbook_skill',
   /** Playbook → Knowledge (N:N) */
-  playbookKnowledge: "sprk_playbook_knowledge",
+  playbookKnowledge: 'sprk_playbook_knowledge',
   /** Playbook → Tools (N:N) */
-  playbookTool: "sprk_playbook_tool",
+  playbookTool: 'sprk_playbook_tool',
   /** Playbook → Actions (N:N) — note different naming pattern */
-  playbookAction: "sprk_analysisplaybook_action",
+  playbookAction: 'sprk_analysisplaybook_action',
   /** Analysis → Skills (N:N) */
-  analysisSkill: "sprk_analysis_skill",
+  analysisSkill: 'sprk_analysis_skill',
   /** Analysis → Knowledge (N:N) */
-  analysisKnowledge: "sprk_analysis_knowledge",
+  analysisKnowledge: 'sprk_analysis_knowledge',
   /** Analysis → Tools (N:N) */
-  analysisTool: "sprk_analysis_tool",
+  analysisTool: 'sprk_analysis_tool',
 } as const;
 
 export const ID_FIELDS = {
-  playbook: "sprk_analysisplaybookid",
-  action: "sprk_analysisactionid",
-  skill: "sprk_analysisskillid",
-  knowledge: "sprk_analysisknowledgeid",
-  tool: "sprk_analysistoolid",
-  analysis: "sprk_analysisid",
+  playbook: 'sprk_analysisplaybookid',
+  action: 'sprk_analysisactionid',
+  skill: 'sprk_analysisskillid',
+  knowledge: 'sprk_analysisknowledgeid',
+  tool: 'sprk_analysistoolid',
+  analysis: 'sprk_analysisid',
 } as const;

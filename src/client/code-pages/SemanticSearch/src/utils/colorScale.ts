@@ -7,7 +7,7 @@
  * Palette extracted from ClusterNode.tsx for reuse across all views.
  */
 
-import { tokens } from "@fluentui/react-components";
+import { tokens } from '@fluentui/react-components';
 
 // =============================================
 // Palette — 8 Fluent v9 semantic color pairs
@@ -39,7 +39,7 @@ export const PALETTE_SIZE = PALETTE_BACKGROUNDS.length;
 
 /** Deterministic hash of a string to a palette index. */
 function hashToIndex(key: string): number {
-  const hash = key.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const hash = key.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   return Math.abs(hash) % PALETTE_SIZE;
 }
 
@@ -69,11 +69,9 @@ export function getCategoryIndex(categoryKey: string): number {
  * Build a lookup map from unique category keys to their color pairs.
  * Useful for rendering color legends.
  */
-export function buildColorLegend(
-  categoryKeys: string[],
-): { key: string; background: string; foreground: string }[] {
+export function buildColorLegend(categoryKeys: string[]): { key: string; background: string; foreground: string }[] {
   const unique = [...new Set(categoryKeys)];
-  return unique.map((key) => ({
+  return unique.map(key => ({
     key,
     ...getCategoryColor(key),
   }));

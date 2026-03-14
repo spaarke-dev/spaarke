@@ -6,36 +6,33 @@
  * Renders charts, cards, and calendars based on sprk_chartdefinition configuration
  */
 
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import { FluentProvider } from "@fluentui/react-components";
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import { VisualHostRoot } from "./components/VisualHostRoot";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import { logger } from "./utils/logger";
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { FluentProvider } from '@fluentui/react-components';
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { VisualHostRoot } from './components/VisualHostRoot';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { resolveTheme, setupThemeListener } from './providers/ThemeProvider';
+import { logger } from './utils/logger';
 
-export class VisualHost implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class VisualHost implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private notifyOutputChanged: () => void;
   private _cleanupThemeListener: (() => void) | null = null;
   private _context: ComponentFramework.Context<IInputs> | null = null;
 
   constructor() {
-    logger.info("VisualHost", "Constructor called");
+    logger.info('VisualHost', 'Constructor called');
   }
 
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     try {
-      logger.info("VisualHost", "Init - Setting up container");
+      logger.info('VisualHost', 'Init - Setting up container');
 
       this.notifyOutputChanged = notifyOutputChanged;
       this._context = context;
@@ -43,11 +40,11 @@ export class VisualHost implements ComponentFramework.StandardControl<
 
       // Fill the platform wrapper (div.pa-cb.flexbox) — without this,
       // the container shrinks to content width inside the flex parent
-      container.style.width = "100%";
+      container.style.width = '100%';
 
       // Set up theme listener for dynamic theme changes
-      this._cleanupThemeListener = setupThemeListener((isDark) => {
-        logger.info("VisualHost", `Theme changed: isDark=${isDark}`);
+      this._cleanupThemeListener = setupThemeListener(isDark => {
+        logger.info('VisualHost', `Theme changed: isDark=${isDark}`);
         if (this._context && this.container) {
           this.renderReactTree(this._context);
         }
@@ -56,9 +53,9 @@ export class VisualHost implements ComponentFramework.StandardControl<
       // Render React tree
       this.renderReactTree(context);
 
-      logger.info("VisualHost", "Init complete");
+      logger.info('VisualHost', 'Init complete');
     } catch (error) {
-      logger.error("VisualHost", "Init failed", error);
+      logger.error('VisualHost', 'Init failed', error);
       throw error;
     }
   }
@@ -72,7 +69,7 @@ export class VisualHost implements ComponentFramework.StandardControl<
       const lookupValue = context.parameters.chartDefinition?.raw;
       const chartDefinitionId = lookupValue?.[0]?.id;
 
-      logger.debug("VisualHost", "UpdateView - Re-rendering", {
+      logger.debug('VisualHost', 'UpdateView - Re-rendering', {
         chartDefinitionId,
         lookupValue,
       });
@@ -80,13 +77,13 @@ export class VisualHost implements ComponentFramework.StandardControl<
       // Re-render with new context
       this.renderReactTree(context);
     } catch (error) {
-      logger.error("VisualHost", "UpdateView failed", error);
+      logger.error('VisualHost', 'UpdateView failed', error);
     }
   }
 
   public destroy(): void {
     try {
-      logger.info("VisualHost", "Destroy - Unmounting React");
+      logger.info('VisualHost', 'Destroy - Unmounting React');
 
       // Clean up theme listener
       if (this._cleanupThemeListener) {
@@ -101,7 +98,7 @@ export class VisualHost implements ComponentFramework.StandardControl<
 
       this._context = null;
     } catch (error) {
-      logger.error("VisualHost", "Destroy failed", error);
+      logger.error('VisualHost', 'Destroy failed', error);
     }
   }
 
@@ -116,7 +113,7 @@ export class VisualHost implements ComponentFramework.StandardControl<
    */
   private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
     if (!this.container) {
-      logger.error("VisualHost", "Cannot render - container not initialized");
+      logger.error('VisualHost', 'Cannot render - container not initialized');
       return;
     }
 
@@ -126,20 +123,20 @@ export class VisualHost implements ComponentFramework.StandardControl<
       ReactDOM.render(
         React.createElement(
           FluentProvider,
-          { theme, style: { width: "100%" } },
+          { theme, style: { width: '100%' } },
           React.createElement(
             ErrorBoundary,
             null,
             React.createElement(VisualHostRoot, {
               context,
               notifyOutputChanged: this.notifyOutputChanged,
-            }),
-          ),
+            })
+          )
         ),
-        this.container,
+        this.container
       );
     } catch (error) {
-      logger.error("VisualHost", "Render failed", error);
+      logger.error('VisualHost', 'Render failed', error);
       throw error;
     }
   }

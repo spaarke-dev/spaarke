@@ -11,15 +11,10 @@
  * - Fluent design tokens for colors (ADR-021)
  */
 
-import React from "react";
-import {
-  BaseEdge,
-  getBezierPath,
-  type EdgeProps,
-  type Edge,
-} from "@xyflow/react";
-import { tokens } from "@fluentui/react-components";
-import type { ConditionEdgeData } from "../../types/canvas";
+import React from 'react';
+import { BaseEdge, getBezierPath, type EdgeProps, type Edge } from '@xyflow/react';
+import { tokens } from '@fluentui/react-components';
+import type { ConditionEdgeData } from '../../types/canvas';
 
 /**
  * Custom edge for true branch connections (green).
@@ -66,11 +61,11 @@ export const TrueBranchEdge: React.FC<EdgeProps<Edge<ConditionEdgeData>>> = ({
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            width: "100%",
-            height: "100%",
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '100%',
+            height: '100%',
           }}
         >
           <div
@@ -80,9 +75,9 @@ export const TrueBranchEdge: React.FC<EdgeProps<Edge<ConditionEdgeData>>> = ({
               color: tokens.colorPaletteGreenForeground1,
               fontWeight: 600,
               fontSize: tokens.fontSizeBase100,
-              padding: "2px 6px",
+              padding: '2px 6px',
               borderRadius: tokens.borderRadiusSmall,
-              whiteSpace: "nowrap",
+              whiteSpace: 'nowrap',
             }}
           >
             True
@@ -138,11 +133,11 @@ export const FalseBranchEdge: React.FC<EdgeProps<Edge<ConditionEdgeData>>> = ({
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            width: "100%",
-            height: "100%",
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '100%',
+            height: '100%',
           }}
         >
           <div
@@ -152,9 +147,9 @@ export const FalseBranchEdge: React.FC<EdgeProps<Edge<ConditionEdgeData>>> = ({
               color: tokens.colorPaletteRedForeground1,
               fontWeight: 600,
               fontSize: tokens.fontSizeBase100,
-              padding: "2px 6px",
+              padding: '2px 6px',
               borderRadius: tokens.borderRadiusSmall,
-              whiteSpace: "nowrap",
+              whiteSpace: 'nowrap',
             }}
           >
             False

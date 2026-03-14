@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 
-export { SdapApiClient } from "./SdapApiClient";
+export { SdapApiClient } from './SdapApiClient';
 
 export type {
   SdapClientConfig,
@@ -16,4 +16,4 @@ export type {
   UploadProgressCallback,
   SdapApiError,
   Container,
-} from "./types";
+} from './types';

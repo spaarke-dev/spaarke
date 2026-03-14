@@ -3,7 +3,7 @@
  * Standards: KM-UX-FLUENT-DESIGN-V9-STANDARDS.md
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -17,11 +17,11 @@ import {
   tokens,
   Button,
   Spinner,
-} from "@fluentui/react-components";
-import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from "../../types";
-import { ColumnRendererService } from "../../services/ColumnRendererService";
-import { useVirtualization } from "../../hooks/useVirtualization";
-import { VirtualizedGridView } from "./VirtualizedGridView";
+} from '@fluentui/react-components';
+import { IDatasetRecord, IDatasetColumn, ScrollBehavior } from '../../types';
+import { ColumnRendererService } from '../../services/ColumnRendererService';
+import { useVirtualization } from '../../hooks/useVirtualization';
+import { VirtualizedGridView } from './VirtualizedGridView';
 
 export interface IGridViewProps {
   records: IDatasetRecord[];
@@ -39,39 +39,39 @@ export interface IGridViewProps {
 
 const useStyles = makeStyles({
   root: {
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
-    position: "relative",
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
   },
   gridContainer: {
     flex: 1,
-    overflow: "auto",
-    position: "relative",
+    overflow: 'auto',
+    position: 'relative',
   },
   loadingOverlay: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     backgroundColor: tokens.colorNeutralBackground1,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
   },
   loadMoreButton: {
     margin: tokens.spacingVerticalM,
-    width: "100%",
+    width: '100%',
   },
   emptyState: {
     padding: tokens.spacingVerticalXXL,
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
   },
 });
 
-export const GridView: React.FC<IGridViewProps> = (props) => {
+export const GridView: React.FC<IGridViewProps> = props => {
   const styles = useStyles();
   const gridContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -82,7 +82,7 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
 
   // Filter to only readable columns
   const readableColumns = React.useMemo(() => {
-    return props.columns.filter((col) => col.canRead !== false);
+    return props.columns.filter(col => col.canRead !== false);
   }, [props.columns]);
 
   // Use custom virtualized grid for very large datasets (>1000 records)
@@ -95,8 +95,8 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
         selectedRecordIds={props.selectedRecordIds}
         itemHeight={virtualization.itemHeight}
         overscanCount={virtualization.overscanCount}
-        onRecordClick={(recordId) => {
-          const record = props.records.find((r) => r.id === recordId);
+        onRecordClick={recordId => {
+          const record = props.records.find(r => r.id === recordId);
           if (record) props.onRecordClick(record);
         }}
       />
@@ -105,8 +105,8 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
 
   // Determine if infinite scroll should be active
   const isInfiniteScroll = React.useMemo(() => {
-    if (props.scrollBehavior === "Infinite") return true;
-    if (props.scrollBehavior === "Paged") return false;
+    if (props.scrollBehavior === 'Infinite') return true;
+    if (props.scrollBehavior === 'Paged') return false;
     // Auto mode: infinite for >100 records, paged otherwise
     return props.records.length > 100;
   }, [props.scrollBehavior, props.records.length]);
@@ -129,28 +129,27 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
         props.loadNextPage();
       }
     },
-    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage],
+    [isInfiniteScroll, props.hasNextPage, props.loading, props.loadNextPage]
   );
 
   // Convert IDatasetColumn to Fluent DataGrid columns with field security
-  const gridColumns =
-    React.useMemo((): TableColumnDefinition<IDatasetRecord>[] => {
-      return readableColumns.map((col) =>
-        createTableColumn<IDatasetRecord>({
-          columnId: col.name,
-          compare: (a, b) => {
-            const aVal = String(a[col.name] ?? "");
-            const bVal = String(b[col.name] ?? "");
-            return aVal.localeCompare(bVal);
-          },
-          renderHeaderCell: () => col.displayName,
-          renderCell: (item) => {
-            const renderer = ColumnRendererService.getRenderer(col);
-            return renderer(item[col.name], item, col);
-          },
-        }),
-      );
-    }, [readableColumns]);
+  const gridColumns = React.useMemo((): TableColumnDefinition<IDatasetRecord>[] => {
+    return readableColumns.map(col =>
+      createTableColumn<IDatasetRecord>({
+        columnId: col.name,
+        compare: (a, b) => {
+          const aVal = String(a[col.name] ?? '');
+          const bVal = String(b[col.name] ?? '');
+          return aVal.localeCompare(bVal);
+        },
+        renderHeaderCell: () => col.displayName,
+        renderCell: item => {
+          const renderer = ColumnRendererService.getRenderer(col);
+          return renderer(item[col.name], item, col);
+        },
+      })
+    );
+  }, [readableColumns]);
 
   // Handle row selection
   const handleSelectionChange = React.useCallback(
@@ -158,7 +157,7 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
       const selectedItems = data.selectedItems as Set<string>;
       props.onSelectionChange(Array.from(selectedItems));
     },
-    [props],
+    [props]
   );
 
   // Handle row click
@@ -166,7 +165,7 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
     (record: IDatasetRecord) => {
       props.onRecordClick(record);
     },
-    [props],
+    [props]
   );
 
   // Empty state
@@ -180,28 +179,20 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
 
   return (
     <div className={styles.root}>
-      <div
-        className={styles.gridContainer}
-        ref={gridContainerRef}
-        onScroll={handleScroll}
-      >
+      <div className={styles.gridContainer} ref={gridContainerRef} onScroll={handleScroll}>
         <DataGrid
           items={props.records}
           columns={gridColumns}
           sortable
           resizableColumns
-          selectionMode={
-            props.selectedRecordIds.length > 0 ? "multiselect" : undefined
-          }
+          selectionMode={props.selectedRecordIds.length > 0 ? 'multiselect' : undefined}
           selectedItems={new Set(props.selectedRecordIds)}
           onSelectionChange={handleSelectionChange}
           focusMode="composite"
         >
           <DataGridHeader>
             <DataGridRow>
-              {({ renderHeaderCell }) => (
-                <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-              )}
+              {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<IDatasetRecord>>
@@ -209,11 +200,9 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
               <DataGridRow<IDatasetRecord>
                 key={rowId}
                 onClick={() => handleRowClick(item)}
-                style={{ cursor: "pointer" }}
+                style={{ cursor: 'pointer' }}
               >
-                {({ renderCell }) => (
-                  <DataGridCell>{renderCell(item)}</DataGridCell>
-                )}
+                {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
               </DataGridRow>
             )}
           </DataGridBody>
@@ -229,11 +218,7 @@ export const GridView: React.FC<IGridViewProps> = (props) => {
 
       {/* Load More button for paged mode */}
       {!isInfiniteScroll && props.hasNextPage && !props.loading && (
-        <Button
-          appearance="subtle"
-          className={styles.loadMoreButton}
-          onClick={props.loadNextPage}
-        >
+        <Button appearance="subtle" className={styles.loadMoreButton} onClick={props.loadNextPage}>
           Load More ({props.records.length} records loaded)
         </Button>
       )}

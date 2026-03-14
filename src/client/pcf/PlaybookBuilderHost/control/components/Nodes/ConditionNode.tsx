@@ -4,89 +4,80 @@
  * Has two outputs: true (left) and false (right).
  */
 
-import * as React from "react";
-import { Handle, Position } from "react-flow-renderer";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-  shorthands,
-} from "@fluentui/react-components";
-import { Branch20Regular } from "@fluentui/react-icons";
-import type { PlaybookNodeData, PlaybookNodeType } from "../../stores";
+import * as React from 'react';
+import { Handle, Position } from 'react-flow-renderer';
+import { makeStyles, tokens, Text, mergeClasses, shorthands } from '@fluentui/react-components';
+import { Branch20Regular } from '@fluentui/react-icons';
+import type { PlaybookNodeData, PlaybookNodeType } from '../../stores';
 
-const nodeColorSchemes: Record<
-  PlaybookNodeType,
-  { background: string; iconColor: string }
-> = {
-  aiAnalysis: { background: "#0078D4", iconColor: "#ffffff" },
-  aiCompletion: { background: "#0078D4", iconColor: "#ffffff" },
-  condition: { background: "#FFB900", iconColor: "#000000" },
-  deliverOutput: { background: "#107C10", iconColor: "#ffffff" },
-  createTask: { background: "#8764B8", iconColor: "#ffffff" },
-  sendEmail: { background: "#8764B8", iconColor: "#ffffff" },
-  wait: { background: "#E3008C", iconColor: "#ffffff" },
+const nodeColorSchemes: Record<PlaybookNodeType, { background: string; iconColor: string }> = {
+  aiAnalysis: { background: '#0078D4', iconColor: '#ffffff' },
+  aiCompletion: { background: '#0078D4', iconColor: '#ffffff' },
+  condition: { background: '#FFB900', iconColor: '#000000' },
+  deliverOutput: { background: '#107C10', iconColor: '#ffffff' },
+  createTask: { background: '#8764B8', iconColor: '#ffffff' },
+  sendEmail: { background: '#8764B8', iconColor: '#ffffff' },
+  wait: { background: '#E3008C', iconColor: '#ffffff' },
 };
 
 const useStyles = makeStyles({
   container: {
-    minWidth: "180px",
-    maxWidth: "220px",
+    minWidth: '180px',
+    maxWidth: '220px',
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     boxShadow: tokens.shadow4,
-    ...shorthands.overflow("hidden"),
-    transitionProperty: "box-shadow, border-color",
-    transitionDuration: "0.2s",
-    transitionTimingFunction: "ease",
+    ...shorthands.overflow('hidden'),
+    transitionProperty: 'box-shadow, border-color',
+    transitionDuration: '0.2s',
+    transitionTimingFunction: 'ease',
   },
   selected: {
     ...shorthands.borderColor(tokens.colorBrandStroke1),
     boxShadow: tokens.shadow16,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "28px",
-    height: "28px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '28px',
+    height: '28px',
     borderRadius: tokens.borderRadiusSmall,
     flexShrink: 0,
   },
   headerText: {
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   label: {
-    display: "block",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    display: 'block',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   typeLabel: {
-    display: "block",
+    display: 'block',
     color: tokens.colorNeutralForeground3,
   },
   branches: {
-    display: "flex",
-    justifyContent: "space-between",
+    display: 'flex',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    position: "relative",
+    position: 'relative',
   },
   branchLabel: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalXS,
     flex: 1,
   },
@@ -107,17 +98,12 @@ interface ConditionNodeProps {
  * Condition node - branches execution flow based on a condition.
  * Has two outputs: true (left) and false (right).
  */
-export const ConditionNode = React.memo(function ConditionNode({
-  data,
-  selected,
-}: ConditionNodeProps) {
+export const ConditionNode = React.memo(function ConditionNode({ data, selected }: ConditionNodeProps) {
   const styles = useStyles();
   const colorScheme = nodeColorSchemes[data.type];
 
   return (
-    <div
-      className={mergeClasses(styles.container, selected && styles.selected)}
-    >
+    <div className={mergeClasses(styles.container, selected && styles.selected)}>
       {/* Target handle (input) */}
       <Handle type="target" position={Position.Top} />
 
@@ -157,18 +143,8 @@ export const ConditionNode = React.memo(function ConditionNode({
       </div>
 
       {/* Source handles (two outputs) */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="true"
-        style={{ left: "25%" }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="false"
-        style={{ left: "75%" }}
-      />
+      <Handle type="source" position={Position.Bottom} id="true" style={{ left: '25%' }} />
+      <Handle type="source" position={Position.Bottom} id="false" style={{ left: '75%' }} />
     </div>
   );
 });

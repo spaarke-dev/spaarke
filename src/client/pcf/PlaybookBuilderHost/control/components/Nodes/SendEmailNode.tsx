@@ -2,11 +2,11 @@
  * Send Email Node - sends an email via Dataverse.
  */
 
-import * as React from "react";
-import { Text, tokens } from "@fluentui/react-components";
-import { Mail20Regular } from "@fluentui/react-icons";
-import { BaseNode } from "./BaseNode";
-import type { PlaybookNodeData } from "../../stores";
+import * as React from 'react';
+import { Text, tokens } from '@fluentui/react-components';
+import { Mail20Regular } from '@fluentui/react-icons';
+import { BaseNode } from './BaseNode';
+import type { PlaybookNodeData } from '../../stores';
 
 interface SendEmailNodeProps {
   data: PlaybookNodeData;
@@ -17,17 +17,9 @@ interface SendEmailNodeProps {
  * Send Email node - sends an email via Dataverse.
  * Use for: notifications, reports, automated communications.
  */
-export const SendEmailNode = React.memo(function SendEmailNode({
-  data,
-  selected,
-}: SendEmailNodeProps) {
+export const SendEmailNode = React.memo(function SendEmailNode({ data, selected }: SendEmailNodeProps) {
   return (
-    <BaseNode
-      data={data}
-      selected={selected}
-      icon={<Mail20Regular />}
-      typeLabel="Send Email"
-    >
+    <BaseNode data={data} selected={selected} icon={<Mail20Regular />} typeLabel="Send Email">
       {data.outputVariable && (
         <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
           Output: {data.outputVariable}

@@ -19,20 +19,8 @@
  * @see ADR-021 — Fluent UI v9 design system
  */
 
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  useEffect,
-} from "react";
-import {
-  makeStyles,
-  tokens,
-  Spinner,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { makeStyles, tokens, Spinner, Text, mergeClasses } from '@fluentui/react-components';
 import {
   forceSimulation,
   forceManyBody,
@@ -42,20 +30,11 @@ import {
   forceY,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
-} from "d3-force";
-import type {
-  DocumentSearchResult,
-  RecordSearchResult,
-  SearchDomain,
-  VisualizationColorBy,
-} from "../types";
-import { useSimilarityProjection } from "../hooks/useSimilarityProjection";
-import { getCategoryColor, buildColorLegend } from "../utils/colorScale";
-import {
-  getResultId,
-  getResultDomain,
-  isDocumentResult,
-} from "../utils/groupResults";
+} from 'd3-force';
+import type { DocumentSearchResult, RecordSearchResult, SearchDomain, VisualizationColorBy } from '../types';
+import { useSimilarityProjection } from '../hooks/useSimilarityProjection';
+import { getCategoryColor, buildColorLegend } from '../utils/colorScale';
+import { getResultId, getResultDomain, isDocumentResult } from '../utils/groupResults';
 
 // =============================================
 // Simulation types
@@ -90,11 +69,7 @@ export interface SearchResultsMapProps {
   /** Active search domain tab. */
   activeDomain: SearchDomain;
   /** Callback when a result point is clicked. Optionally includes click screen coordinates. */
-  onResultClick: (
-    resultId: string,
-    domain: SearchDomain,
-    clickPosition?: { x: number; y: number },
-  ) => void;
+  onResultClick: (resultId: string, domain: SearchDomain, clickPosition?: { x: number; y: number }) => void;
 }
 
 // =============================================
@@ -121,40 +96,40 @@ const LINK_STRENGTH_FACTOR = 0.08;
 
 const useStyles = makeStyles({
   container: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
-    width: "100%",
-    height: "100%",
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
   svg: {
-    width: "100%",
-    height: "100%",
-    cursor: "grab",
+    width: '100%',
+    height: '100%',
+    cursor: 'grab',
   },
   svgPanning: {
-    cursor: "grabbing",
+    cursor: 'grabbing',
   },
   centerMessage: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   legend: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalS,
     left: tokens.spacingHorizontalS,
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -162,25 +137,25 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow4,
-    maxHeight: "280px",
-    overflowY: "auto",
+    maxHeight: '280px',
+    overflowY: 'auto',
   },
   legendItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   legendLabel: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: "200px",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '200px',
   },
   tooltip: {
-    position: "absolute",
-    pointerEvents: "none",
+    position: 'absolute',
+    pointerEvents: 'none',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -190,15 +165,15 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow8,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     zIndex: 20,
-    maxWidth: "300px",
+    maxWidth: '300px',
   },
   tooltipName: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   tooltipDetail: {
     fontSize: tokens.fontSizeBase100,
@@ -207,11 +182,11 @@ const useStyles = makeStyles({
   tooltipSummary: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground2,
-    marginTop: "4px",
-    display: "-webkit-box",
+    marginTop: '4px',
+    display: '-webkit-box',
     WebkitLineClamp: 3,
-    WebkitBoxOrient: "vertical" as const,
-    overflow: "hidden",
+    WebkitBoxOrient: 'vertical' as const,
+    overflow: 'hidden',
   },
 });
 
@@ -230,11 +205,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
   const styles = useStyles();
 
   // Data hook — computes node data and pairwise similarity edges
-  const { nodes: nodeData, edges: edgeData } = useSimilarityProjection(
-    results,
-    colorBy,
-    minSimilarity,
-  );
+  const { nodes: nodeData, edges: edgeData } = useSimilarityProjection(results, colorBy, minSimilarity);
 
   // ─── Container sizing via ResizeObserver ───
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -242,8 +213,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (containerRef.current) {
-      const obs = (containerRef.current as unknown as { __ro?: ResizeObserver })
-        .__ro;
+      const obs = (containerRef.current as unknown as { __ro?: ResizeObserver }).__ro;
       obs?.disconnect();
       containerRef.current = null;
     }
@@ -251,7 +221,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
       containerRef.current = node;
       const rect = node.getBoundingClientRect();
       setDimensions({ width: rect.width, height: rect.height });
-      const observer = new ResizeObserver((entries) => {
+      const observer = new ResizeObserver(entries => {
         for (const entry of entries) {
           setDimensions({
             width: entry.contentRect.width,
@@ -277,9 +247,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   // ─── Simulation refs ───
-  const simulationRef = useRef<ReturnType<
-    typeof forceSimulation<SimNode>
-  > | null>(null);
+  const simulationRef = useRef<ReturnType<typeof forceSimulation<SimNode>> | null>(null);
   const simNodesRef = useRef<SimNode[]>([]);
   const simLinksRef = useRef<SimLink[]>([]);
   const simNodeMapRef = useRef<Map<string, SimNode>>(new Map());
@@ -310,7 +278,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
     }
 
     // Create simulation nodes with random initial spread
-    const simNodes: SimNode[] = nodeData.map((n) => ({
+    const simNodes: SimNode[] = nodeData.map(n => ({
       id: n.id,
       radius: n.radius,
       category: n.category,
@@ -322,7 +290,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
     }));
 
     // Create simulation links (d3 resolves source/target to node refs on tick)
-    const simLinks: SimLink[] = edgeData.map((e) => ({
+    const simLinks: SimLink[] = edgeData.map(e => ({
       source: e.sourceId as unknown as SimNode,
       target: e.targetId as unknown as SimNode,
       similarity: e.similarity,
@@ -338,21 +306,19 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
 
     // Create simulation with strong repulsion for good spread
     const sim = forceSimulation<SimNode>(simNodes)
-      .force("charge", forceManyBody<SimNode>().strength(CHARGE_STRENGTH))
-      .force("x", forceX<SimNode>(0).strength(CENTER_STRENGTH))
-      .force("y", forceY<SimNode>(0).strength(CENTER_STRENGTH))
+      .force('charge', forceManyBody<SimNode>().strength(CHARGE_STRENGTH))
+      .force('x', forceX<SimNode>(0).strength(CENTER_STRENGTH))
+      .force('y', forceY<SimNode>(0).strength(CENTER_STRENGTH))
       .force(
-        "collide",
-        forceCollide<SimNode>().radius((d) => d.radius + 4),
+        'collide',
+        forceCollide<SimNode>().radius(d => d.radius + 4)
       )
       .force(
-        "link",
+        'link',
         forceLink<SimNode, SimLink>(simLinks)
-          .id((d) => d.id)
-          .distance(
-            (d) => LINK_DISTANCE_MAX * (1 - d.similarity) + LINK_DISTANCE_MIN,
-          )
-          .strength((d) => d.similarity * LINK_STRENGTH_FACTOR),
+          .id(d => d.id)
+          .distance(d => LINK_DISTANCE_MAX * (1 - d.similarity) + LINK_DISTANCE_MIN)
+          .strength(d => d.similarity * LINK_STRENGTH_FACTOR)
       )
       .stop();
 
@@ -392,13 +358,13 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
     }
 
     // Trigger initial render with computed positions
-    setTickCount((t) => t + 1);
+    setTickCount(t => t + 1);
 
     // Start interactive mode at very low alpha (barely moving, ready for drag)
     sim
       .alpha(0.005)
       .alphaDecay(0.02)
-      .on("tick", () => setTickCount((t) => t + 1))
+      .on('tick', () => setTickCount(t => t + 1))
       .restart();
 
     simulationRef.current = sim;
@@ -410,8 +376,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
   // Re-fit on container resize
   useEffect(() => {
     const nodes = simNodesRef.current;
-    if (nodes.length === 0 || dimensions.width === 0 || dimensions.height === 0)
-      return;
+    if (nodes.length === 0 || dimensions.width === 0 || dimensions.height === 0) return;
 
     let minX = Infinity,
       maxX = -Infinity,
@@ -433,8 +398,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
       h = maxY - minY;
     const cx = (minX + maxX) / 2,
       cy = (minY + maxY) / 2;
-    const fitScale =
-      Math.min(dimensions.width / w, dimensions.height / h) * 0.9;
+    const fitScale = Math.min(dimensions.width / w, dimensions.height / h) * 0.9;
     const cs = Math.max(MIN_SCALE, Math.min(MAX_SCALE, fitScale));
     setViewTransform({
       x: dimensions.width / 2 - cx * cs,
@@ -458,77 +422,70 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   // ─── Node drag handlers (via document-level listeners for reliability) ───
-  const handleNodePointerDown = useCallback(
-    (e: React.PointerEvent, nodeId: string) => {
-      e.stopPropagation();
-      e.preventDefault();
-      draggedNodeId.current = nodeId;
+  const handleNodePointerDown = useCallback((e: React.PointerEvent, nodeId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    draggedNodeId.current = nodeId;
 
-      const startX = e.clientX;
-      const startY = e.clientY;
+    const startX = e.clientX;
+    const startY = e.clientY;
 
-      // Set fx/fy to pin node at current cursor position
-      const svg = svgRef.current;
-      if (svg) {
-        const rect = svg.getBoundingClientRect();
-        const vt = viewTransformRef.current;
-        const node = simNodeMapRef.current.get(nodeId);
-        if (node) {
-          node.fx = (e.clientX - rect.left - vt.x) / vt.scale;
-          node.fy = (e.clientY - rect.top - vt.y) / vt.scale;
-        }
+    // Set fx/fy to pin node at current cursor position
+    const svg = svgRef.current;
+    if (svg) {
+      const rect = svg.getBoundingClientRect();
+      const vt = viewTransformRef.current;
+      const node = simNodeMapRef.current.get(nodeId);
+      if (node) {
+        node.fx = (e.clientX - rect.left - vt.x) / vt.scale;
+        node.fy = (e.clientY - rect.top - vt.y) / vt.scale;
+      }
+    }
+
+    // Reheat simulation for smooth dragging
+    simulationRef.current?.alphaTarget(0.3).restart();
+
+    const onMove = (ev: PointerEvent) => {
+      const svgEl = svgRef.current;
+      if (!svgEl || !draggedNodeId.current) return;
+      const rect = svgEl.getBoundingClientRect();
+      const vt = viewTransformRef.current;
+      const node = simNodeMapRef.current.get(draggedNodeId.current);
+      if (node) {
+        node.fx = (ev.clientX - rect.left - vt.x) / vt.scale;
+        node.fy = (ev.clientY - rect.top - vt.y) / vt.scale;
+      }
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      // Release node
+      const node = draggedNodeId.current ? simNodeMapRef.current.get(draggedNodeId.current) : null;
+      if (node) {
+        node.fx = null;
+        node.fy = null;
       }
 
-      // Reheat simulation for smooth dragging
-      simulationRef.current?.alphaTarget(0.3).restart();
+      // Check if this was a click (minimal movement) vs drag
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const wasClick = Math.abs(dx) < CLICK_THRESHOLD && Math.abs(dy) < CLICK_THRESHOLD;
 
-      const onMove = (ev: PointerEvent) => {
-        const svgEl = svgRef.current;
-        if (!svgEl || !draggedNodeId.current) return;
-        const rect = svgEl.getBoundingClientRect();
-        const vt = viewTransformRef.current;
-        const node = simNodeMapRef.current.get(draggedNodeId.current);
-        if (node) {
-          node.fx = (ev.clientX - rect.left - vt.x) / vt.scale;
-          node.fy = (ev.clientY - rect.top - vt.y) / vt.scale;
-        }
-      };
+      if (wasClick && node) {
+        onResultClickRef.current(getResultId(node.result), getResultDomain(node.result), {
+          x: ev.clientX,
+          y: ev.clientY,
+        });
+      }
 
-      const onUp = (ev: PointerEvent) => {
-        // Release node
-        const node = draggedNodeId.current
-          ? simNodeMapRef.current.get(draggedNodeId.current)
-          : null;
-        if (node) {
-          node.fx = null;
-          node.fy = null;
-        }
+      draggedNodeId.current = null;
+      simulationRef.current?.alphaTarget(0);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
 
-        // Check if this was a click (minimal movement) vs drag
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
-        const wasClick =
-          Math.abs(dx) < CLICK_THRESHOLD && Math.abs(dy) < CLICK_THRESHOLD;
-
-        if (wasClick && node) {
-          onResultClickRef.current(
-            getResultId(node.result),
-            getResultDomain(node.result),
-            { x: ev.clientX, y: ev.clientY },
-          );
-        }
-
-        draggedNodeId.current = null;
-        simulationRef.current?.alphaTarget(0);
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
-      };
-
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onUp);
-    },
-    [],
-  );
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }, []);
 
   // ─── Canvas pan handlers (on SVG background) ───
   const handleSvgMouseDown = useCallback(
@@ -543,7 +500,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
         ty: viewTransform.y,
       };
     },
-    [viewTransform.x, viewTransform.y],
+    [viewTransform.x, viewTransform.y]
   );
 
   const handleSvgMouseMove = useCallback(
@@ -557,13 +514,13 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
 
       // Handle panning
       if (!isPanning || !panStart.current) return;
-      setViewTransform((prev) => ({
+      setViewTransform(prev => ({
         ...prev,
         x: panStart.current!.tx + (e.clientX - panStart.current!.x),
         y: panStart.current!.ty + (e.clientY - panStart.current!.y),
       }));
     },
-    [isPanning],
+    [isPanning]
   );
 
   const handleSvgMouseUp = useCallback(() => {
@@ -583,12 +540,9 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const cursorX = e.clientX - rect.left;
     const cursorY = e.clientY - rect.top;
-    setViewTransform((prev) => {
+    setViewTransform(prev => {
       const delta = -e.deltaY * ZOOM_FACTOR;
-      const newScale = Math.max(
-        MIN_SCALE,
-        Math.min(MAX_SCALE, prev.scale * (1 + delta)),
-      );
+      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev.scale * (1 + delta)));
       const ratio = newScale / prev.scale;
       return {
         x: cursorX - (cursorX - prev.x) * ratio,
@@ -600,7 +554,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
 
   // ─── Color legend ───
   const legendEntries = useMemo(() => {
-    const categories = nodeData.map((n) => n.category);
+    const categories = nodeData.map(n => n.category);
     return buildColorLegend(categories);
   }, [nodeData]);
 
@@ -616,17 +570,14 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
     if (isDocumentResult(r)) {
       return r.tldr || r.summary || null;
     }
-    return "recordDescription" in r
-      ? ((r as unknown as { recordDescription?: string }).recordDescription ??
-          null)
+    return 'recordDescription' in r
+      ? ((r as unknown as { recordDescription?: string }).recordDescription ?? null)
       : null;
   }, [hoveredNode]);
 
   const hoveredConnectionCount = useMemo(() => {
     if (!hoveredId) return 0;
-    return edgeData.filter(
-      (e) => e.sourceId === hoveredId || e.targetId === hoveredId,
-    ).length;
+    return edgeData.filter(e => e.sourceId === hoveredId || e.targetId === hoveredId).length;
   }, [hoveredId, edgeData]);
 
   // ─── Read current node/link positions from simulation refs for rendering ───
@@ -663,10 +614,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
       {/* SVG network graph */}
       <svg
         ref={svgRef}
-        className={mergeClasses(
-          styles.svg,
-          isPanning ? styles.svgPanning : undefined,
-        )}
+        className={mergeClasses(styles.svg, isPanning ? styles.svgPanning : undefined)}
         onWheel={handleWheel}
         onMouseDown={handleSvgMouseDown}
         onMouseMove={handleSvgMouseMove}
@@ -677,14 +625,14 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
         <g
           style={{
             transform: `translate(${viewTransform.x}px, ${viewTransform.y}px) scale(${viewTransform.scale})`,
-            transformOrigin: "0 0",
+            transformOrigin: '0 0',
           }}
         >
           {/* Similarity edges + labels — render behind nodes */}
           {simLinks.map((link, i) => {
             const src = link.source as SimNode;
             const tgt = link.target as SimNode;
-            if (typeof src === "string" || typeof tgt === "string") return null;
+            if (typeof src === 'string' || typeof tgt === 'string') return null;
             const sx = src.x ?? 0,
               sy = src.y ?? 0;
             const tx = tgt.x ?? 0,
@@ -714,7 +662,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
                         ? Math.min(baseOpacity * 3, 0.7)
                         : baseOpacity * 0.3
                       : baseOpacity,
-                    transition: "opacity 0.15s ease",
+                    transition: 'opacity 0.15s ease',
                   }}
                 />
                 {/* Similarity percentage label */}
@@ -727,9 +675,9 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
                   fill={tokens.colorNeutralForeground3}
                   style={{
                     opacity: hoveredId ? (isConnected ? 0.9 : 0.0) : 0.15,
-                    transition: "opacity 0.15s ease",
-                    pointerEvents: "none",
-                    userSelect: "none",
+                    transition: 'opacity 0.15s ease',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
                   }}
                 >
                   {Math.round(link.similarity * 100)}%
@@ -739,7 +687,7 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
           })}
 
           {/* Result nodes — draggable */}
-          {simNodes.map((node) => {
+          {simNodes.map(node => {
             const colors = getCategoryColor(node.category);
             const isHovered = hoveredId === node.id;
 
@@ -753,14 +701,13 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
                 stroke={colors.foreground}
                 strokeWidth={isHovered ? 2.5 : 1}
                 style={{
-                  cursor:
-                    draggedNodeId.current === node.id ? "grabbing" : "grab",
+                  cursor: draggedNodeId.current === node.id ? 'grabbing' : 'grab',
                   opacity: hoveredId && !isHovered ? 0.5 : 1,
-                  transition: "r 0.15s ease, opacity 0.15s ease",
+                  transition: 'r 0.15s ease, opacity 0.15s ease',
                 }}
                 onMouseEnter={() => setHoveredId(node.id)}
                 onMouseLeave={() => setHoveredId(null)}
-                onPointerDown={(e) => handleNodePointerDown(e, node.id)}
+                onPointerDown={e => handleNodePointerDown(e, node.id)}
               />
             );
           })}
@@ -770,17 +717,10 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
       {/* Color legend — upper-left */}
       {legendEntries.length > 0 && (
         <div className={styles.legend}>
-          {legendEntries.map((entry) => (
+          {legendEntries.map(entry => (
             <div key={entry.key} className={styles.legendItem}>
               <svg width="16" height="16">
-                <circle
-                  cx={8}
-                  cy={8}
-                  r={7}
-                  fill={entry.background}
-                  stroke={entry.foreground}
-                  strokeWidth={1}
-                />
+                <circle cx={8} cy={8} r={7} fill={entry.background} stroke={entry.foreground} strokeWidth={1} />
               </svg>
               <span className={styles.legendLabel}>{entry.key}</span>
             </div>
@@ -790,24 +730,17 @@ export const SearchResultsMap: React.FC<SearchResultsMapProps> = ({
 
       {/* Hover tooltip — hidden during drag */}
       {hoveredNode && !draggedNodeId.current && (
-        <div
-          className={styles.tooltip}
-          style={{ left: tooltipPos.x, top: tooltipPos.y }}
-        >
+        <div className={styles.tooltip} style={{ left: tooltipPos.x, top: tooltipPos.y }}>
           <div className={styles.tooltipName}>{hoveredNode.name}</div>
-          <div className={styles.tooltipDetail}>
-            Score: {Math.round(hoveredNode.score * 100)}%
-          </div>
+          <div className={styles.tooltipDetail}>Score: {Math.round(hoveredNode.score * 100)}%</div>
           <div className={styles.tooltipDetail}>{hoveredNode.category}</div>
           {hoveredConnectionCount > 0 && (
             <div className={styles.tooltipDetail}>
               {hoveredConnectionCount} connection
-              {hoveredConnectionCount !== 1 ? "s" : ""}
+              {hoveredConnectionCount !== 1 ? 's' : ''}
             </div>
           )}
-          {hoveredSummary && (
-            <div className={styles.tooltipSummary}>{hoveredSummary}</div>
-          )}
+          {hoveredSummary && <div className={styles.tooltipSummary}>{hoveredSummary}</div>}
         </div>
       )}
     </div>

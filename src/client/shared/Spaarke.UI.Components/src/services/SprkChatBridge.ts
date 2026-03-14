@@ -27,7 +27,7 @@ export interface DocumentStreamStartPayload {
    * - "replace": Replace content at targetPosition with streamed tokens
    * - "diff": Buffer tokens and open DiffReviewPanel for user review before applying
    */
-  operationType: "insert" | "replace" | "diff";
+  operationType: 'insert' | 'replace' | 'diff';
 }
 
 /** Individual token during a streaming write */
@@ -96,9 +96,7 @@ export type SprkChatBridgeEventName = keyof SprkChatBridgeEventMap;
 // ---------------------------------------------------------------------------
 
 /** Internal envelope sent across the transport */
-interface BridgeEnvelope<
-  K extends SprkChatBridgeEventName = SprkChatBridgeEventName,
-> {
+interface BridgeEnvelope<K extends SprkChatBridgeEventName = SprkChatBridgeEventName> {
   channel: string;
   event: K;
   payload: SprkChatBridgeEventMap[K];
@@ -118,7 +116,7 @@ export interface SprkChatBridgeOptions {
    * - "postmessage": Use window.postMessage only
    * - "auto" (default): Prefer BroadcastChannel, fall back to postMessage
    */
-  transport?: "broadcast" | "postmessage" | "auto";
+  transport?: 'broadcast' | 'postmessage' | 'auto';
   /**
    * Allowed origin for postMessage transport. Defaults to current origin.
    * Only relevant when transport is "postmessage" or "auto" falls back.
@@ -131,9 +129,7 @@ export interface SprkChatBridgeOptions {
 // ---------------------------------------------------------------------------
 
 /** Typed event handler */
-export type SprkChatBridgeHandler<K extends SprkChatBridgeEventName> = (
-  payload: SprkChatBridgeEventMap[K],
-) => void;
+export type SprkChatBridgeHandler<K extends SprkChatBridgeEventName> = (payload: SprkChatBridgeEventMap[K]) => void;
 
 /** Unsubscribe function returned by subscribe() */
 export type SprkChatBridgeUnsubscribe = () => void;
@@ -180,10 +176,7 @@ function createBroadcastTransport(channelName: string): Transport {
 // postMessage fallback transport
 // ---------------------------------------------------------------------------
 
-function createPostMessageTransport(
-  channelName: string,
-  allowedOrigin: string,
-): Transport {
+function createPostMessageTransport(channelName: string, allowedOrigin: string): Transport {
   let receiveHandler: ((envelope: BridgeEnvelope) => void) | null = null;
 
   const messageListener = (event: MessageEvent): void => {
@@ -196,9 +189,9 @@ function createPostMessageTransport(
     const data = event.data;
     if (
       data &&
-      typeof data === "object" &&
+      typeof data === 'object' &&
       data.channel === channelName &&
-      typeof data.event === "string" &&
+      typeof data.event === 'string' &&
       data.payload !== undefined
     ) {
       if (receiveHandler) {
@@ -207,13 +200,13 @@ function createPostMessageTransport(
     }
   };
 
-  if (typeof window !== "undefined") {
-    window.addEventListener("message", messageListener);
+  if (typeof window !== 'undefined') {
+    window.addEventListener('message', messageListener);
   }
 
   return {
     send(envelope: BridgeEnvelope): void {
-      if (typeof window !== "undefined") {
+      if (typeof window !== 'undefined') {
         window.postMessage(envelope, allowedOrigin);
       }
     },
@@ -222,8 +215,8 @@ function createPostMessageTransport(
     },
     close(): void {
       receiveHandler = null;
-      if (typeof window !== "undefined") {
-        window.removeEventListener("message", messageListener);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('message', messageListener);
       }
     },
   };
@@ -265,52 +258,40 @@ export class SprkChatBridge {
   public readonly channelName: string;
 
   /** The transport type in use ("broadcast" | "postmessage") */
-  public readonly transportType: "broadcast" | "postmessage";
+  public readonly transportType: 'broadcast' | 'postmessage';
 
   private readonly transport: Transport;
-  private readonly handlers: Map<
-    SprkChatBridgeEventName,
-    Set<SprkChatBridgeHandler<SprkChatBridgeEventName>>
-  > = new Map();
+  private readonly handlers: Map<SprkChatBridgeEventName, Set<SprkChatBridgeHandler<SprkChatBridgeEventName>>> =
+    new Map();
   private disconnected = false;
 
   constructor(options: SprkChatBridgeOptions) {
-    const {
-      context,
-      transport: transportPref = "auto",
-      allowedOrigin,
-    } = options;
+    const { context, transport: transportPref = 'auto', allowedOrigin } = options;
 
     this.channelName = `sprk-workspace-${context}`;
 
-    const origin =
-      allowedOrigin ??
-      (typeof window !== "undefined" ? window.location.origin : "*");
+    const origin = allowedOrigin ?? (typeof window !== 'undefined' ? window.location.origin : '*');
 
     // Determine transport
     const useBroadcast =
-      transportPref === "broadcast" ||
-      (transportPref === "auto" && typeof BroadcastChannel !== "undefined");
+      transportPref === 'broadcast' || (transportPref === 'auto' && typeof BroadcastChannel !== 'undefined');
 
-    if (
-      transportPref === "broadcast" &&
-      typeof BroadcastChannel === "undefined"
-    ) {
+    if (transportPref === 'broadcast' && typeof BroadcastChannel === 'undefined') {
       throw new Error(
-        "SprkChatBridge: BroadcastChannel transport requested but BroadcastChannel is not available in this environment.",
+        'SprkChatBridge: BroadcastChannel transport requested but BroadcastChannel is not available in this environment.'
       );
     }
 
     if (useBroadcast) {
       this.transport = createBroadcastTransport(this.channelName);
-      this.transportType = "broadcast";
+      this.transportType = 'broadcast';
     } else {
       this.transport = createPostMessageTransport(this.channelName, origin);
-      this.transportType = "postmessage";
+      this.transportType = 'postmessage';
     }
 
     // Wire transport receive to internal router
-    this.transport.onReceive((envelope) => this.routeMessage(envelope));
+    this.transport.onReceive(envelope => this.routeMessage(envelope));
   }
 
   /**
@@ -319,12 +300,9 @@ export class SprkChatBridge {
    * @param event - The event name
    * @param payload - The typed payload for this event
    */
-  emit<K extends SprkChatBridgeEventName>(
-    event: K,
-    payload: SprkChatBridgeEventMap[K],
-  ): void {
+  emit<K extends SprkChatBridgeEventName>(event: K, payload: SprkChatBridgeEventMap[K]): void {
     if (this.disconnected) {
-      throw new Error("SprkChatBridge: Cannot emit after disconnect.");
+      throw new Error('SprkChatBridge: Cannot emit after disconnect.');
     }
 
     const envelope: BridgeEnvelope<K> = {
@@ -343,12 +321,9 @@ export class SprkChatBridge {
    * @param handler - The handler that receives the typed payload
    * @returns A function that removes this subscription when called
    */
-  subscribe<K extends SprkChatBridgeEventName>(
-    event: K,
-    handler: SprkChatBridgeHandler<K>,
-  ): SprkChatBridgeUnsubscribe {
+  subscribe<K extends SprkChatBridgeEventName>(event: K, handler: SprkChatBridgeHandler<K>): SprkChatBridgeUnsubscribe {
     if (this.disconnected) {
-      throw new Error("SprkChatBridge: Cannot subscribe after disconnect.");
+      throw new Error('SprkChatBridge: Cannot subscribe after disconnect.');
     }
 
     let handlerSet = this.handlers.get(event);
@@ -359,8 +334,7 @@ export class SprkChatBridge {
 
     // Cast is safe: the type constraint ensures K-specific handler is added
     // to the K-specific set. Runtime routing in routeMessage ensures correct dispatch.
-    const typedHandler =
-      handler as SprkChatBridgeHandler<SprkChatBridgeEventName>;
+    const typedHandler = handler as SprkChatBridgeHandler<SprkChatBridgeEventName>;
     handlerSet.add(typedHandler);
 
     return () => {
@@ -412,10 +386,7 @@ export class SprkChatBridge {
       try {
         handler(envelope.payload);
       } catch (error) {
-        console.error(
-          `SprkChatBridge: Error in handler for "${envelope.event}":`,
-          error,
-        );
+        console.error(`SprkChatBridge: Error in handler for "${envelope.event}":`, error);
       }
     }
   }

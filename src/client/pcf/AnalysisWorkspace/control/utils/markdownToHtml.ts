@@ -5,7 +5,7 @@
  * in the RichTextEditor (which uses Lexical and expects HTML input).
  */
 
-import { parse as markedParse } from "marked";
+import { parse as markedParse } from 'marked';
 
 /**
  * Convert markdown string to HTML string.
@@ -14,8 +14,8 @@ import { parse as markedParse } from "marked";
  * @returns HTML string suitable for RichTextEditor
  */
 export function markdownToHtml(markdown: string): string {
-  if (!markdown || markdown.trim() === "") {
-    return "";
+  if (!markdown || markdown.trim() === '') {
+    return '';
   }
 
   try {
@@ -23,7 +23,7 @@ export function markdownToHtml(markdown: string): string {
     const result = markedParse(markdown, { gfm: true, breaks: true });
     return result;
   } catch (error) {
-    console.error("[markdownToHtml] Failed to convert markdown:", error);
+    console.error('[markdownToHtml] Failed to convert markdown:', error);
     // Return the original markdown wrapped in pre tag as fallback
     return `<pre>${escapeHtml(markdown)}</pre>`;
   }
@@ -35,13 +35,13 @@ export function markdownToHtml(markdown: string): string {
  */
 function escapeHtml(text: string): string {
   const escapeMap: Record<string, string> = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
   };
-  return text.replace(/[&<>"']/g, (char) => escapeMap[char] || char);
+  return text.replace(/[&<>"']/g, char => escapeMap[char] || char);
 }
 
 /**
@@ -66,5 +66,5 @@ export function isMarkdown(content: string): boolean {
     /`[^`]+`/, // Inline code: `code`
   ];
 
-  return markdownPatterns.some((pattern) => pattern.test(content));
+  return markdownPatterns.some(pattern => pattern.test(content));
 }

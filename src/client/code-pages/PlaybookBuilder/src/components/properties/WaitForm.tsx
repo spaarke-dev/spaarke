@@ -12,25 +12,16 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Input,
-  Label,
-  Dropdown,
-  Option,
-  SpinButton,
-} from "@fluentui/react-components";
+import { useCallback, useMemo, memo } from 'react';
+import { makeStyles, tokens, Text, Input, Label, Dropdown, Option, SpinButton } from '@fluentui/react-components';
 import type {
   DropdownProps,
   OptionOnSelectData,
   SelectionEvents,
   SpinButtonChangeEvent,
   SpinButtonOnChangeData,
-} from "@fluentui/react-components";
-import type { NodeFormProps } from "../../types/forms";
+} from '@fluentui/react-components';
+import type { NodeFormProps } from '../../types/forms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -38,13 +29,13 @@ import type { NodeFormProps } from "../../types/forms";
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -52,8 +43,8 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   conditionalSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
@@ -65,7 +56,7 @@ const useStyles = makeStyles({
 // Config shape
 // ---------------------------------------------------------------------------
 
-const WAIT_TYPES = ["Duration", "Until Date", "Until Condition"] as const;
+const WAIT_TYPES = ['Duration', 'Until Date', 'Until Condition'] as const;
 type WaitType = (typeof WAIT_TYPES)[number];
 
 interface WaitConfig {
@@ -76,10 +67,10 @@ interface WaitConfig {
 }
 
 const DEFAULT_CONFIG: WaitConfig = {
-  waitType: "Duration",
+  waitType: 'Duration',
   durationMinutes: 60,
-  untilDate: "",
-  conditionExpression: "",
+  untilDate: '',
+  conditionExpression: '',
 };
 
 // ---------------------------------------------------------------------------
@@ -94,16 +85,12 @@ function parseConfig(json: string): WaitConfig {
         ? (parsed.waitType as WaitType)
         : DEFAULT_CONFIG.waitType,
       durationMinutes:
-        typeof parsed.durationMinutes === "number" &&
-        parsed.durationMinutes >= 1
+        typeof parsed.durationMinutes === 'number' && parsed.durationMinutes >= 1
           ? parsed.durationMinutes
           : DEFAULT_CONFIG.durationMinutes,
-      untilDate:
-        typeof parsed.untilDate === "string"
-          ? parsed.untilDate
-          : DEFAULT_CONFIG.untilDate,
+      untilDate: typeof parsed.untilDate === 'string' ? parsed.untilDate : DEFAULT_CONFIG.untilDate,
       conditionExpression:
-        typeof parsed.conditionExpression === "string"
+        typeof parsed.conditionExpression === 'string'
           ? parsed.conditionExpression
           : DEFAULT_CONFIG.conditionExpression,
     };
@@ -120,11 +107,7 @@ function serializeConfig(config: WaitConfig): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export const WaitForm = memo(function WaitForm({
-  nodeId,
-  configJson,
-  onConfigChange,
-}: NodeFormProps) {
+export const WaitForm = memo(function WaitForm({ nodeId, configJson, onConfigChange }: NodeFormProps) {
   const styles = useStyles();
   const config = useMemo(() => parseConfig(configJson), [configJson]);
 
@@ -132,18 +115,18 @@ export const WaitForm = memo(function WaitForm({
     (patch: Partial<WaitConfig>) => {
       onConfigChange(serializeConfig({ ...config, ...patch }));
     },
-    [config, onConfigChange],
+    [config, onConfigChange]
   );
 
   // -- Handlers --
 
-  const handleWaitTypeChange: DropdownProps["onOptionSelect"] = useCallback(
+  const handleWaitTypeChange: DropdownProps['onOptionSelect'] = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       if (data.optionValue) {
         update({ waitType: data.optionValue as WaitType });
       }
     },
-    [update],
+    [update]
   );
 
   const handleDurationChange = useCallback(
@@ -152,21 +135,21 @@ export const WaitForm = memo(function WaitForm({
         update({ durationMinutes: data.value });
       }
     },
-    [update],
+    [update]
   );
 
   const handleUntilDateChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ untilDate: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleConditionChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ conditionExpression: e.target.value });
     },
-    [update],
+    [update]
   );
 
   // -- Render --
@@ -185,20 +168,18 @@ export const WaitForm = memo(function WaitForm({
           selectedOptions={[config.waitType]}
           onOptionSelect={handleWaitTypeChange}
         >
-          {WAIT_TYPES.map((wt) => (
+          {WAIT_TYPES.map(wt => (
             <Option key={wt} value={wt}>
               {wt}
             </Option>
           ))}
         </Dropdown>
-        <Text className={styles.fieldHint}>
-          How the node should pause execution
-        </Text>
+        <Text className={styles.fieldHint}>How the node should pause execution</Text>
       </div>
 
       {/* Conditional fields based on waitType */}
       <div className={styles.conditionalSection}>
-        {config.waitType === "Duration" && (
+        {config.waitType === 'Duration' && (
           <div className={styles.field}>
             <Label htmlFor={`${nodeId}-durationMinutes`} size="small" required>
               Duration (Minutes)
@@ -212,13 +193,11 @@ export const WaitForm = memo(function WaitForm({
               max={525600}
               step={15}
             />
-            <Text className={styles.fieldHint}>
-              Wait for a fixed number of minutes (1 to 525,600 = 1 year)
-            </Text>
+            <Text className={styles.fieldHint}>Wait for a fixed number of minutes (1 to 525,600 = 1 year)</Text>
           </div>
         )}
 
-        {config.waitType === "Until Date" && (
+        {config.waitType === 'Until Date' && (
           <div className={styles.field}>
             <Label htmlFor={`${nodeId}-untilDate`} size="small" required>
               Until Date
@@ -231,19 +210,15 @@ export const WaitForm = memo(function WaitForm({
               onChange={handleUntilDateChange}
             />
             <Text className={styles.fieldHint}>
-              Wait until the specified date and time. Also supports template
-              variables: {"{{nodeName.output.fieldName}}"}
+              Wait until the specified date and time. Also supports template variables:{' '}
+              {'{{nodeName.output.fieldName}}'}
             </Text>
           </div>
         )}
 
-        {config.waitType === "Until Condition" && (
+        {config.waitType === 'Until Condition' && (
           <div className={styles.field}>
-            <Label
-              htmlFor={`${nodeId}-conditionExpression`}
-              size="small"
-              required
-            >
+            <Label htmlFor={`${nodeId}-conditionExpression`} size="small" required>
               Condition Expression
             </Label>
             <Input
@@ -254,8 +229,8 @@ export const WaitForm = memo(function WaitForm({
               placeholder="e.g., {{approval.output.status}} == 'approved'"
             />
             <Text className={styles.fieldHint}>
-              Wait until this condition evaluates to true. Supports template
-              variables: {"{{nodeName.output.fieldName}}"}
+              Wait until this condition evaluates to true. Supports template variables:{' '}
+              {'{{nodeName.output.fieldName}}'}
             </Text>
           </div>
         )}

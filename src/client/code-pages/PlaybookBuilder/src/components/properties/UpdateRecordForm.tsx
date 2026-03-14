@@ -17,7 +17,7 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo, useState } from "react";
+import { useCallback, useMemo, memo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -30,13 +30,10 @@ import {
   Option,
   SpinButton,
   Divider,
-} from "@fluentui/react-components";
-import type {
-  OptionOnSelectData,
-  SelectionEvents,
-} from "@fluentui/react-components";
-import { Add20Regular, Delete20Regular } from "@fluentui/react-icons";
-import type { NodeFormProps } from "../../types/forms";
+} from '@fluentui/react-components';
+import type { OptionOnSelectData, SelectionEvents } from '@fluentui/react-components';
+import { Add20Regular, Delete20Regular } from '@fluentui/react-icons';
+import type { NodeFormProps } from '../../types/forms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -44,13 +41,13 @@ import type { NodeFormProps } from "../../types/forms";
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -58,41 +55,41 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   mappingList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
+    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
   },
   mappingCard: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalS),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     backgroundColor: tokens.colorNeutralBackground3,
   },
   mappingHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   mappingFieldInput: {
     flex: 1,
   },
   typeDropdown: {
-    minWidth: "100px",
-    maxWidth: "100px",
+    minWidth: '100px',
+    maxWidth: '100px',
   },
   optionsSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
+    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
     marginTop: tokens.spacingVerticalXS,
   },
   optionRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   optionLabel: {
@@ -100,10 +97,10 @@ const useStyles = makeStyles({
   },
   optionValue: {
     flex: 1,
-    minWidth: "90px",
+    minWidth: '90px',
   },
   addButton: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
   },
 });
 
@@ -111,7 +108,7 @@ const useStyles = makeStyles({
 // Types
 // ---------------------------------------------------------------------------
 
-type FieldMappingType = "string" | "choice" | "boolean" | "number";
+type FieldMappingType = 'string' | 'choice' | 'boolean' | 'number';
 
 interface FieldMapping {
   field: string;
@@ -132,10 +129,10 @@ interface UpdateRecordConfig {
 }
 
 const TYPE_LABELS: Record<FieldMappingType, string> = {
-  string: "String",
-  choice: "Choice",
-  boolean: "Boolean",
-  number: "Number",
+  string: 'String',
+  choice: 'Choice',
+  boolean: 'Boolean',
+  number: 'Number',
 };
 
 // ---------------------------------------------------------------------------
@@ -145,11 +142,8 @@ const TYPE_LABELS: Record<FieldMappingType, string> = {
 function parseConfig(json: string): UpdateRecordConfig {
   try {
     const parsed = JSON.parse(json);
-    const entityLogicalName =
-      typeof parsed.entityLogicalName === "string"
-        ? parsed.entityLogicalName
-        : "";
-    const recordId = typeof parsed.recordId === "string" ? parsed.recordId : "";
+    const entityLogicalName = typeof parsed.entityLogicalName === 'string' ? parsed.entityLogicalName : '';
+    const recordId = typeof parsed.recordId === 'string' ? parsed.recordId : '';
 
     // New format: fieldMappings array
     if (Array.isArray(parsed.fieldMappings)) {
@@ -161,20 +155,18 @@ function parseConfig(json: string): UpdateRecordConfig {
     }
 
     // Legacy format: fields dict → migrate to fieldMappings (all as string type)
-    if (parsed.fields && typeof parsed.fields === "object") {
-      const fieldMappings: FieldMapping[] = Object.entries(parsed.fields).map(
-        ([field, value]) => ({
-          field,
-          type: "string" as FieldMappingType,
-          value: String(value),
-        }),
-      );
+    if (parsed.fields && typeof parsed.fields === 'object') {
+      const fieldMappings: FieldMapping[] = Object.entries(parsed.fields).map(([field, value]) => ({
+        field,
+        type: 'string' as FieldMappingType,
+        value: String(value),
+      }));
       return { entityLogicalName, recordId, fieldMappings };
     }
 
     return { entityLogicalName, recordId, fieldMappings: [] };
   } catch {
-    return { entityLogicalName: "", recordId: "", fieldMappings: [] };
+    return { entityLogicalName: '', recordId: '', fieldMappings: [] };
   }
 }
 
@@ -184,18 +176,14 @@ function serializeConfig(config: UpdateRecordConfig): string {
     entityLogicalName: config.entityLogicalName,
     recordId: config.recordId,
     fieldMappings: config.fieldMappings
-      .filter((m) => m.field.trim() !== "")
-      .map((m) => {
+      .filter(m => m.field.trim() !== '')
+      .map(m => {
         const entry: Record<string, unknown> = {
           field: m.field,
           type: m.type,
           value: m.value,
         };
-        if (
-          m.type === "choice" &&
-          m.options &&
-          Object.keys(m.options).length > 0
-        ) {
+        if (m.type === 'choice' && m.options && Object.keys(m.options).length > 0) {
           entry.options = m.options;
         }
         return entry;
@@ -204,9 +192,7 @@ function serializeConfig(config: UpdateRecordConfig): string {
   return JSON.stringify(clean);
 }
 
-function optionsToArray(
-  options: Record<string, number> | undefined,
-): ChoiceOption[] {
+function optionsToArray(options: Record<string, number> | undefined): ChoiceOption[] {
   if (!options) return [];
   return Object.entries(options).map(([label, value]) => ({ label, value }));
 }
@@ -225,33 +211,23 @@ function arrayToOptions(arr: ChoiceOption[]): Record<string, number> {
 // Component
 // ---------------------------------------------------------------------------
 
-export const UpdateRecordForm = memo(function UpdateRecordForm({
-  nodeId,
-  configJson,
-  onConfigChange,
-}: NodeFormProps) {
+export const UpdateRecordForm = memo(function UpdateRecordForm({ nodeId, configJson, onConfigChange }: NodeFormProps) {
   const styles = useStyles();
   const config = useMemo(() => parseConfig(configJson), [configJson]);
-  const [mappings, setMappings] = useState<FieldMapping[]>(
-    () => config.fieldMappings,
-  );
+  const [mappings, setMappings] = useState<FieldMapping[]>(() => config.fieldMappings);
 
   // Emit the full config update
   const emitConfig = useCallback(
-    (
-      entityLogicalName: string,
-      recordId: string,
-      updatedMappings: FieldMapping[],
-    ) => {
+    (entityLogicalName: string, recordId: string, updatedMappings: FieldMapping[]) => {
       onConfigChange(
         serializeConfig({
           entityLogicalName,
           recordId,
           fieldMappings: updatedMappings,
-        }),
+        })
       );
     },
-    [onConfigChange],
+    [onConfigChange]
   );
 
   // -- Top-level field handlers --
@@ -260,14 +236,14 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       emitConfig(e.target.value, config.recordId, mappings);
     },
-    [config.recordId, mappings, emitConfig],
+    [config.recordId, mappings, emitConfig]
   );
 
   const handleRecordIdChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       emitConfig(config.entityLogicalName, e.target.value, mappings);
     },
-    [config.entityLogicalName, mappings, emitConfig],
+    [config.entityLogicalName, mappings, emitConfig]
   );
 
   // -- Mapping handlers --
@@ -277,17 +253,17 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
       const updated = [...mappings];
       updated[index] = { ...updated[index], ...patch };
       // Clear options when switching away from choice type
-      if (patch.type && patch.type !== "choice") {
+      if (patch.type && patch.type !== 'choice') {
         delete updated[index].options;
       }
       setMappings(updated);
       emitConfig(config.entityLogicalName, config.recordId, updated);
     },
-    [mappings, config.entityLogicalName, config.recordId, emitConfig],
+    [mappings, config.entityLogicalName, config.recordId, emitConfig]
   );
 
   const handleAddMapping = useCallback(() => {
-    const newMapping: FieldMapping = { field: "", type: "string", value: "" };
+    const newMapping: FieldMapping = { field: '', type: 'string', value: '' };
     const updated = [...mappings, newMapping];
     setMappings(updated);
   }, [mappings]);
@@ -298,7 +274,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
       setMappings(updated);
       emitConfig(config.entityLogicalName, config.recordId, updated);
     },
-    [mappings, config.entityLogicalName, config.recordId, emitConfig],
+    [mappings, config.entityLogicalName, config.recordId, emitConfig]
   );
 
   // -- Choice options handlers --
@@ -307,7 +283,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
     (mappingIndex: number, options: Record<string, number>) => {
       updateMapping(mappingIndex, { options });
     },
-    [updateMapping],
+    [updateMapping]
   );
 
   // -- Render --
@@ -327,8 +303,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
           placeholder="e.g., sprk_document"
         />
         <Text className={styles.fieldHint}>
-          Dataverse table logical name (e.g., sprk_document, sprk_matter,
-          contact)
+          Dataverse table logical name (e.g., sprk_document, sprk_matter, contact)
         </Text>
       </div>
 
@@ -345,9 +320,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
           placeholder="e.g., {{document.id}}"
         />
         <Text className={styles.fieldHint}>
-          {
-            "GUID of the record to update. Use {{document.id}} for the current document."
-          }
+          {'GUID of the record to update. Use {{document.id}} for the current document.'}
         </Text>
       </div>
 
@@ -357,8 +330,8 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
           Field Mappings
         </Label>
         <Text className={styles.fieldHint}>
-          {"Map Dataverse fields to values with type-aware coercion. " +
-            "Use {{nodeName.text}} or {{nodeName.output.field}} for AI outputs."}
+          {'Map Dataverse fields to values with type-aware coercion. ' +
+            'Use {{nodeName.text}} or {{nodeName.output.field}} for AI outputs.'}
         </Text>
 
         <div className={styles.mappingList}>
@@ -370,9 +343,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
                   className={styles.mappingFieldInput}
                   size="small"
                   value={mapping.field}
-                  onChange={(e) =>
-                    updateMapping(index, { field: e.target.value })
-                  }
+                  onChange={e => updateMapping(index, { field: e.target.value })}
                   placeholder="sprk_fieldname"
                 />
                 <Dropdown
@@ -380,10 +351,7 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
                   size="small"
                   value={TYPE_LABELS[mapping.type]}
                   selectedOptions={[mapping.type]}
-                  onOptionSelect={(
-                    _event: SelectionEvents,
-                    data: OptionOnSelectData,
-                  ) => {
+                  onOptionSelect={(_event: SelectionEvents, data: OptionOnSelectData) => {
                     if (data.optionValue) {
                       updateMapping(index, {
                         type: data.optionValue as FieldMappingType,
@@ -409,31 +377,27 @@ export const UpdateRecordForm = memo(function UpdateRecordForm({
               <Input
                 size="small"
                 value={mapping.value}
-                onChange={(e) =>
-                  updateMapping(index, { value: e.target.value })
-                }
+                onChange={e => updateMapping(index, { value: e.target.value })}
                 placeholder={
-                  mapping.type === "boolean"
-                    ? "{{nodeName.output.isFlag}}"
-                    : mapping.type === "choice"
-                      ? "{{nodeName.output.status}}"
-                      : "{{nodeName.output.field}}"
+                  mapping.type === 'boolean'
+                    ? '{{nodeName.output.isFlag}}'
+                    : mapping.type === 'choice'
+                      ? '{{nodeName.output.status}}'
+                      : '{{nodeName.output.field}}'
                 }
               />
 
               {/* Row 3: Choice options (only for choice type) */}
-              {mapping.type === "choice" && (
+              {mapping.type === 'choice' && (
                 <ChoiceOptionsEditor
                   options={mapping.options ?? {}}
-                  onChange={(opts) => handleOptionsChange(index, opts)}
+                  onChange={opts => handleOptionsChange(index, opts)}
                 />
               )}
 
               {/* Type hints */}
-              {mapping.type === "boolean" && (
-                <Text className={styles.fieldHint}>
-                  AI output mapped: yes/true/1/on → true, no/false/0/off → false
-                </Text>
+              {mapping.type === 'boolean' && (
+                <Text className={styles.fieldHint}>AI output mapped: yes/true/1/on → true, no/false/0/off → false</Text>
               )}
             </div>
           ))}
@@ -462,19 +426,14 @@ interface ChoiceOptionsEditorProps {
   onChange: (options: Record<string, number>) => void;
 }
 
-const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({
-  options,
-  onChange,
-}: ChoiceOptionsEditorProps) {
+const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({ options, onChange }: ChoiceOptionsEditorProps) {
   const styles = useStyles();
-  const [optionsList, setOptionsList] = useState<ChoiceOption[]>(() =>
-    optionsToArray(options),
-  );
+  const [optionsList, setOptionsList] = useState<ChoiceOption[]>(() => optionsToArray(options));
 
   const handleOptionChange = useCallback(
-    (index: number, key: "label" | "value", val: string | number) => {
+    (index: number, key: 'label' | 'value', val: string | number) => {
       const updated = [...optionsList];
-      if (key === "label") {
+      if (key === 'label') {
         updated[index] = { ...updated[index], label: val as string };
       } else {
         updated[index] = { ...updated[index], value: val as number };
@@ -482,11 +441,11 @@ const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({
       setOptionsList(updated);
       onChange(arrayToOptions(updated));
     },
-    [optionsList, onChange],
+    [optionsList, onChange]
   );
 
   const handleAddOption = useCallback(() => {
-    const updated = [...optionsList, { label: "", value: 100_000_000 }];
+    const updated = [...optionsList, { label: '', value: 100_000_000 }];
     setOptionsList(updated);
   }, [optionsList]);
 
@@ -496,15 +455,14 @@ const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({
       setOptionsList(updated);
       onChange(arrayToOptions(updated));
     },
-    [optionsList, onChange],
+    [optionsList, onChange]
   );
 
   return (
     <div className={styles.optionsSection}>
       <Divider appearance="subtle" />
       <Text className={styles.fieldHint}>
-        Choice options: AI output label → Dataverse option value (int). Include
-        these same labels in the AI prompt.
+        Choice options: AI output label → Dataverse option value (int). Include these same labels in the AI prompt.
       </Text>
       {optionsList.map((opt, index) => (
         <div key={index} className={styles.optionRow}>
@@ -512,7 +470,7 @@ const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({
             className={styles.optionLabel}
             size="small"
             value={opt.label}
-            onChange={(e) => handleOptionChange(index, "label", e.target.value)}
+            onChange={e => handleOptionChange(index, 'label', e.target.value)}
             placeholder="Label (e.g., Complete)"
           />
           <SpinButton
@@ -522,9 +480,7 @@ const ChoiceOptionsEditor = memo(function ChoiceOptionsEditor({
             min={0}
             max={999_999_999}
             step={1}
-            onChange={(_e, data) =>
-              handleOptionChange(index, "value", data.value ?? 100_000_000)
-            }
+            onChange={(_e, data) => handleOptionChange(index, 'value', data.value ?? 100_000_000)}
           />
           <Button
             size="small"

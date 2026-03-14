@@ -2,33 +2,29 @@
  * CalendarVisual Stories
  */
 
-import * as React from "react";
-import type { Meta, StoryObj } from "@storybook/react";
-import { action } from "@storybook/addon-actions";
-import {
-  CalendarVisual,
-  ICalendarEvent,
-} from "../control/components/CalendarVisual";
+import * as React from 'react';
+import type { Meta, StoryObj } from '@storybook/react';
+import { action } from '@storybook/addon-actions';
+import { CalendarVisual, ICalendarEvent } from '../control/components/CalendarVisual';
 
 const meta: Meta<typeof CalendarVisual> = {
-  title: "Charts/CalendarVisual",
+  title: 'Charts/CalendarVisual',
   component: CalendarVisual,
   parameters: {
-    layout: "padded",
+    layout: 'padded',
     docs: {
       description: {
-        component:
-          "CalendarVisual displays a monthly calendar grid with event indicators.",
+        component: 'CalendarVisual displays a monthly calendar grid with event indicators.',
       },
     },
   },
-  tags: ["autodocs"],
+  tags: ['autodocs'],
 };
 
 export default meta;
 type Story = StoryObj<typeof CalendarVisual>;
 
-const handleDrill = action("onDrillInteraction");
+const handleDrill = action('onDrillInteraction');
 
 // Generate sample events for the current month
 const generateEvents = (): ICalendarEvent[] => {
@@ -51,28 +47,28 @@ const generateEvents = (): ICalendarEvent[] => {
 export const Default: Story = {
   args: {
     events: generateEvents(),
-    title: "Deadlines This Month",
+    title: 'Deadlines This Month',
     onDrillInteraction: handleDrill,
-    drillField: "duedate",
+    drillField: 'duedate',
   },
 };
 
 export const NoNavigation: Story = {
   args: {
     events: generateEvents(),
-    title: "Current Month Only",
+    title: 'Current Month Only',
     showNavigation: false,
     onDrillInteraction: handleDrill,
-    drillField: "duedate",
+    drillField: 'duedate',
   },
 };
 
 export const EmptyCalendar: Story = {
   args: {
     events: [],
-    title: "No Events",
+    title: 'No Events',
     onDrillInteraction: handleDrill,
-    drillField: "duedate",
+    drillField: 'duedate',
   },
 };
 
@@ -91,16 +87,16 @@ export const HighDensity: Story = {
       }
       return events;
     })(),
-    title: "Busy Month",
+    title: 'Busy Month',
     onDrillInteraction: handleDrill,
-    drillField: "duedate",
+    drillField: 'duedate',
   },
 };
 
 export const NonInteractive: Story = {
   args: {
     events: generateEvents(),
-    title: "View Only",
+    title: 'View Only',
     showNavigation: true,
   },
 };

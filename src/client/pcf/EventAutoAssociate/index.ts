@@ -18,10 +18,10 @@
  * @version 1.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
 
 // Control version for debugging
-const CONTROL_VERSION = "1.0.0";
+const CONTROL_VERSION = '1.0.0';
 
 /**
  * Entity configuration mapping - matches RecordSelectionHandler
@@ -36,53 +36,53 @@ interface EntityLookupConfig {
 // Hardcoded fallback configs - used only if sprk_recordtype_ref query fails
 const FALLBACK_ENTITY_CONFIGS: EntityLookupConfig[] = [
   {
-    logicalName: "sprk_matter",
-    displayName: "Matter",
-    regardingField: "sprk_regardingmatter",
+    logicalName: 'sprk_matter',
+    displayName: 'Matter',
+    regardingField: 'sprk_regardingmatter',
   },
   {
-    logicalName: "sprk_project",
-    displayName: "Project",
-    regardingField: "sprk_regardingproject",
+    logicalName: 'sprk_project',
+    displayName: 'Project',
+    regardingField: 'sprk_regardingproject',
   },
   {
-    logicalName: "sprk_invoice",
-    displayName: "Invoice",
-    regardingField: "sprk_regardinginvoice",
+    logicalName: 'sprk_invoice',
+    displayName: 'Invoice',
+    regardingField: 'sprk_regardinginvoice',
   },
   {
-    logicalName: "sprk_analysis",
-    displayName: "Analysis",
-    regardingField: "sprk_regardinganalysis",
+    logicalName: 'sprk_analysis',
+    displayName: 'Analysis',
+    regardingField: 'sprk_regardinganalysis',
   },
   {
-    logicalName: "account",
-    displayName: "Account",
-    regardingField: "sprk_regardingaccount",
+    logicalName: 'account',
+    displayName: 'Account',
+    regardingField: 'sprk_regardingaccount',
   },
   {
-    logicalName: "contact",
-    displayName: "Contact",
-    regardingField: "sprk_regardingcontact",
+    logicalName: 'contact',
+    displayName: 'Contact',
+    regardingField: 'sprk_regardingcontact',
   },
   {
-    logicalName: "sprk_workassignment",
-    displayName: "Work Assignment",
-    regardingField: "sprk_regardingworkassignment",
+    logicalName: 'sprk_workassignment',
+    displayName: 'Work Assignment',
+    regardingField: 'sprk_regardingworkassignment',
   },
   {
-    logicalName: "sprk_budget",
-    displayName: "Budget",
-    regardingField: "sprk_regardingbudget",
+    logicalName: 'sprk_budget',
+    displayName: 'Budget',
+    regardingField: 'sprk_regardingbudget',
   },
 ];
 
 // Denormalized field names for unified views
 const DENORMALIZED_FIELDS = {
-  recordName: "sprk_regardingrecordname",
-  recordId: "sprk_regardingrecordid",
-  recordType: "sprk_regardingrecordtype",
-  recordUrl: "sprk_regardingrecordurl",
+  recordName: 'sprk_regardingrecordname',
+  recordId: 'sprk_regardingrecordid',
+  recordType: 'sprk_regardingrecordtype',
+  recordUrl: 'sprk_regardingrecordurl',
 };
 
 // Cache for loaded entity configs
@@ -101,7 +101,7 @@ function getXrmPage(): Xrm.Page | null {
       (window.parent as unknown as { Xrm?: { Page?: Xrm.Page } })?.Xrm;
     return xrm?.Page || null;
   } catch (error) {
-    console.warn("[EventAutoAssociate] Unable to access Xrm.Page:", error);
+    console.warn('[EventAutoAssociate] Unable to access Xrm.Page:', error);
     return null;
   }
 }
@@ -111,7 +111,7 @@ function getXrmPage(): Xrm.Page | null {
  * Generates a fully qualified URL that's portable between environments
  */
 function buildRecordUrl(entityLogicalName: string, recordId: string): string {
-  const cleanId = recordId.replace(/[{}]/g, "").toLowerCase();
+  const cleanId = recordId.replace(/[{}]/g, '').toLowerCase();
 
   try {
     const xrm =
@@ -142,12 +142,12 @@ function buildRecordUrl(entityLogicalName: string, recordId: string): string {
 
     if (xrm?.Utility?.getGlobalContext) {
       const globalContext = xrm.Utility.getGlobalContext();
-      const clientUrl = globalContext.getClientUrl?.() || "";
+      const clientUrl = globalContext.getClientUrl?.() || '';
 
-      let appId = "";
+      let appId = '';
       if (globalContext.getCurrentAppId) {
         const appIdResult = globalContext.getCurrentAppId();
-        if (typeof appIdResult === "string") {
+        if (typeof appIdResult === 'string') {
           appId = appIdResult;
         } else {
           appId = getAppIdFromUrl();
@@ -159,25 +159,19 @@ function buildRecordUrl(entityLogicalName: string, recordId: string): string {
       }
 
       if (clientUrl) {
-        const url = new URL("/main.aspx", clientUrl);
+        const url = new URL('/main.aspx', clientUrl);
         if (appId) {
-          url.searchParams.set(
-            "appid",
-            appId.replace(/[{}]/g, "").toLowerCase(),
-          );
+          url.searchParams.set('appid', appId.replace(/[{}]/g, '').toLowerCase());
         }
-        url.searchParams.set("pagetype", "entityrecord");
-        url.searchParams.set("etn", entityLogicalName);
-        url.searchParams.set("id", cleanId);
+        url.searchParams.set('pagetype', 'entityrecord');
+        url.searchParams.set('etn', entityLogicalName);
+        url.searchParams.set('id', cleanId);
 
         return url.toString();
       }
     }
   } catch (error) {
-    console.warn(
-      "[EventAutoAssociate] Error building record URL, using fallback:",
-      error,
-    );
+    console.warn('[EventAutoAssociate] Error building record URL, using fallback:', error);
   }
 
   return `/main.aspx?pagetype=entityrecord&etn=${entityLogicalName}&id=${cleanId}`;
@@ -199,60 +193,44 @@ function getAppIdFromUrl(): string {
 
     for (const urlStr of urls) {
       const url = new URL(urlStr);
-      const appId = url.searchParams.get("appid");
+      const appId = url.searchParams.get('appid');
       if (appId) {
-        return appId.replace(/[{}]/g, "").toLowerCase();
+        return appId.replace(/[{}]/g, '').toLowerCase();
       }
     }
   } catch {
     // Error parsing URL - ignore
   }
-  return "";
+  return '';
 }
 
 /**
  * Load entity configurations from sprk_recordtype_ref
  */
-async function loadEntityConfigs(
-  webApi: ComponentFramework.WebApi,
-): Promise<EntityLookupConfig[]> {
+async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Promise<EntityLookupConfig[]> {
   if (entityConfigs) {
     return entityConfigs;
   }
 
   try {
-    console.log(
-      "[EventAutoAssociate] Loading entity configs from sprk_recordtype_ref...",
-    );
+    console.log('[EventAutoAssociate] Loading entity configs from sprk_recordtype_ref...');
     const query = `?$filter=statecode eq 0&$select=sprk_recordtype_refid,sprk_recordlogicalname,sprk_recorddisplayname,sprk_regardingfield&$orderby=sprk_recorddisplayname`;
-    const result = await webApi.retrieveMultipleRecords(
-      "sprk_recordtype_ref",
-      query,
-    );
+    const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
     if (result.entities && result.entities.length > 0) {
       entityConfigs = result.entities
-        .filter(
-          (e: Record<string, unknown>) =>
-            e.sprk_recordlogicalname && e.sprk_regardingfield,
-        )
+        .filter((e: Record<string, unknown>) => e.sprk_recordlogicalname && e.sprk_regardingfield)
         .map((e: Record<string, unknown>) => ({
           logicalName: e.sprk_recordlogicalname as string,
-          displayName: (e.sprk_recorddisplayname ||
-            e.sprk_recordlogicalname) as string,
+          displayName: (e.sprk_recorddisplayname || e.sprk_recordlogicalname) as string,
           regardingField: e.sprk_regardingfield as string,
         }));
 
-      console.log(
-        `[EventAutoAssociate] Loaded ${entityConfigs.length} entity configs`,
-      );
+      console.log(`[EventAutoAssociate] Loaded ${entityConfigs.length} entity configs`);
       return entityConfigs;
     }
   } catch (error) {
-    console.warn(
-      "[EventAutoAssociate] Error loading entity configs, using fallback:",
-      error,
-    );
+    console.warn('[EventAutoAssociate] Error loading entity configs, using fallback:', error);
   }
 
   entityConfigs = [...FALLBACK_ENTITY_CONFIGS];
@@ -271,7 +249,7 @@ function getEntityConfigs(): EntityLookupConfig[] {
  */
 async function getRecordTypeByEntityLogicalName(
   webApi: ComponentFramework.WebApi,
-  entityLogicalName: string,
+  entityLogicalName: string
 ): Promise<{ id: string; name: string } | null> {
   const cached = recordTypeCache.get(entityLogicalName);
   if (cached) {
@@ -280,10 +258,7 @@ async function getRecordTypeByEntityLogicalName(
 
   try {
     const query = `?$filter=sprk_recordlogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtype_refid,sprk_recorddisplayname`;
-    const result = await webApi.retrieveMultipleRecords(
-      "sprk_recordtype_ref",
-      query,
-    );
+    const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
     if (result.entities && result.entities.length > 0) {
       const recordType = result.entities[0];
@@ -291,16 +266,11 @@ async function getRecordTypeByEntityLogicalName(
       const name = recordType.sprk_recorddisplayname as string;
 
       recordTypeCache.set(entityLogicalName, { id, name });
-      console.log(
-        `[EventAutoAssociate] Found Record Type for ${entityLogicalName}: ${name}`,
-      );
+      console.log(`[EventAutoAssociate] Found Record Type for ${entityLogicalName}: ${name}`);
       return { id, name };
     }
   } catch (error) {
-    console.error(
-      `[EventAutoAssociate] Error querying Record Type for ${entityLogicalName}:`,
-      error,
-    );
+    console.error(`[EventAutoAssociate] Error querying Record Type for ${entityLogicalName}:`, error);
   }
 
   return null;
@@ -309,12 +279,7 @@ async function getRecordTypeByEntityLogicalName(
 /**
  * Set a lookup field value
  */
-function setLookupValue(
-  fieldName: string,
-  entityType: string,
-  id: string,
-  name: string,
-): boolean {
+function setLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
     return false;
@@ -323,7 +288,7 @@ function setLookupValue(
   try {
     const attr = xrmPage.getAttribute(fieldName);
     if (attr) {
-      const formattedId = id.replace(/[{}]/g, "");
+      const formattedId = id.replace(/[{}]/g, '');
       attr.setValue([
         {
           id: formattedId,
@@ -379,15 +344,11 @@ interface DetectedParentContext {
 function detectPrePopulatedParent(): DetectedParentContext | null {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.log(
-      "[EventAutoAssociate] Xrm.Page not available for parent detection",
-    );
+    console.log('[EventAutoAssociate] Xrm.Page not available for parent detection');
     return null;
   }
 
-  console.log(
-    "[EventAutoAssociate] Checking for pre-populated regarding fields...",
-  );
+  console.log('[EventAutoAssociate] Checking for pre-populated regarding fields...');
 
   for (const config of getEntityConfigs()) {
     try {
@@ -400,26 +361,21 @@ function detectPrePopulatedParent(): DetectedParentContext | null {
             const detected: DetectedParentContext = {
               entityType: config.logicalName,
               entityDisplayName: config.displayName,
-              recordId: lookupValue.id.replace(/[{}]/g, ""),
-              recordName: lookupValue.name || "",
+              recordId: lookupValue.id.replace(/[{}]/g, ''),
+              recordName: lookupValue.name || '',
               regardingField: config.regardingField,
             };
-            console.log(
-              `[EventAutoAssociate] Detected parent: ${config.displayName} - ${detected.recordName}`,
-            );
+            console.log(`[EventAutoAssociate] Detected parent: ${config.displayName} - ${detected.recordName}`);
             return detected;
           }
         }
       }
     } catch (error) {
-      console.warn(
-        `[EventAutoAssociate] Error checking ${config.regardingField}:`,
-        error,
-      );
+      console.warn(`[EventAutoAssociate] Error checking ${config.regardingField}:`, error);
     }
   }
 
-  console.log("[EventAutoAssociate] No pre-populated regarding field detected");
+  console.log('[EventAutoAssociate] No pre-populated regarding field detected');
   return null;
 }
 
@@ -439,10 +395,8 @@ function areDenormalizedFieldsPopulated(): boolean {
 
     if (recordNameAttr) {
       const value = recordNameAttr.getValue();
-      if (value && typeof value === "string" && value.trim().length > 0) {
-        console.log(
-          "[EventAutoAssociate] Denormalized fields already populated",
-        );
+      if (value && typeof value === 'string' && value.trim().length > 0) {
+        console.log('[EventAutoAssociate] Denormalized fields already populated');
         return true;
       }
     }
@@ -450,17 +404,12 @@ function areDenormalizedFieldsPopulated(): boolean {
     if (recordTypeAttr) {
       const value = recordTypeAttr.getValue() as Xrm.LookupValue[] | null;
       if (value && Array.isArray(value) && value.length > 0) {
-        console.log(
-          "[EventAutoAssociate] Denormalized fields already populated (type lookup set)",
-        );
+        console.log('[EventAutoAssociate] Denormalized fields already populated (type lookup set)');
         return true;
       }
     }
   } catch (error) {
-    console.warn(
-      "[EventAutoAssociate] Error checking denormalized fields:",
-      error,
-    );
+    console.warn('[EventAutoAssociate] Error checking denormalized fields:', error);
   }
 
   return false;
@@ -471,18 +420,16 @@ function areDenormalizedFieldsPopulated(): boolean {
  */
 async function completeAutoDetectedAssociation(
   detectedParent: DetectedParentContext,
-  webApi: ComponentFramework.WebApi,
+  webApi: ComponentFramework.WebApi
 ): Promise<boolean> {
   console.log(
-    `[EventAutoAssociate] Completing association for: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`,
+    `[EventAutoAssociate] Completing association for: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`
   );
 
   let success = true;
 
   // Set record name
-  if (
-    !setTextValue(DENORMALIZED_FIELDS.recordName, detectedParent.recordName)
-  ) {
+  if (!setTextValue(DENORMALIZED_FIELDS.recordName, detectedParent.recordName)) {
     success = false;
   }
 
@@ -492,34 +439,19 @@ async function completeAutoDetectedAssociation(
   }
 
   // Set record URL
-  const recordUrl = buildRecordUrl(
-    detectedParent.entityType,
-    detectedParent.recordId,
-  );
+  const recordUrl = buildRecordUrl(detectedParent.entityType, detectedParent.recordId);
   if (!setTextValue(DENORMALIZED_FIELDS.recordUrl, recordUrl)) {
     success = false;
   }
 
   // Query and set Record Type lookup
-  const recordType = await getRecordTypeByEntityLogicalName(
-    webApi,
-    detectedParent.entityType,
-  );
+  const recordType = await getRecordTypeByEntityLogicalName(webApi, detectedParent.entityType);
   if (recordType) {
-    if (
-      !setLookupValue(
-        DENORMALIZED_FIELDS.recordType,
-        "sprk_recordtype_ref",
-        recordType.id,
-        recordType.name,
-      )
-    ) {
+    if (!setLookupValue(DENORMALIZED_FIELDS.recordType, 'sprk_recordtype_ref', recordType.id, recordType.name)) {
       success = false;
     }
   } else {
-    console.warn(
-      `[EventAutoAssociate] Record Type not found for entity: ${detectedParent.entityType}`,
-    );
+    console.warn(`[EventAutoAssociate] Record Type not found for entity: ${detectedParent.entityType}`);
     success = false;
   }
 
@@ -532,10 +464,7 @@ async function completeAutoDetectedAssociation(
  *
  * Headless control - renders nothing visible but runs auto-detection logic on init.
  */
-export class EventAutoAssociate implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class EventAutoAssociate implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private context: ComponentFramework.Context<IInputs> | null = null;
   private hasRun = false;
@@ -551,7 +480,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.context = context;
     this.container = container;
@@ -571,26 +500,24 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<
   private async runAutoDetection(): Promise<void> {
     // Only run once per form load
     if (this.hasRun) {
-      console.log("[EventAutoAssociate] Already ran, skipping");
+      console.log('[EventAutoAssociate] Already ran, skipping');
       return;
     }
     this.hasRun = true;
 
     if (!this.context) {
-      console.warn("[EventAutoAssociate] Context not available");
+      console.warn('[EventAutoAssociate] Context not available');
       return;
     }
 
     const webApi = this.context.webAPI;
 
     // Small delay to ensure form is fully loaded
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Check if denormalized fields are already populated
     if (areDenormalizedFieldsPopulated()) {
-      console.log(
-        "[EventAutoAssociate] Denormalized fields already set, no action needed",
-      );
+      console.log('[EventAutoAssociate] Denormalized fields already set, no action needed');
       return;
     }
 
@@ -603,7 +530,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<
       // Complete the association by setting denormalized fields
       await completeAutoDetectedAssociation(detectedParent, webApi);
     } else {
-      console.log("[EventAutoAssociate] No parent detected, no action needed");
+      console.log('[EventAutoAssociate] No parent detected, no action needed');
     }
   }
 
@@ -627,7 +554,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<
    */
   public destroy(): void {
     if (this.container) {
-      this.container.innerHTML = "";
+      this.container.innerHTML = '';
       this.container = null;
     }
     this.context = null;

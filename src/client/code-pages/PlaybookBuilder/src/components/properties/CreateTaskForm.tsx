@@ -11,7 +11,7 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo } from "react";
+import { useCallback, useMemo, memo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -22,15 +22,15 @@ import {
   Dropdown,
   Option,
   SpinButton,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import type {
   DropdownProps,
   OptionOnSelectData,
   SelectionEvents,
   SpinButtonChangeEvent,
   SpinButtonOnChangeData,
-} from "@fluentui/react-components";
-import type { NodeFormProps } from "../../types/forms";
+} from '@fluentui/react-components';
+import type { NodeFormProps } from '../../types/forms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -38,13 +38,13 @@ import type { NodeFormProps } from "../../types/forms";
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -52,7 +52,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
   },
   descriptionArea: {
-    minHeight: "100px",
+    minHeight: '100px',
   },
 });
 
@@ -60,7 +60,7 @@ const useStyles = makeStyles({
 // Config shape
 // ---------------------------------------------------------------------------
 
-const PRIORITY_LEVELS = ["Low", "Normal", "High"] as const;
+const PRIORITY_LEVELS = ['Low', 'Normal', 'High'] as const;
 type PriorityLevel = (typeof PRIORITY_LEVELS)[number];
 
 interface CreateTaskConfig {
@@ -72,11 +72,11 @@ interface CreateTaskConfig {
 }
 
 const DEFAULT_CONFIG: CreateTaskConfig = {
-  subject: "",
-  description: "",
+  subject: '',
+  description: '',
   dueInDays: 7,
-  priority: "Normal",
-  assignTo: "",
+  priority: 'Normal',
+  assignTo: '',
 };
 
 // ---------------------------------------------------------------------------
@@ -87,25 +87,14 @@ function parseConfig(json: string): CreateTaskConfig {
   try {
     const parsed = JSON.parse(json) as Partial<CreateTaskConfig>;
     return {
-      subject:
-        typeof parsed.subject === "string"
-          ? parsed.subject
-          : DEFAULT_CONFIG.subject,
-      description:
-        typeof parsed.description === "string"
-          ? parsed.description
-          : DEFAULT_CONFIG.description,
+      subject: typeof parsed.subject === 'string' ? parsed.subject : DEFAULT_CONFIG.subject,
+      description: typeof parsed.description === 'string' ? parsed.description : DEFAULT_CONFIG.description,
       dueInDays:
-        typeof parsed.dueInDays === "number" && parsed.dueInDays >= 0
-          ? parsed.dueInDays
-          : DEFAULT_CONFIG.dueInDays,
+        typeof parsed.dueInDays === 'number' && parsed.dueInDays >= 0 ? parsed.dueInDays : DEFAULT_CONFIG.dueInDays,
       priority: PRIORITY_LEVELS.includes(parsed.priority as PriorityLevel)
         ? (parsed.priority as PriorityLevel)
         : DEFAULT_CONFIG.priority,
-      assignTo:
-        typeof parsed.assignTo === "string"
-          ? parsed.assignTo
-          : DEFAULT_CONFIG.assignTo,
+      assignTo: typeof parsed.assignTo === 'string' ? parsed.assignTo : DEFAULT_CONFIG.assignTo,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -120,11 +109,7 @@ function serializeConfig(config: CreateTaskConfig): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export const CreateTaskForm = memo(function CreateTaskForm({
-  nodeId,
-  configJson,
-  onConfigChange,
-}: NodeFormProps) {
+export const CreateTaskForm = memo(function CreateTaskForm({ nodeId, configJson, onConfigChange }: NodeFormProps) {
   const styles = useStyles();
   const config = useMemo(() => parseConfig(configJson), [configJson]);
 
@@ -132,7 +117,7 @@ export const CreateTaskForm = memo(function CreateTaskForm({
     (patch: Partial<CreateTaskConfig>) => {
       onConfigChange(serializeConfig({ ...config, ...patch }));
     },
-    [config, onConfigChange],
+    [config, onConfigChange]
   );
 
   // -- Handlers --
@@ -141,14 +126,14 @@ export const CreateTaskForm = memo(function CreateTaskForm({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ subject: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleDescriptionChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       update({ description: e.target.value });
     },
-    [update],
+    [update]
   );
 
   const handleDueInDaysChange = useCallback(
@@ -157,23 +142,23 @@ export const CreateTaskForm = memo(function CreateTaskForm({
         update({ dueInDays: data.value });
       }
     },
-    [update],
+    [update]
   );
 
-  const handlePriorityChange: DropdownProps["onOptionSelect"] = useCallback(
+  const handlePriorityChange: DropdownProps['onOptionSelect'] = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       if (data.optionValue) {
         update({ priority: data.optionValue as PriorityLevel });
       }
     },
-    [update],
+    [update]
   );
 
   const handleAssignToChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       update({ assignTo: e.target.value });
     },
-    [update],
+    [update]
   );
 
   // -- Render --
@@ -192,9 +177,7 @@ export const CreateTaskForm = memo(function CreateTaskForm({
           onChange={handleSubjectChange}
           placeholder="e.g., Follow up: {{analysis.output.title}}"
         />
-        <Text className={styles.fieldHint}>
-          Supports template variables: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.fieldHint}>Supports template variables: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* Description */}
@@ -208,14 +191,10 @@ export const CreateTaskForm = memo(function CreateTaskForm({
           className={styles.descriptionArea}
           value={config.description}
           onChange={handleDescriptionChange}
-          placeholder={
-            "Task details...\nCan reference: {{nodeName.output.fieldName}}"
-          }
+          placeholder={'Task details...\nCan reference: {{nodeName.output.fieldName}}'}
           resize="vertical"
         />
-        <Text className={styles.fieldHint}>
-          Supports template variables: {"{{nodeName.output.fieldName}}"}
-        </Text>
+        <Text className={styles.fieldHint}>Supports template variables: {'{{nodeName.output.fieldName}}'}</Text>
       </div>
 
       {/* Due In Days */}
@@ -232,9 +211,7 @@ export const CreateTaskForm = memo(function CreateTaskForm({
           max={365}
           step={1}
         />
-        <Text className={styles.fieldHint}>
-          Number of days from execution until the task is due (0-365)
-        </Text>
+        <Text className={styles.fieldHint}>Number of days from execution until the task is due (0-365)</Text>
       </div>
 
       {/* Priority */}
@@ -249,7 +226,7 @@ export const CreateTaskForm = memo(function CreateTaskForm({
           selectedOptions={[config.priority]}
           onOptionSelect={handlePriorityChange}
         >
-          {PRIORITY_LEVELS.map((level) => (
+          {PRIORITY_LEVELS.map(level => (
             <Option key={level} value={level}>
               {level}
             </Option>
@@ -270,8 +247,7 @@ export const CreateTaskForm = memo(function CreateTaskForm({
           placeholder="e.g., {{trigger.output.ownerId}} or user@example.com"
         />
         <Text className={styles.fieldHint}>
-          Owner reference. Supports template variables:{" "}
-          {"{{nodeName.output.fieldName}}"}
+          Owner reference. Supports template variables: {'{{nodeName.output.fieldName}}'}
         </Text>
       </div>
     </div>

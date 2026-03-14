@@ -64,7 +64,7 @@ interface SidePane {
  * Page input for pane.navigate() - web resource variant
  */
 interface SidePanePageInput {
-  pageType: "webresource";
+  pageType: 'webresource';
   webresourceName: string;
   data?: string;
 }
@@ -85,13 +85,13 @@ interface AppSidePanes {
 // ============================================================================
 
 /** Deterministic pane ID for singleton behavior */
-const SPRK_CHAT_PANE_ID = "sprk-chat-pane";
+const SPRK_CHAT_PANE_ID = 'sprk-chat-pane';
 
 /** Title displayed in the side pane header */
-const SPRK_CHAT_PANE_TITLE = "SprkChat";
+const SPRK_CHAT_PANE_TITLE = 'SprkChat';
 
 /** Web resource name for the SprkChatPane Code Page */
-const SPRK_CHAT_WEB_RESOURCE = "sprk_SprkChatPane";
+const SPRK_CHAT_WEB_RESOURCE = 'sprk_SprkChatPane';
 
 /** Default pane width in pixels */
 const SPRK_CHAT_PANE_WIDTH = 400;
@@ -104,18 +104,18 @@ const SPRK_CHAT_PANE_WIDTH = 400;
  * so it works without deploying a separate image web resource.
  */
 const SPRK_CHAT_ICON =
-  "data:image/svg+xml;utf8," +
+  'data:image/svg+xml;utf8,' +
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%230078d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
       '<circle cx="9" cy="10" r="1" fill="%230078d4"/>' +
       '<circle cx="12" cy="10" r="1" fill="%230078d4"/>' +
       '<circle cx="15" cy="10" r="1" fill="%230078d4"/>' +
-      "</svg>",
+      '</svg>'
   );
 
 /** Log prefix for console output */
-const LOG_PREFIX = "[Spaarke.SprkChat]";
+const LOG_PREFIX = '[Spaarke.SprkChat]';
 
 /** Whether auto-init has already run (prevent duplicate registration) */
 let _autoInitDone = false;
@@ -131,7 +131,7 @@ let _autoInitDone = false;
 function getSidePanesApi(): AppSidePanes | null {
   try {
     // Try current window first
-    if (typeof Xrm !== "undefined" && Xrm?.App?.sidePanes) {
+    if (typeof Xrm !== 'undefined' && Xrm?.App?.sidePanes) {
       return Xrm.App.sidePanes as AppSidePanes;
     }
 
@@ -144,7 +144,7 @@ function getSidePanesApi(): AppSidePanes | null {
       }
     }
   } catch (e) {
-    console.warn(LOG_PREFIX, "Error accessing Xrm.App.sidePanes:", e);
+    console.warn(LOG_PREFIX, 'Error accessing Xrm.App.sidePanes:', e);
   }
   return null;
 }
@@ -157,8 +157,8 @@ function getSidePanesApi(): AppSidePanes | null {
  * @returns Clean GUID without braces, lowercased
  */
 function cleanGuid(guid: string): string {
-  if (!guid) return "";
-  return guid.replace(/[{}]/g, "").toLowerCase();
+  if (!guid) return '';
+  return guid.replace(/[{}]/g, '').toLowerCase();
 }
 
 /**
@@ -175,39 +175,36 @@ function getFormContext(primaryControl?: any): {
   entityType: string;
   entityId: string;
 } {
-  const result = { entityType: "", entityId: "" };
+  const result = { entityType: '', entityId: '' };
 
   try {
     // Strategy 1: Use primaryControl (preferred - passed by ribbon as PrimaryControl)
     if (primaryControl?.data?.entity) {
-      result.entityType = primaryControl.data.entity.getEntityName() || "";
-      result.entityId = cleanGuid(primaryControl.data.entity.getId() || "");
+      result.entityType = primaryControl.data.entity.getEntityName() || '';
+      result.entityId = cleanGuid(primaryControl.data.entity.getId() || '');
 
       if (result.entityType || result.entityId) {
-        console.log(LOG_PREFIX, "Context from primaryControl:", result);
+        console.log(LOG_PREFIX, 'Context from primaryControl:', result);
         return result;
       }
     }
 
     // Strategy 2: Xrm.Page (legacy but widely available)
-    const xrm = typeof Xrm !== "undefined" ? Xrm : (window.parent as any)?.Xrm;
+    const xrm = typeof Xrm !== 'undefined' ? Xrm : (window.parent as any)?.Xrm;
     if (xrm?.Page?.data?.entity) {
-      result.entityType = xrm.Page.data.entity.getEntityName() || "";
-      result.entityId = cleanGuid(xrm.Page.data.entity.getId() || "");
+      result.entityType = xrm.Page.data.entity.getEntityName() || '';
+      result.entityId = cleanGuid(xrm.Page.data.entity.getId() || '');
 
       if (result.entityType || result.entityId) {
-        console.log(LOG_PREFIX, "Context from Xrm.Page:", result);
+        console.log(LOG_PREFIX, 'Context from Xrm.Page:', result);
         return result;
       }
     }
   } catch (e) {
-    console.warn(LOG_PREFIX, "Error reading form context:", e);
+    console.warn(LOG_PREFIX, 'Error reading form context:', e);
   }
 
-  console.log(
-    LOG_PREFIX,
-    "No form context available, opening pane without record context",
-  );
+  console.log(LOG_PREFIX, 'No form context available, opening pane without record context');
   return result;
 }
 
@@ -221,18 +218,13 @@ function getFormContext(primaryControl?: any): {
  * @param sessionId - Optional existing session ID to resume
  * @returns URL-encoded query string
  */
-function buildDataParams(
-  entityType: string,
-  entityId: string,
-  playbookId?: string,
-  sessionId?: string,
-): string {
+function buildDataParams(entityType: string, entityId: string, playbookId?: string, sessionId?: string): string {
   const params = new URLSearchParams();
 
-  if (entityType) params.set("entityType", entityType);
-  if (entityId) params.set("entityId", entityId);
-  if (playbookId) params.set("playbookId", playbookId);
-  if (sessionId) params.set("sessionId", sessionId);
+  if (entityType) params.set('entityType', entityType);
+  if (entityId) params.set('entityId', entityId);
+  if (playbookId) params.set('playbookId', playbookId);
+  if (sessionId) params.set('sessionId', sessionId);
 
   return params.toString();
 }
@@ -261,14 +253,10 @@ function buildDataParams(
  * // Programmatic with optional params:
  * Spaarke.SprkChat.openPane(primaryControl, "playbook-guid", "session-guid");
  */
-async function openSprkChatPane(
-  primaryControl?: any,
-  playbookId?: string,
-  sessionId?: string,
-): Promise<void> {
-  console.log(LOG_PREFIX, "========================================");
-  console.log(LOG_PREFIX, "openSprkChatPane: Starting v1.0.0");
-  console.log(LOG_PREFIX, "========================================");
+async function openSprkChatPane(primaryControl?: any, playbookId?: string, sessionId?: string): Promise<void> {
+  console.log(LOG_PREFIX, '========================================');
+  console.log(LOG_PREFIX, 'openSprkChatPane: Starting v1.0.0');
+  console.log(LOG_PREFIX, '========================================');
 
   // -------------------------------------------------------------------------
   // Step 1: Check if sidePanes API is available
@@ -276,23 +264,22 @@ async function openSprkChatPane(
   const sidePanes = getSidePanesApi();
   if (!sidePanes) {
     const errorMsg =
-      "The SprkChat side pane requires Xrm.App.sidePanes API, " +
-      "which is not available in this context. " +
-      "Please ensure you are using a supported model-driven app.";
+      'The SprkChat side pane requires Xrm.App.sidePanes API, ' +
+      'which is not available in this context. ' +
+      'Please ensure you are using a supported model-driven app.';
     console.error(LOG_PREFIX, errorMsg);
 
     // Fallback: Try to show an alert dialog
     try {
-      const xrm =
-        typeof Xrm !== "undefined" ? Xrm : (window.parent as any)?.Xrm;
+      const xrm = typeof Xrm !== 'undefined' ? Xrm : (window.parent as any)?.Xrm;
       if (xrm?.Navigation?.openAlertDialog) {
         await xrm.Navigation.openAlertDialog({
-          title: "SprkChat",
+          title: 'SprkChat',
           text: errorMsg,
         });
       }
     } catch (alertError) {
-      console.error(LOG_PREFIX, "Could not show alert dialog:", alertError);
+      console.error(LOG_PREFIX, 'Could not show alert dialog:', alertError);
     }
     return;
   }
@@ -301,16 +288,11 @@ async function openSprkChatPane(
   // Step 2: Get current form context
   // -------------------------------------------------------------------------
   const { entityType, entityId } = getFormContext(primaryControl);
-  const dataParams = buildDataParams(
-    entityType,
-    entityId,
-    playbookId,
-    sessionId,
-  );
+  const dataParams = buildDataParams(entityType, entityId, playbookId, sessionId);
 
-  console.log(LOG_PREFIX, "entityType:", entityType);
-  console.log(LOG_PREFIX, "entityId:", entityId);
-  console.log(LOG_PREFIX, "dataParams:", dataParams);
+  console.log(LOG_PREFIX, 'entityType:', entityType);
+  console.log(LOG_PREFIX, 'entityId:', entityId);
+  console.log(LOG_PREFIX, 'dataParams:', dataParams);
 
   // -------------------------------------------------------------------------
   // Step 3: Check for existing pane (singleton pattern)
@@ -319,11 +301,11 @@ async function openSprkChatPane(
     const existingPane = sidePanes.getPane(SPRK_CHAT_PANE_ID);
 
     if (existingPane) {
-      console.log(LOG_PREFIX, "Existing pane found, reusing");
+      console.log(LOG_PREFIX, 'Existing pane found, reusing');
 
       // Navigate to updated context (in case record changed)
       await existingPane.navigate({
-        pageType: "webresource",
+        pageType: 'webresource',
         webresourceName: SPRK_CHAT_WEB_RESOURCE,
         data: dataParams,
       });
@@ -331,14 +313,14 @@ async function openSprkChatPane(
       // Bring pane to focus
       existingPane.select();
 
-      console.log(LOG_PREFIX, "Existing pane navigated and selected");
+      console.log(LOG_PREFIX, 'Existing pane navigated and selected');
       return;
     }
 
     // ---------------------------------------------------------------------
     // Step 4: Create new pane
     // ---------------------------------------------------------------------
-    console.log(LOG_PREFIX, "No existing pane, creating new one");
+    console.log(LOG_PREFIX, 'No existing pane, creating new one');
 
     const newPane = await sidePanes.createPane({
       paneId: SPRK_CHAT_PANE_ID,
@@ -351,28 +333,27 @@ async function openSprkChatPane(
 
     // Navigate to the Code Page web resource
     await newPane.navigate({
-      pageType: "webresource",
+      pageType: 'webresource',
       webresourceName: SPRK_CHAT_WEB_RESOURCE,
       data: dataParams,
     });
 
-    console.log(LOG_PREFIX, "New pane created and navigated successfully");
+    console.log(LOG_PREFIX, 'New pane created and navigated successfully');
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(LOG_PREFIX, "Error opening SprkChat pane:", errorMessage);
+    console.error(LOG_PREFIX, 'Error opening SprkChat pane:', errorMessage);
 
     // Attempt to show user-facing error
     try {
-      const xrm =
-        typeof Xrm !== "undefined" ? Xrm : (window.parent as any)?.Xrm;
+      const xrm = typeof Xrm !== 'undefined' ? Xrm : (window.parent as any)?.Xrm;
       if (xrm?.Navigation?.openAlertDialog) {
         await xrm.Navigation.openAlertDialog({
-          title: "SprkChat",
-          text: "Unable to open SprkChat: " + errorMessage,
+          title: 'SprkChat',
+          text: 'Unable to open SprkChat: ' + errorMessage,
         });
       }
     } catch (alertError) {
-      console.error(LOG_PREFIX, "Could not show error dialog:", alertError);
+      console.error(LOG_PREFIX, 'Could not show error dialog:', alertError);
     }
   }
 }
@@ -395,10 +376,7 @@ async function autoInitSidePane(): Promise<void> {
 
   const sidePanes = getSidePanesApi();
   if (!sidePanes) {
-    console.log(
-      LOG_PREFIX,
-      "autoInit: sidePanes API not available yet, will retry on enable",
-    );
+    console.log(LOG_PREFIX, 'autoInit: sidePanes API not available yet, will retry on enable');
     _autoInitDone = false; // Allow retry
     return;
   }
@@ -406,15 +384,12 @@ async function autoInitSidePane(): Promise<void> {
   // Check if pane already exists (e.g., from a previous navigation)
   const existing = sidePanes.getPane(SPRK_CHAT_PANE_ID);
   if (existing) {
-    console.log(LOG_PREFIX, "autoInit: pane already registered");
+    console.log(LOG_PREFIX, 'autoInit: pane already registered');
     return;
   }
 
   try {
-    console.log(
-      LOG_PREFIX,
-      "autoInit: registering SprkChat in side pane launcher",
-    );
+    console.log(LOG_PREFIX, 'autoInit: registering SprkChat in side pane launcher');
 
     const pane = await sidePanes.createPane({
       paneId: SPRK_CHAT_PANE_ID,
@@ -427,18 +402,15 @@ async function autoInitSidePane(): Promise<void> {
 
     // Navigate to the Code Page (no record context yet — will update on openPane)
     await pane.navigate({
-      pageType: "webresource",
+      pageType: 'webresource',
       webresourceName: SPRK_CHAT_WEB_RESOURCE,
-      data: "",
+      data: '',
     });
 
-    console.log(
-      LOG_PREFIX,
-      "autoInit: SprkChat registered in side pane launcher",
-    );
+    console.log(LOG_PREFIX, 'autoInit: SprkChat registered in side pane launcher');
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.warn(LOG_PREFIX, "autoInit: could not register pane:", msg);
+    console.warn(LOG_PREFIX, 'autoInit: could not register pane:', msg);
     _autoInitDone = false; // Allow retry
   }
 }
@@ -487,7 +459,7 @@ function showSprkChatPane(): boolean {
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const _window = (typeof window !== "undefined" ? window : globalThis) as any;
+const _window = (typeof window !== 'undefined' ? window : globalThis) as any;
 
 _window.Spaarke = _window.Spaarke || {};
 _window.Spaarke.SprkChat = _window.Spaarke.SprkChat || {};
@@ -498,9 +470,4 @@ _window.Spaarke.SprkChat.show = showSprkChatPane;
 _window.Spaarke.SprkChat.autoInit = autoInitSidePane;
 
 // Also export for module-based consumption (if imported by other TypeScript)
-export {
-  openSprkChatPane,
-  enableSprkChatPane,
-  showSprkChatPane,
-  autoInitSidePane,
-};
+export { openSprkChatPane, enableSprkChatPane, showSprkChatPane, autoInitSidePane };

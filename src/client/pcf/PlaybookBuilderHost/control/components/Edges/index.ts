@@ -5,7 +5,7 @@
  */
 
 // Edge implementations
-export { TrueBranchEdge, FalseBranchEdge } from "./ConditionEdge";
+export { TrueBranchEdge, FalseBranchEdge } from './ConditionEdge';
 
 // Registry and constants
-export { edgeTypes, EDGE_TYPES } from "./edgeTypes";
+export { edgeTypes, EDGE_TYPES } from './edgeTypes';

@@ -47,7 +47,7 @@
  * @see ADR-022  - React 19 APIs for Code Pages (hooks, concurrent features)
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   makeStyles,
   shorthands,
@@ -61,33 +61,33 @@ import {
   ToastTitle,
   useToastController,
   useId,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   ErrorCircle20Regular,
   LockClosed20Regular,
   ArrowClockwise20Regular,
   Play20Regular,
   PanelRight20Regular,
-} from "@fluentui/react-icons";
-import type { RichTextEditorRef } from "@spaarke/ui-components";
-import { useDocumentHistory } from "@spaarke/ui-components/hooks/useDocumentHistory";
-import { useAuth } from "./hooks/useAuth";
-import { useAnalysisLoader } from "./hooks/useAnalysisLoader";
-import { useAutoSave } from "./hooks/useAutoSave";
-import { useExportAnalysis } from "./hooks/useExportAnalysis";
-import { useSelectionBroadcast } from "./hooks/useSelectionBroadcast";
-import { useReAnalysisProgress } from "./hooks/useReAnalysisProgress";
-import { useAnalysisExecution } from "./hooks/useAnalysisExecution";
-import { useDiffReview } from "./hooks/useDiffReview";
+} from '@fluentui/react-icons';
+import type { RichTextEditorRef } from '@spaarke/ui-components';
+import { useDocumentHistory } from '@spaarke/ui-components/hooks/useDocumentHistory';
+import { useAuth } from './hooks/useAuth';
+import { useAnalysisLoader } from './hooks/useAnalysisLoader';
+import { useAutoSave } from './hooks/useAutoSave';
+import { useExportAnalysis } from './hooks/useExportAnalysis';
+import { useSelectionBroadcast } from './hooks/useSelectionBroadcast';
+import { useReAnalysisProgress } from './hooks/useReAnalysisProgress';
+import { useAnalysisExecution } from './hooks/useAnalysisExecution';
+import { useDiffReview } from './hooks/useDiffReview';
 
-import { EditorPanel } from "./components/EditorPanel";
-import { SourceViewerPanel } from "./components/SourceViewerPanel";
-import { PanelSplitter } from "./components/PanelSplitter";
-import { DocumentStreamBridge } from "./components/DocumentStreamBridge";
-import { ReAnalysisProgressOverlay } from "./components/ReAnalysisProgressOverlay";
-import { DiffReviewPanel } from "./components/DiffReviewPanel";
-import { usePanelResize } from "./hooks/usePanelResize";
-import { markdownToHtml } from "./utils/markdownToHtml";
+import { EditorPanel } from './components/EditorPanel';
+import { SourceViewerPanel } from './components/SourceViewerPanel';
+import { PanelSplitter } from './components/PanelSplitter';
+import { DocumentStreamBridge } from './components/DocumentStreamBridge';
+import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverlay';
+import { DiffReviewPanel } from './components/DiffReviewPanel';
+import { usePanelResize } from './hooks/usePanelResize';
+import { markdownToHtml } from './utils/markdownToHtml';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -108,37 +108,37 @@ export interface AppProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100vw",
-    height: "100vh",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100vw',
+    height: '100vh',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   toolbar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    height: "40px",
+    height: '40px',
     flexShrink: 0,
   },
   content: {
-    display: "flex",
-    flexDirection: "row",
+    display: 'flex',
+    flexDirection: 'row',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   leftPanel: {
-    overflow: "hidden",
+    overflow: 'hidden',
     flexShrink: 0,
-    position: "relative",
+    position: 'relative',
   },
   rightPanel: {
-    overflow: "hidden",
+    overflow: 'hidden',
     flexShrink: 0,
   },
   rightPanelExpanded: {
@@ -147,30 +147,30 @@ const useStyles = makeStyles({
   },
   rightPanelCollapsed: {
     // When collapsed, the strip is handled by SourceViewerPanel internally
-    width: "auto",
+    width: 'auto',
   },
   // ---- Auth states (task 066) ----
   authContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100vw",
-    height: "100vh",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100vw',
+    height: '100vh',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     ...shorthands.gap(tokens.spacingVerticalM),
     ...shorthands.padding(tokens.spacingVerticalXXL, tokens.spacingHorizontalL),
-    textAlign: "center",
+    textAlign: 'center',
   },
   errorIcon: {
     color: tokens.colorPaletteRedForeground1,
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalS,
   },
   lockIcon: {
     color: tokens.colorNeutralForeground3,
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalS,
   },
   errorTitle: {
@@ -179,7 +179,7 @@ const useStyles = makeStyles({
   },
   errorDetail: {
     color: tokens.colorNeutralForeground3,
-    maxWidth: "400px",
+    maxWidth: '400px',
   },
 });
 
@@ -187,32 +187,21 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export function App({
-  analysisId,
-  documentId,
-  tenantId,
-}: AppProps): JSX.Element {
+export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element {
   const styles = useStyles();
 
   // ---- Auth (task 066) ----
   // Hook must be called unconditionally (React rules of hooks)
-  const {
-    token,
-    isAuthenticated,
-    isAuthenticating,
-    authError,
-    isXrmUnavailable,
-    retryAuth,
-  } = useAuth();
+  const { token, isAuthenticated, isAuthenticating, authError, isXrmUnavailable, retryAuth } = useAuth();
 
   // ---- Task 061: Toast notification ----
-  const toasterId = useId("workspace-toast");
+  const toasterId = useId('workspace-toast');
   const { dispatchToast } = useToastController(toasterId);
 
   // ---- State (all hooks must be called before any early return) ----
   const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
   const [showSourcePane, setShowSourcePane] = useState(true);
-  const [editorContent, setEditorContent] = useState("");
+  const [editorContent, setEditorContent] = useState('');
 
   // ---- Resolved documentId: URL prop → Dataverse lookup fallback ----
   // When embedded on the sprk_analysis form, the URL may not include a documentId
@@ -263,9 +252,7 @@ export function App({
   // documentId. The analysis record's lookup (_sprk_documentid_value) provides it.
   useEffect(() => {
     if (!resolvedDocumentId && analysis?.sourceDocumentId) {
-      console.log(
-        `[AnalysisWorkspace] Resolved documentId from analysis lookup: ${analysis.sourceDocumentId}`,
-      );
+      console.log(`[AnalysisWorkspace] Resolved documentId from analysis lookup: ${analysis.sourceDocumentId}`);
       setResolvedDocumentId(analysis.sourceDocumentId);
     }
   }, [resolvedDocumentId, analysis?.sourceDocumentId]);
@@ -288,10 +275,10 @@ export function App({
         <Toast>
           <ToastTitle>Analysis complete</ToastTitle>
         </Toast>,
-        { intent: "success", timeout: 5000 },
+        { intent: 'success', timeout: 5000 }
       );
     },
-    onStreamContent: (content) => {
+    onStreamContent: content => {
       // Convert markdown to HTML for the RichTextEditor during streaming
       if (editorRef.current && content) {
         const html = markdownToHtml(content);
@@ -302,11 +289,10 @@ export function App({
   });
 
   // ---- Task 062: Auto-save via Dataverse PATCH (same-origin) ----
-  const { saveState, lastSavedAt, saveError, forceSave, notifyContentChanged } =
-    useAutoSave({
-      analysisId,
-      enabled: !!analysisId,
-    });
+  const { saveState, lastSavedAt, saveError, forceSave, notifyContentChanged } = useAutoSave({
+    analysisId,
+    enabled: !!analysisId,
+  });
 
   // ---- Task 062: Export to Word via BFF API ----
   const { exportState, exportError, doExport } = useExportAnalysis({
@@ -316,8 +302,7 @@ export function App({
   });
 
   // ---- Task 062: Document history for Undo/Redo ----
-  const { undo, redo, canUndo, canRedo, historyLength, pushVersion } =
-    useDocumentHistory(editorRef);
+  const { undo, redo, canUndo, canRedo, historyLength, pushVersion } = useDocumentHistory(editorRef);
 
   // ---- Task 064: Selection broadcast to SprkChat ----
   // The bridge is created by DocumentStreamBridge. We need to access it.
@@ -330,8 +315,7 @@ export function App({
   // onStreamingStateChange callback. However, to keep things clean,
   // we import SprkChatBridge directly for selection and re-analysis progress events.
   const [appBridge, setAppBridge] = useState<
-    | import("@spaarke/ui-components/services/SprkChatBridge").SprkChatBridge
-    | null
+    import('@spaarke/ui-components/services/SprkChatBridge').SprkChatBridge | null
   >(null);
 
   // Create bridge for selection + re-analysis progress events (uses same channel as streaming)
@@ -340,28 +324,24 @@ export function App({
       return;
     }
 
-    let bridge:
-      | import("@spaarke/ui-components/services/SprkChatBridge").SprkChatBridge
-      | null = null;
+    let bridge: import('@spaarke/ui-components/services/SprkChatBridge').SprkChatBridge | null = null;
     let cancelled = false;
 
     // Dynamic import to avoid circular dependency
-    import("@spaarke/ui-components/services/SprkChatBridge").then(
-      ({ SprkChatBridge }) => {
-        if (cancelled) {
-          return;
-        }
-        try {
-          bridge = new SprkChatBridge({
-            context: analysisId,
-            transport: "auto",
-          });
-          setAppBridge(bridge);
-        } catch (err) {
-          console.error("[App] Failed to create bridge:", err);
-        }
-      },
-    );
+    import('@spaarke/ui-components/services/SprkChatBridge').then(({ SprkChatBridge }) => {
+      if (cancelled) {
+        return;
+      }
+      try {
+        bridge = new SprkChatBridge({
+          context: analysisId,
+          transport: 'auto',
+        });
+        setAppBridge(bridge);
+      } catch (err) {
+        console.error('[App] Failed to create bridge:', err);
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -404,24 +384,22 @@ export function App({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window as any).Xrm;
       if (!xrm?.App?.sidePanes) {
-        console.warn(
-          "[AnalysisWorkspace] SprkChat side pane unavailable — Xrm.App.sidePanes not found",
-        );
+        console.warn('[AnalysisWorkspace] SprkChat side pane unavailable — Xrm.App.sidePanes not found');
         return;
       }
 
       xrm.App.sidePanes
         .createPane({
-          title: "SprkChat",
-          paneId: "sprkchat-analysis",
+          title: 'SprkChat',
+          paneId: 'sprkchat-analysis',
           canClose: true,
           width: 400,
         })
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then((pane: any) => {
           pane.navigate({
-            pageType: "webresource",
-            webresourceName: "sprk_SprkChatPane",
+            pageType: 'webresource',
+            webresourceName: 'sprk_SprkChatPane',
             data: new URLSearchParams({
               analysisId,
               documentId: resolvedDocumentId,
@@ -429,13 +407,10 @@ export function App({
           });
         })
         .catch((err: unknown) => {
-          console.warn(
-            "[AnalysisWorkspace] SprkChat side pane failed to create:",
-            err,
-          );
+          console.warn('[AnalysisWorkspace] SprkChat side pane failed to create:', err);
         });
     } catch (err) {
-      console.warn("[AnalysisWorkspace] SprkChat side pane unavailable:", err);
+      console.warn('[AnalysisWorkspace] SprkChat side pane unavailable:', err);
     }
   }, [analysisId, resolvedDocumentId]);
 
@@ -447,7 +422,7 @@ export function App({
       const trimmed = analysis.content.trim();
       // If content starts with an HTML tag, it's already HTML (from auto-save);
       // pass directly to the editor. Otherwise treat as markdown.
-      const isHtml = trimmed.startsWith("<");
+      const isHtml = trimmed.startsWith('<');
       const html = isHtml ? trimmed : markdownToHtml(trimmed);
       editorRef.current.setHtml(html);
       setEditorContent(html);
@@ -456,7 +431,7 @@ export function App({
 
   // ---- Handlers ----
   const handleToggleCollapse = useCallback(() => {
-    setIsSourceCollapsed((prev) => !prev);
+    setIsSourceCollapsed(prev => !prev);
   }, []);
 
   const handleEditorChange = useCallback(
@@ -465,18 +440,13 @@ export function App({
       // Task 062: Notify auto-save of content changes
       notifyContentChanged(html);
     },
-    [notifyContentChanged],
+    [notifyContentChanged]
   );
 
   // ---- Auth loading state (task 066) ----
   if (isAuthenticating) {
     return (
-      <div
-        className={styles.authContainer}
-        role="main"
-        aria-label="Analysis Workspace"
-        data-testid="auth-loading"
-      >
+      <div className={styles.authContainer} role="main" aria-label="Analysis Workspace" data-testid="auth-loading">
         <Spinner size="large" label="Authenticating..." />
         <Text size={200} className={styles.errorDetail}>
           Connecting to Dataverse...
@@ -488,19 +458,13 @@ export function App({
   // ---- Auth error: Xrm unavailable (outside Dataverse) ----
   if (authError && isXrmUnavailable) {
     return (
-      <div
-        className={styles.authContainer}
-        role="alert"
-        aria-label="Analysis Workspace"
-        data-testid="auth-error-xrm"
-      >
+      <div className={styles.authContainer} role="alert" aria-label="Analysis Workspace" data-testid="auth-error-xrm">
         <LockClosed20Regular className={styles.lockIcon} />
         <Text size={400} className={styles.errorTitle}>
           Dataverse Required
         </Text>
         <Text size={200} className={styles.errorDetail}>
-          Analysis Workspace must be opened from within Dataverse. Please open
-          this page from a model-driven app form.
+          Analysis Workspace must be opened from within Dataverse. Please open this page from a model-driven app form.
         </Text>
       </div>
     );
@@ -509,19 +473,13 @@ export function App({
   // ---- Auth error: token acquisition failure (retryable) ----
   if (authError) {
     return (
-      <div
-        className={styles.authContainer}
-        role="alert"
-        aria-label="Analysis Workspace"
-        data-testid="auth-error-token"
-      >
+      <div className={styles.authContainer} role="alert" aria-label="Analysis Workspace" data-testid="auth-error-token">
         <ErrorCircle20Regular className={styles.errorIcon} />
         <Text size={400} className={styles.errorTitle}>
           Authentication Failed
         </Text>
         <Text size={200} className={styles.errorDetail}>
-          {authError.message ||
-            "Unable to acquire an authentication token. Please try again."}
+          {authError.message || 'Unable to acquire an authentication token. Please try again.'}
         </Text>
         <Button
           appearance="primary"
@@ -538,11 +496,7 @@ export function App({
   // ---- Not yet authenticated (guard for edge case) ----
   if (!isAuthenticated) {
     return (
-      <div
-        className={styles.authContainer}
-        role="main"
-        aria-label="Analysis Workspace"
-      >
+      <div className={styles.authContainer} role="main" aria-label="Analysis Workspace">
         <Spinner size="large" label="Initializing..." />
       </div>
     );
@@ -561,17 +515,15 @@ export function App({
           appearance="primary"
           icon={isExecuting ? <Spinner size="tiny" /> : <Play20Regular />}
           onClick={triggerExecute}
-          disabled={
-            isExecuting || (!analysis?.playbookId && !analysis?.actionId)
-          }
+          disabled={isExecuting || (!analysis?.playbookId && !analysis?.actionId)}
           data-testid="run-analysis-button"
         >
-          {isExecuting ? "Running..." : "Run Analysis"}
+          {isExecuting ? 'Running...' : 'Run Analysis'}
         </Button>
         <ToggleButton
           icon={<PanelRight20Regular />}
           checked={showSourcePane}
-          onClick={() => setShowSourcePane((prev) => !prev)}
+          onClick={() => setShowSourcePane(prev => !prev)}
           data-testid="source-pane-toggle"
         >
           Source
@@ -581,30 +533,21 @@ export function App({
       {/* Content area: 2-panel layout */}
       <div className={styles.content}>
         {/* Left Panel -- Editor + Streaming Bridge + Re-Analysis Overlay */}
-        <div
-          className={styles.leftPanel}
-          style={{ width: showSourcePane ? leftPanelWidth : "100%" }}
-        >
+        <div className={styles.leftPanel} style={{ width: showSourcePane ? leftPanelWidth : '100%' }}>
           {/* Task 063: SprkChatBridge document streaming wiring */}
-          <DocumentStreamBridge
-            context={analysisId}
-            editorRef={editorRef}
-            enabled={!!analysisId}
-          />
+          <DocumentStreamBridge context={analysisId} editorRef={editorRef} enabled={!!analysisId} />
           {/* Show error state if analysis load or execution failed */}
-          {(analysisError || executionError) &&
-          !isAnalysisLoading &&
-          !isExecuting ? (
+          {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
             <div
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                gap: "12px",
-                padding: "24px",
-                textAlign: "center",
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                gap: '12px',
+                padding: '24px',
+                textAlign: 'center',
               }}
               role="alert"
               data-testid="analysis-load-error"
@@ -614,15 +557,9 @@ export function App({
                 Failed to Load Analysis
               </Text>
               <Text size={200} className={styles.errorDetail}>
-                {executionError?.message ||
-                  analysisError?.message ||
-                  "Unable to load the analysis record."}
+                {executionError?.message || analysisError?.message || 'Unable to load the analysis record.'}
               </Text>
-              <Button
-                appearance="primary"
-                icon={<ArrowClockwise20Regular />}
-                onClick={retryLoad}
-              >
+              <Button appearance="primary" icon={<ArrowClockwise20Regular />} onClick={retryLoad}>
                 Retry
               </Button>
             </div>
@@ -632,9 +569,7 @@ export function App({
               value={editorContent}
               onChange={handleEditorChange}
               placeholder={
-                isExecuting
-                  ? executionProgress || "Running analysis..."
-                  : "Analysis output will appear here..."
+                isExecuting ? executionProgress || 'Running analysis...' : 'Analysis output will appear here...'
               }
               isLoading={isAnalysisLoading}
               isStreaming={isExecuting}
@@ -682,9 +617,7 @@ export function App({
             )}
             <div
               className={`${styles.rightPanel} ${
-                isSourceCollapsed
-                  ? styles.rightPanelCollapsed
-                  : styles.rightPanelExpanded
+                isSourceCollapsed ? styles.rightPanelCollapsed : styles.rightPanelExpanded
               }`}
               style={isSourceCollapsed ? undefined : { width: rightPanelWidth }}
             >

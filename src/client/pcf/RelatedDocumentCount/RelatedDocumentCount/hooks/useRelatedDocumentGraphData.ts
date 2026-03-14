@@ -11,18 +11,15 @@
  * React 16 compatible (useState + useEffect + useCallback + useRef only, per ADR-022).
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { authenticatedFetch } from "@spaarke/auth";
-import type {
-  MiniGraphNode,
-  MiniGraphEdge,
-} from "@spaarke/ui-components/dist/types/MiniGraphTypes";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { authenticatedFetch } from '@spaarke/auth';
+import type { MiniGraphNode, MiniGraphEdge } from '@spaarke/ui-components/dist/types/MiniGraphTypes';
 
 /** Maximum nodes to include in the mini preview (source + related). */
 const MAX_PREVIEW_NODES = 15;
 
 /** Default BFF API URL when not configured via PCF properties. */
-const DEFAULT_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
 // ─── API Response Types (minimal, matching BFF response shape) ───────
 
@@ -95,7 +92,7 @@ export function useRelatedDocumentGraphData(
   documentId: string,
   tenantId: string | undefined,
   apiBaseUrl: string | undefined,
-  enabled: boolean,
+  enabled: boolean
 ): UseRelatedDocumentGraphDataResult {
   const [count, setCount] = useState(0);
   const [nodes, setNodes] = useState<MiniGraphNode[]>([]);
@@ -115,7 +112,7 @@ export function useRelatedDocumentGraphData(
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!enabled || !documentId || documentId.trim() === "") {
+    if (!enabled || !documentId || documentId.trim() === '') {
       setCount(0);
       setNodes([]);
       setEdges([]);
@@ -129,17 +126,17 @@ export function useRelatedDocumentGraphData(
     setError(null);
 
     try {
-      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, "");
-      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ""}limit=20`;
+      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, '');
+      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
 
-      console.log("[useRelatedDocumentGraphData] Fetching count + graph:", {
+      console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {
         documentId,
         url,
       });
 
       const response = await authenticatedFetch(url, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!mountedRef.current || currentFetchId !== fetchIdRef.current) {
@@ -158,7 +155,7 @@ export function useRelatedDocumentGraphData(
           setError("You don't have permission to view related documents.");
           return;
         }
-        setError("Failed to load related document count.");
+        setError('Failed to load related document count.');
         return;
       }
 
@@ -170,12 +167,7 @@ export function useRelatedDocumentGraphData(
 
       // Extract count from metadata
       const total = data.metadata?.totalResults ?? 0;
-      console.log(
-        "[useRelatedDocumentGraphData] Got count:",
-        total,
-        "nodes:",
-        data.nodes.length,
-      );
+      console.log('[useRelatedDocumentGraphData] Got count:', total, 'nodes:', data.nodes.length);
       setCount(total);
       setLastUpdated(new Date());
 
@@ -186,32 +178,28 @@ export function useRelatedDocumentGraphData(
         return;
       }
 
-      const sourceNode = data.nodes.find((n) => n.type === "source");
+      const sourceNode = data.nodes.find(n => n.type === 'source');
       const others = data.nodes
-        .filter((n) => n.type !== "source")
+        .filter(n => n.type !== 'source')
         .sort((a, b) => (b.data.similarity ?? 0) - (a.data.similarity ?? 0))
         .slice(0, MAX_PREVIEW_NODES - 1);
 
-      const limitedNodes = sourceNode
-        ? [sourceNode, ...others]
-        : others.slice(0, MAX_PREVIEW_NODES);
+      const limitedNodes = sourceNode ? [sourceNode, ...others] : others.slice(0, MAX_PREVIEW_NODES);
 
-      const nodeIds = new Set(limitedNodes.map((n) => n.id));
+      const nodeIds = new Set(limitedNodes.map(n => n.id));
 
       // Filter edges to only include retained nodes
-      const limitedEdges = data.edges.filter(
-        (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
-      );
+      const limitedEdges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
       // Map to MiniGraph types
-      const miniNodes: MiniGraphNode[] = limitedNodes.map((n) => ({
+      const miniNodes: MiniGraphNode[] = limitedNodes.map(n => ({
         id: n.id,
         type: n.type,
         label: n.data.label,
         similarity: n.data.similarity,
       }));
 
-      const miniEdges: MiniGraphEdge[] = limitedEdges.map((e) => ({
+      const miniEdges: MiniGraphEdge[] = limitedEdges.map(e => ({
         source: e.source,
         target: e.target,
         relationshipType: e.data.relationshipType,
@@ -225,12 +213,12 @@ export function useRelatedDocumentGraphData(
         return;
       }
 
-      console.error("[useRelatedDocumentGraphData] Error:", err);
+      console.error('[useRelatedDocumentGraphData] Error:', err);
 
-      if (err instanceof Error && err.message.includes("auth")) {
-        setError("Authentication error. Please refresh the page.");
+      if (err instanceof Error && err.message.includes('auth')) {
+        setError('Authentication error. Please refresh the page.');
       } else {
-        setError("Unable to load related documents. Please try again.");
+        setError('Unable to load related documents. Please try again.');
       }
     } finally {
       if (mountedRef.current && currentFetchId === fetchIdRef.current) {

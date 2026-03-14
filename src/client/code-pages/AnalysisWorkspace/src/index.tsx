@@ -37,22 +37,20 @@
  * @see ADR-021 - Fluent UI v9 design system (React 19 createRoot for Code Pages)
  */
 
-import { useEffect } from "react";
-import { createRoot } from "react-dom/client";
-import { FluentProvider } from "@fluentui/react-components";
-import { App } from "./App";
-import { AuthProvider } from "./context/AuthContext";
-import { useThemeDetection } from "./hooks/useThemeDetection";
+import { useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { FluentProvider } from '@fluentui/react-components';
+import { App } from './App';
+import { AuthProvider } from './context/AuthContext';
+import { useThemeDetection } from './hooks/useThemeDetection';
 
 // ---------------------------------------------------------------------------
 // Parse URL parameters (multi-source resolution)
 // ---------------------------------------------------------------------------
 
 const rawUrlParams = new URLSearchParams(window.location.search);
-const dataEnvelope = rawUrlParams.get("data");
-const appParams = dataEnvelope
-  ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-  : rawUrlParams;
+const dataEnvelope = rawUrlParams.get('data');
+const appParams = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelope)) : rawUrlParams;
 
 /**
  * Resolve analysisId from available sources:
@@ -63,12 +61,12 @@ const appParams = dataEnvelope
  */
 function resolveAnalysisId(): string {
   // Source 1: Explicit analysisId (navigateTo)
-  const explicit = appParams.get("analysisId");
+  const explicit = appParams.get('analysisId');
   if (explicit) return explicit;
 
   // Source 2: Dataverse "id" param (form web resource pass-through)
-  const dvId = rawUrlParams.get("id");
-  if (dvId) return dvId.replace(/[{}]/g, "").toLowerCase();
+  const dvId = rawUrlParams.get('id');
+  if (dvId) return dvId.replace(/[{}]/g, '').toLowerCase();
 
   // Source 3: Parent Xrm form context (embedded iframe)
   try {
@@ -80,8 +78,7 @@ function resolveAnalysisId(): string {
       /* cross-origin */
     }
     try {
-      if (window.top && window.top !== window && window.top !== window.parent)
-        frames.push(window.top!);
+      if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
     } catch {
       /* cross-origin */
     }
@@ -91,7 +88,7 @@ function resolveAnalysisId(): string {
         const xrm = (frame as any).Xrm;
         if (xrm?.Page?.data?.entity) {
           const id = xrm.Page.data.entity.getId();
-          if (id) return id.replace(/[{}]/g, "").toLowerCase();
+          if (id) return id.replace(/[{}]/g, '').toLowerCase();
         }
       } catch {
         /* unavailable */
@@ -102,7 +99,7 @@ function resolveAnalysisId(): string {
     /* frame access error */
   }
 
-  return "";
+  return '';
 }
 
 /**
@@ -114,7 +111,7 @@ function resolveAnalysisId(): string {
  * Web API returns it as _sprk_documentid_value.
  */
 function resolveDocumentId(): string {
-  const explicit = appParams.get("documentId");
+  const explicit = appParams.get('documentId');
   if (explicit) return explicit;
 
   try {
@@ -126,8 +123,7 @@ function resolveDocumentId(): string {
       /* cross-origin */
     }
     try {
-      if (window.top && window.top !== window && window.top !== window.parent)
-        frames.push(window.top!);
+      if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
     } catch {
       /* cross-origin */
     }
@@ -136,11 +132,11 @@ function resolveDocumentId(): string {
       try {
         const xrm = (frame as any).Xrm;
         // Try sprk_documentid (correct field name on sprk_analysis entity)
-        const attr = xrm?.Page?.getAttribute?.("sprk_documentid");
+        const attr = xrm?.Page?.getAttribute?.('sprk_documentid');
         if (attr) {
           const val = attr.getValue();
           if (Array.isArray(val) && val.length > 0 && val[0].id) {
-            return val[0].id.replace(/[{}]/g, "").toLowerCase();
+            return val[0].id.replace(/[{}]/g, '').toLowerCase();
           }
         }
       } catch {
@@ -152,10 +148,8 @@ function resolveDocumentId(): string {
     /* frame access error */
   }
 
-  console.warn(
-    "[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context",
-  );
-  return "";
+  console.warn('[AnalysisWorkspace] Could not resolve documentId from URL or Xrm form context');
+  return '';
 }
 
 /**
@@ -164,7 +158,7 @@ function resolveDocumentId(): string {
  *   2. Xrm organizationSettings.tenantId (frame-walk)
  */
 function resolveTenantId(): string {
-  const explicit = appParams.get("tenantId");
+  const explicit = appParams.get('tenantId');
   if (explicit) return explicit;
 
   try {
@@ -176,8 +170,7 @@ function resolveTenantId(): string {
       /* cross-origin */
     }
     try {
-      if (window.top && window.top !== window && window.top !== window.parent)
-        frames.push(window.top!);
+      if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
     } catch {
       /* cross-origin */
     }
@@ -185,9 +178,8 @@ function resolveTenantId(): string {
     for (const frame of frames) {
       try {
         const xrm = (frame as any).Xrm;
-        const tid =
-          xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
-        if (tid) return tid.replace(/[{}]/g, "").toLowerCase();
+        const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+        if (tid) return tid.replace(/[{}]/g, '').toLowerCase();
       } catch {
         /* unavailable */
       }
@@ -197,7 +189,7 @@ function resolveTenantId(): string {
     /* frame access error */
   }
 
-  return "";
+  return '';
 }
 
 const analysisId = resolveAnalysisId();
@@ -230,13 +222,9 @@ function ThemeRoot(): JSX.Element {
   }, [theme]);
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={theme} style={{ height: '100%' }}>
       <AuthProvider>
-        <App
-          analysisId={analysisId}
-          documentId={documentId}
-          tenantId={tenantId}
-        />
+        <App analysisId={analysisId} documentId={documentId} tenantId={tenantId} />
       </AuthProvider>
     </FluentProvider>
   );
@@ -246,8 +234,7 @@ function ThemeRoot(): JSX.Element {
 // Render
 // ---------------------------------------------------------------------------
 
-const container = document.getElementById("root");
-if (!container)
-  throw new Error("[AnalysisWorkspace] Root container #root not found in DOM.");
+const container = document.getElementById('root');
+if (!container) throw new Error('[AnalysisWorkspace] Root container #root not found in DOM.');
 
 createRoot(container).render(<ThemeRoot />);

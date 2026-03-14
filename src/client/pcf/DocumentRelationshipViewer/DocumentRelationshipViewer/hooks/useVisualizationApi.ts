@@ -5,13 +5,10 @@
  * Handles loading states, errors, and automatic refetching when parameters change.
  */
 
-import * as React from "react";
-import {
-  VisualizationApiService,
-  VisualizationApiError,
-} from "../services/VisualizationApiService";
-import type { DocumentNode, DocumentEdge } from "../types/graph";
-import type { VisualizationQueryParams, GraphMetadata } from "../types/api";
+import * as React from 'react';
+import { VisualizationApiService, VisualizationApiError } from '../services/VisualizationApiService';
+import type { DocumentNode, DocumentEdge } from '../types/graph';
+import type { VisualizationQueryParams, GraphMetadata } from '../types/api';
 
 /**
  * Configuration options for the visualization API hook.
@@ -74,9 +71,7 @@ export interface VisualizationApiState {
  * });
  * ```
  */
-export function useVisualizationApi(
-  options: UseVisualizationApiOptions,
-): VisualizationApiState {
+export function useVisualizationApi(options: UseVisualizationApiOptions): VisualizationApiState {
   const {
     apiBaseUrl,
     documentId,
@@ -93,9 +88,7 @@ export function useVisualizationApi(
   const [edges, setEdges] = React.useState<DocumentEdge[]>([]);
   const [metadata, setMetadata] = React.useState<GraphMetadata | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [error, setError] = React.useState<
-    VisualizationApiError | Error | null
-  >(null);
+  const [error, setError] = React.useState<VisualizationApiError | Error | null>(null);
 
   // Create service instance (memoized by apiBaseUrl)
   const service = React.useMemo(() => {
@@ -114,12 +107,12 @@ export function useVisualizationApi(
       includeKeywords: true,
       includeParentEntity: true,
     }),
-    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes],
+    [tenantId, threshold, limit, depth, documentTypes, relationshipTypes]
   );
 
   // Fetch function
   const fetchData = React.useCallback(async () => {
-    if (!enabled || !documentId || !tenantId || documentId.trim() === "") {
+    if (!enabled || !documentId || !tenantId || documentId.trim() === '') {
       // Clear data if not enabled or missing required params
       setNodes([]);
       setEdges([]);
@@ -132,7 +125,7 @@ export function useVisualizationApi(
     setError(null);
 
     try {
-      console.log("[VisualizationApi] Fetching related documents:", {
+      console.log('[VisualizationApi] Fetching related documents:', {
         documentId,
         tenantId,
         threshold,
@@ -142,7 +135,7 @@ export function useVisualizationApi(
 
       const result = await service.getRelatedDocuments(documentId, queryParams);
 
-      console.log("[VisualizationApi] Received data:", {
+      console.log('[VisualizationApi] Received data:', {
         nodeCount: result.nodes.length,
         edgeCount: result.edges.length,
         searchLatencyMs: result.metadata.searchLatencyMs,
@@ -152,16 +145,14 @@ export function useVisualizationApi(
       setEdges(result.edges);
       setMetadata(result.metadata);
     } catch (err) {
-      console.error("[VisualizationApi] Error fetching data:", err);
+      console.error('[VisualizationApi] Error fetching data:', err);
 
       if (err instanceof VisualizationApiError) {
         setError(err);
 
         // For 404, show empty graph instead of error
         if (err.isNotFound()) {
-          console.log(
-            "[VisualizationApi] Document not found or has no embedding, showing empty graph",
-          );
+          console.log('[VisualizationApi] Document not found or has no embedding, showing empty graph');
           setNodes([]);
           setEdges([]);
           setMetadata(null);
@@ -169,21 +160,12 @@ export function useVisualizationApi(
       } else if (err instanceof Error) {
         setError(err);
       } else {
-        setError(new Error("Unknown error occurred"));
+        setError(new Error('Unknown error occurred'));
       }
     } finally {
       setIsLoading(false);
     }
-  }, [
-    enabled,
-    documentId,
-    tenantId,
-    service,
-    queryParams,
-    threshold,
-    limit,
-    depth,
-  ]);
+  }, [enabled, documentId, tenantId, service, queryParams, threshold, limit, depth]);
 
   // Fetch on mount and when dependencies change
   React.useEffect(() => {
@@ -206,20 +188,18 @@ export function useVisualizationApi(
  * @param error - The error object
  * @returns User-friendly error message
  */
-export function formatVisualizationError(
-  error: VisualizationApiError | Error | null,
-): string {
-  if (!error) return "";
+export function formatVisualizationError(error: VisualizationApiError | Error | null): string {
+  if (!error) return '';
 
   if (error instanceof VisualizationApiError) {
     if (error.isNotFound()) {
-      return "Document not found or has no relationship data yet. The document may still be processing.";
+      return 'Document not found or has no relationship data yet. The document may still be processing.';
     }
     if (error.isUnauthorized()) {
       return "You don't have permission to view relationships for this document.";
     }
-    return error.message || "Failed to load document relationships.";
+    return error.message || 'Failed to load document relationships.';
   }
 
-  return error.message || "An unexpected error occurred.";
+  return error.message || 'An unexpected error occurred.';
 }

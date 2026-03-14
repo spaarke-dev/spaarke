@@ -11,7 +11,7 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Dropdown,
   Option,
@@ -20,12 +20,9 @@ import {
   tokens,
   SelectionEvents,
   OptionOnSelectData,
-} from "@fluentui/react-components";
-import { FilterRegular } from "@fluentui/react-icons";
-import {
-  RecordTypeFilter,
-  RECORD_TYPE_OPTIONS,
-} from "../services/useRecordMatch";
+} from '@fluentui/react-components';
+import { FilterRegular } from '@fluentui/react-icons';
+import { RecordTypeFilter, RECORD_TYPE_OPTIONS } from '../services/useRecordMatch';
 
 /**
  * Component Props
@@ -48,13 +45,13 @@ export interface RecordTypeSelectorProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   labelContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   label: {
@@ -63,11 +60,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   icon: {
-    fontSize: "16px",
+    fontSize: '16px',
     color: tokens.colorNeutralForeground3,
   },
   dropdown: {
-    minWidth: "160px",
+    minWidth: '160px',
   },
 });
 
@@ -91,16 +88,14 @@ export const RecordTypeSelector: React.FC<RecordTypeSelectorProps> = ({
         onChange(data.optionValue as RecordTypeFilter);
       }
     },
-    [onChange],
+    [onChange]
   );
 
   // Get the display label for the current value
-  const selectedLabel =
-    RECORD_TYPE_OPTIONS.find((opt) => opt.value === value)?.label ||
-    "All Records";
+  const selectedLabel = RECORD_TYPE_OPTIONS.find(opt => opt.value === value)?.label || 'All Records';
 
   return (
-    <div className={`${styles.container} ${className || ""}`}>
+    <div className={`${styles.container} ${className || ''}`}>
       {showLabel && (
         <div className={styles.labelContainer}>
           <FilterRegular className={styles.icon} />
@@ -115,7 +110,7 @@ export const RecordTypeSelector: React.FC<RecordTypeSelectorProps> = ({
         disabled={disabled}
         aria-label="Select record type to match"
       >
-        {RECORD_TYPE_OPTIONS.map((option) => (
+        {RECORD_TYPE_OPTIONS.map(option => (
           <Option key={option.value} value={option.value}>
             {option.label}
           </Option>

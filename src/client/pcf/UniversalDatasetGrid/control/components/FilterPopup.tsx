@@ -7,7 +7,7 @@
  * Task 016: Add Column/Field Filters
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Popover,
   PopoverTrigger,
@@ -21,51 +21,39 @@ import {
   Text,
   Divider,
   Field,
-} from "@fluentui/react-components";
-import {
-  Filter20Regular,
-  Filter20Filled,
-  Dismiss20Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Filter20Regular, Filter20Filled, Dismiss20Regular } from '@fluentui/react-icons';
 
 /**
  * Filter operator types for different data types
  */
-export type TextFilterOperator =
-  | "contains"
-  | "equals"
-  | "startswith"
-  | "endswith";
-export type ChoiceFilterOperator = "equals" | "in";
-export type DateFilterOperator = "equals" | "before" | "after" | "between";
+export type TextFilterOperator = 'contains' | 'equals' | 'startswith' | 'endswith';
+export type ChoiceFilterOperator = 'equals' | 'in';
+export type DateFilterOperator = 'equals' | 'before' | 'after' | 'between';
 
 /**
  * Filter value structure for different filter types
  */
 export interface TextFilterValue {
-  type: "text";
+  type: 'text';
   operator: TextFilterOperator;
   value: string;
 }
 
 export interface ChoiceFilterValue {
-  type: "choice";
+  type: 'choice';
   operator: ChoiceFilterOperator;
   values: (string | number)[];
 }
 
 export interface DateFilterValue {
-  type: "date";
+  type: 'date';
   operator: DateFilterOperator;
   value?: Date;
   endValue?: Date; // For 'between' operator
 }
 
-export type FilterValue =
-  | TextFilterValue
-  | ChoiceFilterValue
-  | DateFilterValue
-  | null;
+export type FilterValue = TextFilterValue | ChoiceFilterValue | DateFilterValue | null;
 
 /**
  * Choice option for OptionSet columns
@@ -107,111 +95,107 @@ export interface FilterPopupProps {
 const useStyles = makeStyles({
   popoverSurface: {
     padding: tokens.spacingVerticalM,
-    minWidth: "280px",
-    maxWidth: "350px",
+    minWidth: '280px',
+    maxWidth: '350px',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: tokens.spacingVerticalM,
   },
   filterSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   operatorDropdown: {
-    minWidth: "120px",
+    minWidth: '120px',
   },
   inputRow: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    alignItems: "center",
+    alignItems: 'center',
   },
   buttonRow: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    justifyContent: "flex-end",
+    justifyContent: 'flex-end',
     marginTop: tokens.spacingVerticalM,
   },
   triggerButton: {
-    minWidth: "auto",
-    padding: "2px",
+    minWidth: 'auto',
+    padding: '2px',
   },
   activeIndicator: {
-    position: "absolute" as const,
-    top: "-2px",
-    right: "-2px",
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
+    position: 'absolute' as const,
+    top: '-2px',
+    right: '-2px',
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
   },
   triggerWrapper: {
-    position: "relative" as const,
-    display: "inline-flex",
+    position: 'relative' as const,
+    display: 'inline-flex',
   },
 });
 
 /**
  * Get filter operators based on data type
  */
-function getOperatorsForDataType(
-  dataType: string,
-): { value: string; label: string }[] {
+function getOperatorsForDataType(dataType: string): { value: string; label: string }[] {
   const normalizedType = dataType.toLowerCase();
 
-  if (normalizedType.includes("date") || normalizedType.includes("time")) {
+  if (normalizedType.includes('date') || normalizedType.includes('time')) {
     return [
-      { value: "equals", label: "Equals" },
-      { value: "before", label: "Before" },
-      { value: "after", label: "After" },
-      { value: "between", label: "Between" },
+      { value: 'equals', label: 'Equals' },
+      { value: 'before', label: 'Before' },
+      { value: 'after', label: 'After' },
+      { value: 'between', label: 'Between' },
     ];
   }
 
   if (
-    normalizedType.includes("optionset") ||
-    normalizedType.includes("picklist") ||
-    normalizedType.includes("choice")
+    normalizedType.includes('optionset') ||
+    normalizedType.includes('picklist') ||
+    normalizedType.includes('choice')
   ) {
     return [
-      { value: "equals", label: "Equals" },
-      { value: "in", label: "Is one of" },
+      { value: 'equals', label: 'Equals' },
+      { value: 'in', label: 'Is one of' },
     ];
   }
 
   // Default: text operators
   return [
-    { value: "contains", label: "Contains" },
-    { value: "equals", label: "Equals" },
-    { value: "startswith", label: "Starts with" },
-    { value: "endswith", label: "Ends with" },
+    { value: 'contains', label: 'Contains' },
+    { value: 'equals', label: 'Equals' },
+    { value: 'startswith', label: 'Starts with' },
+    { value: 'endswith', label: 'Ends with' },
   ];
 }
 
 /**
  * Determine filter type from data type
  */
-function getFilterTypeFromDataType(
-  dataType: string,
-): "text" | "choice" | "date" {
+function getFilterTypeFromDataType(dataType: string): 'text' | 'choice' | 'date' {
   const normalizedType = dataType.toLowerCase();
 
-  if (normalizedType.includes("date") || normalizedType.includes("time")) {
-    return "date";
+  if (normalizedType.includes('date') || normalizedType.includes('time')) {
+    return 'date';
   }
 
   if (
-    normalizedType.includes("optionset") ||
-    normalizedType.includes("picklist") ||
-    normalizedType.includes("choice")
+    normalizedType.includes('optionset') ||
+    normalizedType.includes('picklist') ||
+    normalizedType.includes('choice')
   ) {
-    return "choice";
+    return 'choice';
   }
 
-  return "text";
+  return 'text';
 }
 
 /**
@@ -242,39 +226,36 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
   const operators = getOperatorsForDataType(dataType);
 
   const [localOperator, setLocalOperator] = React.useState<string>(
-    filterValue
-      ? (filterValue as TextFilterValue | ChoiceFilterValue | DateFilterValue)
-          .operator
-      : operators[0].value,
+    filterValue ? (filterValue as TextFilterValue | ChoiceFilterValue | DateFilterValue).operator : operators[0].value
   );
   const [localTextValue, setLocalTextValue] = React.useState<string>(
-    filterValue?.type === "text" ? filterValue.value : "",
+    filterValue?.type === 'text' ? filterValue.value : ''
   );
-  const [localChoiceValues, setLocalChoiceValues] = React.useState<
-    (string | number)[]
-  >(filterValue?.type === "choice" ? filterValue.values : []);
+  const [localChoiceValues, setLocalChoiceValues] = React.useState<(string | number)[]>(
+    filterValue?.type === 'choice' ? filterValue.values : []
+  );
   const [localDateValue, setLocalDateValue] = React.useState<Date | undefined>(
-    filterValue?.type === "date" ? filterValue.value : undefined,
+    filterValue?.type === 'date' ? filterValue.value : undefined
   );
-  const [localDateEndValue, setLocalDateEndValue] = React.useState<
-    Date | undefined
-  >(filterValue?.type === "date" ? filterValue.endValue : undefined);
+  const [localDateEndValue, setLocalDateEndValue] = React.useState<Date | undefined>(
+    filterValue?.type === 'date' ? filterValue.endValue : undefined
+  );
 
   // Reset local state when filterValue prop changes
   React.useEffect(() => {
-    if (filterValue?.type === "text") {
+    if (filterValue?.type === 'text') {
       setLocalOperator(filterValue.operator);
       setLocalTextValue(filterValue.value);
-    } else if (filterValue?.type === "choice") {
+    } else if (filterValue?.type === 'choice') {
       setLocalOperator(filterValue.operator);
       setLocalChoiceValues(filterValue.values);
-    } else if (filterValue?.type === "date") {
+    } else if (filterValue?.type === 'date') {
       setLocalOperator(filterValue.operator);
       setLocalDateValue(filterValue.value);
       setLocalDateEndValue(filterValue.endValue);
     } else {
       setLocalOperator(operators[0].value);
-      setLocalTextValue("");
+      setLocalTextValue('');
       setLocalChoiceValues([]);
       setLocalDateValue(undefined);
       setLocalDateEndValue(undefined);
@@ -292,24 +273,24 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
   const handleApplyFilter = () => {
     let newFilterValue: FilterValue = null;
 
-    if (filterType === "text" && localTextValue.trim()) {
+    if (filterType === 'text' && localTextValue.trim()) {
       newFilterValue = {
-        type: "text",
+        type: 'text',
         operator: localOperator as TextFilterOperator,
         value: localTextValue.trim(),
       };
-    } else if (filterType === "choice" && localChoiceValues.length > 0) {
+    } else if (filterType === 'choice' && localChoiceValues.length > 0) {
       newFilterValue = {
-        type: "choice",
+        type: 'choice',
         operator: localOperator as ChoiceFilterOperator,
         values: localChoiceValues,
       };
-    } else if (filterType === "date" && localDateValue) {
+    } else if (filterType === 'date' && localDateValue) {
       newFilterValue = {
-        type: "date",
+        type: 'date',
         operator: localOperator as DateFilterOperator,
         value: localDateValue,
-        endValue: localOperator === "between" ? localDateEndValue : undefined,
+        endValue: localOperator === 'between' ? localDateEndValue : undefined,
       };
     }
 
@@ -319,7 +300,7 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
 
   const handleClearFilter = () => {
     setLocalOperator(operators[0].value);
-    setLocalTextValue("");
+    setLocalTextValue('');
     setLocalChoiceValues([]);
     setLocalDateValue(undefined);
     setLocalDateEndValue(undefined);
@@ -331,25 +312,25 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
 
   // Render filter input based on type
   const renderFilterInput = () => {
-    if (filterType === "text") {
+    if (filterType === 'text') {
       return (
         <Input
           placeholder={`Filter ${columnDisplayName}...`}
           value={localTextValue}
           onChange={(e, data) => setLocalTextValue(data.value)}
-          style={{ width: "100%" }}
+          style={{ width: '100%' }}
         />
       );
     }
 
-    if (filterType === "choice") {
+    if (filterType === 'choice') {
       return (
         <Dropdown
           placeholder={`Select ${columnDisplayName}...`}
-          multiselect={localOperator === "in"}
+          multiselect={localOperator === 'in'}
           selectedOptions={localChoiceValues.map(String)}
           onOptionSelect={(e, data) => {
-            if (localOperator === "in") {
+            if (localOperator === 'in') {
               // Multiselect: toggle selection
               const selectedValues = data.selectedOptions.map((opt: string) => {
                 // Try to parse as number if original was number
@@ -359,15 +340,13 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
               setLocalChoiceValues(selectedValues);
             } else {
               // Single select
-              const numVal = parseInt(data.optionValue || "", 10);
-              setLocalChoiceValues([
-                !isNaN(numVal) ? numVal : data.optionValue || "",
-              ]);
+              const numVal = parseInt(data.optionValue || '', 10);
+              setLocalChoiceValues([!isNaN(numVal) ? numVal : data.optionValue || '']);
             }
           }}
-          style={{ width: "100%" }}
+          style={{ width: '100%' }}
         >
-          {choiceOptions.map((opt) => (
+          {choiceOptions.map(opt => (
             <Option key={String(opt.value)} value={String(opt.value)}>
               {opt.label}
             </Option>
@@ -376,17 +355,17 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
       );
     }
 
-    if (filterType === "date") {
+    if (filterType === 'date') {
       // Format date for input type="date" (YYYY-MM-DD)
       const formatDateForInput = (date: Date | undefined): string => {
-        if (!date) return "";
-        return date.toISOString().split("T")[0];
+        if (!date) return '';
+        return date.toISOString().split('T')[0];
       };
 
       // Parse date from input value
       const parseDateFromInput = (value: string): Date | undefined => {
         if (!value) return undefined;
-        const date = new Date(value + "T00:00:00");
+        const date = new Date(value + 'T00:00:00');
         return isNaN(date.getTime()) ? undefined : date;
       };
 
@@ -396,21 +375,17 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
             <Input
               type="date"
               value={formatDateForInput(localDateValue)}
-              onChange={(_e, data) =>
-                setLocalDateValue(parseDateFromInput(data.value))
-              }
-              style={{ width: "100%" }}
+              onChange={(_e, data) => setLocalDateValue(parseDateFromInput(data.value))}
+              style={{ width: '100%' }}
             />
           </Field>
-          {localOperator === "between" && (
+          {localOperator === 'between' && (
             <Field label="End Date">
               <Input
                 type="date"
                 value={formatDateForInput(localDateEndValue)}
-                onChange={(_e, data) =>
-                  setLocalDateEndValue(parseDateFromInput(data.value))
-                }
-                style={{ width: "100%" }}
+                onChange={(_e, data) => setLocalDateEndValue(parseDateFromInput(data.value))}
+                style={{ width: '100%' }}
               />
             </Field>
           )}
@@ -422,11 +397,7 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
   };
 
   return (
-    <Popover
-      open={isOpen}
-      onOpenChange={(e, data) => handleOpenChange(data.open)}
-      positioning="below-start"
-    >
+    <Popover open={isOpen} onOpenChange={(e, data) => handleOpenChange(data.open)} positioning="below-start">
       <PopoverTrigger disableButtonEnhancement>
         <span className={styles.triggerWrapper}>
           <Button
@@ -435,11 +406,7 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
             icon={hasActiveFilter ? <Filter20Filled /> : <Filter20Regular />}
             className={styles.triggerButton}
             aria-label={`Filter ${columnDisplayName}`}
-            title={
-              hasActiveFilter
-                ? `Filter active on ${columnDisplayName}`
-                : `Filter ${columnDisplayName}`
-            }
+            title={hasActiveFilter ? `Filter active on ${columnDisplayName}` : `Filter ${columnDisplayName}`}
           />
           {hasActiveFilter && <span className={styles.activeIndicator} />}
         </span>
@@ -460,23 +427,16 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
         <Divider />
 
         {/* Filter controls */}
-        <div
-          className={styles.filterSection}
-          style={{ marginTop: tokens.spacingVerticalM }}
-        >
+        <div className={styles.filterSection} style={{ marginTop: tokens.spacingVerticalM }}>
           {/* Operator selector */}
           <Dropdown
             className={styles.operatorDropdown}
-            value={
-              operators.find((op) => op.value === localOperator)?.label || ""
-            }
+            value={operators.find(op => op.value === localOperator)?.label || ''}
             selectedOptions={[localOperator]}
-            onOptionSelect={(e, data) =>
-              setLocalOperator(data.optionValue || operators[0].value)
-            }
-            style={{ width: "100%" }}
+            onOptionSelect={(e, data) => setLocalOperator(data.optionValue || operators[0].value)}
+            style={{ width: '100%' }}
           >
-            {operators.map((op) => (
+            {operators.map(op => (
               <Option key={op.value} value={op.value}>
                 {op.label}
               </Option>
@@ -489,11 +449,7 @@ export const FilterPopup: React.FC<FilterPopupProps> = ({
 
         {/* Action buttons */}
         <div className={styles.buttonRow}>
-          <Button
-            appearance="secondary"
-            onClick={handleClearFilter}
-            disabled={!hasActiveFilter}
-          >
+          <Button appearance="secondary" onClick={handleClearFilter} disabled={!hasActiveFilter}>
             Clear
           </Button>
           <Button appearance="primary" onClick={handleApplyFilter}>

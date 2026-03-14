@@ -7,25 +7,20 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Skeleton,
-  SkeletonItem,
-} from "@fluentui/react-components";
-import { ILoadingStateProps } from "../types";
+import * as React from 'react';
+import { makeStyles, tokens, Skeleton, SkeletonItem } from '@fluentui/react-components';
+import { ILoadingStateProps } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalM,
   },
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -33,58 +28,58 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
   icon: {
-    width: "32px",
-    height: "32px",
+    width: '32px',
+    height: '32px',
   },
   titleGroup: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     flex: 1,
   },
   title: {
-    width: "60%",
-    height: "20px",
+    width: '60%',
+    height: '20px',
   },
   subtitle: {
-    width: "40%",
-    height: "14px",
+    width: '40%',
+    height: '14px',
   },
   badge: {
-    width: "48px",
-    height: "24px",
+    width: '48px',
+    height: '24px',
   },
   content: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     marginTop: tokens.spacingVerticalS,
   },
   line: {
-    height: "14px",
+    height: '14px',
   },
   lineFull: {
-    width: "100%",
+    width: '100%',
   },
   lineMedium: {
-    width: "80%",
+    width: '80%',
   },
   lineShort: {
-    width: "50%",
+    width: '50%',
   },
   metadata: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalM,
     marginTop: tokens.spacingVerticalS,
   },
   metaItem: {
-    width: "80px",
-    height: "14px",
+    width: '80px',
+    height: '14px',
   },
 });
 
@@ -109,18 +104,9 @@ const SkeletonCard: React.FC = () => {
 
         {/* Content: Snippet lines */}
         <div className={styles.content}>
-          <SkeletonItem
-            shape="rectangle"
-            className={`${styles.line} ${styles.lineFull}`}
-          />
-          <SkeletonItem
-            shape="rectangle"
-            className={`${styles.line} ${styles.lineMedium}`}
-          />
-          <SkeletonItem
-            shape="rectangle"
-            className={`${styles.line} ${styles.lineShort}`}
-          />
+          <SkeletonItem shape="rectangle" className={`${styles.line} ${styles.lineFull}`} />
+          <SkeletonItem shape="rectangle" className={`${styles.line} ${styles.lineMedium}`} />
+          <SkeletonItem shape="rectangle" className={`${styles.line} ${styles.lineShort}`} />
         </div>
 
         {/* Metadata row */}
@@ -147,7 +133,7 @@ export const LoadingState: React.FC<ILoadingStateProps> = ({ count = 3 }) => {
 
   return (
     <div className={styles.container}>
-      {skeletons.map((index) => (
+      {skeletons.map(index => (
         <SkeletonCard key={index} />
       ))}
     </div>

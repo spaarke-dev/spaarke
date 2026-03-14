@@ -18,19 +18,14 @@
  * @version 1.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  Theme,
-} from "@fluentui/react-components";
-import { AssociationResolverApp } from "./AssociationResolverApp";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { AssociationResolverApp } from './AssociationResolverApp';
 
 // Control version for footer display
-const CONTROL_VERSION = "1.0.6";
+const CONTROL_VERSION = '1.0.6';
 
 /**
  * Record Type lookup reference extracted from bound property
@@ -51,21 +46,18 @@ function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
   }
 
   // Check localStorage user preference
-  const stored = localStorage.getItem("spaarke-theme");
-  if (stored === "dark") return webDarkTheme;
-  if (stored === "light") return webLightTheme;
+  const stored = localStorage.getItem('spaarke-theme');
+  if (stored === 'dark') return webDarkTheme;
+  if (stored === 'light') return webLightTheme;
 
   // Check URL flag
   const url = window.location.href;
-  if (
-    url.includes("themeOption%3Ddarkmode") ||
-    url.includes("themeOption=darkmode")
-  ) {
+  if (url.includes('themeOption%3Ddarkmode') || url.includes('themeOption=darkmode')) {
     return webDarkTheme;
   }
 
   // Check system preference
-  if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
     return webDarkTheme;
   }
 
@@ -75,17 +67,14 @@ function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
 /**
  * AssociationResolver PCF Control
  */
-export class AssociationResolver implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class AssociationResolver implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private context: ComponentFramework.Context<IInputs>;
   private notifyOutputChanged: () => void;
 
   // Output values
-  private _regardingRecordId: string = "";
-  private _regardingRecordName: string = "";
+  private _regardingRecordId = '';
+  private _regardingRecordName = '';
 
   constructor() {
     // Constructor
@@ -98,7 +87,7 @@ export class AssociationResolver implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.context = context;
     this.notifyOutputChanged = notifyOutputChanged;
@@ -143,10 +132,7 @@ export class AssociationResolver implements ComponentFramework.StandardControl<
   /**
    * Handle record selection from child component
    */
-  private handleRecordSelected = (
-    recordId: string,
-    recordName: string,
-  ): void => {
+  private handleRecordSelected = (recordId: string, recordName: string): void => {
     this._regardingRecordId = recordId;
     this._regardingRecordName = recordName;
     this.notifyOutputChanged();
@@ -172,8 +158,8 @@ export class AssociationResolver implements ComponentFramework.StandardControl<
 
     return {
       id: ref.id,
-      name: ref.name || "",
-      entityLogicalName: ref.entityType || "sprk_recordtype_ref",
+      name: ref.name || '',
+      entityLogicalName: ref.entityType || 'sprk_recordtype_ref',
     };
   }
 
@@ -185,24 +171,22 @@ export class AssociationResolver implements ComponentFramework.StandardControl<
 
     const theme = resolveTheme(this.context);
     const regardingRecordType = this.getRecordTypeReference();
-    const apiBaseUrl =
-      this.context.parameters.apiBaseUrl?.raw ||
-      "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+    const apiBaseUrl = this.context.parameters.apiBaseUrl?.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
 
     // React 16: ReactDOM.render (NOT createRoot().render())
     ReactDOM.render(
       React.createElement(
         FluentProvider,
-        { theme, style: { height: "100%", width: "100%" } },
+        { theme, style: { height: '100%', width: '100%' } },
         React.createElement(AssociationResolverApp, {
           context: this.context,
           regardingRecordType,
           apiBaseUrl,
           onRecordSelected: this.handleRecordSelected,
           version: CONTROL_VERSION,
-        }),
+        })
       ),
-      this.container,
+      this.container
     );
   }
 }

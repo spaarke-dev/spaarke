@@ -5,58 +5,43 @@
  * Uses @spaarke/auth authenticatedFetch for API calls.
  */
 
-import { authenticatedFetch } from "./authInit";
+import { authenticatedFetch } from './authInit';
 import type {
   IFilePreviewServices,
   IOpenLinksResponse,
-} from "../../../../shared/Spaarke.UI.Components/dist/components/FilePreview";
+} from '../../../../shared/Spaarke.UI.Components/dist/components/FilePreview';
 
 /**
  * Create an IFilePreviewServices adapter for the DocumentRelationshipViewer.
  *
  * @param apiBaseUrl - BFF API base URL
  */
-export function createFilePreviewServices(
-  apiBaseUrl: string,
-): IFilePreviewServices {
+export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServices {
   return {
-    getDocumentPreviewUrl: async (
-      documentId: string,
-    ): Promise<string | null> => {
+    getDocumentPreviewUrl: async (documentId: string): Promise<string | null> => {
       try {
-        const res = await authenticatedFetch(
-          `${apiBaseUrl}/api/documents/${documentId}/preview-url`,
-        );
+        const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${documentId}/preview-url`);
         if (!res.ok) return null;
         const data = await res.json();
         return data.previewUrl ?? data.url ?? null;
       } catch {
-        console.error("[FilePreview] Failed to get preview URL:", documentId);
+        console.error('[FilePreview] Failed to get preview URL:', documentId);
         return null;
       }
     },
 
-    getDocumentOpenLinks: async (
-      documentId: string,
-    ): Promise<IOpenLinksResponse | null> => {
+    getDocumentOpenLinks: async (documentId: string): Promise<IOpenLinksResponse | null> => {
       try {
-        const res = await authenticatedFetch(
-          `${apiBaseUrl}/api/documents/${documentId}/open-links`,
-        );
+        const res = await authenticatedFetch(`${apiBaseUrl}/api/documents/${documentId}/open-links`);
         if (!res.ok) return null;
         return await res.json();
       } catch {
-        console.error("[FilePreview] Failed to get open links:", documentId);
+        console.error('[FilePreview] Failed to get open links:', documentId);
         return null;
       }
     },
 
-    navigateToEntity: (params: {
-      action: string;
-      entityName: string;
-      entityId: string;
-      openInNewWindow?: boolean;
-    }) => {
+    navigateToEntity: (params: { action: string; entityName: string; entityId: string; openInNewWindow?: boolean }) => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrm = (window as any).Xrm;
@@ -67,16 +52,14 @@ export function createFilePreviewServices(
           });
         } else {
           // Fallback: open in new window
-          const clientUrl =
-            xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ??
-            window.location.origin;
+          const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
           window.open(
             `${clientUrl}/main.aspx?etn=${params.entityName}&id=${params.entityId}&pagetype=entityrecord`,
-            params.openInNewWindow ? "_blank" : "_self",
+            params.openInNewWindow ? '_blank' : '_self'
           );
         }
       } catch (err) {
-        console.error("[FilePreview] Failed to navigate:", err);
+        console.error('[FilePreview] Failed to navigate:', err);
       }
     },
 
@@ -84,9 +67,7 @@ export function createFilePreviewServices(
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrm = (window as any).Xrm;
-        const clientUrl =
-          xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ??
-          window.location.origin;
+        const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
         const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${documentId}&pagetype=entityrecord`;
         await navigator.clipboard.writeText(url);
         return true;
@@ -95,10 +76,7 @@ export function createFilePreviewServices(
       }
     },
 
-    setWorkspaceFlag: async (
-      _documentId: string,
-      _flag: boolean,
-    ): Promise<boolean> => {
+    setWorkspaceFlag: async (_documentId: string, _flag: boolean): Promise<boolean> => {
       // Stub — workspace flag not yet wired in the viewer context
       return true;
     },

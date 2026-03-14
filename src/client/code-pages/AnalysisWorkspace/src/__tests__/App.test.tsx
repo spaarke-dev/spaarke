@@ -14,10 +14,10 @@
  * @see App.tsx
  */
 
-import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { App } from "../App";
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { App } from '../App';
 import {
   TEST_ANALYSIS_ID,
   TEST_DOCUMENT_ID,
@@ -25,7 +25,7 @@ import {
   TEST_TOKEN,
   buildAnalysisRecord,
   buildDocumentMetadata,
-} from "./mocks/fixtures";
+} from './mocks/fixtures';
 
 // ---------------------------------------------------------------------------
 // Mock hooks
@@ -33,35 +33,35 @@ import {
 
 // Mock useAuth hook
 const mockUseAuth = jest.fn();
-jest.mock("../hooks/useAuth", () => ({
+jest.mock('../hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
 // Mock useAnalysisLoader hook
 const mockUseAnalysisLoader = jest.fn();
-jest.mock("../hooks/useAnalysisLoader", () => ({
+jest.mock('../hooks/useAnalysisLoader', () => ({
   useAnalysisLoader: (opts: unknown) => mockUseAnalysisLoader(opts),
 }));
 
 // Mock useAutoSave hook
 const mockUseAutoSave = jest.fn();
-jest.mock("../hooks/useAutoSave", () => ({
+jest.mock('../hooks/useAutoSave', () => ({
   useAutoSave: (opts: unknown) => mockUseAutoSave(opts),
 }));
 
 // Mock useExportAnalysis hook
 const mockUseExportAnalysis = jest.fn();
-jest.mock("../hooks/useExportAnalysis", () => ({
+jest.mock('../hooks/useExportAnalysis', () => ({
   useExportAnalysis: (opts: unknown) => mockUseExportAnalysis(opts),
 }));
 
 // Mock useSelectionBroadcast hook (void return, just needs to not crash)
-jest.mock("../hooks/useSelectionBroadcast", () => ({
+jest.mock('../hooks/useSelectionBroadcast', () => ({
   useSelectionBroadcast: jest.fn(),
 }));
 
 // Mock usePanelResize hook
-jest.mock("../hooks/usePanelResize", () => ({
+jest.mock('../hooks/usePanelResize', () => ({
   usePanelResize: () => ({
     leftPanelWidth: 600,
     rightPanelWidth: 400,
@@ -75,42 +75,29 @@ jest.mock("../hooks/usePanelResize", () => ({
 }));
 
 // Mock child components to simplify rendering
-jest.mock("../components/EditorPanel", () => ({
-  EditorPanel: React.forwardRef(function MockEditorPanel(
-    props: Record<string, unknown>,
-    _ref: React.Ref<unknown>,
-  ) {
-    return React.createElement(
-      "div",
-      { "data-testid": "editor-panel" },
-      "Editor Panel",
-    );
+jest.mock('../components/EditorPanel', () => ({
+  EditorPanel: React.forwardRef(function MockEditorPanel(props: Record<string, unknown>, _ref: React.Ref<unknown>) {
+    return React.createElement('div', { 'data-testid': 'editor-panel' }, 'Editor Panel');
   }),
 }));
 
-jest.mock("../components/SourceViewerPanel", () => ({
-  SourceViewerPanel: function MockSourceViewerPanel(props: {
-    isCollapsed: boolean;
-  }) {
+jest.mock('../components/SourceViewerPanel', () => ({
+  SourceViewerPanel: function MockSourceViewerPanel(props: { isCollapsed: boolean }) {
     return React.createElement(
-      "div",
-      { "data-testid": "source-viewer-panel" },
-      props.isCollapsed ? "Collapsed" : "Expanded",
+      'div',
+      { 'data-testid': 'source-viewer-panel' },
+      props.isCollapsed ? 'Collapsed' : 'Expanded'
     );
   },
 }));
 
-jest.mock("../components/PanelSplitter", () => ({
+jest.mock('../components/PanelSplitter', () => ({
   PanelSplitter: function MockPanelSplitter() {
-    return React.createElement(
-      "div",
-      { "data-testid": "panel-splitter" },
-      "Splitter",
-    );
+    return React.createElement('div', { 'data-testid': 'panel-splitter' }, 'Splitter');
   },
 }));
 
-jest.mock("../components/DocumentStreamBridge", () => ({
+jest.mock('../components/DocumentStreamBridge', () => ({
   DocumentStreamBridge: function MockDocStreamBridge() {
     return null;
   },
@@ -128,7 +115,7 @@ function renderApp(overrides?: Partial<Parameters<typeof App>[0]>) {
         documentId={overrides?.documentId ?? TEST_DOCUMENT_ID}
         tenantId={overrides?.tenantId ?? TEST_TENANT_ID}
       />
-    </FluentProvider>,
+    </FluentProvider>
   );
 }
 
@@ -156,7 +143,7 @@ function setupAuthenticatedAndLoaded() {
   });
 
   mockUseAutoSave.mockReturnValue({
-    saveState: "idle",
+    saveState: 'idle',
     lastSavedAt: null,
     saveError: null,
     forceSave: jest.fn(),
@@ -164,7 +151,7 @@ function setupAuthenticatedAndLoaded() {
   });
 
   mockUseExportAnalysis.mockReturnValue({
-    exportState: "idle",
+    exportState: 'idle',
     exportError: null,
     doExport: jest.fn(),
   });
@@ -174,7 +161,7 @@ function setupAuthenticatedAndLoaded() {
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("App", () => {
+describe('App', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -183,7 +170,7 @@ describe("App", () => {
   // 1. Valid Params - Authenticated Layout
   // -----------------------------------------------------------------------
 
-  it("render_ValidParamsAndAuthenticated_ShowsTwoPanelLayout", () => {
+  it('render_ValidParamsAndAuthenticated_ShowsTwoPanelLayout', () => {
     // Arrange
     setupAuthenticatedAndLoaded();
 
@@ -191,16 +178,16 @@ describe("App", () => {
     renderApp();
 
     // Assert: both panels are rendered
-    expect(screen.getByTestId("editor-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("source-viewer-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("panel-splitter")).toBeInTheDocument();
+    expect(screen.getByTestId('editor-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('source-viewer-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('panel-splitter')).toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------
   // 2. Auth Loading State
   // -----------------------------------------------------------------------
 
-  it("render_Authenticating_ShowsSpinner", () => {
+  it('render_Authenticating_ShowsSpinner', () => {
     // Arrange
     mockUseAuth.mockReturnValue({
       token: null,
@@ -224,14 +211,14 @@ describe("App", () => {
       retry: jest.fn(),
     });
     mockUseAutoSave.mockReturnValue({
-      saveState: "idle",
+      saveState: 'idle',
       lastSavedAt: null,
       saveError: null,
       forceSave: jest.fn(),
       notifyContentChanged: jest.fn(),
     });
     mockUseExportAnalysis.mockReturnValue({
-      exportState: "idle",
+      exportState: 'idle',
       exportError: null,
       doExport: jest.fn(),
     });
@@ -240,25 +227,25 @@ describe("App", () => {
     renderApp();
 
     // Assert: auth loading spinner is shown
-    expect(screen.getByTestId("auth-loading")).toBeInTheDocument();
-    expect(screen.getByText("Authenticating...")).toBeInTheDocument();
+    expect(screen.getByTestId('auth-loading')).toBeInTheDocument();
+    expect(screen.getByText('Authenticating...')).toBeInTheDocument();
 
     // Assert: panels are NOT rendered
-    expect(screen.queryByTestId("editor-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId('editor-panel')).not.toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------
   // 3. Auth Error with Retry
   // -----------------------------------------------------------------------
 
-  it("render_AuthErrorRetryable_ShowsErrorWithRetryButton", () => {
+  it('render_AuthErrorRetryable_ShowsErrorWithRetryButton', () => {
     // Arrange
     const retryMock = jest.fn();
     mockUseAuth.mockReturnValue({
       token: null,
       isAuthenticated: false,
       isAuthenticating: false,
-      authError: new Error("Token acquisition failed"),
+      authError: new Error('Token acquisition failed'),
       isXrmUnavailable: false,
       refreshToken: jest.fn(),
       retryAuth: retryMock,
@@ -275,14 +262,14 @@ describe("App", () => {
       retry: jest.fn(),
     });
     mockUseAutoSave.mockReturnValue({
-      saveState: "idle",
+      saveState: 'idle',
       lastSavedAt: null,
       saveError: null,
       forceSave: jest.fn(),
       notifyContentChanged: jest.fn(),
     });
     mockUseExportAnalysis.mockReturnValue({
-      exportState: "idle",
+      exportState: 'idle',
       exportError: null,
       doExport: jest.fn(),
     });
@@ -291,11 +278,11 @@ describe("App", () => {
     renderApp();
 
     // Assert: error state with retry
-    expect(screen.getByTestId("auth-error-token")).toBeInTheDocument();
-    expect(screen.getByText("Authentication Failed")).toBeInTheDocument();
-    expect(screen.getByText("Token acquisition failed")).toBeInTheDocument();
+    expect(screen.getByTestId('auth-error-token')).toBeInTheDocument();
+    expect(screen.getByText('Authentication Failed')).toBeInTheDocument();
+    expect(screen.getByText('Token acquisition failed')).toBeInTheDocument();
 
-    const retryButton = screen.getByTestId("auth-retry-button");
+    const retryButton = screen.getByTestId('auth-retry-button');
     expect(retryButton).toBeInTheDocument();
 
     // Act: click retry
@@ -309,13 +296,13 @@ describe("App", () => {
   // 4. Xrm Unavailable
   // -----------------------------------------------------------------------
 
-  it("render_XrmUnavailable_ShowsDataverseRequiredMessage", () => {
+  it('render_XrmUnavailable_ShowsDataverseRequiredMessage', () => {
     // Arrange
     mockUseAuth.mockReturnValue({
       token: null,
       isAuthenticated: false,
       isAuthenticating: false,
-      authError: new Error("Xrm SDK not available"),
+      authError: new Error('Xrm SDK not available'),
       isXrmUnavailable: true,
       refreshToken: jest.fn(),
       retryAuth: jest.fn(),
@@ -332,14 +319,14 @@ describe("App", () => {
       retry: jest.fn(),
     });
     mockUseAutoSave.mockReturnValue({
-      saveState: "idle",
+      saveState: 'idle',
       lastSavedAt: null,
       saveError: null,
       forceSave: jest.fn(),
       notifyContentChanged: jest.fn(),
     });
     mockUseExportAnalysis.mockReturnValue({
-      exportState: "idle",
+      exportState: 'idle',
       exportError: null,
       doExport: jest.fn(),
     });
@@ -348,18 +335,16 @@ describe("App", () => {
     renderApp();
 
     // Assert
-    expect(screen.getByTestId("auth-error-xrm")).toBeInTheDocument();
-    expect(screen.getByText("Dataverse Required")).toBeInTheDocument();
-    expect(
-      screen.getByText(/must be opened from within Dataverse/i),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('auth-error-xrm')).toBeInTheDocument();
+    expect(screen.getByText('Dataverse Required')).toBeInTheDocument();
+    expect(screen.getByText(/must be opened from within Dataverse/i)).toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------
   // 5. Source Panel Collapsed
   // -----------------------------------------------------------------------
 
-  it("render_Authenticated_SourcePanelInitiallyExpanded", () => {
+  it('render_Authenticated_SourcePanelInitiallyExpanded', () => {
     // Arrange
     setupAuthenticatedAndLoaded();
 
@@ -367,8 +352,6 @@ describe("App", () => {
     renderApp();
 
     // Assert: source viewer starts expanded
-    expect(screen.getByTestId("source-viewer-panel")).toHaveTextContent(
-      "Expanded",
-    );
+    expect(screen.getByTestId('source-viewer-panel')).toHaveTextContent('Expanded');
   });
 });

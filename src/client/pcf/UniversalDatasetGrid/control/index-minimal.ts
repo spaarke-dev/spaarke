@@ -3,28 +3,25 @@
  * Purpose: Verify control CAN execute before adding React/Fluent
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
 
-export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class UniversalDatasetGrid implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement;
   private context: ComponentFramework.Context<IInputs>;
 
   constructor() {
-    console.log("🟢 [MINIMAL] Constructor called - Control CAN execute!");
+    console.log('🟢 [MINIMAL] Constructor called - Control CAN execute!');
   }
 
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
-    console.log("🟢 [MINIMAL] Init called - Control IS working!");
-    console.log("[MINIMAL] Context:", context);
-    console.log("[MINIMAL] Container:", container);
+    console.log('🟢 [MINIMAL] Init called - Control IS working!');
+    console.log('[MINIMAL] Context:', context);
+    console.log('[MINIMAL] Container:', container);
 
     this.container = container;
     this.context = context;
@@ -42,7 +39,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
   }
 
   public updateView(context: ComponentFramework.Context<IInputs>): void {
-    console.log("🟢 [MINIMAL] UpdateView called");
+    console.log('🟢 [MINIMAL] UpdateView called');
     this.context = context;
   }
 
@@ -51,6 +48,6 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
   }
 
   public destroy(): void {
-    console.log("🟢 [MINIMAL] Destroy called");
+    console.log('🟢 [MINIMAL] Destroy called');
   }
 }

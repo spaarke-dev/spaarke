@@ -22,8 +22,8 @@ import type {
   FileDownloadRequest,
   FileDeleteRequest,
   FileReplaceRequest,
-} from "./types";
-import { consoleLogger } from "./types";
+} from './types';
+import { consoleLogger } from './types';
 
 /**
  * Optional callback invoked on 401 responses before retry.
@@ -68,15 +68,13 @@ export class SdapApiClient {
   private readonly onUnauthorized?: OnUnauthorizedCallback;
 
   constructor(options: SdapApiClientOptions) {
-    this.baseUrl = options.baseUrl.endsWith("/")
-      ? options.baseUrl.slice(0, -1)
-      : options.baseUrl;
+    this.baseUrl = options.baseUrl.endsWith('/') ? options.baseUrl.slice(0, -1) : options.baseUrl;
     this.getAccessToken = options.getAccessToken;
     this.timeout = options.timeout ?? 300000;
     this.logger = options.logger ?? consoleLogger;
     this.onUnauthorized = options.onUnauthorized;
 
-    this.logger.info("SdapApiClient", "Initialized", {
+    this.logger.info('SdapApiClient', 'Initialized', {
       baseUrl: this.baseUrl,
       timeout: this.timeout,
     });
@@ -91,7 +89,7 @@ export class SdapApiClient {
    * API: PUT /api/obo/containers/{containerId}/files/{fileName}
    */
   async uploadFile(request: FileUploadApiRequest): Promise<SpeFileMetadata> {
-    this.logger.info("SdapApiClient", "Uploading file", {
+    this.logger.info('SdapApiClient', 'Uploading file', {
       fileName: request.fileName,
       fileSize: request.file.size,
       containerId: request.driveId,
@@ -103,7 +101,7 @@ export class SdapApiClient {
       const url = `${this.baseUrl}/obo/containers/${encodeURIComponent(request.driveId)}/files/${encodeURIComponent(request.fileName)}`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "PUT",
+        method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -112,11 +110,11 @@ export class SdapApiClient {
 
       const result = await this.handleResponse<SpeFileMetadata>(response);
 
-      this.logger.info("SdapApiClient", "File uploaded successfully", result);
+      this.logger.info('SdapApiClient', 'File uploaded successfully', result);
       return result;
     } catch (error) {
-      this.logger.error("SdapApiClient", "File upload failed", error);
-      throw this.enhanceError(error, "File upload failed");
+      this.logger.error('SdapApiClient', 'File upload failed', error);
+      throw this.enhanceError(error, 'File upload failed');
     }
   }
 
@@ -125,7 +123,7 @@ export class SdapApiClient {
    * API: GET /obo/drives/{driveId}/items/{itemId}/content
    */
   async downloadFile(request: FileDownloadRequest): Promise<Blob> {
-    this.logger.info("SdapApiClient", "Downloading file", {
+    this.logger.info('SdapApiClient', 'Downloading file', {
       driveId: request.driveId,
       itemId: request.itemId,
     });
@@ -136,7 +134,7 @@ export class SdapApiClient {
       const url = `${this.baseUrl}/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}/content`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "GET",
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -149,15 +147,15 @@ export class SdapApiClient {
 
       const blob = await response.blob();
 
-      this.logger.info("SdapApiClient", "File downloaded successfully", {
+      this.logger.info('SdapApiClient', 'File downloaded successfully', {
         size: blob.size,
         type: blob.type,
       });
 
       return blob;
     } catch (error) {
-      this.logger.error("SdapApiClient", "File download failed", error);
-      throw this.enhanceError(error, "File download failed");
+      this.logger.error('SdapApiClient', 'File download failed', error);
+      throw this.enhanceError(error, 'File download failed');
     }
   }
 
@@ -166,7 +164,7 @@ export class SdapApiClient {
    * API: DELETE /obo/drives/{driveId}/items/{itemId}
    */
   async deleteFile(request: FileDeleteRequest): Promise<void> {
-    this.logger.info("SdapApiClient", "Deleting file", {
+    this.logger.info('SdapApiClient', 'Deleting file', {
       driveId: request.driveId,
       itemId: request.itemId,
     });
@@ -177,7 +175,7 @@ export class SdapApiClient {
       const url = `${this.baseUrl}/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}`;
 
       const response = await this.fetchWithTimeout(url, {
-        method: "DELETE",
+        method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -185,10 +183,10 @@ export class SdapApiClient {
 
       await this.handleResponse<void>(response);
 
-      this.logger.info("SdapApiClient", "File deleted successfully");
+      this.logger.info('SdapApiClient', 'File deleted successfully');
     } catch (error) {
-      this.logger.error("SdapApiClient", "File delete failed", error);
-      throw this.enhanceError(error, "File delete failed");
+      this.logger.error('SdapApiClient', 'File delete failed', error);
+      throw this.enhanceError(error, 'File delete failed');
     }
   }
 
@@ -197,7 +195,7 @@ export class SdapApiClient {
    * Implemented as: DELETE old file + UPLOAD new file.
    */
   async replaceFile(request: FileReplaceRequest): Promise<SpeFileMetadata> {
-    this.logger.info("SdapApiClient", "Replacing file", {
+    this.logger.info('SdapApiClient', 'Replacing file', {
       fileName: request.fileName,
       fileSize: request.file.size,
       driveId: request.driveId,
@@ -211,7 +209,7 @@ export class SdapApiClient {
         itemId: request.itemId,
       });
 
-      this.logger.info("SdapApiClient", "Old file deleted, uploading new file");
+      this.logger.info('SdapApiClient', 'Old file deleted, uploading new file');
 
       // Step 2: Upload new file
       const result = await this.uploadFile({
@@ -220,11 +218,11 @@ export class SdapApiClient {
         fileName: request.fileName,
       });
 
-      this.logger.info("SdapApiClient", "File replaced successfully", result);
+      this.logger.info('SdapApiClient', 'File replaced successfully', result);
       return result;
     } catch (error) {
-      this.logger.error("SdapApiClient", "File replace failed", error);
-      throw this.enhanceError(error, "File replace failed");
+      this.logger.error('SdapApiClient', 'File replace failed', error);
+      throw this.enhanceError(error, 'File replace failed');
     }
   }
 
@@ -237,10 +235,7 @@ export class SdapApiClient {
    *
    * On 401: invokes onUnauthorized callback (if provided), refreshes token, retries once.
    */
-  private async fetchWithTimeout(
-    url: string,
-    options: RequestInit,
-  ): Promise<Response> {
+  private async fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
     let attempt = 0;
     const maxAttempts = 2;
 
@@ -265,15 +260,11 @@ export class SdapApiClient {
 
         // 401 Unauthorized -- token may have expired during request
         if (response.status === 401 && attempt < maxAttempts) {
-          this.logger.warn(
-            "SdapApiClient",
-            "401 Unauthorized response -- clearing token cache and retrying",
-            {
-              url,
-              attempt,
-              maxAttempts,
-            },
-          );
+          this.logger.warn('SdapApiClient', '401 Unauthorized response -- clearing token cache and retrying', {
+            url,
+            attempt,
+            maxAttempts,
+          });
 
           // Allow caller to clear token caches
           this.onUnauthorized?.();
@@ -283,14 +274,10 @@ export class SdapApiClient {
 
           // Update Authorization header with fresh token
           if (options.headers) {
-            (options.headers as Record<string, string>)["Authorization"] =
-              `Bearer ${newToken}`;
+            (options.headers as Record<string, string>)['Authorization'] = `Bearer ${newToken}`;
           }
 
-          this.logger.info(
-            "SdapApiClient",
-            "Retrying request with fresh token",
-          );
+          this.logger.info('SdapApiClient', 'Retrying request with fresh token');
           continue;
         }
 
@@ -299,7 +286,7 @@ export class SdapApiClient {
       } catch (error) {
         clearTimeout(timeoutId);
 
-        if (error instanceof Error && error.name === "AbortError") {
+        if (error instanceof Error && error.name === 'AbortError') {
           throw new Error(`Request timeout after ${this.timeout}ms`);
         }
 
@@ -308,7 +295,7 @@ export class SdapApiClient {
     }
 
     // Should never reach here, but TypeScript needs a return
-    throw new Error("Unexpected error in fetchWithTimeout retry logic");
+    throw new Error('Unexpected error in fetchWithTimeout retry logic');
   }
 
   /**
@@ -317,12 +304,12 @@ export class SdapApiClient {
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-      let errorDetails = "";
+      let errorDetails = '';
 
       try {
         const errorData = await response.json();
         errorMessage = errorData.error || errorMessage;
-        errorDetails = errorData.details || "";
+        errorDetails = errorData.details || '';
       } catch {
         try {
           errorDetails = await response.text();
@@ -331,10 +318,7 @@ export class SdapApiClient {
         }
       }
 
-      const userFriendlyMessage = this.getUserFriendlyErrorMessage(
-        response.status,
-        errorMessage,
-      );
+      const userFriendlyMessage = this.getUserFriendlyErrorMessage(response.status, errorMessage);
 
       const error = new Error(userFriendlyMessage) as Error & {
         details?: string;
@@ -349,49 +333,39 @@ export class SdapApiClient {
     }
 
     // For 204 No Content or empty responses
-    if (
-      response.status === 204 ||
-      response.headers.get("content-length") === "0"
-    ) {
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
       return undefined as T;
     }
 
     try {
       return await response.json();
     } catch (error) {
-      this.logger.error(
-        "SdapApiClient",
-        "Failed to parse response JSON",
-        error,
-      );
-      throw new Error("Invalid JSON response from server");
+      this.logger.error('SdapApiClient', 'Failed to parse response JSON', error);
+      throw new Error('Invalid JSON response from server');
     }
   }
 
   /**
    * Get user-friendly error message based on HTTP status code.
    */
-  private getUserFriendlyErrorMessage(
-    status: number,
-    originalMessage: string,
-  ): string {
+  private getUserFriendlyErrorMessage(status: number, originalMessage: string): string {
     switch (status) {
       case 401:
-        return "Authentication failed. Your session may have expired. Please refresh the page and try again.";
+        return 'Authentication failed. Your session may have expired. Please refresh the page and try again.';
       case 403:
-        return "Access denied. You do not have permission to perform this operation. Please contact your administrator.";
+        return 'Access denied. You do not have permission to perform this operation. Please contact your administrator.';
       case 404:
-        return "The requested file was not found. It may have been deleted or moved.";
+        return 'The requested file was not found. It may have been deleted or moved.';
       case 408:
       case 504:
-        return "Request timeout. The server took too long to respond. Please try again.";
+        return 'Request timeout. The server took too long to respond. Please try again.';
       case 429:
-        return "Too many requests. Please wait a moment and try again.";
+        return 'Too many requests. Please wait a moment and try again.';
       case 500:
-        return "Server error occurred. Please try again later. If the problem persists, contact your administrator.";
+        return 'Server error occurred. Please try again later. If the problem persists, contact your administrator.';
       case 502:
       case 503:
-        return "The service is temporarily unavailable. Please try again in a few minutes.";
+        return 'The service is temporarily unavailable. Please try again in a few minutes.';
       default:
         return originalMessage;
     }

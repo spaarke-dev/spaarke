@@ -7,27 +7,25 @@
  * @version 1.0.1
  */
 
-const LOG_PREFIX = "[Spaarke.AnalysisWorkspace.EnvVar]";
+const LOG_PREFIX = '[Spaarke.AnalysisWorkspace.EnvVar]';
 
 // Cache duration: 5 minutes
 const CACHE_DURATION_MS = 5 * 60 * 1000;
 
 // Default fallback for development
-const DEFAULT_API_URL = "https://spe-api-dev-67e2xz.azurewebsites.net/api";
+const DEFAULT_API_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
 
 /**
  * Check if WebAPI is available (not in design-time/editor mode)
  * Custom Page editor doesn't implement WebAPI methods
  */
-function isWebApiAvailable(
-  webApi: ComponentFramework.WebApi | undefined,
-): boolean {
+function isWebApiAvailable(webApi: ComponentFramework.WebApi | undefined): boolean {
   if (!webApi) return false;
 
   // Check if retrieveMultipleRecords is a real implementation
   // In editor mode, it may be undefined or throw "not implemented"
   try {
-    if (typeof webApi.retrieveMultipleRecords !== "function") {
+    if (typeof webApi.retrieveMultipleRecords !== 'function') {
       return false;
     }
     return true;
@@ -41,7 +39,7 @@ interface CachedValue {
   timestamp: number;
 }
 
-const envVarCache: Map<string, CachedValue> = new Map();
+const envVarCache = new Map<string, CachedValue>();
 
 function isCacheValid(cached: CachedValue | undefined): boolean {
   if (!cached) return false;
@@ -53,7 +51,7 @@ function isCacheValid(cached: CachedValue | undefined): boolean {
  */
 export async function getEnvironmentVariable(
   webApi: ComponentFramework.WebApi,
-  schemaName: string,
+  schemaName: string
 ): Promise<string | undefined> {
   // Check cache first
   const cached = envVarCache.get(schemaName);
@@ -64,9 +62,7 @@ export async function getEnvironmentVariable(
 
   // Check if WebAPI is available (not in design-time/editor mode)
   if (!isWebApiAvailable(webApi)) {
-    console.log(
-      `${LOG_PREFIX} WebAPI not available (design-time mode), using default`,
-    );
+    console.log(`${LOG_PREFIX} WebAPI not available (design-time mode), using default`);
     return undefined;
   }
 
@@ -75,8 +71,8 @@ export async function getEnvironmentVariable(
 
     // Get environment variable definition
     const defResult = await webApi.retrieveMultipleRecords(
-      "environmentvariabledefinition",
-      `?$filter=schemaname eq '${schemaName}'&$select=environmentvariabledefinitionid,defaultvalue`,
+      'environmentvariabledefinition',
+      `?$filter=schemaname eq '${schemaName}'&$select=environmentvariabledefinitionid,defaultvalue`
     );
 
     if (!defResult.entities || defResult.entities.length === 0) {
@@ -90,8 +86,8 @@ export async function getEnvironmentVariable(
 
     // Check for override value
     const valueResult = await webApi.retrieveMultipleRecords(
-      "environmentvariablevalue",
-      `?$filter=_environmentvariabledefinitionid_value eq '${definitionId}'&$select=value`,
+      'environmentvariablevalue',
+      `?$filter=_environmentvariabledefinitionid_value eq '${definitionId}'&$select=value`
     );
 
     let finalValue: string | undefined;
@@ -111,10 +107,8 @@ export async function getEnvironmentVariable(
   } catch (error) {
     // Handle "not implemented" errors from design-time environment
     const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.toLowerCase().includes("not implemented")) {
-      console.log(
-        `${LOG_PREFIX} WebAPI not implemented (design-time mode), using default`,
-      );
+    if (errorMessage.toLowerCase().includes('not implemented')) {
+      console.log(`${LOG_PREFIX} WebAPI not implemented (design-time mode), using default`);
       return undefined;
     }
     console.error(`${LOG_PREFIX} Error fetching ${schemaName}:`, error);
@@ -125,10 +119,8 @@ export async function getEnvironmentVariable(
 /**
  * Get the BFF API base URL from environment variables
  */
-export async function getApiBaseUrl(
-  webApi: ComponentFramework.WebApi,
-): Promise<string> {
-  const value = await getEnvironmentVariable(webApi, "sprk_BffApiBaseUrl");
+export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<string> {
+  const value = await getEnvironmentVariable(webApi, 'sprk_BffApiBaseUrl');
   return value ?? DEFAULT_API_URL;
 }
 

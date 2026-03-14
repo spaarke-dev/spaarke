@@ -1,12 +1,7 @@
-import * as React from "react";
-import {
-  Link,
-  tokens,
-  mergeClasses,
-  makeStyles,
-} from "@fluentui/react-components";
-import { openEventDetailPane } from "../utils/sidePaneUtils";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { Link, tokens, mergeClasses, makeStyles } from '@fluentui/react-components';
+import { openEventDetailPane } from '../utils/sidePaneUtils';
+import { logger } from '../utils/logger';
 
 /**
  * Props for HyperlinkCell component
@@ -30,10 +25,10 @@ export interface HyperlinkCellProps {
 const useStyles = makeStyles({
   link: {
     fontWeight: tokens.fontWeightRegular,
-    textDecoration: "none",
-    cursor: "pointer",
-    ":hover": {
-      textDecoration: "underline",
+    textDecoration: 'none',
+    cursor: 'pointer',
+    ':hover': {
+      textDecoration: 'underline',
     },
   },
   disabledText: {
@@ -81,11 +76,11 @@ export const HyperlinkCell: React.FC<HyperlinkCellProps> = ({
       event.stopPropagation();
 
       if (disabled) {
-        logger.debug("HyperlinkCell", "Click ignored - cell is disabled");
+        logger.debug('HyperlinkCell', 'Click ignored - cell is disabled');
         return;
       }
 
-      logger.info("HyperlinkCell", "Opening side pane for event", {
+      logger.info('HyperlinkCell', 'Opening side pane for event', {
         recordId,
         eventType,
       });
@@ -97,20 +92,20 @@ export const HyperlinkCell: React.FC<HyperlinkCellProps> = ({
         });
 
         if (result.success) {
-          logger.info("HyperlinkCell", "Side pane opened successfully");
+          logger.info('HyperlinkCell', 'Side pane opened successfully');
           onSidePaneOpened?.(recordId);
         } else {
-          logger.error("HyperlinkCell", "Failed to open side pane", {
+          logger.error('HyperlinkCell', 'Failed to open side pane', {
             error: result.error,
           });
         }
       } catch (error) {
-        logger.error("HyperlinkCell", "Exception opening side pane", {
+        logger.error('HyperlinkCell', 'Exception opening side pane', {
           error: error instanceof Error ? error.message : String(error),
         });
       }
     },
-    [recordId, eventType, disabled, onSidePaneOpened],
+    [recordId, eventType, disabled, onSidePaneOpened]
   );
 
   /**
@@ -118,17 +113,17 @@ export const HyperlinkCell: React.FC<HyperlinkCellProps> = ({
    */
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLAnchorElement>) => {
-      if (event.key === "Enter" || event.key === " ") {
+      if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         event.stopPropagation();
         handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement>);
       }
     },
-    [handleClick],
+    [handleClick]
   );
 
   // If no display text, show empty dash
-  if (!displayText || displayText.trim() === "") {
+  if (!displayText || displayText.trim() === '') {
     return <span className={styles.disabledText}>-</span>;
   }
 

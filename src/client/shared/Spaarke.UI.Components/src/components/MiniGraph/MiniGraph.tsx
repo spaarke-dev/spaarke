@@ -10,15 +10,12 @@
  * @see ADR-022 - React 16 compatible (useMemo only)
  */
 
-import * as React from "react";
-import { tokens } from "@fluentui/react-components";
-import { useForceSimulation } from "../../hooks/useForceSimulation";
-import type { ForceNode, ForceEdge } from "../../hooks/useForceSimulation";
-import type { MiniGraphNode, MiniGraphEdge } from "../../types/MiniGraphTypes";
-import {
-  getRelationshipStroke,
-  getRelationshipNodeFill,
-} from "../../utils/relationshipColors";
+import * as React from 'react';
+import { tokens } from '@fluentui/react-components';
+import { useForceSimulation } from '../../hooks/useForceSimulation';
+import type { ForceNode, ForceEdge } from '../../hooks/useForceSimulation';
+import type { MiniGraphNode, MiniGraphEdge } from '../../types/MiniGraphTypes';
+import { getRelationshipStroke, getRelationshipNodeFill } from '../../utils/relationshipColors';
 
 // ─── Props ───────────────────────────────────────────────────────────
 
@@ -45,7 +42,7 @@ const HUB_RADIUS = 6;
 const VIEWBOX_PADDING = 30;
 
 /** Hub node types that get a slightly larger radius. */
-const HUB_TYPES = new Set(["matter", "project", "invoice", "email"]);
+const HUB_TYPES = new Set(['matter', 'project', 'invoice', 'email']);
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -53,10 +50,7 @@ const HUB_TYPES = new Set(["matter", "project", "invoice", "email"]);
  * Determine the primary relationship type for a node based on its incoming edges.
  * Used to color the node by its strongest relationship.
  */
-function getPrimaryRelationshipType(
-  nodeId: string,
-  edges: MiniGraphEdge[],
-): string | undefined {
+function getPrimaryRelationshipType(nodeId: string, edges: MiniGraphEdge[]): string | undefined {
   let best: MiniGraphEdge | undefined;
   for (const e of edges) {
     if (e.target === nodeId || e.source === nodeId) {
@@ -70,13 +64,7 @@ function getPrimaryRelationshipType(
 
 // ─── Component ───────────────────────────────────────────────────────
 
-export const MiniGraph: React.FC<IMiniGraphProps> = ({
-  nodes,
-  edges,
-  width,
-  height,
-  onClick,
-}) => {
+export const MiniGraph: React.FC<IMiniGraphProps> = ({ nodes, edges, width, height, onClick }) => {
   // Use a ref to measure the container and fill available space
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [measuredSize, setMeasuredSize] = React.useState<{
@@ -108,39 +96,35 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
   // Map to ForceNode / ForceEdge for the simulation hook
   const forceNodes: ForceNode[] = React.useMemo(
     () =>
-      nodes.map((n) => ({
+      nodes.map(n => ({
         id: n.id,
         label: n.label,
-        isSource: n.type === "source",
+        isSource: n.type === 'source',
         type: n.type,
         similarity: n.similarity,
       })),
-    [nodes],
+    [nodes]
   );
 
   const forceEdges: ForceEdge[] = React.useMemo(
     () =>
-      edges.map((e) => ({
+      edges.map(e => ({
         source: e.source,
         target: e.target,
         weight: e.similarity ?? 0.5,
         relationshipType: e.relationshipType,
       })),
-    [edges],
+    [edges]
   );
 
   // Run synchronous d3-force simulation with compact settings
-  const { nodes: positioned, edges: positionedEdges } = useForceSimulation(
-    forceNodes,
-    forceEdges,
-    {
-      mode: "hub-spoke",
-      ticks: 50,
-      chargeStrength: -200,
-      linkDistanceMultiplier: 100,
-      collisionRadius: 15,
-    },
-  );
+  const { nodes: positioned, edges: positionedEdges } = useForceSimulation(forceNodes, forceEdges, {
+    mode: 'hub-spoke',
+    ticks: 50,
+    chargeStrength: -200,
+    linkDistanceMultiplier: 100,
+    collisionRadius: 15,
+  });
 
   // Normalize positions into pixel space so radii are visually consistent
   const normalized = React.useMemo(() => {
@@ -169,7 +153,7 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
     const midX = (minX + maxX) / 2;
     const midY = (minY + maxY) / 2;
 
-    const mappedNodes = positioned.map((n) => ({
+    const mappedNodes = positioned.map(n => ({
       ...n,
       px: (n.x - midX) * scale + effectiveWidth / 2,
       py: (n.y - midY) * scale + effectiveHeight / 2,
@@ -180,7 +164,7 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
       nodePos.set(mn.id, { px: mn.px, py: mn.py });
     }
 
-    const mappedEdges = positionedEdges.map((e) => {
+    const mappedEdges = positionedEdges.map(e => {
       const src = nodePos.get(e.source);
       const tgt = nodePos.get(e.target);
       return {
@@ -197,19 +181,11 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
 
   // Don't render if no nodes
   if (nodes.length === 0) {
-    return (
-      <div
-        ref={containerRef}
-        style={{ width: "100%", height: "100%", minHeight: "80px" }}
-      />
-    );
+    return <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '80px' }} />;
   }
 
   return (
-    <div
-      ref={containerRef}
-      style={{ width: "100%", height: "100%", minHeight: "80px" }}
-    >
+    <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '80px' }}>
       <svg
         width="100%"
         height="100%"
@@ -217,16 +193,15 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
         preserveAspectRatio="xMidYMid meet"
         onClick={onClick}
         style={{
-          cursor: onClick ? "pointer" : "default",
-          display: "block",
+          cursor: onClick ? 'pointer' : 'default',
+          display: 'block',
         }}
         role="img"
         aria-label={`Relationship graph preview with ${nodes.length} documents`}
       >
         {/* Edges — render first so nodes draw on top */}
         {normalized.edges.map((e, i) => {
-          const relType = (e as unknown as { relationshipType?: string })
-            .relationshipType;
+          const relType = (e as unknown as { relationshipType?: string }).relationshipType;
           const similarity = e.weight ?? 0.5;
           return (
             <line
@@ -243,17 +218,11 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
         })}
 
         {/* Nodes — radii now in pixel space */}
-        {normalized.nodes.map((n) => {
-          const nodeType = (n as unknown as Record<string, unknown>).type as
-            | string
-            | undefined;
-          const isSource = n.isSource === true || nodeType === "source";
-          const isHub = HUB_TYPES.has(nodeType ?? "");
-          const r = isSource
-            ? SOURCE_RADIUS
-            : isHub
-              ? HUB_RADIUS
-              : RELATED_RADIUS;
+        {normalized.nodes.map(n => {
+          const nodeType = (n as unknown as Record<string, unknown>).type as string | undefined;
+          const isSource = n.isSource === true || nodeType === 'source';
+          const isHub = HUB_TYPES.has(nodeType ?? '');
+          const r = isSource ? SOURCE_RADIUS : isHub ? HUB_RADIUS : RELATED_RADIUS;
 
           let fill: string;
           if (isSource) {
@@ -270,9 +239,7 @@ export const MiniGraph: React.FC<IMiniGraphProps> = ({
               cy={n.py}
               r={r}
               fill={fill}
-              stroke={
-                isSource ? tokens.colorBrandStroke1 : tokens.colorNeutralStroke2
-              }
+              stroke={isSource ? tokens.colorBrandStroke1 : tokens.colorNeutralStroke2}
               strokeWidth={isSource ? 2 : 1}
             />
           );

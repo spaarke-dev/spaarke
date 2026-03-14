@@ -10,13 +10,13 @@
  * @see ADR-022 - React 16 APIs only (useState, useCallback)
  */
 
-import * as React from "react";
-import { RelationshipCountCard } from "@spaarke/ui-components/dist/components/RelationshipCountCard";
-import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
-import { MiniGraph } from "@spaarke/ui-components/dist/components/MiniGraph";
-import { initializeAuth } from "./authInit";
-import { useRelatedDocumentGraphData } from "./hooks/useRelatedDocumentGraphData";
-import { IRelatedDocumentCountProps } from "./types";
+import * as React from 'react';
+import { RelationshipCountCard } from '@spaarke/ui-components/dist/components/RelationshipCountCard';
+import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
+import { MiniGraph } from '@spaarke/ui-components/dist/components/MiniGraph';
+import { initializeAuth } from './authInit';
+import { useRelatedDocumentGraphData } from './hooks/useRelatedDocumentGraphData';
+import { IRelatedDocumentCountProps } from './types';
 
 /**
  * Build the URL for the DocumentRelationshipViewer code page web resource.
@@ -27,19 +27,15 @@ import { IRelatedDocumentCountProps } from "./types";
  * @param isDarkMode - Whether to pass dark theme to the viewer
  * @returns Full URL to the web resource, or null if missing data
  */
-function buildViewerUrl(
-  documentId: string,
-  tenantId: string | undefined,
-  isDarkMode: boolean,
-): string | null {
-  if (!documentId || documentId.trim() === "") {
+function buildViewerUrl(documentId: string, tenantId: string | undefined, isDarkMode: boolean): string | null {
+  if (!documentId || documentId.trim() === '') {
     return null;
   }
 
-  const theme = isDarkMode ? "dark" : "light";
+  const theme = isDarkMode ? 'dark' : 'light';
   const params = new URLSearchParams({ documentId, theme });
   if (tenantId) {
-    params.set("tenantId", tenantId);
+    params.set('tenantId', tenantId);
   }
 
   // Resolve client URL from Xrm context (Dataverse org URL)
@@ -62,7 +58,7 @@ function getClientUrl(): string {
         }
       | undefined;
     const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-    if (url) return url.replace(/\/$/, "");
+    if (url) return url.replace(/\/$/, '');
   } catch {
     // Xrm not available (test harness, dev mode)
   }
@@ -87,15 +83,14 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
 
   React.useEffect(() => {
     let cancelled = false;
-    const effectiveApiBaseUrl =
-      apiBaseUrl || "https://spe-api-dev-67e2xz.azurewebsites.net";
+    const effectiveApiBaseUrl = apiBaseUrl || 'https://spe-api-dev-67e2xz.azurewebsites.net';
     initializeAuth(effectiveApiBaseUrl)
       .then(() => {
         if (!cancelled) setIsAuthReady(true);
       })
-      .catch((err) => {
-        console.error("[RelatedDocumentCount] Auth init failed:", err);
-        if (!cancelled) setAuthError("Authentication failed. Please refresh.");
+      .catch(err => {
+        console.error('[RelatedDocumentCount] Auth init failed:', err);
+        if (!cancelled) setAuthError('Authentication failed. Please refresh.');
       });
     return () => {
       cancelled = true;
@@ -111,12 +106,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     error,
     lastUpdated,
     refetch,
-  } = useRelatedDocumentGraphData(
-    documentId,
-    tenantId,
-    apiBaseUrl,
-    isAuthReady,
-  );
+  } = useRelatedDocumentGraphData(documentId, tenantId, apiBaseUrl, isAuthReady);
 
   // Dialog open/close state
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
@@ -124,7 +114,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
   // Build viewer URL for the dialog
   const viewerUrl = React.useMemo(
     () => buildViewerUrl(documentId, tenantId, isDarkMode),
-    [documentId, tenantId, isDarkMode],
+    [documentId, tenantId, isDarkMode]
   );
 
   // Open the FindSimilarDialog when user clicks "View" on the count card
@@ -164,11 +154,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
         lastUpdated={lastUpdated ?? undefined}
         graphPreview={graphPreview}
       />
-      <FindSimilarDialog
-        open={isDialogOpen}
-        onClose={handleClose}
-        url={isDialogOpen ? viewerUrl : null}
-      />
+      <FindSimilarDialog open={isDialogOpen} onClose={handleClose} url={isDialogOpen ? viewerUrl : null} />
     </div>
   );
 };

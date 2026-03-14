@@ -12,24 +12,19 @@
 // =============================================
 
 /** Active search domain — determines which entity type tab is active */
-export type SearchDomain = "documents" | "matters" | "projects" | "invoices";
+export type SearchDomain = 'documents' | 'matters' | 'projects' | 'invoices';
 
 /** View mode toggle — grid (tabular), map (similarity scatter), treemap, or timeline */
-export type ViewMode = "grid" | "map" | "treemap" | "timeline";
+export type ViewMode = 'grid' | 'map' | 'treemap' | 'timeline';
 
 /** Graph clustering category — determines how results are grouped in graph view */
-export type GraphClusterBy =
-  | "MatterType"
-  | "PracticeArea"
-  | "DocumentType"
-  | "Organization"
-  | "PersonContact";
+export type GraphClusterBy = 'MatterType' | 'PracticeArea' | 'DocumentType' | 'Organization' | 'PersonContact';
 
 /** Hybrid search mode — matches C# HybridSearchMode / RecordHybridSearchMode constants */
-export type HybridMode = "rrf" | "vectorOnly" | "keywordOnly";
+export type HybridMode = 'rrf' | 'vectorOnly' | 'keywordOnly';
 
 /** Sort direction for grid columns and saved searches */
-export type SortDirection = "asc" | "desc";
+export type SortDirection = 'asc' | 'desc';
 
 // =============================================
 // Filter Types
@@ -527,12 +522,7 @@ export interface ApiError {
 // =============================================
 
 /** Search execution state for hook management */
-export type SearchState =
-  | "idle"
-  | "loading"
-  | "loadingMore"
-  | "error"
-  | "success";
+export type SearchState = 'idle' | 'loading' | 'loadingMore' | 'error' | 'success';
 
 /** Search error information */
 export interface SearchError {
@@ -552,7 +542,7 @@ export interface SearchError {
 export type VisualizationColorBy = GraphClusterBy;
 
 /** Date field selector for Timeline view */
-export type TimelineDateField = "createdAt" | "updatedAt" | "modifiedAt";
+export type TimelineDateField = 'createdAt' | 'updatedAt' | 'modifiedAt';
 
 /** Settings state for the Map (similarity scatter) view */
 export interface MapViewSettings {
@@ -578,21 +568,21 @@ export interface TimelineViewSettings {
 
 /** Known Dataverse entity logical names for record search */
 export const RecordEntityTypes = {
-  Matter: "sprk_matter",
-  Project: "sprk_project",
-  Invoice: "sprk_invoice",
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  Invoice: 'sprk_invoice',
 } as const;
 
 /** Valid search scope values */
 export const SearchScopes = {
-  All: "all",
-  Entity: "entity",
-  DocumentIds: "documentIds",
+  All: 'all',
+  Entity: 'entity',
+  DocumentIds: 'documentIds',
 } as const;
 
 /** Standard hybrid search modes */
 export const HybridModes = {
-  Rrf: "rrf",
-  VectorOnly: "vectorOnly",
-  KeywordOnly: "keywordOnly",
+  Rrf: 'rrf',
+  VectorOnly: 'vectorOnly',
+  KeywordOnly: 'keywordOnly',
 } as const;

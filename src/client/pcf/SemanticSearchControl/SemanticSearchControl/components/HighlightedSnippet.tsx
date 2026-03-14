@@ -7,14 +7,14 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useMemo } from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
+import * as React from 'react';
+import { useMemo } from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   snippet: {
@@ -26,7 +26,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorPaletteYellowBackground2,
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
-    padding: "0 2px",
+    padding: '0 2px',
     borderRadius: tokens.borderRadiusSmall,
   },
   ellipsis: {
@@ -46,10 +46,7 @@ interface IHighlightedSnippetProps {
  * Parse and render highlighted text.
  * Highlights are marked with <em> tags from the API.
  */
-function parseHighlights(
-  text: string,
-  styles: ReturnType<typeof useStyles>,
-): React.ReactNode[] {
+function parseHighlights(text: string, styles: ReturnType<typeof useStyles>): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
 
   // Match <em> tags for highlights
@@ -69,7 +66,7 @@ function parseHighlights(
     parts.push(
       <span key={`highlight-${keyIndex++}`} className={styles.highlight}>
         {match[1]}
-      </span>,
+      </span>
     );
 
     lastIndex = match.index + match[0].length;
@@ -88,17 +85,13 @@ function parseHighlights(
  */
 function sanitizeSnippet(text: string): string {
   // First, protect <em> tags by replacing them with placeholders
-  let sanitized = text
-    .replace(/<em>/gi, "{{EM_OPEN}}")
-    .replace(/<\/em>/gi, "{{EM_CLOSE}}");
+  let sanitized = text.replace(/<em>/gi, '{{EM_OPEN}}').replace(/<\/em>/gi, '{{EM_CLOSE}}');
 
   // Remove all other HTML tags
-  sanitized = sanitized.replace(/<[^>]*>/g, "");
+  sanitized = sanitized.replace(/<[^>]*>/g, '');
 
   // Restore <em> tags
-  sanitized = sanitized
-    .replace(/\{\{EM_OPEN\}\}/g, "<em>")
-    .replace(/\{\{EM_CLOSE\}\}/g, "</em>");
+  sanitized = sanitized.replace(/\{\{EM_OPEN\}\}/g, '<em>').replace(/\{\{EM_CLOSE\}\}/g, '</em>');
 
   return sanitized;
 }
@@ -108,7 +101,7 @@ function sanitizeSnippet(text: string): string {
  */
 function truncateText(text: string, maxLength: number): string {
   // Strip HTML for length calculation
-  const plainText = text.replace(/<[^>]*>/g, "");
+  const plainText = text.replace(/<[^>]*>/g, '');
 
   if (plainText.length <= maxLength) {
     return text;
@@ -116,7 +109,7 @@ function truncateText(text: string, maxLength: number): string {
 
   // Find last space before max length
   let truncateIndex = maxLength;
-  while (truncateIndex > 0 && plainText[truncateIndex] !== " ") {
+  while (truncateIndex > 0 && plainText[truncateIndex] !== ' ') {
     truncateIndex--;
   }
 
@@ -129,7 +122,7 @@ function truncateText(text: string, maxLength: number): string {
   const ratio = truncateIndex / plainText.length;
   const htmlTruncateIndex = Math.floor(text.length * ratio);
 
-  return text.slice(0, htmlTruncateIndex) + "...";
+  return text.slice(0, htmlTruncateIndex) + '...';
 }
 
 /**
@@ -138,10 +131,7 @@ function truncateText(text: string, maxLength: number): string {
  * @param props.text - Snippet text with highlight markers
  * @param props.maxLength - Maximum characters before truncation (default: 200)
  */
-export const HighlightedSnippet: React.FC<IHighlightedSnippetProps> = ({
-  text,
-  maxLength = 200,
-}) => {
+export const HighlightedSnippet: React.FC<IHighlightedSnippetProps> = ({ text, maxLength = 200 }) => {
   const styles = useStyles();
 
   // Process the snippet

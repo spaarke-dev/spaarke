@@ -5,19 +5,18 @@
  * parses the JSON, and initializes the canvasStore with nodes and edges.
  */
 
-import { useEffect, useState, useCallback } from "react";
-import { retrieveRecord } from "../services/dataverseClient";
-import { loadNodeScopes } from "../services/playbookNodeSync";
-import { useCanvasStore } from "../stores/canvasStore";
+import { useEffect, useState, useCallback } from 'react';
+import { retrieveRecord } from '../services/dataverseClient';
+import { loadNodeScopes } from '../services/playbookNodeSync';
+import { useCanvasStore } from '../stores/canvasStore';
 
-const LOG_PREFIX = "[PlaybookBuilder:usePlaybookLoader]";
+const LOG_PREFIX = '[PlaybookBuilder:usePlaybookLoader]';
 
 /** Entity set name for playbooks in Dataverse Web API */
-const PLAYBOOK_ENTITY_SET = "sprk_analysisplaybooks";
+const PLAYBOOK_ENTITY_SET = 'sprk_analysisplaybooks';
 
 /** OData $select for the canvas layout field */
-const CANVAS_SELECT =
-  "$select=sprk_canvaslayoutjson,sprk_name,sprk_analysisplaybookid";
+const CANVAS_SELECT = '$select=sprk_canvaslayoutjson,sprk_name,sprk_analysisplaybookid';
 
 export interface UsePlaybookLoaderResult {
   /** True while the initial load is in progress */
@@ -40,10 +39,10 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
   const [error, setError] = useState<string | null>(null);
   const [playbookName, setPlaybookName] = useState<string | null>(null);
 
-  const loadFromCanvasJson = useCanvasStore((s) => s.loadFromCanvasJson);
-  const mergeNodeScopes = useCanvasStore((s) => s.mergeNodeScopes);
-  const initializeNewCanvas = useCanvasStore((s) => s.initializeNewCanvas);
-  const reset = useCanvasStore((s) => s.reset);
+  const loadFromCanvasJson = useCanvasStore(s => s.loadFromCanvasJson);
+  const mergeNodeScopes = useCanvasStore(s => s.mergeNodeScopes);
+  const initializeNewCanvas = useCanvasStore(s => s.initializeNewCanvas);
+  const reset = useCanvasStore(s => s.reset);
 
   const load = useCallback(async () => {
     if (!playbookId) {
@@ -51,9 +50,7 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
       initializeNewCanvas();
       setIsLoading(false);
       setError(null);
-      console.info(
-        `${LOG_PREFIX} No playbook ID — initialized with Start node`,
-      );
+      console.info(`${LOG_PREFIX} No playbook ID — initialized with Start node`);
       return;
     }
 
@@ -61,19 +58,12 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
     setError(null);
 
     try {
-      const record = await retrieveRecord(
-        PLAYBOOK_ENTITY_SET,
-        playbookId,
-        CANVAS_SELECT,
-      );
+      const record = await retrieveRecord(PLAYBOOK_ENTITY_SET, playbookId, CANVAS_SELECT);
 
       const name = (record.sprk_name as string) ?? null;
       setPlaybookName(name);
 
-      const canvasJson = record.sprk_canvaslayoutjson as
-        | string
-        | null
-        | undefined;
+      const canvasJson = record.sprk_canvaslayoutjson as string | null | undefined;
 
       if (canvasJson && canvasJson.trim().length > 0) {
         loadFromCanvasJson(canvasJson);
@@ -81,9 +71,7 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
       } else {
         // No saved canvas yet — initialize with a default Start node
         initializeNewCanvas();
-        console.info(
-          `${LOG_PREFIX} Playbook "${name}" has no saved canvas; initialized with Start node`,
-        );
+        console.info(`${LOG_PREFIX} Playbook "${name}" has no saved canvas; initialized with Start node`);
       }
 
       // Load N:N scope associations from Dataverse and merge into canvas nodes.
@@ -93,15 +81,10 @@ export function usePlaybookLoader(playbookId: string): UsePlaybookLoaderResult {
         const scopeMap = await loadNodeScopes(playbookId);
         if (scopeMap.size > 0) {
           mergeNodeScopes(scopeMap);
-          console.info(
-            `${LOG_PREFIX} Merged N:N scopes for ${scopeMap.size} nodes`,
-          );
+          console.info(`${LOG_PREFIX} Merged N:N scopes for ${scopeMap.size} nodes`);
         }
       } catch (scopeErr) {
-        console.warn(
-          `${LOG_PREFIX} Failed to load N:N scopes (non-fatal):`,
-          scopeErr,
-        );
+        console.warn(`${LOG_PREFIX} Failed to load N:N scopes (non-fatal):`, scopeErr);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -12,18 +12,9 @@
  * - ADR-021: Fluent UI v9 exclusively, design tokens only
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  EventTypeColorVariant,
-  getEventTypeColor,
-  getEventTypeColorConfig,
-} from "../utils/eventTypeColors";
+import * as React from 'react';
+import { makeStyles, tokens, Text, mergeClasses } from '@fluentui/react-components';
+import { EventTypeColorVariant, getEventTypeColor, getEventTypeColorConfig } from '../utils/eventTypeColors';
 
 // Re-export for backward compatibility
 export type EventTypeColor = EventTypeColorVariant;
@@ -50,13 +41,13 @@ export interface IEventTypeBadgeProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
   },
   badge: {
-    width: "12px",
-    height: "12px",
+    width: '12px',
+    height: '12px',
     borderRadius: tokens.borderRadiusSmall,
     flexShrink: 0,
   },
@@ -90,7 +81,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
 });
 
@@ -120,10 +111,7 @@ export const EventTypeBadge: React.FC<IEventTypeBadgeProps> = ({
 
   return (
     <div className={styles.container} role="img" aria-label={accessibleLabel}>
-      <div
-        className={mergeClasses(styles.badge, colorClass)}
-        aria-hidden="true"
-      />
+      <div className={mergeClasses(styles.badge, colorClass)} aria-hidden="true" />
       {!indicatorOnly && <Text className={styles.typeName}>{typeName}</Text>}
     </div>
   );

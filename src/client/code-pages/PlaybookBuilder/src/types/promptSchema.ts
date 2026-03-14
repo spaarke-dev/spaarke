@@ -15,13 +15,7 @@
 // ---------------------------------------------------------------------------
 
 /** All valid output field types as a const tuple. */
-export const OUTPUT_FIELD_TYPES = [
-  "string",
-  "number",
-  "boolean",
-  "array",
-  "object",
-] as const;
+export const OUTPUT_FIELD_TYPES = ['string', 'number', 'boolean', 'array', 'object'] as const;
 
 /** Union type derived from OUTPUT_FIELD_TYPES. */
 export type OutputFieldType = (typeof OUTPUT_FIELD_TYPES)[number];
@@ -262,14 +256,12 @@ export interface PromptSchemaValidationResult {
  * @param schema - The value to validate.
  * @returns Validation result with `valid` flag and `errors` array.
  */
-export function validatePromptSchema(
-  schema: unknown,
-): PromptSchemaValidationResult {
+export function validatePromptSchema(schema: unknown): PromptSchemaValidationResult {
   const errors: string[] = [];
 
   // Check schema is an object
-  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) {
-    return { valid: false, errors: ["Schema must be a non-null object."] };
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { valid: false, errors: ['Schema must be a non-null object.'] };
   }
 
   const obj = schema as Record<string, unknown>;
@@ -278,7 +270,7 @@ export function validatePromptSchema(
   if (
     obj.instruction === null ||
     obj.instruction === undefined ||
-    typeof obj.instruction !== "object" ||
+    typeof obj.instruction !== 'object' ||
     Array.isArray(obj.instruction)
   ) {
     errors.push("'instruction' is required and must be an object.");
@@ -286,19 +278,14 @@ export function validatePromptSchema(
     const instruction = obj.instruction as Record<string, unknown>;
 
     // Check instruction.task is a non-empty string
-    if (
-      typeof instruction.task !== "string" ||
-      instruction.task.trim() === ""
-    ) {
-      errors.push(
-        "'instruction.task' is required and must be a non-empty string.",
-      );
+    if (typeof instruction.task !== 'string' || instruction.task.trim() === '') {
+      errors.push("'instruction.task' is required and must be a non-empty string.");
     }
   }
 
   // Check output.fields have valid types if present
   if (obj.output !== undefined && obj.output !== null) {
-    if (typeof obj.output !== "object" || Array.isArray(obj.output)) {
+    if (typeof obj.output !== 'object' || Array.isArray(obj.output)) {
       errors.push("'output' must be an object when present.");
     } else {
       const output = obj.output as Record<string, unknown>;
@@ -312,27 +299,18 @@ export function validatePromptSchema(
           for (let i = 0; i < output.fields.length; i++) {
             const field = output.fields[i] as Record<string, unknown>;
 
-            if (
-              field === null ||
-              typeof field !== "object" ||
-              Array.isArray(field)
-            ) {
+            if (field === null || typeof field !== 'object' || Array.isArray(field)) {
               errors.push(`output.fields[${i}] must be an object.`);
               continue;
             }
 
-            if (typeof field.name !== "string" || field.name.trim() === "") {
-              errors.push(
-                `output.fields[${i}].name is required and must be a non-empty string.`,
-              );
+            if (typeof field.name !== 'string' || field.name.trim() === '') {
+              errors.push(`output.fields[${i}].name is required and must be a non-empty string.`);
             }
 
-            if (
-              typeof field.type !== "string" ||
-              !validTypes.includes(field.type)
-            ) {
+            if (typeof field.type !== 'string' || !validTypes.includes(field.type)) {
               errors.push(
-                `output.fields[${i}].type must be one of: ${validTypes.join(", ")}. Got: "${String(field.type)}".`,
+                `output.fields[${i}].type must be one of: ${validTypes.join(', ')}. Got: "${String(field.type)}".`
               );
             }
           }
@@ -358,10 +336,10 @@ export function validatePromptSchema(
  */
 export function createDefaultPromptSchema(): PromptSchema {
   return {
-    $schema: "https://spaarke.com/schemas/jps/v1",
+    $schema: 'https://spaarke.com/schemas/jps/v1',
     $version: 1,
     instruction: {
-      task: "",
+      task: '',
     },
   };
 }

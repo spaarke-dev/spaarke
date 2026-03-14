@@ -20,7 +20,7 @@
  * @see ADR-021 - Fluent UI v9; makeStyles; design tokens; dark mode
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -30,19 +30,9 @@ import {
   MessageBar,
   MessageBarBody,
   mergeClasses,
-} from "@fluentui/react-components";
-import {
-  BookRegular,
-  FlashRegular,
-  SearchRegular,
-  SettingsRegular,
-} from "@fluentui/react-icons";
-import {
-  IChatAction,
-  ISprkChatActionMenuProps,
-  ISprkChatActionMenuHandle,
-  ChatActionCategory,
-} from "./types";
+} from '@fluentui/react-components';
+import { BookRegular, FlashRegular, SearchRegular, SettingsRegular } from '@fluentui/react-icons';
+import { IChatAction, ISprkChatActionMenuProps, ISprkChatActionMenuHandle, ChatActionCategory } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -55,15 +45,15 @@ const CATEGORY_CONFIG: ReadonlyArray<{
   icon: React.ReactElement;
 }> = [
   {
-    key: "playbooks",
-    label: "Playbooks",
+    key: 'playbooks',
+    label: 'Playbooks',
     icon: React.createElement(BookRegular),
   },
-  { key: "actions", label: "Actions", icon: React.createElement(FlashRegular) },
-  { key: "search", label: "Search", icon: React.createElement(SearchRegular) },
+  { key: 'actions', label: 'Actions', icon: React.createElement(FlashRegular) },
+  { key: 'search', label: 'Search', icon: React.createElement(SearchRegular) },
   {
-    key: "settings",
-    label: "Settings",
+    key: 'settings',
+    label: 'Settings',
     icon: React.createElement(SettingsRegular),
   },
 ];
@@ -74,66 +64,62 @@ const CATEGORY_CONFIG: ReadonlyArray<{
 
 const useStyles = makeStyles({
   overlay: {
-    position: "absolute",
-    bottom: "100%",
+    position: 'absolute',
+    bottom: '100%',
     left: 0,
     right: 0,
     zIndex: 1000,
-    display: "flex",
-    flexDirection: "column",
-    maxHeight: "320px",
+    display: 'flex',
+    flexDirection: 'column',
+    maxHeight: '320px',
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.border(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow16,
-    ...shorthands.overflow("hidden"),
+    ...shorthands.overflow('hidden'),
   },
   listContainer: {
     flexGrow: 1,
-    overflowY: "auto",
-    overflowX: "hidden",
-    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
   },
   categoryHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-    userSelect: "none",
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    userSelect: 'none',
   },
   categoryIcon: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     fontSize: tokens.fontSizeBase300,
   },
   menuItem: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-    cursor: "pointer",
+    cursor: 'pointer',
     backgroundColor: tokens.colorTransparentBackground,
-    ...shorthands.border("0", "none", tokens.colorTransparentStroke),
-    width: "100%",
-    textAlign: "left",
+    ...shorthands.border('0', 'none', tokens.colorTransparentStroke),
+    width: '100%',
+    textAlign: 'left',
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    ":focus-visible": {
+    ':focus-visible': {
       outlineWidth: tokens.strokeWidthThick,
-      outlineStyle: "solid",
+      outlineStyle: 'solid',
       outlineColor: tokens.colorStrokeFocus2,
       outlineOffset: `-${tokens.strokeWidthThick}`,
     },
@@ -143,14 +129,14 @@ const useStyles = makeStyles({
   },
   menuItemDisabled: {
     color: tokens.colorNeutralForegroundDisabled,
-    cursor: "not-allowed",
-    ":hover": {
+    cursor: 'not-allowed',
+    ':hover': {
       backgroundColor: tokens.colorTransparentBackground,
     },
   },
   menuItemContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXXS),
     flexGrow: 1,
     minWidth: 0,
@@ -158,47 +144,40 @@ const useStyles = makeStyles({
   menuItemLabel: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightRegular,
-    color: "inherit",
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    color: 'inherit',
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   menuItemDescription: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    ...shorthands.overflow("hidden"),
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    ...shorthands.overflow('hidden'),
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   shortcutBadge: {
     flexShrink: 0,
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
     backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.padding(
-      tokens.spacingVerticalXXS,
-      tokens.spacingHorizontalXS,
-    ),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalXS),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    ...shorthands.border(
-      tokens.strokeWidthThin,
-      "solid",
-      tokens.colorNeutralStroke2,
-    ),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
     fontFamily: tokens.fontFamilyMonospace,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
   emptyState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalL, tokens.spacingHorizontalM),
     color: tokens.colorNeutralForeground3,
   },
   loadingState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalL, tokens.spacingHorizontalM),
   },
   errorState: {
@@ -218,19 +197,14 @@ const useStyles = makeStyles({
 /**
  * Filters actions by matching filterText against label and description (case-insensitive).
  */
-function filterActions(
-  actions: IChatAction[],
-  filterText: string,
-): IChatAction[] {
+function filterActions(actions: IChatAction[], filterText: string): IChatAction[] {
   if (!filterText) {
     return actions;
   }
   const needle = filterText.toLowerCase();
-  return actions.filter((action) => {
+  return actions.filter(action => {
     const labelMatch = action.label.toLowerCase().includes(needle);
-    const descMatch = action.description
-      ? action.description.toLowerCase().includes(needle)
-      : false;
+    const descMatch = action.description ? action.description.toLowerCase().includes(needle) : false;
     return labelMatch || descMatch;
   });
 }
@@ -253,7 +227,7 @@ function groupByCategory(actions: IChatAction[]): Array<{
   }> = [];
 
   for (const config of CATEGORY_CONFIG) {
-    const items = actions.filter((a) => a.category === config.key);
+    const items = actions.filter(a => a.category === config.key);
     if (items.length > 0) {
       grouped.push({
         category: config.key,
@@ -296,15 +270,11 @@ interface IHighlightedTextProps {
  * Splits on the first occurrence of `highlight` (case-insensitive) and wraps
  * the matching portion in a styled span.
  */
-const HighlightedText: React.FC<IHighlightedTextProps> = ({
-  text,
-  highlight,
-  className,
-}) => {
+const HighlightedText: React.FC<IHighlightedTextProps> = ({ text, highlight, className }) => {
   const styles = useStyles();
 
   if (!highlight) {
-    return React.createElement("span", { className }, text);
+    return React.createElement('span', { className }, text);
   }
 
   const lowerText = text.toLowerCase();
@@ -312,7 +282,7 @@ const HighlightedText: React.FC<IHighlightedTextProps> = ({
   const index = lowerText.indexOf(lowerHighlight);
 
   if (index === -1) {
-    return React.createElement("span", { className }, text);
+    return React.createElement('span', { className }, text);
   }
 
   const before = text.substring(0, index);
@@ -320,11 +290,11 @@ const HighlightedText: React.FC<IHighlightedTextProps> = ({
   const after = text.substring(index + highlight.length);
 
   return React.createElement(
-    "span",
+    'span',
     { className },
     before,
-    React.createElement("span", { className: styles.highlight }, match),
-    after,
+    React.createElement('span', { className: styles.highlight }, match),
+    after
   );
 };
 
@@ -353,37 +323,16 @@ const HighlightedText: React.FC<IHighlightedTextProps> = ({
  * />
  * ```
  */
-export const SprkChatActionMenu = React.forwardRef<
-  ISprkChatActionMenuHandle,
-  ISprkChatActionMenuProps
->(
-  (
-    {
-      actions,
-      isOpen,
-      onSelect,
-      onDismiss,
-      filterText = "",
-      anchorRef,
-      isLoading = false,
-      errorMessage,
-    },
-    ref,
-  ) => {
+export const SprkChatActionMenu = React.forwardRef<ISprkChatActionMenuHandle, ISprkChatActionMenuProps>(
+  ({ actions, isOpen, onSelect, onDismiss, filterText = '', anchorRef, isLoading = false, errorMessage }, ref) => {
     const styles = useStyles();
     const menuRef = React.useRef<HTMLDivElement>(null);
     const [activeIndex, setActiveIndex] = React.useState<number>(0);
 
     // Filter and group actions
-    const filteredActions = React.useMemo(
-      () => filterActions(actions, filterText),
-      [actions, filterText],
-    );
+    const filteredActions = React.useMemo(() => filterActions(actions, filterText), [actions, filterText]);
 
-    const groups = React.useMemo(
-      () => groupByCategory(filteredActions),
-      [filteredActions],
-    );
+    const groups = React.useMemo(() => groupByCategory(filteredActions), [filteredActions]);
 
     const flatList = React.useMemo(() => buildFlatList(groups), [groups]);
 
@@ -415,18 +364,14 @@ export const SprkChatActionMenu = React.forwardRef<
         const menuEl = menuRef.current;
         const anchorEl = anchorRef?.current;
 
-        if (
-          menuEl &&
-          !menuEl.contains(target) &&
-          (!anchorEl || !anchorEl.contains(target))
-        ) {
+        if (menuEl && !menuEl.contains(target) && (!anchorEl || !anchorEl.contains(target))) {
           onDismiss();
         }
       };
 
-      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener('mousedown', handleClickOutside);
       return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
+        document.removeEventListener('mousedown', handleClickOutside);
       };
     }, [isOpen, onDismiss, anchorRef]);
 
@@ -438,15 +383,14 @@ export const SprkChatActionMenu = React.forwardRef<
         }
         let nextIndex = currentIndex;
         for (let i = 0; i < flatList.length; i++) {
-          nextIndex =
-            (nextIndex + direction + flatList.length) % flatList.length;
+          nextIndex = (nextIndex + direction + flatList.length) % flatList.length;
           if (!flatList[nextIndex].disabled) {
             return nextIndex;
           }
         }
         return currentIndex;
       },
-      [flatList],
+      [flatList]
     );
 
     // Expose imperative navigation methods so SprkChatInput can drive
@@ -455,10 +399,10 @@ export const SprkChatActionMenu = React.forwardRef<
       ref,
       () => ({
         navigateUp: () => {
-          setActiveIndex((prev) => findNextEnabledIndex(prev, -1));
+          setActiveIndex(prev => findNextEnabledIndex(prev, -1));
         },
         navigateDown: () => {
-          setActiveIndex((prev) => findNextEnabledIndex(prev, 1));
+          setActiveIndex(prev => findNextEnabledIndex(prev, 1));
         },
         selectActive: () => {
           const selectedAction = flatList[activeIndex];
@@ -467,26 +411,26 @@ export const SprkChatActionMenu = React.forwardRef<
           }
         },
       }),
-      [findNextEnabledIndex, flatList, activeIndex, onSelect],
+      [findNextEnabledIndex, flatList, activeIndex, onSelect]
     );
 
     // Keyboard navigation handler
     const handleKeyDown = React.useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
         switch (event.key) {
-          case "ArrowDown": {
+          case 'ArrowDown': {
             event.preventDefault();
             event.stopPropagation();
-            setActiveIndex((prev) => findNextEnabledIndex(prev, 1));
+            setActiveIndex(prev => findNextEnabledIndex(prev, 1));
             break;
           }
-          case "ArrowUp": {
+          case 'ArrowUp': {
             event.preventDefault();
             event.stopPropagation();
-            setActiveIndex((prev) => findNextEnabledIndex(prev, -1));
+            setActiveIndex(prev => findNextEnabledIndex(prev, -1));
             break;
           }
-          case "Enter": {
+          case 'Enter': {
             event.preventDefault();
             event.stopPropagation();
             const selectedAction = flatList[activeIndex];
@@ -495,7 +439,7 @@ export const SprkChatActionMenu = React.forwardRef<
             }
             break;
           }
-          case "Escape": {
+          case 'Escape': {
             event.preventDefault();
             event.stopPropagation();
             onDismiss();
@@ -505,7 +449,7 @@ export const SprkChatActionMenu = React.forwardRef<
             break;
         }
       },
-      [activeIndex, flatList, findNextEnabledIndex, onSelect, onDismiss],
+      [activeIndex, flatList, findNextEnabledIndex, onSelect, onDismiss]
     );
 
     // Scroll active item into view
@@ -517,11 +461,9 @@ export const SprkChatActionMenu = React.forwardRef<
       if (!activeAction) {
         return;
       }
-      const activeElement = menuRef.current?.querySelector(
-        `[data-action-id="${activeAction.id}"]`,
-      );
+      const activeElement = menuRef.current?.querySelector(`[data-action-id="${activeAction.id}"]`);
       if (activeElement) {
-        activeElement.scrollIntoView({ block: "nearest" });
+        activeElement.scrollIntoView({ block: 'nearest' });
       }
     }, [activeIndex, flatList, isOpen]);
 
@@ -532,18 +474,18 @@ export const SprkChatActionMenu = React.forwardRef<
           onSelect(action);
         }
       },
-      [onSelect],
+      [onSelect]
     );
 
     // Handle item mouse enter — update active index to match hovered item
     const handleItemMouseEnter = React.useCallback(
       (action: IChatAction) => {
-        const index = flatList.findIndex((a) => a.id === action.id);
+        const index = flatList.findIndex(a => a.id === action.id);
         if (index >= 0) {
           setActiveIndex(index);
         }
       },
-      [flatList],
+      [flatList]
     );
 
     if (!isOpen) {
@@ -556,27 +498,23 @@ export const SprkChatActionMenu = React.forwardRef<
     const renderContent = (): React.ReactElement => {
       if (isLoading) {
         return React.createElement(
-          "div",
+          'div',
           {
             className: styles.loadingState,
-            "data-testid": "action-menu-loading",
+            'data-testid': 'action-menu-loading',
           },
           React.createElement(Spinner, {
-            size: "small",
-            label: "Loading actions...",
-          }),
+            size: 'small',
+            label: 'Loading actions...',
+          })
         );
       }
 
       if (errorMessage) {
         return React.createElement(
-          "div",
-          { className: styles.errorState, "data-testid": "action-menu-error" },
-          React.createElement(
-            MessageBar,
-            { intent: "error" },
-            React.createElement(MessageBarBody, null, errorMessage),
-          ),
+          'div',
+          { className: styles.errorState, 'data-testid': 'action-menu-error' },
+          React.createElement(MessageBar, { intent: 'error' }, React.createElement(MessageBarBody, null, errorMessage))
         );
       }
 
@@ -584,52 +522,48 @@ export const SprkChatActionMenu = React.forwardRef<
         return React.createElement(
           React.Fragment,
           null,
-          ...groups.map((group) =>
+          ...groups.map(group =>
             React.createElement(
-              "div",
+              'div',
               {
                 key: group.category,
-                role: "group",
-                "aria-label": group.label,
+                role: 'group',
+                'aria-label': group.label,
               },
               // Category header
               React.createElement(
-                "div",
+                'div',
                 { className: styles.categoryHeader },
-                React.createElement(
-                  "span",
-                  { className: styles.categoryIcon },
-                  group.icon,
-                ),
-                React.createElement(Text, { size: 100 }, group.label),
+                React.createElement('span', { className: styles.categoryIcon }, group.icon),
+                React.createElement(Text, { size: 100 }, group.label)
               ),
               // Action items
-              group.items.map((action) => {
-                const flatIndex = flatList.findIndex((a) => a.id === action.id);
+              group.items.map(action => {
+                const flatIndex = flatList.findIndex(a => a.id === action.id);
                 const isActive = flatIndex === activeIndex;
                 const isDisabled = !!action.disabled;
 
                 return React.createElement(
-                  "div",
+                  'div',
                   {
                     key: action.id,
                     id: `action-menu-item-${action.id}`,
-                    "data-action-id": action.id,
+                    'data-action-id': action.id,
                     className: mergeClasses(
                       styles.menuItem,
                       isActive && styles.menuItemActive,
-                      isDisabled && styles.menuItemDisabled,
+                      isDisabled && styles.menuItemDisabled
                     ),
-                    role: "option",
-                    "aria-selected": isActive,
-                    "aria-disabled": isDisabled,
+                    role: 'option',
+                    'aria-selected': isActive,
+                    'aria-disabled': isDisabled,
                     onClick: () => handleItemClick(action),
                     onMouseEnter: () => handleItemMouseEnter(action),
-                    "data-testid": `action-menu-item-${action.id}`,
+                    'data-testid': `action-menu-item-${action.id}`,
                   },
                   // Label + description
                   React.createElement(
-                    "div",
+                    'div',
                     { className: styles.menuItemContent },
                     React.createElement(HighlightedText, {
                       text: action.label,
@@ -642,57 +576,51 @@ export const SprkChatActionMenu = React.forwardRef<
                           highlight: filterText,
                           className: styles.menuItemDescription,
                         })
-                      : null,
+                      : null
                   ),
                   // Shortcut badge
                   action.shortcut
                     ? React.createElement(
-                        "span",
+                        'span',
                         {
                           className: styles.shortcutBadge,
-                          "aria-label": `Keyboard shortcut: ${action.shortcut}`,
+                          'aria-label': `Keyboard shortcut: ${action.shortcut}`,
                         },
-                        action.shortcut,
+                        action.shortcut
                       )
-                    : null,
+                    : null
                 );
-              }),
-            ),
-          ),
+              })
+            )
+          )
         );
       }
 
       return React.createElement(
-        "div",
-        { className: styles.emptyState, "data-testid": "action-menu-empty" },
-        React.createElement(Text, { size: 200 }, "No matching actions"),
+        'div',
+        { className: styles.emptyState, 'data-testid': 'action-menu-empty' },
+        React.createElement(Text, { size: 200 }, 'No matching actions')
       );
     };
 
     return React.createElement(
-      "div",
+      'div',
       {
         ref: menuRef,
         className: styles.overlay,
-        role: "listbox",
-        "aria-label": "Action menu",
-        "aria-activedescendant":
-          hasResults && !isLoading && !errorMessage
-            ? `action-menu-item-${flatList[activeIndex]?.id}`
-            : undefined,
+        role: 'listbox',
+        'aria-label': 'Action menu',
+        'aria-activedescendant':
+          hasResults && !isLoading && !errorMessage ? `action-menu-item-${flatList[activeIndex]?.id}` : undefined,
         tabIndex: 0,
         onKeyDown: handleKeyDown,
-        "data-testid": "sprkchat-action-menu",
+        'data-testid': 'sprkchat-action-menu',
       },
-      React.createElement(
-        "div",
-        { className: styles.listContainer },
-        renderContent(),
-      ),
+      React.createElement('div', { className: styles.listContainer }, renderContent())
     );
-  },
+  }
 );
 
-SprkChatActionMenu.displayName = "SprkChatActionMenu";
+SprkChatActionMenu.displayName = 'SprkChatActionMenu';
 
 export default SprkChatActionMenu;

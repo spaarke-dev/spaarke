@@ -10,7 +10,7 @@
  * @see ADR-021 — Fluent UI v9 Design System
  */
 
-import React, { useEffect, useCallback, useMemo } from "react";
+import React, { useEffect, useCallback, useMemo } from 'react';
 import {
   Dropdown,
   Option,
@@ -22,8 +22,8 @@ import {
   type SelectionEvents,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
-import { useScopeStore } from "../../stores/scopeStore";
+} from '@fluentui/react-components';
+import { useScopeStore } from '../../stores/scopeStore';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 makeStyles — uses design tokens for dark mode)
@@ -31,8 +31,8 @@ import { useScopeStore } from "../../stores/scopeStore";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   label: {
@@ -44,11 +44,11 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXXS,
   },
   dropdown: {
-    width: "100%",
+    width: '100%',
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
   },
@@ -77,10 +77,10 @@ export const ActionSelector: React.FC<ActionSelectorProps> = ({
   disabled = false,
 }) => {
   const styles = useStyles();
-  const actions = useScopeStore((s) => s.actions);
-  const isLoadingActions = useScopeStore((s) => s.isLoadingActions);
-  const actionsError = useScopeStore((s) => s.actionsError);
-  const loadActions = useScopeStore((s) => s.loadActions);
+  const actions = useScopeStore(s => s.actions);
+  const isLoadingActions = useScopeStore(s => s.isLoadingActions);
+  const actionsError = useScopeStore(s => s.actionsError);
+  const loadActions = useScopeStore(s => s.loadActions);
 
   // Load actions on mount if not already loaded
   useEffect(() => {
@@ -90,22 +90,19 @@ export const ActionSelector: React.FC<ActionSelectorProps> = ({
   }, [actions.length, isLoadingActions, actionsError, loadActions]);
 
   // Find the selected action for display
-  const selectedAction = useMemo(
-    () => actions.find((a) => a.id === selectedActionId),
-    [actions, selectedActionId],
-  );
+  const selectedAction = useMemo(() => actions.find(a => a.id === selectedActionId), [actions, selectedActionId]);
 
   // Handle selection change
   const handleSelect = useCallback(
     (_event: SelectionEvents, data: OptionOnSelectData) => {
       const selectedValue = data.optionValue;
-      if (selectedValue === "__none__") {
+      if (selectedValue === '__none__') {
         onActionChange(undefined);
       } else {
         onActionChange(selectedValue ?? undefined);
       }
     },
-    [onActionChange],
+    [onActionChange]
   );
 
   // Loading state
@@ -142,7 +139,7 @@ export const ActionSelector: React.FC<ActionSelectorProps> = ({
         id="action-selector"
         className={styles.dropdown}
         placeholder="Select an action..."
-        value={selectedAction?.name ?? ""}
+        value={selectedAction?.name ?? ''}
         selectedOptions={selectedActionId ? [selectedActionId] : []}
         onOptionSelect={handleSelect}
         disabled={disabled}
@@ -150,13 +147,11 @@ export const ActionSelector: React.FC<ActionSelectorProps> = ({
         <Option key="__none__" value="__none__">
           (None)
         </Option>
-        {actions.map((action) => (
+        {actions.map(action => (
           <Option key={action.id} value={action.id} text={action.name}>
             <div>
               <div>{action.name}</div>
-              {action.description && (
-                <div className={styles.description}>{action.description}</div>
-              )}
+              {action.description && <div className={styles.description}>{action.description}</div>}
             </div>
           </Option>
         ))}

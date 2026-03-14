@@ -11,7 +11,7 @@
  * @version 3.0.0.0
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Badge,
   Button,
@@ -25,7 +25,7 @@ import {
   makeStyles,
   mergeClasses,
   tokens,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   DocumentRegular,
   ArrowClockwiseRegular,
@@ -37,11 +37,8 @@ import {
   CalendarRegular,
   DocumentCopyRegular,
   DismissRegular,
-} from "@fluentui/react-icons";
-import type {
-  SummaryStatus,
-  ExtractedEntities,
-} from "@spaarke/ui-components/src/hooks";
+} from '@fluentui/react-icons';
+import type { SummaryStatus, ExtractedEntities } from '@spaarke/ui-components/src/hooks';
 
 // Re-export for backward compatibility
 export type { SummaryStatus };
@@ -95,8 +92,8 @@ export interface AiSummaryPanelProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingVerticalM,
     borderRadius: tokens.borderRadiusMedium,
@@ -104,17 +101,17 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     flex: 1,
     minHeight: 0, // Allow flex shrinking
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   fileInfo: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     minWidth: 0,
     flex: 1,
@@ -123,19 +120,19 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   fileIcon: {
     flexShrink: 0,
     color: tokens.colorNeutralForeground3,
-    fontSize: "20px",
+    fontSize: '20px',
   },
   summaryContainer: {
     flex: 1,
     minHeight: 0,
-    overflowY: "auto",
+    overflowY: 'auto',
     padding: tokens.spacingVerticalL,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusSmall,
@@ -144,26 +141,26 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase400,
     lineHeight: tokens.lineHeightBase400,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
   },
   cursor: {
-    display: "inline-block",
-    width: "8px",
-    height: "16px",
+    display: 'inline-block',
+    width: '8px',
+    height: '16px',
     backgroundColor: tokens.colorBrandForeground1,
-    marginLeft: "2px",
+    marginLeft: '2px',
     animationName: {
-      "0%, 100%": { opacity: 1 },
-      "50%": { opacity: 0 },
+      '0%, 100%': { opacity: 1 },
+      '50%': { opacity: 0 },
     },
-    animationDuration: "1s",
-    animationIterationCount: "infinite",
+    animationDuration: '1s',
+    animationIterationCount: 'infinite',
   },
   // TL;DR styles
   tldrContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalXXL,
   },
@@ -173,39 +170,39 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   tldrList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     margin: 0,
     paddingLeft: tokens.spacingHorizontalL,
-    listStyleType: "disc",
+    listStyleType: 'disc',
   },
   tldrItem: {
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase400,
     color: tokens.colorNeutralForeground1,
-    "::marker": {
+    '::marker': {
       color: tokens.colorBrandForeground1,
     },
   },
   // Summary section
   summarySection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalXXL,
   },
   pendingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalL,
     color: tokens.colorNeutralForeground3,
   },
   errorContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingVerticalM,
     backgroundColor: tokens.colorPaletteRedBackground1,
@@ -216,8 +213,8 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
   },
   infoContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground3,
@@ -228,7 +225,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   retryButton: {
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
   },
   // Badge variants
   badgePending: {
@@ -257,14 +254,14 @@ const useStyles = makeStyles({
   },
   // Keywords styles
   keywordsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalXXL,
   },
   keywordsList: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
   },
   keywordTag: {
@@ -276,28 +273,28 @@ const useStyles = makeStyles({
   },
   // Entities section styles (no accordion)
   entitiesContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     marginTop: tokens.spacingVerticalXL,
   },
   entitySection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     marginBottom: tokens.spacingVerticalM,
   },
   entityTypeHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
   },
   entityList: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
     paddingLeft: tokens.spacingHorizontalL,
   },
@@ -319,20 +316,20 @@ const useStyles = makeStyles({
  */
 const getStatusConfig = (status: SummaryStatus) => {
   switch (status) {
-    case "pending":
-      return { label: "Pending", styleKey: "badgePending" as const };
-    case "streaming":
-      return { label: "Generating...", styleKey: "badgeStreaming" as const };
-    case "complete":
-      return { label: "Complete", styleKey: "badgeComplete" as const };
-    case "error":
-      return { label: "Error", styleKey: "badgeError" as const };
-    case "skipped":
-      return { label: "Skipped", styleKey: "badgeSkipped" as const };
-    case "not-supported":
-      return { label: "Not Supported", styleKey: "badgeNotSupported" as const };
+    case 'pending':
+      return { label: 'Pending', styleKey: 'badgePending' as const };
+    case 'streaming':
+      return { label: 'Generating...', styleKey: 'badgeStreaming' as const };
+    case 'complete':
+      return { label: 'Complete', styleKey: 'badgeComplete' as const };
+    case 'error':
+      return { label: 'Error', styleKey: 'badgeError' as const };
+    case 'skipped':
+      return { label: 'Skipped', styleKey: 'badgeSkipped' as const };
+    case 'not-supported':
+      return { label: 'Not Supported', styleKey: 'badgeNotSupported' as const };
     default:
-      return { label: "Unknown", styleKey: "badgePending" as const };
+      return { label: 'Unknown', styleKey: 'badgePending' as const };
   }
 };
 
@@ -367,9 +364,9 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
   const keywordsList = React.useMemo(() => {
     if (!keywords) return [];
     return keywords
-      .split(",")
-      .map((k) => k.trim())
-      .filter((k) => k.length > 0);
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
   }, [keywords]);
 
   // Check if entities has any data
@@ -402,18 +399,9 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
     return (
       <div className={styles.keywordsContainer}>
         <span className={styles.sectionHeader}>Keywords</span>
-        <div
-          className={styles.keywordsList}
-          role="list"
-          aria-label="Document keywords"
-        >
+        <div className={styles.keywordsList} role="list" aria-label="Document keywords">
           {keywordsList.map((keyword, index) => (
-            <Badge
-              key={index}
-              appearance="filled"
-              className={styles.keywordTag}
-              size="small"
-            >
+            <Badge key={index} appearance="filled" className={styles.keywordTag} size="small">
               {keyword}
             </Badge>
           ))}
@@ -423,11 +411,7 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
   };
 
   // Render an entity type section
-  const renderEntityType = (
-    icon: React.ReactNode,
-    label: string,
-    items: string[] | undefined,
-  ) => {
+  const renderEntityType = (icon: React.ReactNode, label: string, items: string[] | undefined) => {
     if (!items || items.length === 0) return null;
 
     return (
@@ -461,25 +445,15 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
           <div className={styles.entitySection}>
             <div className={styles.entityTypeHeader}>
               <span>Document Type:</span>
-              <span style={{ fontWeight: tokens.fontWeightRegular }}>
-                {entities.documentType}
-              </span>
+              <span style={{ fontWeight: tokens.fontWeightRegular }}>{entities.documentType}</span>
             </div>
           </div>
         )}
-        {renderEntityType(
-          <OrganizationRegular />,
-          "Organizations",
-          entities?.organizations,
-        )}
-        {renderEntityType(<PersonRegular />, "People", entities?.people)}
-        {renderEntityType(<MoneyRegular />, "Amounts", entities?.amounts)}
-        {renderEntityType(<CalendarRegular />, "Dates", entities?.dates)}
-        {renderEntityType(
-          <DocumentCopyRegular />,
-          "References",
-          entities?.references,
-        )}
+        {renderEntityType(<OrganizationRegular />, 'Organizations', entities?.organizations)}
+        {renderEntityType(<PersonRegular />, 'People', entities?.people)}
+        {renderEntityType(<MoneyRegular />, 'Amounts', entities?.amounts)}
+        {renderEntityType(<CalendarRegular />, 'Dates', entities?.dates)}
+        {renderEntityType(<DocumentCopyRegular />, 'References', entities?.references)}
       </div>
     );
   };
@@ -521,22 +495,19 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
         }
       ).Xrm;
       if (!xrm?.Page?.ui?.tabs) {
-        console.warn("[AiSummaryPanel] Xrm.Page.ui.tabs not available");
+        console.warn('[AiSummaryPanel] Xrm.Page.ui.tabs not available');
         return;
       }
 
       // Navigate to "Tab 3 - Analysis" (sprk_tab_analysis)
-      const analysisTab = xrm.Page.ui.tabs.get("sprk_tab_analysis");
+      const analysisTab = xrm.Page.ui.tabs.get('sprk_tab_analysis');
       if (analysisTab) {
         analysisTab.setFocus();
       } else {
-        console.warn("[AiSummaryPanel] Analysis tab not found");
+        console.warn('[AiSummaryPanel] Analysis tab not found');
       }
     } catch (err) {
-      console.error(
-        "[AiSummaryPanel] Failed to navigate to Analysis tab:",
-        err,
-      );
+      console.error('[AiSummaryPanel] Failed to navigate to Analysis tab:', err);
     }
   }, []);
 
@@ -549,16 +520,13 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
 
     const message =
       storageMessage ||
-      "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.";
+      'Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.';
 
     return (
       <MessageBar intent="warning" className={styles.warningMessageBar}>
         <MessageBarBody>
           <MessageBarTitle>Partial Success</MessageBarTitle>
-          {message}{" "}
-          {analysisId && (
-            <Link onClick={handleViewInAnalysis}>View in Analysis</Link>
-          )}
+          {message} {analysisId && <Link onClick={handleViewInAnalysis}>View in Analysis</Link>}
         </MessageBarBody>
         <MessageBarActions
           containerAction={
@@ -578,7 +546,7 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
   // Render content based on status
   const renderContent = () => {
     switch (status) {
-      case "pending":
+      case 'pending':
         return (
           <div className={styles.pendingContainer}>
             <Spinner size="small" />
@@ -586,7 +554,7 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
           </div>
         );
 
-      case "streaming":
+      case 'streaming':
         // Show streaming text with cursor during generation
         return (
           <div
@@ -597,22 +565,18 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
             aria-atomic="false"
           >
             <Text className={styles.summaryText}>
-              {summary || ""}
+              {summary || ''}
               <span className={styles.cursor} aria-hidden="true" />
             </Text>
           </div>
         );
 
-      case "complete":
+      case 'complete':
         // Full height scrollable content: Warning (if partial) → TL;DR → Keywords → Summary → Extracted Details
         return (
           <>
             {renderWarning()}
-            <div
-              className={styles.summaryContainer}
-              role="region"
-              aria-label="Document analysis"
-            >
+            <div className={styles.summaryContainer} role="region" aria-label="Document analysis">
               {/* TL;DR bullets */}
               {renderTldr()}
               {/* Keywords */}
@@ -630,20 +594,18 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
           </>
         );
 
-      case "error":
+      case 'error':
         return (
           <div className={styles.errorContainer}>
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
+                display: 'flex',
+                alignItems: 'center',
                 gap: tokens.spacingHorizontalS,
               }}
             >
               <DismissCircleRegular />
-              <Text className={styles.errorText}>
-                {error || "An error occurred while generating the summary."}
-              </Text>
+              <Text className={styles.errorText}>{error || 'An error occurred while generating the summary.'}</Text>
             </div>
             {onRetry && (
               <Button
@@ -660,7 +622,7 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
           </div>
         );
 
-      case "skipped":
+      case 'skipped':
         return (
           <div className={styles.infoContainer}>
             <InfoRegular />
@@ -668,13 +630,11 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
           </div>
         );
 
-      case "not-supported":
+      case 'not-supported':
         return (
           <div className={styles.infoContainer}>
             <InfoRegular />
-            <Text className={styles.infoText}>
-              File type not supported for AI summarization
-            </Text>
+            <Text className={styles.infoText}>File type not supported for AI summarization</Text>
           </div>
         );
 

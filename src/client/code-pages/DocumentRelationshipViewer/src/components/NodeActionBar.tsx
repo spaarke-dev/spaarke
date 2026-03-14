@@ -3,23 +3,10 @@
  * Same logic as PCF; Xrm is available in Dataverse HTML web resource dialogs.
  */
 
-import React, { useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Card,
-  Button,
-  Tooltip,
-  Text,
-  Divider,
-} from "@fluentui/react-components";
-import {
-  Open20Regular,
-  Globe20Regular,
-  ArrowExpand20Regular,
-  Dismiss20Regular,
-} from "@fluentui/react-icons";
-import type { DocumentNodeData } from "../types/graph";
+import React, { useCallback } from 'react';
+import { makeStyles, tokens, Card, Button, Tooltip, Text, Divider } from '@fluentui/react-components';
+import { Open20Regular, Globe20Regular, ArrowExpand20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import type { DocumentNodeData } from '../types/graph';
 
 export interface NodeActionBarProps {
   nodeData: DocumentNodeData;
@@ -30,10 +17,10 @@ export interface NodeActionBarProps {
 
 const useStyles = makeStyles({
   container: {
-    position: "absolute",
+    position: 'absolute',
     top: tokens.spacingVerticalM,
     right: tokens.spacingHorizontalM,
-    width: "280px",
+    width: '280px',
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
@@ -41,43 +28,43 @@ const useStyles = makeStyles({
     zIndex: 100,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   headerContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    overflow: "hidden",
+    overflow: 'hidden',
     flex: 1,
   },
   documentName: {
     fontWeight: tokens.fontWeightSemibold,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground1,
   },
   parentEntity: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
-  closeButton: { minWidth: "auto", padding: tokens.spacingHorizontalXS },
+  closeButton: { minWidth: 'auto', padding: tokens.spacingHorizontalXS },
   actionsContainer: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     padding: tokens.spacingVerticalS,
     gap: tokens.spacingVerticalXS,
   },
-  actionButton: { justifyContent: "flex-start", width: "100%" },
+  actionButton: { justifyContent: 'flex-start', width: '100%' },
   divider: { margin: `${tokens.spacingVerticalXXS} 0` },
   sourceLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -87,36 +74,27 @@ const useStyles = makeStyles({
   },
 });
 
-export const NodeActionBar: React.FC<NodeActionBarProps> = ({
-  nodeData,
-  onClose,
-  onExpand,
-  canExpand = true,
-}) => {
+export const NodeActionBar: React.FC<NodeActionBarProps> = ({ nodeData, onClose, onExpand, canExpand = true }) => {
   const styles = useStyles();
   const isSource = nodeData.isSource ?? false;
   const isOrphanFile = nodeData.isOrphanFile ?? !nodeData.documentId;
 
   const handleOpenDocumentRecord = useCallback(() => {
     if (!nodeData.documentId) return;
-    if (typeof Xrm !== "undefined" && Xrm.Navigation) {
+    if (typeof Xrm !== 'undefined' && Xrm.Navigation) {
       void Xrm.Navigation.openForm({
-        entityName: "sprk_document",
+        entityName: 'sprk_document',
         entityId: nodeData.documentId,
         openInNewWindow: true,
       });
     } else {
       const baseUrl = window.location.origin;
-      window.open(
-        `${baseUrl}/main.aspx?etn=sprk_document&id=${nodeData.documentId}&pagetype=entityrecord`,
-        "_blank",
-      );
+      window.open(`${baseUrl}/main.aspx?etn=sprk_document&id=${nodeData.documentId}&pagetype=entityrecord`, '_blank');
     }
   }, [nodeData.documentId]);
 
   const handleViewFile = useCallback(() => {
-    if (nodeData.fileUrl)
-      window.open(nodeData.fileUrl, "_blank", "noopener,noreferrer");
+    if (nodeData.fileUrl) window.open(nodeData.fileUrl, '_blank', 'noopener,noreferrer');
   }, [nodeData.fileUrl]);
 
   const handleExpand = useCallback(() => {
@@ -134,16 +112,11 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
             {nodeData.name}
           </Text>
           {nodeData.parentEntityName && (
-            <Text
-              className={styles.parentEntity}
-              title={nodeData.parentEntityName}
-            >
+            <Text className={styles.parentEntity} title={nodeData.parentEntityName}>
               {nodeData.parentEntityName}
             </Text>
           )}
-          {isSource && (
-            <Text className={styles.sourceLabel}>Source Document</Text>
-          )}
+          {isSource && <Text className={styles.sourceLabel}>Source Document</Text>}
         </div>
         <Tooltip content="Close" relationship="label">
           <Button
@@ -158,9 +131,7 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
       <div className={styles.actionsContainer}>
         <Tooltip
           content={
-            isOrphanFile
-              ? "Not available for files without a document record"
-              : "Open document record in Dataverse"
+            isOrphanFile ? 'Not available for files without a document record' : 'Open document record in Dataverse'
           }
           relationship="description"
         >
@@ -188,10 +159,7 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
         {!isSource && (
           <>
             <Divider className={styles.divider} />
-            <Tooltip
-              content="Load related documents for this node"
-              relationship="description"
-            >
+            <Tooltip content="Load related documents for this node" relationship="description">
               <Button
                 className={styles.actionButton}
                 appearance="subtle"

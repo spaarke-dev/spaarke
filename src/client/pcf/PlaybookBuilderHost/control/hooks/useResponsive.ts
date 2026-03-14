@@ -8,7 +8,7 @@
  * Task 054: Responsive modal sizing
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -79,10 +79,10 @@ export interface UseResponsiveReturn {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_BREAKPOINTS: Breakpoint[] = [
-  { name: "mobile", minWidth: 0, maxWidth: 640 },
-  { name: "tablet", minWidth: 640, maxWidth: 1024 },
-  { name: "desktop", minWidth: 1024, maxWidth: 1440 },
-  { name: "wide", minWidth: 1440, maxWidth: Infinity },
+  { name: 'mobile', minWidth: 0, maxWidth: 640 },
+  { name: 'tablet', minWidth: 640, maxWidth: 1024 },
+  { name: 'desktop', minWidth: 1024, maxWidth: 1440 },
+  { name: 'wide', minWidth: 1440, maxWidth: Infinity },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,28 +128,16 @@ const MODAL_SIZES: Record<string, ModalSize> = {
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const useResponsive = (
-  options: UseResponsiveOptions = {},
-): UseResponsiveReturn => {
-  const {
-    preferredWidth,
-    preferredHeight,
-    containerRef,
-    breakpoints = DEFAULT_BREAKPOINTS,
-  } = options;
+export const useResponsive = (options: UseResponsiveOptions = {}): UseResponsiveReturn => {
+  const { preferredWidth, preferredHeight, containerRef, breakpoints = DEFAULT_BREAKPOINTS } = options;
 
   // Viewport dimensions
-  const [viewportWidth, setViewportWidth] = useState(
-    typeof window !== "undefined" ? window.innerWidth : 1024,
-  );
-  const [viewportHeight, setViewportHeight] = useState(
-    typeof window !== "undefined" ? window.innerHeight : 768,
-  );
+  const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 768);
 
   // User's preferred size (persisted via props)
   const [userPreferredWidth, setUserPreferredWidth] = useState(preferredWidth);
-  const [userPreferredHeight, setUserPreferredHeight] =
-    useState(preferredHeight);
+  const [userPreferredHeight, setUserPreferredHeight] = useState(preferredHeight);
 
   // Track viewport changes
   useEffect(() => {
@@ -158,15 +146,15 @@ export const useResponsive = (
       setViewportHeight(window.innerHeight);
     };
 
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   // Track container size changes
   useEffect(() => {
     if (!containerRef?.current) return;
 
-    const observer = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver(entries => {
       const entry = entries[0];
       if (entry) {
         // Could use container size instead of viewport if needed
@@ -184,7 +172,7 @@ export const useResponsive = (
         return bp.name;
       }
     }
-    return "desktop";
+    return 'desktop';
   }, [viewportWidth, breakpoints]);
 
   // Calculate modal size
@@ -214,18 +202,12 @@ export const useResponsive = (
       maxWidth: Math.min(baseSize.maxWidth, maxViewportWidth),
       maxHeight: Math.min(baseSize.maxHeight, maxViewportHeight),
     };
-  }, [
-    breakpoint,
-    userPreferredWidth,
-    userPreferredHeight,
-    viewportWidth,
-    viewportHeight,
-  ]);
+  }, [breakpoint, userPreferredWidth, userPreferredHeight, viewportWidth, viewportHeight]);
 
   // Breakpoint helpers
-  const isMobile = breakpoint === "mobile";
-  const isTablet = breakpoint === "tablet";
-  const isDesktop = breakpoint === "desktop" || breakpoint === "wide";
+  const isMobile = breakpoint === 'mobile';
+  const isTablet = breakpoint === 'tablet';
+  const isDesktop = breakpoint === 'desktop' || breakpoint === 'wide';
 
   // Update preferred size (called on user resize)
   const setPreferredSize = useCallback((width: number, height: number) => {

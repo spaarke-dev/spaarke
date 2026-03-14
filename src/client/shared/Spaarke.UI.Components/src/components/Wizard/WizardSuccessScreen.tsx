@@ -25,15 +25,9 @@
  *   - No domain-specific imports
  */
 
-import * as React from "react";
-import {
-  Text,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import type { IWizardSuccessConfig } from "./wizardShellTypes";
+import * as React from 'react';
+import { Text, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import type { IWizardSuccessConfig } from './wizardShellTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,19 +43,19 @@ interface Props {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalL,
     paddingTop: tokens.spacingVerticalXXL,
     paddingBottom: tokens.spacingVerticalXL,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: tokens.spacingVerticalS,
   },
 
@@ -71,24 +65,24 @@ const useStyles = makeStyles({
 
   body: {
     color: tokens.colorNeutralForeground2,
-    maxWidth: "400px",
+    maxWidth: '400px',
   },
 
   actionsRow: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalM,
-    justifyContent: "center",
+    justifyContent: 'center',
     marginTop: tokens.spacingVerticalS,
   },
 
   warningsSection: {
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     marginTop: tokens.spacingVerticalM,
-    alignItems: "stretch",
-    textAlign: "left",
+    alignItems: 'stretch',
+    textAlign: 'left',
   },
 });
 

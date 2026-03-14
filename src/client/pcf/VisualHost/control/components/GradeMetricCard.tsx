@@ -10,15 +10,9 @@
  * Supports click-to-drill for viewing underlying records.
  */
 
-import * as React from "react";
-import {
-  Card,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import type { DrillInteraction } from "../types";
+import * as React from 'react';
+import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import type { DrillInteraction } from '../types';
 import {
   type IColorRule,
   gradeValueToLetter,
@@ -26,7 +20,7 @@ import {
   getGradeColorTokens,
   resolveContextTemplate,
   resolveAreaIcon,
-} from "../utils/gradeUtils";
+} from '../utils/gradeUtils';
 
 export interface IGradeMetricCardProps {
   /** Performance area name (e.g., "Guidelines", "Budget", "Outcomes") */
@@ -57,52 +51,52 @@ export interface IGradeMetricCardProps {
 
 const useStyles = makeStyles({
   card: {
-    minWidth: "200px",
-    minHeight: "120px",
-    cursor: "default",
-    position: "relative",
-    overflow: "hidden",
-    transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
+    minWidth: '200px',
+    minHeight: '120px',
+    cursor: 'default',
+    position: 'relative',
+    overflow: 'hidden',
+    transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out',
   },
   cardInteractive: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       boxShadow: tokens.shadow8,
-      transform: "translateY(-2px)",
+      transform: 'translateY(-2px)',
     },
-    "&:active": {
-      transform: "translateY(0)",
+    '&:active': {
+      transform: 'translateY(0)',
     },
   },
   cardFillContainer: {
-    width: "100%",
-    minWidth: "unset",
-    minHeight: "unset",
-    aspectRatio: "5 / 3",
+    width: '100%',
+    minWidth: 'unset',
+    minHeight: 'unset',
+    aspectRatio: '5 / 3',
   },
   borderAccent: {
-    position: "absolute",
-    left: "0",
-    top: "0",
-    bottom: "0",
-    width: "4px",
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    bottom: '0',
+    width: '4px',
   },
   content: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     padding: tokens.spacingVerticalM,
     paddingLeft: `calc(${tokens.spacingHorizontalM} + 4px)`,
     gap: tokens.spacingVerticalS,
-    height: "100%",
-    boxSizing: "border-box",
+    height: '100%',
+    boxSizing: 'border-box',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   icon: {
-    fontSize: "20px",
+    fontSize: '20px',
     flexShrink: 0,
   },
   label: {
@@ -110,9 +104,9 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   gradeContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     flexGrow: 1,
   },
   gradeText: {
@@ -126,7 +120,7 @@ const useStyles = makeStyles({
   },
 });
 
-const DEFAULT_CONTEXT_TEMPLATE = "You have a {grade}% in {area} compliance";
+const DEFAULT_CONTEXT_TEMPLATE = 'You have a {grade}% in {area} compliance';
 
 /**
  * GradeMetricCard - Displays a grade metric with color-coded styling
@@ -162,7 +156,7 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
     if (isInteractive && onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: drillValue ?? areaName,
         label: areaName,
       });
@@ -170,7 +164,7 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (isInteractive && (e.key === "Enter" || e.key === " ")) {
+    if (isInteractive && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
       handleClick();
     }
@@ -181,7 +175,7 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
       className={mergeClasses(
         styles.card,
         isInteractive && styles.cardInteractive,
-        fillContainer && !hasExplicitDimensions && styles.cardFillContainer,
+        fillContainer && !hasExplicitDimensions && styles.cardFillContainer
       )}
       style={{
         backgroundColor: colorTokens.cardBackground,
@@ -189,15 +183,15 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
           ? {
               width: `${explicitWidth}px`,
               height: `${explicitHeight}px`,
-              minWidth: "unset",
-              minHeight: "unset",
+              minWidth: 'unset',
+              minHeight: 'unset',
             }
           : undefined),
       }}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
-      role={isInteractive ? "button" : "region"}
+      role={isInteractive ? 'button' : 'region'}
       aria-label={
         isInteractive
           ? `${areaName}: Grade ${letterGrade}. Click to view details.`
@@ -205,44 +199,28 @@ export const GradeMetricCard: React.FC<IGradeMetricCardProps> = ({
       }
     >
       {/* Color-coded left border accent */}
-      <div
-        className={styles.borderAccent}
-        style={{ backgroundColor: colorTokens.borderAccent }}
-      />
+      <div className={styles.borderAccent} style={{ backgroundColor: colorTokens.borderAccent }} />
 
       <div className={styles.content}>
         {/* Header: Icon + Area Label */}
         <div className={styles.header}>
-          <span
-            className={styles.icon}
-            style={{ color: colorTokens.iconColor }}
-          >
+          <span className={styles.icon} style={{ color: colorTokens.iconColor }}>
             <AreaIcon />
           </span>
-          <Text
-            className={styles.label}
-            style={{ color: colorTokens.labelColor }}
-          >
+          <Text className={styles.label} style={{ color: colorTokens.labelColor }}>
             {areaName}
           </Text>
         </div>
 
         {/* Center: Large letter grade */}
         <div className={styles.gradeContainer}>
-          <Text
-            className={styles.gradeText}
-            style={{ color: colorTokens.gradeText }}
-            aria-live="polite"
-          >
+          <Text className={styles.gradeText} style={{ color: colorTokens.gradeText }} aria-live="polite">
             {letterGrade}
           </Text>
         </div>
 
         {/* Bottom: Contextual text */}
-        <Text
-          className={styles.contextText}
-          style={{ color: colorTokens.contextText }}
-        >
+        <Text className={styles.contextText} style={{ color: colorTokens.contextText }}>
           {contextMessage}
         </Text>
       </div>

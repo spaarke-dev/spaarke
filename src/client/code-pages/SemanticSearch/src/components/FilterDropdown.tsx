@@ -8,17 +8,9 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import { useMemo, useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Dropdown,
-  Option,
-  Label,
-  Spinner,
-  useId,
-} from "@fluentui/react-components";
-import type { FilterOption } from "../types";
+import { useMemo, useCallback } from 'react';
+import { makeStyles, tokens, Dropdown, Option, Label, Spinner, useId } from '@fluentui/react-components';
+import type { FilterOption } from '../types';
 
 export interface FilterDropdownProps {
   /** Label text for the dropdown */
@@ -35,21 +27,21 @@ export interface FilterDropdownProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    width: "100%",
+    width: '100%',
   },
   label: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
   },
   dropdown: {
-    width: "100%",
+    width: '100%',
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
@@ -71,26 +63,23 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({
   isLoading,
 }) => {
   const styles = useStyles();
-  const dropdownId = useId("filter-dropdown");
+  const dropdownId = useId('filter-dropdown');
 
   // Handle selection change
   const handleOptionSelect = useCallback(
-    (
-      _ev: React.SyntheticEvent,
-      data: { optionValue?: string; selectedOptions: string[] },
-    ) => {
+    (_ev: React.SyntheticEvent, data: { optionValue?: string; selectedOptions: string[] }) => {
       onChange(data.selectedOptions);
     },
-    [onChange],
+    [onChange]
   );
 
   // Format the summary button label
   const selectedValue = useMemo(() => {
     if (selectedValues.length === 0) {
-      return "All";
+      return 'All';
     }
     if (selectedValues.length === 1) {
-      const selectedOption = options.find((o) => o.value === selectedValues[0]);
+      const selectedOption = options.find(o => o.value === selectedValues[0]);
       return selectedOption?.label ?? selectedValues[0];
     }
     return `${selectedValues.length} selected`;
@@ -125,10 +114,10 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({
         onOptionSelect={handleOptionSelect}
         multiselect
       >
-        {options.map((option) => (
+        {options.map(option => (
           <Option key={option.value} value={option.value} text={option.label}>
             {option.label}
-            {option.count !== undefined ? ` (${option.count})` : ""}
+            {option.count !== undefined ? ` (${option.count})` : ''}
           </Option>
         ))}
       </Dropdown>

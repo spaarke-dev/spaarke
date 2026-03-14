@@ -27,7 +27,7 @@ import {
   AuthenticationResult,
   SilentRequest,
   PopupRequest,
-} from "@azure/msal-browser";
+} from '@azure/msal-browser';
 
 /**
  * AuthService handles MSAL token acquisition for BFF API calls
@@ -43,7 +43,7 @@ export class AuthService {
   private msalInstance: PublicClientApplication;
   private namedScope: string;
   private currentAccount: AccountInfo | null = null;
-  private initialized: boolean = false;
+  private initialized = false;
 
   /**
    * Initialize MSAL public client
@@ -59,7 +59,7 @@ export class AuthService {
 
     // CRITICAL: Static redirect URI matching Azure AD app registration
     // Must be the Dataverse org URL, NOT window.location.origin
-    const redirectUri = "https://spaarkedev1.crm.dynamics.com";
+    const redirectUri = 'https://spaarkedev1.crm.dynamics.com';
 
     // MSAL configuration for public client (SPA)
     this.msalInstance = new PublicClientApplication({
@@ -70,7 +70,7 @@ export class AuthService {
         navigateToLoginRequestUrl: false, // Stay on current page after login
       },
       cache: {
-        cacheLocation: "sessionStorage", // Use sessionStorage for PCF
+        cacheLocation: 'sessionStorage', // Use sessionStorage for PCF
         storeAuthStateInCookie: false, // Not needed for modern browsers
       },
       system: {
@@ -92,26 +92,22 @@ export class AuthService {
    */
   public async initialize(): Promise<void> {
     if (this.initialized) {
-      console.info(
-        "[AuthService:AnalysisWorkspace] Already initialized, skipping",
-      );
+      console.info('[AuthService:AnalysisWorkspace] Already initialized, skipping');
       return;
     }
 
-    console.info("[AuthService:AnalysisWorkspace] Initializing MSAL...");
+    console.info('[AuthService:AnalysisWorkspace] Initializing MSAL...');
 
     // Step 1: Initialize MSAL instance (required in MSAL v3+)
     await this.msalInstance.initialize();
-    console.info("[AuthService:AnalysisWorkspace] MSAL instance initialized");
+    console.info('[AuthService:AnalysisWorkspace] MSAL instance initialized');
 
     // Step 2: Handle redirect response (CRITICAL - required in MSAL v3+)
     // If user was redirected to Azure AD for login and is now returning,
     // this processes the OAuth response and extracts tokens.
     const redirectResponse = await this.msalInstance.handleRedirectPromise();
     if (redirectResponse) {
-      console.info(
-        "[AuthService:AnalysisWorkspace] Redirect response processed, user authenticated via redirect",
-      );
+      console.info('[AuthService:AnalysisWorkspace] Redirect response processed, user authenticated via redirect');
       this.currentAccount = redirectResponse.account;
     }
 
@@ -120,18 +116,14 @@ export class AuthService {
       const accounts = this.msalInstance.getAllAccounts();
       if (accounts.length > 0) {
         this.currentAccount = accounts[0];
-        console.info(
-          `[AuthService:AnalysisWorkspace] Active account found: ${this.currentAccount.username}`,
-        );
+        console.info(`[AuthService:AnalysisWorkspace] Active account found: ${this.currentAccount.username}`);
       } else {
-        console.info("[AuthService:AnalysisWorkspace] No active account found");
+        console.info('[AuthService:AnalysisWorkspace] No active account found');
       }
     }
 
     this.initialized = true;
-    console.info(
-      "[AuthService:AnalysisWorkspace] MSAL initialization complete",
-    );
+    console.info('[AuthService:AnalysisWorkspace] MSAL initialization complete');
   }
 
   /**
@@ -154,35 +146,26 @@ export class AuthService {
     try {
       // Step 1: Try acquireTokenSilent with cached account (fastest path)
       if (this.currentAccount) {
-        console.log(
-          "[AuthService:AnalysisWorkspace] Attempting acquireTokenSilent with cached account...",
-        );
+        console.log('[AuthService:AnalysisWorkspace] Attempting acquireTokenSilent with cached account...');
         try {
           const silentRequest: SilentRequest = {
             scopes: [this.namedScope],
             account: this.currentAccount,
           };
-          const result =
-            await this.msalInstance.acquireTokenSilent(silentRequest);
-          console.log(
-            "[AuthService:AnalysisWorkspace] acquireTokenSilent succeeded",
-          );
+          const result = await this.msalInstance.acquireTokenSilent(silentRequest);
+          console.log('[AuthService:AnalysisWorkspace] acquireTokenSilent succeeded');
           return result.accessToken;
         } catch (silentError) {
-          console.log(
-            "[AuthService:AnalysisWorkspace] acquireTokenSilent failed, trying ssoSilent...",
-          );
+          console.log('[AuthService:AnalysisWorkspace] acquireTokenSilent failed, trying ssoSilent...');
           // Fall through to ssoSilent
         }
       }
 
       // Step 2: Try ssoSilent (discover account from browser session)
-      console.log(
-        "[AuthService:AnalysisWorkspace] Attempting ssoSilent authentication...",
-      );
+      console.log('[AuthService:AnalysisWorkspace] Attempting ssoSilent authentication...');
       const ssoResult = await this.attemptSsoSilent();
       if (ssoResult) {
-        console.log("[AuthService:AnalysisWorkspace] ssoSilent succeeded");
+        console.log('[AuthService:AnalysisWorkspace] ssoSilent succeeded');
         // Update cached account
         if (ssoResult.account) {
           this.currentAccount = ssoResult.account;
@@ -191,26 +174,17 @@ export class AuthService {
       }
 
       // Step 3: Fall back to popup (requires user interaction)
-      console.log(
-        "[AuthService:AnalysisWorkspace] Falling back to popup authentication...",
-      );
+      console.log('[AuthService:AnalysisWorkspace] Falling back to popup authentication...');
       const popupResult = await this.attemptPopupAuth();
-      console.log(
-        "[AuthService:AnalysisWorkspace] Popup authentication succeeded",
-      );
+      console.log('[AuthService:AnalysisWorkspace] Popup authentication succeeded');
       // Update cached account
       if (popupResult.account) {
         this.currentAccount = popupResult.account;
       }
       return popupResult.accessToken;
     } catch (error) {
-      console.error(
-        "[AuthService:AnalysisWorkspace] Token acquisition failed:",
-        error,
-      );
-      throw new Error(
-        `Failed to acquire access token: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      console.error('[AuthService:AnalysisWorkspace] Token acquisition failed:', error);
+      throw new Error(`Failed to acquire access token: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -227,8 +201,8 @@ export class AuthService {
     } catch (error) {
       // SSO silent can fail if no SSO session exists
       console.log(
-        "[AuthService:AnalysisWorkspace] ssoSilent not available:",
-        error instanceof Error ? error.message : String(error),
+        '[AuthService:AnalysisWorkspace] ssoSilent not available:',
+        error instanceof Error ? error.message : String(error)
       );
       return null;
     }
@@ -248,19 +222,11 @@ export class AuthService {
     } catch (error) {
       // Handle specific popup errors
       if (error instanceof Error) {
-        if (
-          error.message.includes("popup_window_error") ||
-          error.message.includes("BrowserAuthError")
-        ) {
-          throw new Error(
-            "Popup blocked. Please allow popups for this site and try again.",
-          );
+        if (error.message.includes('popup_window_error') || error.message.includes('BrowserAuthError')) {
+          throw new Error('Popup blocked. Please allow popups for this site and try again.');
         }
-        if (
-          error.message.includes("user_cancelled") ||
-          error.message.includes("popup_window_closed")
-        ) {
-          throw new Error("Authentication cancelled by user");
+        if (error.message.includes('user_cancelled') || error.message.includes('popup_window_closed')) {
+          throw new Error('Authentication cancelled by user');
         }
       }
       throw error;

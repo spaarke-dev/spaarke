@@ -3,50 +3,46 @@
  * Tests the visual switching logic for all chart types
  */
 
-import * as React from "react";
-import type { Meta, StoryObj } from "@storybook/react";
-import { action } from "@storybook/addon-actions";
-import { ChartRenderer } from "../control/components/ChartRenderer";
-import { VisualType, AggregationType } from "../control/types";
-import type {
-  IChartDefinition,
-  IChartData,
-  IAggregatedDataPoint,
-} from "../control/types";
+import * as React from 'react';
+import type { Meta, StoryObj } from '@storybook/react';
+import { action } from '@storybook/addon-actions';
+import { ChartRenderer } from '../control/components/ChartRenderer';
+import { VisualType, AggregationType } from '../control/types';
+import type { IChartDefinition, IChartData, IAggregatedDataPoint } from '../control/types';
 
 // Sample data for stories
 const sampleDataPoints: IAggregatedDataPoint[] = [
-  { label: "Active", value: 45, fieldValue: "active", color: "#0078D4" },
-  { label: "Pending", value: 30, fieldValue: "pending", color: "#FFB900" },
-  { label: "Closed", value: 25, fieldValue: "closed", color: "#107C10" },
-  { label: "Cancelled", value: 10, fieldValue: "cancelled", color: "#D13438" },
+  { label: 'Active', value: 45, fieldValue: 'active', color: '#0078D4' },
+  { label: 'Pending', value: 30, fieldValue: 'pending', color: '#FFB900' },
+  { label: 'Closed', value: 25, fieldValue: 'closed', color: '#107C10' },
+  { label: 'Cancelled', value: 10, fieldValue: 'cancelled', color: '#D13438' },
 ];
 
 const monthlyDataPoints: IAggregatedDataPoint[] = [
-  { label: "Jan", value: 100, fieldValue: "jan" },
-  { label: "Feb", value: 120, fieldValue: "feb" },
-  { label: "Mar", value: 90, fieldValue: "mar" },
-  { label: "Apr", value: 150, fieldValue: "apr" },
-  { label: "May", value: 130, fieldValue: "may" },
-  { label: "Jun", value: 180, fieldValue: "jun" },
+  { label: 'Jan', value: 100, fieldValue: 'jan' },
+  { label: 'Feb', value: 120, fieldValue: 'feb' },
+  { label: 'Mar', value: 90, fieldValue: 'mar' },
+  { label: 'Apr', value: 150, fieldValue: 'apr' },
+  { label: 'May', value: 130, fieldValue: 'may' },
+  { label: 'Jun', value: 180, fieldValue: 'jun' },
 ];
 
 const baseChartData: IChartData = {
   dataPoints: sampleDataPoints,
   totalRecords: 110,
   aggregationType: AggregationType.Count,
-  aggregationField: "statuscode",
-  groupByField: "statuscode",
+  aggregationField: 'statuscode',
+  groupByField: 'statuscode',
 };
 
 const baseChartDefinition: IChartDefinition = {
-  sprk_chartdefinitionid: "story-001",
-  sprk_name: "Sample Chart",
-  sprk_description: "A sample chart for testing",
+  sprk_chartdefinitionid: 'story-001',
+  sprk_name: 'Sample Chart',
+  sprk_description: 'A sample chart for testing',
   sprk_visualtype: VisualType.BarChart,
   sprk_aggregationtype: AggregationType.Count,
-  sprk_sourceentity: "account",
-  sprk_groupbyfield: "statuscode",
+  sprk_sourceentity: 'account',
+  sprk_groupbyfield: 'statuscode',
   sprk_configurationjson: JSON.stringify({
     showTitle: true,
     showLegend: true,
@@ -55,41 +51,41 @@ const baseChartDefinition: IChartDefinition = {
 
 // Story metadata
 const meta: Meta<typeof ChartRenderer> = {
-  title: "Core/ChartRenderer",
+  title: 'Core/ChartRenderer',
   component: ChartRenderer,
   parameters: {
-    layout: "centered",
+    layout: 'centered',
     docs: {
       description: {
         component:
-          "ChartRenderer dynamically renders the appropriate chart component based on the visual type in the chart definition. This is the central switching logic for Visual Host.",
+          'ChartRenderer dynamically renders the appropriate chart component based on the visual type in the chart definition. This is the central switching logic for Visual Host.',
       },
     },
   },
-  tags: ["autodocs"],
+  tags: ['autodocs'],
   decorators: [
-    (Story) => (
-      <div style={{ width: "600px", height: "400px", padding: "1rem" }}>
+    Story => (
+      <div style={{ width: '600px', height: '400px', padding: '1rem' }}>
         <Story />
       </div>
     ),
   ],
   argTypes: {
     chartDefinition: {
-      description: "Chart definition from sprk_chartdefinition entity",
-      control: "object",
+      description: 'Chart definition from sprk_chartdefinition entity',
+      control: 'object',
     },
     chartData: {
-      description: "Aggregated data for chart rendering",
-      control: "object",
+      description: 'Aggregated data for chart rendering',
+      control: 'object',
     },
     onDrillInteraction: {
-      description: "Callback when user interacts with chart for drill-through",
-      action: "drillInteraction",
+      description: 'Callback when user interacts with chart for drill-through',
+      action: 'drillInteraction',
     },
     height: {
-      description: "Height override for the chart",
-      control: { type: "number", min: 100, max: 600 },
+      description: 'Height override for the chart',
+      control: { type: 'number', min: 100, max: 600 },
     },
   },
 };
@@ -102,19 +98,19 @@ export const MetricCard: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Total Records",
-      sprk_description: "Count of all records",
+      sprk_name: 'Total Records',
+      sprk_description: 'Count of all records',
       sprk_visualtype: VisualType.MetricCard,
       sprk_configurationjson: JSON.stringify({
-        trend: "up",
+        trend: 'up',
         trendValue: 12.5,
       }),
     },
     chartData: {
       ...baseChartData,
-      dataPoints: [{ label: "Total", value: 110, fieldValue: null }],
+      dataPoints: [{ label: 'Total', value: 110, fieldValue: null }],
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -124,17 +120,17 @@ export const BarChartVertical: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Status Distribution",
-      sprk_description: "Records by status",
+      sprk_name: 'Status Distribution',
+      sprk_description: 'Records by status',
       sprk_visualtype: VisualType.BarChart,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
-        orientation: "vertical",
+        orientation: 'vertical',
         showLegend: false,
       }),
     },
     chartData: baseChartData,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -144,15 +140,15 @@ export const BarChartHorizontal: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Status Distribution",
+      sprk_name: 'Status Distribution',
       sprk_visualtype: VisualType.BarChart,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
-        orientation: "horizontal",
+        orientation: 'horizontal',
       }),
     },
     chartData: baseChartData,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -162,8 +158,8 @@ export const LineChart: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Monthly Trend",
-      sprk_description: "Records over time",
+      sprk_name: 'Monthly Trend',
+      sprk_description: 'Records over time',
       sprk_visualtype: VisualType.LineChart,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
@@ -173,9 +169,9 @@ export const LineChart: Story = {
     chartData: {
       ...baseChartData,
       dataPoints: monthlyDataPoints,
-      groupByField: "month",
+      groupByField: 'month',
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -185,19 +181,19 @@ export const AreaChart: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Cumulative Growth",
+      sprk_name: 'Cumulative Growth',
       sprk_visualtype: VisualType.AreaChart,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
-        lineColor: "#0078D4",
+        lineColor: '#0078D4',
       }),
     },
     chartData: {
       ...baseChartData,
       dataPoints: monthlyDataPoints,
-      groupByField: "month",
+      groupByField: 'month',
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -207,17 +203,17 @@ export const DonutChart: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Status Breakdown",
+      sprk_name: 'Status Breakdown',
       sprk_visualtype: VisualType.DonutChart,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
         showCenterValue: true,
-        centerLabel: "Total",
+        centerLabel: 'Total',
         showLegend: true,
       }),
     },
     chartData: baseChartData,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -227,7 +223,7 @@ export const StatusDistributionBar: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Pipeline Status",
+      sprk_name: 'Pipeline Status',
       sprk_visualtype: VisualType.StatusBar,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
@@ -236,7 +232,7 @@ export const StatusDistributionBar: Story = {
       }),
     },
     chartData: baseChartData,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -246,7 +242,7 @@ export const Calendar: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Activity Calendar",
+      sprk_name: 'Activity Calendar',
       sprk_visualtype: VisualType.Calendar,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
@@ -256,11 +252,11 @@ export const Calendar: Story = {
     chartData: {
       ...baseChartData,
       dataPoints: [
-        { label: "Meeting", value: 3, fieldValue: new Date().toISOString() },
-        { label: "Call", value: 2, fieldValue: new Date().toISOString() },
+        { label: 'Meeting', value: 3, fieldValue: new Date().toISOString() },
+        { label: 'Call', value: 2, fieldValue: new Date().toISOString() },
       ],
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 400,
   },
 };
@@ -270,7 +266,7 @@ export const MiniTable: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Top Items",
+      sprk_name: 'Top Items',
       sprk_visualtype: VisualType.MiniTable,
       sprk_configurationjson: JSON.stringify({
         showTitle: true,
@@ -279,7 +275,7 @@ export const MiniTable: Story = {
       }),
     },
     chartData: baseChartData,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
     height: 300,
   },
 };
@@ -289,7 +285,7 @@ export const NoData: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Empty Chart",
+      sprk_name: 'Empty Chart',
       sprk_visualtype: VisualType.BarChart,
     },
     chartData: {
@@ -306,7 +302,7 @@ export const NoDrillThrough: Story = {
   args: {
     chartDefinition: {
       ...baseChartDefinition,
-      sprk_name: "Display Only",
+      sprk_name: 'Display Only',
       sprk_visualtype: VisualType.BarChart,
     },
     chartData: baseChartData,
@@ -319,32 +315,32 @@ export const NoDrillThrough: Story = {
 export const AllVisualTypes: Story = {
   render: () => {
     const visualTypes = [
-      { type: VisualType.MetricCard, name: "MetricCard" },
-      { type: VisualType.BarChart, name: "BarChart" },
-      { type: VisualType.LineChart, name: "LineChart" },
-      { type: VisualType.DonutChart, name: "DonutChart" },
-      { type: VisualType.StatusBar, name: "StatusBar" },
-      { type: VisualType.MiniTable, name: "MiniTable" },
+      { type: VisualType.MetricCard, name: 'MetricCard' },
+      { type: VisualType.BarChart, name: 'BarChart' },
+      { type: VisualType.LineChart, name: 'LineChart' },
+      { type: VisualType.DonutChart, name: 'DonutChart' },
+      { type: VisualType.StatusBar, name: 'StatusBar' },
+      { type: VisualType.MiniTable, name: 'MiniTable' },
     ];
 
     return (
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
-          gap: "1rem",
-          padding: "1rem",
-          width: "1000px",
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: '1rem',
+          padding: '1rem',
+          width: '1000px',
         }}
       >
         {visualTypes.map(({ type, name }) => (
           <div
             key={type}
             style={{
-              border: "1px solid #e0e0e0",
-              borderRadius: "8px",
-              padding: "1rem",
-              height: "300px",
+              border: '1px solid #e0e0e0',
+              borderRadius: '8px',
+              padding: '1rem',
+              height: '300px',
             }}
           >
             <ChartRenderer
@@ -362,9 +358,7 @@ export const AllVisualTypes: Story = {
                 type === VisualType.MetricCard
                   ? {
                       ...baseChartData,
-                      dataPoints: [
-                        { label: "Total", value: 110, fieldValue: null },
-                      ],
+                      dataPoints: [{ label: 'Total', value: 110, fieldValue: null }],
                     }
                   : type === VisualType.LineChart
                     ? { ...baseChartData, dataPoints: monthlyDataPoints }
@@ -379,8 +373,8 @@ export const AllVisualTypes: Story = {
     );
   },
   decorators: [
-    (Story) => (
-      <div style={{ width: "1100px" }}>
+    Story => (
+      <div style={{ width: '1100px' }}>
         <Story />
       </div>
     ),

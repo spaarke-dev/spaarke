@@ -15,17 +15,17 @@
 declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-import { logger } from "./logger";
+import { logger } from './logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Unique pane ID for EventDetailSidePane - used to check for existing pane */
-const EVENT_DETAIL_PANE_ID = "eventDetailPane";
+const EVENT_DETAIL_PANE_ID = 'eventDetailPane';
 
 /** Custom Page name for the Event Detail Side Pane */
-const EVENT_DETAIL_PAGE_NAME = "sprk_eventdetailsidepane";
+const EVENT_DETAIL_PAGE_NAME = 'sprk_eventdetailsidepane';
 
 /** Default width for the side pane (per design spec) */
 const PANE_WIDTH = 400;
@@ -82,7 +82,7 @@ interface SidePane {
 }
 
 interface SidePanePageInput {
-  pageType: "custom";
+  pageType: 'custom';
   name: string;
   /** Parameters passed as URL query string to the Custom Page */
   recordId?: string;
@@ -104,11 +104,7 @@ interface AppSidePanes {
  * @returns true if sidePanes API exists
  */
 function isSidePanesAvailable(): boolean {
-  return !!(
-    typeof Xrm !== "undefined" &&
-    Xrm.App &&
-    (Xrm.App as unknown as { sidePanes?: AppSidePanes }).sidePanes
-  );
+  return !!(typeof Xrm !== 'undefined' && Xrm.App && (Xrm.App as unknown as { sidePanes?: AppSidePanes }).sidePanes);
 }
 
 /**
@@ -126,23 +122,20 @@ function getSidePanes(): AppSidePanes | null {
  * Note: Custom Pages receive parameters via URL query string or recordId.
  * We use query string format: ?eventId={guid}&eventType={guid}
  */
-function buildPageInput(
-  eventId: string,
-  eventType?: string,
-): SidePanePageInput {
+function buildPageInput(eventId: string, eventType?: string): SidePanePageInput {
   // For Custom Pages, we can pass parameters via the name with query string
   // Format: pagename?param1=value1&param2=value2
-  let pageName = EVENT_DETAIL_PAGE_NAME;
+  const pageName = EVENT_DETAIL_PAGE_NAME;
 
   // Build query parameters
   const params = new URLSearchParams();
-  params.set("eventId", eventId);
+  params.set('eventId', eventId);
   if (eventType) {
-    params.set("eventType", eventType);
+    params.set('eventType', eventType);
   }
 
   return {
-    pageType: "custom",
+    pageType: 'custom',
     name: `${pageName}?${params.toString()}`,
   };
 }
@@ -175,30 +168,26 @@ function buildPageInput(
  * }
  * ```
  */
-export async function openEventDetailPane(
-  params: OpenEventDetailPaneParams,
-): Promise<SidePaneOpenResult> {
+export async function openEventDetailPane(params: OpenEventDetailPaneParams): Promise<SidePaneOpenResult> {
   const { eventId, eventType, onClose } = params;
 
-  logger.info("SidePaneUtils", "Opening Event Detail pane", {
+  logger.info('SidePaneUtils', 'Opening Event Detail pane', {
     eventId,
     eventType,
   });
 
   // Validate eventId
-  if (!eventId || eventId.trim() === "") {
-    const error = "eventId is required to open the side pane";
-    logger.error("SidePaneUtils", error);
+  if (!eventId || eventId.trim() === '') {
+    const error = 'eventId is required to open the side pane';
+    logger.error('SidePaneUtils', error);
     return { success: false, error };
   }
 
   // Check if sidePanes API is available
   const sidePanes = getSidePanes();
   if (!sidePanes) {
-    const error =
-      "Xrm.App.sidePanes API is not available. " +
-      "This feature requires a model-driven app context.";
-    logger.error("SidePaneUtils", error);
+    const error = 'Xrm.App.sidePanes API is not available. ' + 'This feature requires a model-driven app context.';
+    logger.error('SidePaneUtils', error);
     return { success: false, error };
   }
 
@@ -208,10 +197,7 @@ export async function openEventDetailPane(
 
     if (existingPane) {
       // Pane exists - navigate to new event (reuses pane)
-      logger.info(
-        "SidePaneUtils",
-        "Reusing existing pane, navigating to new event",
-      );
+      logger.info('SidePaneUtils', 'Reusing existing pane, navigating to new event');
 
       const pageInput = buildPageInput(eventId, eventType);
       await existingPane.navigate(pageInput);
@@ -220,10 +206,10 @@ export async function openEventDetailPane(
       return { success: true, paneId: EVENT_DETAIL_PANE_ID };
     } else {
       // Create new pane
-      logger.info("SidePaneUtils", "Creating new side pane");
+      logger.info('SidePaneUtils', 'Creating new side pane');
 
       const newPane = await sidePanes.createPane({
-        title: "Event Details",
+        title: 'Event Details',
         paneId: EVENT_DETAIL_PANE_ID,
         canClose: true,
         width: PANE_WIDTH,
@@ -234,7 +220,7 @@ export async function openEventDetailPane(
       const pageInput = buildPageInput(eventId, eventType);
       await newPane.navigate(pageInput);
 
-      logger.info("SidePaneUtils", "Side pane created and navigated", {
+      logger.info('SidePaneUtils', 'Side pane created and navigated', {
         paneId: newPane.paneId,
       });
 
@@ -242,7 +228,7 @@ export async function openEventDetailPane(
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error("SidePaneUtils", "Failed to open side pane", {
+    logger.error('SidePaneUtils', 'Failed to open side pane', {
       error: errorMessage,
     });
     return {
@@ -260,18 +246,18 @@ export async function openEventDetailPane(
 export function closeEventDetailPane(): boolean {
   const sidePanes = getSidePanes();
   if (!sidePanes) {
-    logger.warn("SidePaneUtils", "sidePanes API not available for close");
+    logger.warn('SidePaneUtils', 'sidePanes API not available for close');
     return false;
   }
 
   const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
   if (existingPane) {
-    logger.info("SidePaneUtils", "Closing Event Detail pane");
+    logger.info('SidePaneUtils', 'Closing Event Detail pane');
     existingPane.close();
     return true;
   }
 
-  logger.debug("SidePaneUtils", "No Event Detail pane open to close");
+  logger.debug('SidePaneUtils', 'No Event Detail pane open to close');
   return false;
 }
 

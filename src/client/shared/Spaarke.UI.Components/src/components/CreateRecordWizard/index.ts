@@ -7,7 +7,7 @@
  */
 
 // Main component
-export { CreateRecordWizard } from "./CreateRecordWizard";
+export { CreateRecordWizard } from './CreateRecordWizard';
 
 // Follow-on steps UI
 export {
@@ -15,13 +15,13 @@ export {
   FOLLOW_ON_STEP_ID_MAP,
   FOLLOW_ON_STEP_LABEL_MAP,
   FOLLOW_ON_CANONICAL_ORDER,
-} from "./FollowOnSteps";
+} from './FollowOnSteps';
 
 // Step components (for direct use if needed)
-export { AssignResourcesStep } from "./steps/AssignResourcesStep";
-export { DraftSummaryStep } from "./steps/DraftSummaryStep";
-export { SendEmailStep } from "./steps/SendEmailStep";
-export { RecipientField } from "./steps/RecipientField";
+export { AssignResourcesStep } from './steps/AssignResourcesStep';
+export { DraftSummaryStep } from './steps/DraftSummaryStep';
+export { SendEmailStep } from './steps/SendEmailStep';
+export { RecipientField } from './steps/RecipientField';
 
 // Types
 export type {
@@ -33,11 +33,11 @@ export type {
   FollowOnActionId,
   IRecipientItem,
   SearchCallback,
-} from "./types";
+} from './types';
 
 // Step prop types
-export type { IAssignResourcesStepProps } from "./steps/AssignResourcesStep";
-export type { IDraftSummaryStepProps } from "./steps/DraftSummaryStep";
-export type { ISendEmailStepProps } from "./steps/SendEmailStep";
-export type { IRecipientFieldProps } from "./steps/RecipientField";
-export type { INextStepsStepProps } from "./FollowOnSteps";
+export type { IAssignResourcesStepProps } from './steps/AssignResourcesStep';
+export type { IDraftSummaryStepProps } from './steps/DraftSummaryStep';
+export type { ISendEmailStepProps } from './steps/SendEmailStep';
+export type { IRecipientFieldProps } from './steps/RecipientField';
+export type { INextStepsStepProps } from './FollowOnSteps';

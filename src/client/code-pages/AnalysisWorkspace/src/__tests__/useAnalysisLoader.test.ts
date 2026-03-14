@@ -17,8 +17,8 @@
  * @see services/analysisApi.ts
  */
 
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useAnalysisLoader } from "../hooks/useAnalysisLoader";
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useAnalysisLoader } from '../hooks/useAnalysisLoader';
 import {
   buildAnalysisRecord,
   buildDocumentMetadata,
@@ -26,25 +26,21 @@ import {
   TEST_ANALYSIS_ID,
   TEST_DOCUMENT_ID,
   TEST_TOKEN,
-} from "./mocks/fixtures";
+} from './mocks/fixtures';
 
 // Mock the analysisApi service module
-jest.mock("../services/analysisApi");
+jest.mock('../services/analysisApi');
 
-import { fetchAnalysis, fetchDocumentMetadata } from "../services/analysisApi";
+import { fetchAnalysis, fetchDocumentMetadata } from '../services/analysisApi';
 
-const mockFetchAnalysis = fetchAnalysis as jest.MockedFunction<
-  typeof fetchAnalysis
->;
-const mockFetchDocumentMetadata = fetchDocumentMetadata as jest.MockedFunction<
-  typeof fetchDocumentMetadata
->;
+const mockFetchAnalysis = fetchAnalysis as jest.MockedFunction<typeof fetchAnalysis>;
+const mockFetchDocumentMetadata = fetchDocumentMetadata as jest.MockedFunction<typeof fetchDocumentMetadata>;
 
 // ---------------------------------------------------------------------------
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("useAnalysisLoader", () => {
+describe('useAnalysisLoader', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -53,7 +49,7 @@ describe("useAnalysisLoader", () => {
   // 1. Valid Load
   // -----------------------------------------------------------------------
 
-  it("loadAnalysisAndDocument_ValidIds_BothLoadedSuccessfully", async () => {
+  it('loadAnalysisAndDocument_ValidIds_BothLoadedSuccessfully', async () => {
     // Arrange
     const analysisFixture = buildAnalysisRecord({ id: TEST_ANALYSIS_ID });
     const documentFixture = buildDocumentMetadata({ id: TEST_DOCUMENT_ID });
@@ -67,7 +63,7 @@ describe("useAnalysisLoader", () => {
         analysisId: TEST_ANALYSIS_ID,
         documentId: TEST_DOCUMENT_ID,
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     // Assert: initially loading
@@ -89,11 +85,11 @@ describe("useAnalysisLoader", () => {
   // 2. Invalid ID
   // -----------------------------------------------------------------------
 
-  it("loadAnalysis_InvalidId_ReturnsAnalysisError", async () => {
+  it('loadAnalysis_InvalidId_ReturnsAnalysisError', async () => {
     // Arrange
     const apiError = buildAnalysisError({
-      errorCode: "ANALYSIS_NOT_FOUND",
-      message: "Analysis not found",
+      errorCode: 'ANALYSIS_NOT_FOUND',
+      message: 'Analysis not found',
       status: 404,
     });
 
@@ -103,10 +99,10 @@ describe("useAnalysisLoader", () => {
     // Act
     const { result } = renderHook(() =>
       useAnalysisLoader({
-        analysisId: "non-existent-id",
+        analysisId: 'non-existent-id',
         documentId: TEST_DOCUMENT_ID,
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     await waitFor(() => {
@@ -117,9 +113,9 @@ describe("useAnalysisLoader", () => {
     expect(result.current.analysis).toBeNull();
     expect(result.current.analysisError).toEqual(
       expect.objectContaining({
-        errorCode: "ANALYSIS_NOT_FOUND",
-        message: "Analysis not found",
-      }),
+        errorCode: 'ANALYSIS_NOT_FOUND',
+        message: 'Analysis not found',
+      })
     );
     expect(result.current.document).not.toBeNull();
     expect(result.current.documentError).toBeNull();
@@ -129,12 +125,10 @@ describe("useAnalysisLoader", () => {
   // 3. Network Failure
   // -----------------------------------------------------------------------
 
-  it("loadAnalysis_NetworkFailure_ReturnsGenericError", async () => {
+  it('loadAnalysis_NetworkFailure_ReturnsGenericError', async () => {
     // Arrange: simulate a TypeError (fetch network failure)
-    mockFetchAnalysis.mockRejectedValue(new TypeError("Failed to fetch"));
-    mockFetchDocumentMetadata.mockRejectedValue(
-      new TypeError("Failed to fetch"),
-    );
+    mockFetchAnalysis.mockRejectedValue(new TypeError('Failed to fetch'));
+    mockFetchDocumentMetadata.mockRejectedValue(new TypeError('Failed to fetch'));
 
     // Act
     const { result } = renderHook(() =>
@@ -142,7 +136,7 @@ describe("useAnalysisLoader", () => {
         analysisId: TEST_ANALYSIS_ID,
         documentId: TEST_DOCUMENT_ID,
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     await waitFor(() => {
@@ -153,15 +147,15 @@ describe("useAnalysisLoader", () => {
     // are wrapped by the hook's isAnalysisError type guard)
     expect(result.current.analysisError).toEqual(
       expect.objectContaining({
-        errorCode: "LOAD_FAILED",
-        message: "Failed to fetch",
-      }),
+        errorCode: 'LOAD_FAILED',
+        message: 'Failed to fetch',
+      })
     );
     expect(result.current.documentError).toEqual(
       expect.objectContaining({
-        errorCode: "LOAD_FAILED",
-        message: "Failed to fetch",
-      }),
+        errorCode: 'LOAD_FAILED',
+        message: 'Failed to fetch',
+      })
     );
   });
 
@@ -169,26 +163,22 @@ describe("useAnalysisLoader", () => {
   // 4. Parallel Fetch
   // -----------------------------------------------------------------------
 
-  it("loadBothResources_WithToken_FetchesBothInParallel", async () => {
+  it('loadBothResources_WithToken_FetchesBothInParallel', async () => {
     // Arrange: use delayed promises to verify parallel execution
-    let analysisResolve:
-      | ((value: ReturnType<typeof buildAnalysisRecord>) => void)
-      | undefined;
-    let documentResolve:
-      | ((value: ReturnType<typeof buildDocumentMetadata>) => void)
-      | undefined;
+    let analysisResolve: ((value: ReturnType<typeof buildAnalysisRecord>) => void) | undefined;
+    let documentResolve: ((value: ReturnType<typeof buildDocumentMetadata>) => void) | undefined;
 
     mockFetchAnalysis.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise(resolve => {
           analysisResolve = resolve;
-        }),
+        })
     );
     mockFetchDocumentMetadata.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise(resolve => {
           documentResolve = resolve;
-        }),
+        })
     );
 
     // Act
@@ -197,7 +187,7 @@ describe("useAnalysisLoader", () => {
         analysisId: TEST_ANALYSIS_ID,
         documentId: TEST_DOCUMENT_ID,
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     // Assert: both fetches were initiated (both are loading)
@@ -238,12 +228,12 @@ describe("useAnalysisLoader", () => {
   // 5. Missing Document
   // -----------------------------------------------------------------------
 
-  it("loadDocument_MissingDocument_AnalysisLoadsDocumentErrors", async () => {
+  it('loadDocument_MissingDocument_AnalysisLoadsDocumentErrors', async () => {
     // Arrange
     const analysisFixture = buildAnalysisRecord();
     const docError = buildAnalysisError({
-      errorCode: "DOCUMENT_NOT_FOUND",
-      message: "Document not found",
+      errorCode: 'DOCUMENT_NOT_FOUND',
+      message: 'Document not found',
       status: 404,
     });
 
@@ -254,9 +244,9 @@ describe("useAnalysisLoader", () => {
     const { result } = renderHook(() =>
       useAnalysisLoader({
         analysisId: TEST_ANALYSIS_ID,
-        documentId: "missing-doc-id",
+        documentId: 'missing-doc-id',
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     await waitFor(() => {
@@ -269,8 +259,8 @@ describe("useAnalysisLoader", () => {
     expect(result.current.document).toBeNull();
     expect(result.current.documentError).toEqual(
       expect.objectContaining({
-        errorCode: "DOCUMENT_NOT_FOUND",
-      }),
+        errorCode: 'DOCUMENT_NOT_FOUND',
+      })
     );
   });
 
@@ -278,7 +268,7 @@ describe("useAnalysisLoader", () => {
   // 6. Token null (gated loading)
   // -----------------------------------------------------------------------
 
-  it("loadResources_TokenNull_DoesNotFetchUntilTokenAvailable", async () => {
+  it('loadResources_TokenNull_DoesNotFetchUntilTokenAvailable', async () => {
     // Arrange
     mockFetchAnalysis.mockResolvedValue(buildAnalysisRecord());
     mockFetchDocumentMetadata.mockResolvedValue(buildDocumentMetadata());
@@ -291,7 +281,7 @@ describe("useAnalysisLoader", () => {
           documentId: TEST_DOCUMENT_ID,
           token: props.token,
         }),
-      { initialProps: { token: null as string | null } },
+      { initialProps: { token: null as string | null } }
     );
 
     // Assert: nothing fetched
@@ -307,29 +297,21 @@ describe("useAnalysisLoader", () => {
     });
 
     // Assert: now fetched
-    expect(mockFetchAnalysis).toHaveBeenCalledWith(
-      TEST_ANALYSIS_ID,
-      TEST_TOKEN,
-    );
-    expect(mockFetchDocumentMetadata).toHaveBeenCalledWith(
-      TEST_DOCUMENT_ID,
-      TEST_TOKEN,
-    );
+    expect(mockFetchAnalysis).toHaveBeenCalledWith(TEST_ANALYSIS_ID, TEST_TOKEN);
+    expect(mockFetchDocumentMetadata).toHaveBeenCalledWith(TEST_DOCUMENT_ID, TEST_TOKEN);
   });
 
   // -----------------------------------------------------------------------
   // 7. Retry
   // -----------------------------------------------------------------------
 
-  it("retry_AfterError_ReloadsFailedResources", async () => {
+  it('retry_AfterError_ReloadsFailedResources', async () => {
     // Arrange: first call fails, second succeeds
     const apiError = buildAnalysisError({
-      errorCode: "SERVER_ERROR",
-      message: "Internal error",
+      errorCode: 'SERVER_ERROR',
+      message: 'Internal error',
     });
-    mockFetchAnalysis
-      .mockRejectedValueOnce(apiError)
-      .mockResolvedValueOnce(buildAnalysisRecord());
+    mockFetchAnalysis.mockRejectedValueOnce(apiError).mockResolvedValueOnce(buildAnalysisRecord());
     mockFetchDocumentMetadata.mockResolvedValue(buildDocumentMetadata());
 
     // Act
@@ -338,7 +320,7 @@ describe("useAnalysisLoader", () => {
         analysisId: TEST_ANALYSIS_ID,
         documentId: TEST_DOCUMENT_ID,
         token: TEST_TOKEN,
-      }),
+      })
     );
 
     await waitFor(() => {

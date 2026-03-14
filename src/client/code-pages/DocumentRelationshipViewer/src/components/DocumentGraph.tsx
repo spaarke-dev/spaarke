@@ -6,7 +6,7 @@
  * positions are fully resolved before first render (no spinner).
  */
 
-import React, { useMemo, useEffect, useCallback } from "react";
+import React, { useMemo, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -20,22 +20,13 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type Node,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import {
-  useForceSimulation,
-  type ForceNode,
-  type ForceEdge,
-} from "@spaarke/ui-components";
-import { DocumentNode as DocumentNodeComponent } from "./DocumentNode";
-import { DocumentEdge as DocumentEdgeComponent } from "./DocumentEdge";
-import type {
-  DocumentNode,
-  DocumentEdge,
-  DocumentNodeData,
-  ForceLayoutOptions,
-} from "../types/graph";
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { useForceSimulation, type ForceNode, type ForceEdge } from '@spaarke/ui-components';
+import { DocumentNode as DocumentNodeComponent } from './DocumentNode';
+import { DocumentEdge as DocumentEdgeComponent } from './DocumentEdge';
+import type { DocumentNode, DocumentEdge, DocumentNodeData, ForceLayoutOptions } from '../types/graph';
 
 export interface DocumentGraphProps {
   nodes: DocumentNode[];
@@ -48,13 +39,13 @@ export interface DocumentGraphProps {
 }
 
 const useStyles = makeStyles({
-  container: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  container: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
     gap: tokens.spacingVerticalM,
   },
@@ -73,10 +64,7 @@ const AutoFitOnChange: React.FC<{ nodeCount: number }> = ({ nodeCount }) => {
   const { fitView } = useReactFlow();
   useEffect(() => {
     // Small delay to let nodes render before fitting
-    const timer = setTimeout(
-      () => fitView({ padding: 0.2, maxZoom: 1.5, duration: 200 }),
-      100,
-    );
+    const timer = setTimeout(() => fitView({ padding: 0.2, maxZoom: 1.5, duration: 200 }), 100);
     return () => clearTimeout(timer);
   }, [nodeCount, fitView]);
   return null;
@@ -96,28 +84,28 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
   // Convert @xyflow/react nodes to ForceNode inputs
   const forceNodes = useMemo<ForceNode[]>(
     () =>
-      inputNodes.map((n) => ({
+      inputNodes.map(n => ({
         id: n.id,
         label: n.data.name,
         isSource: n.data.isSource,
       })),
-    [inputNodes],
+    [inputNodes]
   );
 
   // Convert @xyflow/react edges to ForceEdge inputs (similarity → weight)
   const forceEdges = useMemo<ForceEdge[]>(
     () =>
-      inputEdges.map((e) => ({
+      inputEdges.map(e => ({
         source: e.source,
         target: e.target,
         weight: e.data?.similarity ?? 0.5,
       })),
-    [inputEdges],
+    [inputEdges]
   );
 
   // Run synchronous force simulation — positions resolved before first render
   const layoutResult = useForceSimulation(forceNodes, forceEdges, {
-    mode: "hub-spoke",
+    mode: 'hub-spoke',
     chargeStrength: layoutOptions?.chargeStrength ?? -1000,
     linkDistanceMultiplier: layoutOptions?.distanceMultiplier ?? 400,
     collisionRadius: layoutOptions?.collisionRadius ?? 100,
@@ -126,8 +114,8 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
 
   // Map positioned output back to @xyflow/react Node format
   const layoutNodes = useMemo<DocumentNode[]>(() => {
-    const posMap = new Map(layoutResult.nodes.map((pn) => [pn.id, pn]));
-    return inputNodes.map((node) => {
+    const posMap = new Map(layoutResult.nodes.map(pn => [pn.id, pn]));
+    return inputNodes.map(node => {
       const pos = posMap.get(node.id);
       return {
         ...node,
@@ -151,7 +139,7 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
     (_event: React.MouseEvent, node: Node) => {
       if (onNodeSelect) onNodeSelect(node as DocumentNode);
     },
-    [onNodeSelect],
+    [onNodeSelect]
   );
 
   if (inputNodes.length === 0) {
@@ -159,15 +147,13 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
       <div className={styles.container}>
         <div className={styles.emptyState}>
           <Text size={400}>No document relationships to display</Text>
-          <Text size={200}>
-            Select a document with AI embeddings to view relationships
-          </Text>
+          <Text size={200}>Select a document with AI embeddings to view relationships</Text>
         </div>
       </div>
     );
   }
 
-  const typedEdges = edges.map((edge) => ({ ...edge, type: "similarity" }));
+  const typedEdges = edges.map(edge => ({ ...edge, type: 'similarity' }));
 
   return (
     <div className={styles.container}>
@@ -185,33 +171,23 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
         maxZoom={2}
         connectOnClick={false}
         attributionPosition="bottom-left"
-        style={{ width: "100%", height: "100%" }}
+        style={{ width: '100%', height: '100%' }}
       >
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1}
-          color={
-            isDarkMode ? tokens.colorNeutralStroke2 : tokens.colorNeutralStroke3
-          }
+          color={isDarkMode ? tokens.colorNeutralStroke2 : tokens.colorNeutralStroke3}
         />
         <Controls showZoom showFitView showInteractive={false} />
         {showMinimap && (
           <MiniMap
             nodeColor={(node: Node<DocumentNodeData>) =>
-              node.data?.isSource
-                ? tokens.colorBrandBackground
-                : tokens.colorNeutralBackground3
+              node.data?.isSource ? tokens.colorBrandBackground : tokens.colorNeutralBackground3
             }
-            maskColor={
-              isDarkMode
-                ? tokens.colorNeutralBackgroundAlpha2
-                : tokens.colorNeutralBackgroundAlpha
-            }
+            maskColor={isDarkMode ? tokens.colorNeutralBackgroundAlpha2 : tokens.colorNeutralBackgroundAlpha}
             style={{
-              backgroundColor: isDarkMode
-                ? tokens.colorNeutralBackground2
-                : tokens.colorNeutralBackground1,
+              backgroundColor: isDarkMode ? tokens.colorNeutralBackground2 : tokens.colorNeutralBackground1,
             }}
           />
         )}
@@ -222,7 +198,7 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
 };
 
 /** Wrap in ReactFlowProvider so useReactFlow works inside AutoFitOnChange */
-export const DocumentGraph: React.FC<DocumentGraphProps> = (props) => (
+export const DocumentGraph: React.FC<DocumentGraphProps> = props => (
   <ReactFlowProvider>
     <DocumentGraphInner {...props} />
   </ReactFlowProvider>

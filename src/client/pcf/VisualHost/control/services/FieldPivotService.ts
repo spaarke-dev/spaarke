@@ -10,60 +10,40 @@
  * v1.2.41 - Field pivot data source mode
  */
 
-import type {
-  IChartData,
-  IAggregatedDataPoint,
-  IFieldPivotConfig,
-  IFieldPivotEntry,
-} from "../types";
-import { AggregationType } from "../types";
-import { logger } from "../utils/logger";
+import type { IChartData, IAggregatedDataPoint, IFieldPivotConfig, IFieldPivotEntry } from '../types';
+import { AggregationType } from '../types';
+import { logger } from '../utils/logger';
 
-const TAG = "FieldPivotService";
+const TAG = 'FieldPivotService';
 
 /**
  * WebAPI interface for single-record retrieval.
  * Uses the same retrieveRecord pattern available in PCF context.webAPI.
  */
 export interface IFieldPivotWebApi {
-  retrieveRecord(
-    entityType: string,
-    id: string,
-    options?: string,
-  ): Promise<Record<string, unknown>>;
+  retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
 }
 
 /**
  * Parse and validate fieldPivot configuration from configurationJson.
  * Returns null if fieldPivot is not configured.
  */
-export function parseFieldPivotConfig(
-  configurationJson: string | undefined,
-): IFieldPivotConfig | null {
+export function parseFieldPivotConfig(configurationJson: string | undefined): IFieldPivotConfig | null {
   if (!configurationJson) return null;
 
   try {
     const json = JSON.parse(configurationJson);
     const pivot = json.fieldPivot;
 
-    if (
-      !pivot?.fields ||
-      !Array.isArray(pivot.fields) ||
-      pivot.fields.length === 0
-    ) {
+    if (!pivot?.fields || !Array.isArray(pivot.fields) || pivot.fields.length === 0) {
       return null;
     }
 
     // Validate each entry has required properties
-    const validFields = pivot.fields.filter(
-      (f: IFieldPivotEntry) => f.field && f.label,
-    );
+    const validFields = pivot.fields.filter((f: IFieldPivotEntry) => f.field && f.label);
 
     if (validFields.length === 0) {
-      logger.warn(
-        TAG,
-        "fieldPivot.fields defined but no valid entries (need field + label)",
-      );
+      logger.warn(TAG, 'fieldPivot.fields defined but no valid entries (need field + label)');
       return null;
     }
 
@@ -88,53 +68,44 @@ export async function fetchAndPivot(
   webApi: IFieldPivotWebApi,
   entityLogicalName: string,
   recordId: string,
-  pivotConfig: IFieldPivotConfig,
+  pivotConfig: IFieldPivotConfig
 ): Promise<IChartData> {
-  const fieldNames = pivotConfig.fields.map((f) => f.field);
+  const fieldNames = pivotConfig.fields.map(f => f.field);
 
   logger.info(TAG, `Fetching ${entityLogicalName} record ${recordId}`, {
     fields: fieldNames,
   });
 
   // Build $select to fetch only the fields we need
-  const selectOption = `?$select=${fieldNames.join(",")}`;
+  const selectOption = `?$select=${fieldNames.join(',')}`;
 
   // Clean the record ID (remove braces if present)
-  const cleanId = recordId.replace(/[{}]/g, "");
+  const cleanId = recordId.replace(/[{}]/g, '');
 
-  const record = await webApi.retrieveRecord(
-    entityLogicalName,
-    cleanId,
-    selectOption,
-  );
+  const record = await webApi.retrieveRecord(entityLogicalName, cleanId, selectOption);
 
-  logger.info(
-    TAG,
-    `Record retrieved, pivoting ${pivotConfig.fields.length} fields`,
-  );
+  logger.info(TAG, `Record retrieved, pivoting ${pivotConfig.fields.length} fields`);
 
   // Map each configured field to a data point
-  const dataPoints: IAggregatedDataPoint[] = pivotConfig.fields.map(
-    (entry, index) => {
-      const rawValue = record[entry.field];
-      const numericValue = typeof rawValue === "number" ? rawValue : 0;
+  const dataPoints: IAggregatedDataPoint[] = pivotConfig.fields.map((entry, index) => {
+    const rawValue = record[entry.field];
+    const numericValue = typeof rawValue === 'number' ? rawValue : 0;
 
-      if (rawValue === null || rawValue === undefined) {
-        logger.warn(TAG, `Field "${entry.field}" is null/undefined on record`);
-      }
+    if (rawValue === null || rawValue === undefined) {
+      logger.warn(TAG, `Field "${entry.field}" is null/undefined on record`);
+    }
 
-      return {
-        label: entry.label,
-        value: numericValue,
-        fieldValue: entry.fieldValue ?? entry.label,
-        sortOrder: entry.sortOrder ?? index,
-        valueFormat: entry.valueFormat,
-      };
-    },
-  );
+    return {
+      label: entry.label,
+      value: numericValue,
+      fieldValue: entry.fieldValue ?? entry.label,
+      sortOrder: entry.sortOrder ?? index,
+      valueFormat: entry.valueFormat,
+    };
+  });
 
   logger.info(TAG, `Pivot complete: ${dataPoints.length} data points`, {
-    points: dataPoints.map((dp) => `${dp.label}=${dp.value}`),
+    points: dataPoints.map(dp => `${dp.label}=${dp.value}`),
   });
 
   return {

@@ -31,7 +31,7 @@
  * @see services/authService.ts -- the token acquisition service
  */
 
-import { useAuthContext } from "../context/AuthContext";
+import { useAuthContext } from '../context/AuthContext';
 
 export interface UseAuthResult {
   /** The Bearer access token (null when not authenticated) */

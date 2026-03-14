@@ -7,9 +7,9 @@
  * Updated for shared library: imports SdapApiClient from @spaarke/ui-components.
  */
 
-import { SdapApiClient } from "@spaarke/ui-components/src/services/document-upload";
-import { MsalAuthProvider } from "./auth/MsalAuthProvider";
-import { logger } from "../utils/logger";
+import { SdapApiClient } from '@spaarke/ui-components/src/services/document-upload';
+import { MsalAuthProvider } from './auth/MsalAuthProvider';
+import { logger } from '../utils/logger';
 
 /**
  * Factory for creating SdapApiClient instances
@@ -33,9 +33,7 @@ export class SdapApiClientFactory {
    * The Graph API scopes (FileStorageContainer.Selected, Files.Read.All) are requested by the
    * BFF API during the OBO exchange - NOT by the PCF client. See GraphClientFactory.cs.
    */
-  private static readonly SPE_BFF_API_SCOPES = [
-    "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation",
-  ];
+  private static readonly SPE_BFF_API_SCOPES = ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
 
   /**
    * Create SDAP API Client with MSAL authentication
@@ -45,22 +43,15 @@ export class SdapApiClientFactory {
    * @returns Configured SdapApiClient instance
    */
   static create(baseUrl: string, timeout = 300000): SdapApiClient {
-    logger.info(
-      "SdapApiClientFactory",
-      "Creating SDAP API client with MSAL auth",
-      {
-        baseUrl,
-        timeout,
-      },
-    );
+    logger.info('SdapApiClientFactory', 'Creating SDAP API client with MSAL auth', {
+      baseUrl,
+      timeout,
+    });
 
     // Create token provider function that uses MSAL
     const getAccessToken = async (): Promise<string> => {
       try {
-        logger.debug(
-          "SdapApiClientFactory",
-          "Retrieving access token via MSAL",
-        );
+        logger.debug('SdapApiClientFactory', 'Retrieving access token via MSAL');
 
         // Get user access token from MSAL
         // This token represents the current user and will be used by SDAP BFF API
@@ -70,31 +61,19 @@ export class SdapApiClientFactory {
         // Wait for MSAL initialization if not ready yet (handles race condition)
         // This can happen if user clicks buttons before initializeMsalAsync() completes
         if (!authProvider.isInitializedState()) {
-          logger.info(
-            "SdapApiClientFactory",
-            "MSAL not yet initialized, waiting...",
-          );
+          logger.info('SdapApiClientFactory', 'MSAL not yet initialized, waiting...');
           await authProvider.initialize();
-          logger.info("SdapApiClientFactory", "MSAL initialization complete");
+          logger.info('SdapApiClientFactory', 'MSAL initialization complete');
         }
 
-        const token = await authProvider.getToken(
-          SdapApiClientFactory.SPE_BFF_API_SCOPES,
-        );
+        const token = await authProvider.getToken(SdapApiClientFactory.SPE_BFF_API_SCOPES);
 
-        logger.debug(
-          "SdapApiClientFactory",
-          "Access token retrieved successfully",
-        );
+        logger.debug('SdapApiClientFactory', 'Access token retrieved successfully');
 
         return token;
       } catch (error) {
-        logger.error(
-          "SdapApiClientFactory",
-          "Failed to retrieve access token",
-          error,
-        );
-        throw new Error("Failed to retrieve user access token via MSAL");
+        logger.error('SdapApiClientFactory', 'Failed to retrieve access token', error);
+        throw new Error('Failed to retrieve user access token via MSAL');
       }
     };
 
@@ -118,22 +97,14 @@ export class SdapApiClientFactory {
    * @param timeout - Request timeout in milliseconds
    * @returns Configured SdapApiClient instance
    */
-  static createForTesting(
-    baseUrl: string,
-    staticToken: string,
-    timeout = 300000,
-  ): SdapApiClient {
-    logger.info(
-      "SdapApiClientFactory",
-      "Creating SDAP API client for testing",
-      {
-        baseUrl,
-        timeout,
-      },
-    );
+  static createForTesting(baseUrl: string, staticToken: string, timeout = 300000): SdapApiClient {
+    logger.info('SdapApiClientFactory', 'Creating SDAP API client for testing', {
+      baseUrl,
+      timeout,
+    });
 
     const getAccessToken = async (): Promise<string> => {
-      logger.debug("SdapApiClientFactory", "Using static token for testing");
+      logger.debug('SdapApiClientFactory', 'Using static token for testing');
       return staticToken;
     };
 

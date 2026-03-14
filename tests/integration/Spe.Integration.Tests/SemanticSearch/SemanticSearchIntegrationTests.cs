@@ -572,8 +572,17 @@ public class SemanticSearchTestFixture : WebApplicationFactory<Program>
         // Use ConfigureTestServices to replace services AFTER the app's services are registered
         builder.ConfigureTestServices(services =>
         {
-            // Apply shared test service mocks (Dataverse, IChatClient, etc.)
+            // Apply shared test service mocks (Dataverse, IChatClient, hosted services, etc.)
             TestHostConfiguration.ConfigureSharedTestServices(services);
+
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme. This forces the
+            // test authentication handler to be used throughout the request pipeline.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = "Test";
+                options.DefaultChallengeScheme = "Test";
+            });
 
             // Replace the real semantic search service with mock
             services.RemoveAll<ISemanticSearchService>();

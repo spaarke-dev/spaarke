@@ -1,4 +1,4 @@
-import * as React from "react";
+import * as React from 'react';
 import {
   FluentProvider,
   webLightTheme,
@@ -15,22 +15,16 @@ import {
   MenuList,
   MenuItemCheckbox,
   Button,
-} from "@fluentui/react-components";
-import {
-  DocumentFlowchart24Regular,
-  Filter20Regular,
-} from "@fluentui/react-icons";
-import { IInputs } from "./generated/ManifestTypes";
-import { DocumentGraph } from "./components/DocumentGraph";
-import {
-  useVisualizationApi,
-  formatVisualizationError,
-} from "./hooks/useVisualizationApi";
-import type { DocumentNode } from "./types/graph";
-import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from "./types/api";
+} from '@fluentui/react-components';
+import { DocumentFlowchart24Regular, Filter20Regular } from '@fluentui/react-icons';
+import { IInputs } from './generated/ManifestTypes';
+import { DocumentGraph } from './components/DocumentGraph';
+import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
+import type { DocumentNode } from './types/graph';
+import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.31";
+const CONTROL_VERSION = '1.0.31';
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -53,59 +47,59 @@ export interface IDocumentRelationshipViewerProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     // Fill available vertical space like AnalysisWorkspace pattern
-    height: "calc(100vh - 180px)",
-    minHeight: "500px",
+    height: 'calc(100vh - 180px)',
+    minHeight: '500px',
     // Use viewport width minus form sidebar/chrome (~320px for nav + paddings)
-    width: "calc(100vw - 320px)",
+    width: 'calc(100vw - 320px)',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     backgroundColor: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    position: "sticky",
+    position: 'sticky',
     top: 0,
     zIndex: 10,
   },
   headerTitle: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
     color: tokens.colorNeutralForeground2,
   },
   graphContainer: {
     flex: 1,
-    display: "flex",
-    position: "relative",
+    display: 'flex',
+    position: 'relative',
     minHeight: 0, // Important for flex sizing
-    width: "100%", // Ensure full horizontal width
+    width: '100%', // Ensure full horizontal width
   },
   placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    width: "100%",
-    height: "100%",
+    width: '100%',
+    height: '100%',
   },
   footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
@@ -118,14 +112,14 @@ const useStyles = makeStyles({
   },
   errorContainer: {
     padding: tokens.spacingVerticalL,
-    width: "100%",
+    width: '100%',
   },
   filterDropdown: {
-    minWidth: "180px",
+    minWidth: '180px',
   },
   filterContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
 });
@@ -136,16 +130,12 @@ const useStyles = makeStyles({
 function resolveTheme(context?: ComponentFramework.Context<IInputs>) {
   // Check PCF context for dark mode
   if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme
-      ? webDarkTheme
-      : webLightTheme;
+    return context.fluentDesignLanguage.isDarkTheme ? webDarkTheme : webLightTheme;
   }
 
   // Fallback to system preference
-  if (typeof window !== "undefined") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? webDarkTheme
-      : webLightTheme;
+  if (typeof window !== 'undefined') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? webDarkTheme : webLightTheme;
   }
 
   return webLightTheme;
@@ -159,8 +149,8 @@ function isDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
     return context.fluentDesignLanguage.isDarkTheme;
   }
 
-  if (typeof window !== "undefined") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  if (typeof window !== 'undefined') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
 
   return false;
@@ -180,9 +170,11 @@ function isDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs with platform libraries
  */
-export const DocumentRelationshipViewer: React.FC<
-  IDocumentRelationshipViewerProps
-> = ({ context, notifyOutputChanged, onDocumentSelect }) => {
+export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerProps> = ({
+  context,
+  notifyOutputChanged,
+  onDocumentSelect,
+}) => {
   const styles = useStyles();
   const theme = resolveTheme(context);
   const darkMode = isDarkMode(context);
@@ -196,20 +188,15 @@ export const DocumentRelationshipViewer: React.FC<
     }
   ).page;
   const pageEntityId = pageContext?.entityId ?? null;
-  const documentId = pageEntityId ?? "";
-  const apiBaseUrl =
-    context.parameters.apiBaseUrl?.raw ??
-    "https://spe-api-dev-67e2xz.azurewebsites.net";
-  const tenantId = context.parameters.tenantId?.raw ?? "";
+  const documentId = pageEntityId ?? '';
+  const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net';
+  const tenantId = context.parameters.tenantId?.raw ?? '';
 
   // Selected node state
-  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(
-    null,
-  );
+  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
 
   // Relationship type filter state (empty array = all types)
-  const [selectedRelationshipTypes, setSelectedRelationshipTypes] =
-    React.useState<string[]>([]);
+  const [selectedRelationshipTypes, setSelectedRelationshipTypes] = React.useState<string[]>([]);
 
   // Fetch visualization data from API
   // Authentication is handled transparently by authenticatedFetch() from @spaarke/auth
@@ -220,11 +207,8 @@ export const DocumentRelationshipViewer: React.FC<
     threshold: 0.65,
     limit: 25,
     depth: 1,
-    relationshipTypes:
-      selectedRelationshipTypes.length > 0
-        ? selectedRelationshipTypes
-        : undefined,
-    enabled: !!documentId && documentId.trim() !== "" && !!tenantId,
+    relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
+    enabled: !!documentId && documentId.trim() !== '' && !!tenantId,
   });
 
   // Get container dimensions for layout
@@ -256,10 +240,10 @@ export const DocumentRelationshipViewer: React.FC<
     // Also try immediately
     updateDimensions();
 
-    window.addEventListener("resize", updateDimensions);
+    window.addEventListener('resize', updateDimensions);
     return () => {
       clearTimeout(timeoutId);
-      window.removeEventListener("resize", updateDimensions);
+      window.removeEventListener('resize', updateDimensions);
     };
   }, []);
 
@@ -269,23 +253,22 @@ export const DocumentRelationshipViewer: React.FC<
       setSelectedNodeId(node.id);
       if (onDocumentSelect) {
         // Use documentId if available, otherwise use speFileId or node.id for orphan files
-        const selectedId =
-          node.data.documentId ?? node.data.speFileId ?? node.id;
+        const selectedId = node.data.documentId ?? node.data.speFileId ?? node.id;
         onDocumentSelect(selectedId);
       }
       notifyOutputChanged();
     },
-    [onDocumentSelect, notifyOutputChanged],
+    [onDocumentSelect, notifyOutputChanged]
   );
 
   // Handle relationship type filter changes via Menu's onCheckedValueChange
   const handleCheckedValueChange = React.useCallback(
     (_event: unknown, data: { name: string; checkedItems: string[] }) => {
-      if (data.name === "filter") {
+      if (data.name === 'filter') {
         setSelectedRelationshipTypes(data.checkedItems);
       }
     },
-    [],
+    []
   );
 
   // Get all relationship type options for the menu
@@ -299,7 +282,7 @@ export const DocumentRelationshipViewer: React.FC<
   // Filter button label
   const filterButtonLabel = React.useMemo(() => {
     if (selectedRelationshipTypes.length === 0) {
-      return "All types";
+      return 'All types';
     }
     return `${selectedRelationshipTypes.length} selected`;
   }, [selectedRelationshipTypes.length]);
@@ -313,11 +296,10 @@ export const DocumentRelationshipViewer: React.FC<
   }, [selectedRelationshipTypes]);
 
   // Check if we should show the placeholder (missing document or tenant)
-  const showPlaceholder = !documentId || documentId.trim() === "";
+  const showPlaceholder = !documentId || documentId.trim() === '';
   const showTenantMissing = documentId && !tenantId;
   // Check if we have measured dimensions
-  const hasDimensions =
-    dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
+  const hasDimensions = dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
   // Format error message for display
   const errorMessage = error ? formatVisualizationError(error) : null;
 
@@ -332,36 +314,22 @@ export const DocumentRelationshipViewer: React.FC<
               Document Relationships
             </Text>
             {selectedNodeId && (
-              <Text
-                size={200}
-                style={{ color: tokens.colorNeutralForeground3 }}
-              >
+              <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                 Selected: {selectedNodeId}
               </Text>
             )}
           </div>
           <div className={styles.filterContainer}>
-            <Menu
-              checkedValues={checkedItems}
-              onCheckedValueChange={handleCheckedValueChange}
-            >
+            <Menu checkedValues={checkedItems} onCheckedValueChange={handleCheckedValueChange}>
               <MenuTrigger disableButtonEnhancement>
-                <Button
-                  appearance="subtle"
-                  icon={<Filter20Regular />}
-                  size="small"
-                >
+                <Button appearance="subtle" icon={<Filter20Regular />} size="small">
                   {filterButtonLabel}
                 </Button>
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
-                  {relationshipTypeOptions.map((option) => (
-                    <MenuItemCheckbox
-                      key={option.key}
-                      name="filter"
-                      value={option.key}
-                    >
+                  {relationshipTypeOptions.map(option => (
+                    <MenuItemCheckbox key={option.key} name="filter" value={option.key}>
                       {option.label}
                     </MenuItemCheckbox>
                   ))}
@@ -387,9 +355,7 @@ export const DocumentRelationshipViewer: React.FC<
             <div className={styles.placeholder}>
               <DocumentFlowchart24Regular style={{ fontSize: 48 }} />
               <Text>Configuration required</Text>
-              <Text size={200}>
-                Tenant ID must be configured to load relationships
-              </Text>
+              <Text size={200}>Tenant ID must be configured to load relationships</Text>
             </div>
           ) : showPlaceholder ? (
             <div className={styles.placeholder}>
@@ -405,10 +371,7 @@ export const DocumentRelationshipViewer: React.FC<
             <div className={styles.placeholder}>
               <DocumentFlowchart24Regular style={{ fontSize: 48 }} />
               <Text>No related documents found</Text>
-              <Text size={200}>
-                This document has no similar documents above the similarity
-                threshold
-              </Text>
+              <Text size={200}>This document has no similar documents above the similarity threshold</Text>
             </div>
           ) : (
             <DocumentGraph
@@ -431,7 +394,7 @@ export const DocumentRelationshipViewer: React.FC<
               ? `${nodes.length} documents · ${edges.length} relationships`
               : metadata
                 ? `Searched in ${metadata.searchLatencyMs}ms`
-                : "No data loaded"}
+                : 'No data loaded'}
           </span>
           <span className={styles.versionText}>v{CONTROL_VERSION}</span>
         </div>

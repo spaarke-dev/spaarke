@@ -23,12 +23,10 @@ export interface IFilePreviewServices {
   /** Fetch an ephemeral iframe preview URL for a document. Returns null on failure. */
   getDocumentPreviewUrl: (documentId: string) => Promise<string | null>;
   /** Fetch desktop + web open links for a document. Returns null on failure. */
-  getDocumentOpenLinks: (
-    documentId: string,
-  ) => Promise<IOpenLinksResponse | null>;
+  getDocumentOpenLinks: (documentId: string) => Promise<IOpenLinksResponse | null>;
   /** Navigate to a Dataverse entity record. */
   navigateToEntity: (params: {
-    action: "openRecord";
+    action: 'openRecord';
     entityName: string;
     entityId: string;
     openInNewWindow?: boolean;

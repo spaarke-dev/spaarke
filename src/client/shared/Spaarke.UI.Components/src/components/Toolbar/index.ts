@@ -1,1 +1,1 @@
-export * from "./CommandToolbar";
+export * from './CommandToolbar';

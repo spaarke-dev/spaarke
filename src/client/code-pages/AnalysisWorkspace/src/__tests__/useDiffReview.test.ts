@@ -11,19 +11,16 @@
  * @see ADR-012 - Shared Component Library
  */
 
-import { renderHook, act } from "@testing-library/react";
-import {
-  useDiffReview,
-  type UseDiffReviewOptions,
-} from "../hooks/useDiffReview";
-import { SprkChatBridge } from "../__tests__/mocks/MockSprkChatBridge";
+import { renderHook, act } from '@testing-library/react';
+import { useDiffReview, type UseDiffReviewOptions } from '../hooks/useDiffReview';
+import { SprkChatBridge } from '../__tests__/mocks/MockSprkChatBridge';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Create a mock editor ref with getHtml / setHtml */
-function createMockEditorRef(initialHtml = "<p>Original content</p>") {
+function createMockEditorRef(initialHtml = '<p>Original content</p>') {
   let html = initialHtml;
   const editorRef = {
     current: {
@@ -53,23 +50,23 @@ function emitDiffStream(
   bridge: SprkChatBridge,
   operationId: string,
   tokens: string[],
-  options?: { cancelled?: boolean },
+  options?: { cancelled?: boolean }
 ) {
-  bridge.emit("document_stream_start", {
+  bridge.emit('document_stream_start', {
     operationId,
-    targetPosition: "selection",
-    operationType: "diff",
+    targetPosition: 'selection',
+    operationType: 'diff',
   });
 
   for (let i = 0; i < tokens.length; i++) {
-    bridge.emit("document_stream_token", {
+    bridge.emit('document_stream_token', {
       operationId,
       token: tokens[i],
       index: i,
     });
   }
 
-  bridge.emit("document_stream_end", {
+  bridge.emit('document_stream_end', {
     operationId,
     cancelled: options?.cancelled ?? false,
     totalTokens: tokens.length,
@@ -77,26 +74,22 @@ function emitDiffStream(
 }
 
 /** Emit a non-diff (insert mode) streaming sequence */
-function emitInsertStream(
-  bridge: SprkChatBridge,
-  operationId: string,
-  tokens: string[],
-) {
-  bridge.emit("document_stream_start", {
+function emitInsertStream(bridge: SprkChatBridge, operationId: string, tokens: string[]) {
+  bridge.emit('document_stream_start', {
     operationId,
-    targetPosition: "end",
-    operationType: "insert",
+    targetPosition: 'end',
+    operationType: 'insert',
   });
 
   for (let i = 0; i < tokens.length; i++) {
-    bridge.emit("document_stream_token", {
+    bridge.emit('document_stream_token', {
       operationId,
       token: tokens[i],
       index: i,
     });
   }
 
-  bridge.emit("document_stream_end", {
+  bridge.emit('document_stream_end', {
     operationId,
     cancelled: false,
     totalTokens: tokens.length,
@@ -107,12 +100,12 @@ function emitInsertStream(
 // Test Suite
 // ---------------------------------------------------------------------------
 
-describe("useDiffReview", () => {
+describe('useDiffReview', () => {
   let bridge: SprkChatBridge;
   let mockPushUndoVersion: jest.Mock;
 
   beforeEach(() => {
-    bridge = new SprkChatBridge({ context: "diff-test" });
+    bridge = new SprkChatBridge({ context: 'diff-test' });
     mockPushUndoVersion = jest.fn();
   });
 
@@ -131,9 +124,7 @@ describe("useDiffReview", () => {
       pushUndoVersion: mockPushUndoVersion,
     };
 
-    const result = renderHook(() =>
-      useDiffReview({ ...defaultOptions, ...overrides }),
-    );
+    const result = renderHook(() => useDiffReview({ ...defaultOptions, ...overrides }));
 
     return { ...result, editorRef, getHtml, setHtml };
   }
@@ -143,44 +134,44 @@ describe("useDiffReview", () => {
   // -----------------------------------------------------------------------
 
   describe("document_stream_start with operationType='diff'", () => {
-    it("streamStart_DiffOperationType_SetsIsDiffStreamingTrue", () => {
+    it('streamStart_DiffOperationType_SetsIsDiffStreamingTrue', () => {
       const { result } = renderDiffReviewHook();
 
       expect(result.current.isDiffStreaming).toBe(false);
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-1",
-          targetPosition: "selection",
-          operationType: "diff",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-1',
+          targetPosition: 'selection',
+          operationType: 'diff',
         });
       });
 
       expect(result.current.isDiffStreaming).toBe(true);
     });
 
-    it("streamStart_InsertOperationType_DoesNotActivateDiffMode", () => {
+    it('streamStart_InsertOperationType_DoesNotActivateDiffMode', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-insert",
-          targetPosition: "end",
-          operationType: "insert",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-insert',
+          targetPosition: 'end',
+          operationType: 'insert',
         });
       });
 
       expect(result.current.isDiffStreaming).toBe(false);
     });
 
-    it("streamStart_ReplaceOperationType_DoesNotActivateDiffMode", () => {
+    it('streamStart_ReplaceOperationType_DoesNotActivateDiffMode', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-replace",
-          targetPosition: "end",
-          operationType: "replace",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-replace',
+          targetPosition: 'end',
+          operationType: 'replace',
         });
       });
 
@@ -192,26 +183,26 @@ describe("useDiffReview", () => {
   // 2. Token accumulation in buffer
   // -----------------------------------------------------------------------
 
-  describe("document_stream_token accumulation", () => {
-    it("streamToken_DiffMode_TokensBufferedNotWrittenToEditor", () => {
+  describe('document_stream_token accumulation', () => {
+    it('streamToken_DiffMode_TokensBufferedNotWrittenToEditor', () => {
       const { result, editorRef } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-buf",
-          targetPosition: "selection",
-          operationType: "diff",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-buf',
+          targetPosition: 'selection',
+          operationType: 'diff',
         });
 
-        bridge.emit("document_stream_token", {
-          operationId: "op-buf",
-          token: "Revised ",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-buf',
+          token: 'Revised ',
           index: 0,
         });
 
-        bridge.emit("document_stream_token", {
-          operationId: "op-buf",
-          token: "content",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-buf',
+          token: 'content',
           index: 1,
         });
       });
@@ -222,19 +213,19 @@ describe("useDiffReview", () => {
       expect(result.current.diffState.isOpen).toBe(false);
     });
 
-    it("streamToken_NonDiffOperation_TokensIgnoredByHook", () => {
+    it('streamToken_NonDiffOperation_TokensIgnoredByHook', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-insert",
-          targetPosition: "end",
-          operationType: "insert",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-insert',
+          targetPosition: 'end',
+          operationType: 'insert',
         });
 
-        bridge.emit("document_stream_token", {
-          operationId: "op-insert",
-          token: "ignored token",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-insert',
+          token: 'ignored token',
           index: 0,
         });
       });
@@ -249,30 +240,26 @@ describe("useDiffReview", () => {
   // 3. Stream end opens DiffReviewPanel with buffered content
   // -----------------------------------------------------------------------
 
-  describe("document_stream_end opens DiffReviewPanel", () => {
-    it("streamEnd_DiffComplete_OpensPanelWithOriginalAndProposed", () => {
+  describe('document_stream_end opens DiffReviewPanel', () => {
+    it('streamEnd_DiffComplete_OpensPanelWithOriginalAndProposed', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        emitDiffStream(bridge, "op-end-1", ["Revised ", "content ", "here."]);
+        emitDiffStream(bridge, 'op-end-1', ['Revised ', 'content ', 'here.']);
       });
 
       expect(result.current.diffState.isOpen).toBe(true);
-      expect(result.current.diffState.originalText).toBe(
-        "<p>Original content</p>",
-      );
-      expect(result.current.diffState.proposedText).toBe(
-        "Revised content here.",
-      );
-      expect(result.current.diffState.operationId).toBe("op-end-1");
+      expect(result.current.diffState.originalText).toBe('<p>Original content</p>');
+      expect(result.current.diffState.proposedText).toBe('Revised content here.');
+      expect(result.current.diffState.operationId).toBe('op-end-1');
       expect(result.current.isDiffStreaming).toBe(false);
     });
 
-    it("streamEnd_CancelledStream_DoesNotOpenPanel", () => {
+    it('streamEnd_CancelledStream_DoesNotOpenPanel', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        emitDiffStream(bridge, "op-cancel", ["partial"], {
+        emitDiffStream(bridge, 'op-cancel', ['partial'], {
           cancelled: true,
         });
       });
@@ -281,18 +268,18 @@ describe("useDiffReview", () => {
       expect(result.current.isDiffStreaming).toBe(false);
     });
 
-    it("streamEnd_EmptyBuffer_DoesNotOpenPanel", () => {
+    it('streamEnd_EmptyBuffer_DoesNotOpenPanel', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
         // Start diff stream but emit no tokens
-        bridge.emit("document_stream_start", {
-          operationId: "op-empty",
-          targetPosition: "selection",
-          operationType: "diff",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-empty',
+          targetPosition: 'selection',
+          operationType: 'diff',
         });
-        bridge.emit("document_stream_end", {
-          operationId: "op-empty",
+        bridge.emit('document_stream_end', {
+          operationId: 'op-empty',
           cancelled: false,
           totalTokens: 0,
         });
@@ -301,15 +288,15 @@ describe("useDiffReview", () => {
       expect(result.current.diffState.isOpen).toBe(false);
     });
 
-    it("streamEnd_NonDiffOperation_PanelRemainsClosedNoStateChange", () => {
+    it('streamEnd_NonDiffOperation_PanelRemainsClosedNoStateChange', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        emitInsertStream(bridge, "op-insert-end", ["some", " tokens"]);
+        emitInsertStream(bridge, 'op-insert-end', ['some', ' tokens']);
       });
 
       expect(result.current.diffState.isOpen).toBe(false);
-      expect(result.current.diffState.proposedText).toBe("");
+      expect(result.current.diffState.proposedText).toBe('');
     });
   });
 
@@ -317,64 +304,62 @@ describe("useDiffReview", () => {
   // 4. Accept handler pushes undo and replaces editor content
   // -----------------------------------------------------------------------
 
-  describe("acceptDiff handler", () => {
-    it("acceptDiff_PushesUndoAndReplacesEditorContent", () => {
+  describe('acceptDiff handler', () => {
+    it('acceptDiff_PushesUndoAndReplacesEditorContent', () => {
       const { result, editorRef, getHtml } = renderDiffReviewHook();
 
       // Open the diff panel
       act(() => {
-        emitDiffStream(bridge, "op-accept", ["New content"]);
+        emitDiffStream(bridge, 'op-accept', ['New content']);
       });
 
       expect(result.current.diffState.isOpen).toBe(true);
 
       // Accept the proposed text
       act(() => {
-        result.current.acceptDiff("New content");
+        result.current.acceptDiff('New content');
       });
 
       // Undo should have been called twice (before and after replacement)
       expect(mockPushUndoVersion).toHaveBeenCalledTimes(2);
 
       // Editor content should be updated
-      expect(editorRef.current!.setHtml).toHaveBeenCalledWith("New content");
+      expect(editorRef.current!.setHtml).toHaveBeenCalledWith('New content');
 
       // Panel should close after accept
       expect(result.current.diffState.isOpen).toBe(false);
-      expect(result.current.diffState.proposedText).toBe("");
+      expect(result.current.diffState.proposedText).toBe('');
     });
 
-    it("acceptDiff_EditedText_ReplacesWithEditedVersion", () => {
+    it('acceptDiff_EditedText_ReplacesWithEditedVersion', () => {
       const { result, editorRef } = renderDiffReviewHook();
 
       // Open diff panel
       act(() => {
-        emitDiffStream(bridge, "op-edit-accept", ["AI proposed content"]);
+        emitDiffStream(bridge, 'op-edit-accept', ['AI proposed content']);
       });
 
       // Accept with user-edited version
       act(() => {
-        result.current.acceptDiff("User-edited version of AI content");
+        result.current.acceptDiff('User-edited version of AI content');
       });
 
-      expect(editorRef.current!.setHtml).toHaveBeenCalledWith(
-        "User-edited version of AI content",
-      );
+      expect(editorRef.current!.setHtml).toHaveBeenCalledWith('User-edited version of AI content');
     });
 
-    it("acceptDiff_NullEditorRef_ClosePanelGracefully", () => {
+    it('acceptDiff_NullEditorRef_ClosePanelGracefully', () => {
       const { result } = renderDiffReviewHook({
         editorRef: { current: null } as unknown as React.RefObject<any>,
       });
 
       // Open diff panel
       act(() => {
-        emitDiffStream(bridge, "op-null-editor", ["content"]);
+        emitDiffStream(bridge, 'op-null-editor', ['content']);
       });
 
       // Accept should not crash with null editor
       act(() => {
-        result.current.acceptDiff("content");
+        result.current.acceptDiff('content');
       });
 
       // Panel should still close
@@ -386,13 +371,13 @@ describe("useDiffReview", () => {
   // 5. Reject handler closes panel without changes
   // -----------------------------------------------------------------------
 
-  describe("rejectDiff handler", () => {
-    it("rejectDiff_ClosesPanelWithoutChangingEditorContent", () => {
+  describe('rejectDiff handler', () => {
+    it('rejectDiff_ClosesPanelWithoutChangingEditorContent', () => {
       const { result, editorRef, getHtml } = renderDiffReviewHook();
 
       // Open diff panel
       act(() => {
-        emitDiffStream(bridge, "op-reject", ["Rejected content"]);
+        emitDiffStream(bridge, 'op-reject', ['Rejected content']);
       });
 
       expect(result.current.diffState.isOpen).toBe(true);
@@ -412,18 +397,18 @@ describe("useDiffReview", () => {
       expect(mockPushUndoVersion).not.toHaveBeenCalled();
 
       // Editor still has original content
-      expect(getHtml()).toBe("<p>Original content</p>");
+      expect(getHtml()).toBe('<p>Original content</p>');
     });
 
-    it("rejectDiff_ResetsAllDiffState", () => {
+    it('rejectDiff_ResetsAllDiffState', () => {
       const { result } = renderDiffReviewHook();
 
       // Open diff panel
       act(() => {
-        emitDiffStream(bridge, "op-reject-state", ["Some proposed text"]);
+        emitDiffStream(bridge, 'op-reject-state', ['Some proposed text']);
       });
 
-      expect(result.current.diffState.operationId).toBe("op-reject-state");
+      expect(result.current.diffState.operationId).toBe('op-reject-state');
 
       // Reject
       act(() => {
@@ -432,8 +417,8 @@ describe("useDiffReview", () => {
 
       // All state should be reset
       expect(result.current.diffState.isOpen).toBe(false);
-      expect(result.current.diffState.originalText).toBe("");
-      expect(result.current.diffState.proposedText).toBe("");
+      expect(result.current.diffState.originalText).toBe('');
+      expect(result.current.diffState.proposedText).toBe('');
       expect(result.current.diffState.operationId).toBeNull();
     });
   });
@@ -442,45 +427,45 @@ describe("useDiffReview", () => {
   // 6. New stream while diff is open auto-rejects existing
   // -----------------------------------------------------------------------
 
-  describe("auto-reject on new stream", () => {
-    it("newDiffStream_WhilePanelOpen_AutoRejectsExistingDiff", () => {
+  describe('auto-reject on new stream', () => {
+    it('newDiffStream_WhilePanelOpen_AutoRejectsExistingDiff', () => {
       const { result } = renderDiffReviewHook();
 
       // Open first diff
       act(() => {
-        emitDiffStream(bridge, "op-first", ["First proposed"]);
+        emitDiffStream(bridge, 'op-first', ['First proposed']);
       });
 
       expect(result.current.diffState.isOpen).toBe(true);
-      expect(result.current.diffState.operationId).toBe("op-first");
+      expect(result.current.diffState.operationId).toBe('op-first');
 
       // Start a new diff stream while the panel is open
       act(() => {
-        emitDiffStream(bridge, "op-second", ["Second proposed"]);
+        emitDiffStream(bridge, 'op-second', ['Second proposed']);
       });
 
       // Panel should show the new diff, not the old one
       expect(result.current.diffState.isOpen).toBe(true);
-      expect(result.current.diffState.operationId).toBe("op-second");
-      expect(result.current.diffState.proposedText).toBe("Second proposed");
+      expect(result.current.diffState.operationId).toBe('op-second');
+      expect(result.current.diffState.proposedText).toBe('Second proposed');
     });
 
-    it("newInsertStream_WhileDiffOpen_AutoRejectsExistingDiff", () => {
+    it('newInsertStream_WhileDiffOpen_AutoRejectsExistingDiff', () => {
       const { result } = renderDiffReviewHook();
 
       // Open a diff
       act(() => {
-        emitDiffStream(bridge, "op-diff-open", ["Diff content"]);
+        emitDiffStream(bridge, 'op-diff-open', ['Diff content']);
       });
 
       expect(result.current.diffState.isOpen).toBe(true);
 
       // Start a non-diff stream (insert mode)
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-insert-new",
-          targetPosition: "end",
-          operationType: "insert",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-insert-new',
+          targetPosition: 'end',
+          operationType: 'insert',
         });
       });
 
@@ -493,19 +478,19 @@ describe("useDiffReview", () => {
   // 7. Disabled state
   // -----------------------------------------------------------------------
 
-  describe("disabled state", () => {
-    it("enabled_False_DoesNotSubscribeToBridgeEvents", () => {
+  describe('disabled state', () => {
+    it('enabled_False_DoesNotSubscribeToBridgeEvents', () => {
       const { result } = renderDiffReviewHook({ enabled: false });
 
       act(() => {
-        emitDiffStream(bridge, "op-disabled", ["Should not appear"]);
+        emitDiffStream(bridge, 'op-disabled', ['Should not appear']);
       });
 
       expect(result.current.diffState.isOpen).toBe(false);
       expect(result.current.isDiffStreaming).toBe(false);
     });
 
-    it("bridge_Null_DoesNotCrash", () => {
+    it('bridge_Null_DoesNotCrash', () => {
       const { result } = renderDiffReviewHook({ bridge: null as any });
 
       // Should not crash with null bridge
@@ -518,70 +503,60 @@ describe("useDiffReview", () => {
   // 8. Edge cases
   // -----------------------------------------------------------------------
 
-  describe("edge cases", () => {
-    it("multipleTokens_BufferedCorrectly_JoinedInOrder", () => {
+  describe('edge cases', () => {
+    it('multipleTokens_BufferedCorrectly_JoinedInOrder', () => {
       const { result } = renderDiffReviewHook();
 
-      const tokens = [
-        "<p>",
-        "This ",
-        "is ",
-        "a ",
-        "multi-token ",
-        "stream.",
-        "</p>",
-      ];
+      const tokens = ['<p>', 'This ', 'is ', 'a ', 'multi-token ', 'stream.', '</p>'];
 
       act(() => {
-        emitDiffStream(bridge, "op-multi", tokens);
+        emitDiffStream(bridge, 'op-multi', tokens);
       });
 
-      expect(result.current.diffState.proposedText).toBe(
-        "<p>This is a multi-token stream.</p>",
-      );
+      expect(result.current.diffState.proposedText).toBe('<p>This is a multi-token stream.</p>');
     });
 
-    it("rapidConsecutiveStreams_OnlyLastStreamOpensPanel", () => {
+    it('rapidConsecutiveStreams_OnlyLastStreamOpensPanel', () => {
       const { result } = renderDiffReviewHook();
 
       // Emit three rapid diff streams
       act(() => {
-        emitDiffStream(bridge, "op-rapid-1", ["First"]);
+        emitDiffStream(bridge, 'op-rapid-1', ['First']);
       });
 
       act(() => {
-        emitDiffStream(bridge, "op-rapid-2", ["Second"]);
+        emitDiffStream(bridge, 'op-rapid-2', ['Second']);
       });
 
       act(() => {
-        emitDiffStream(bridge, "op-rapid-3", ["Third"]);
+        emitDiffStream(bridge, 'op-rapid-3', ['Third']);
       });
 
       // Only the last stream's content should be shown
       expect(result.current.diffState.isOpen).toBe(true);
-      expect(result.current.diffState.proposedText).toBe("Third");
-      expect(result.current.diffState.operationId).toBe("op-rapid-3");
+      expect(result.current.diffState.proposedText).toBe('Third');
+      expect(result.current.diffState.operationId).toBe('op-rapid-3');
     });
 
-    it("streamEnd_NonMatchingOperationId_Ignored", () => {
+    it('streamEnd_NonMatchingOperationId_Ignored', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-match",
-          targetPosition: "selection",
-          operationType: "diff",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-match',
+          targetPosition: 'selection',
+          operationType: 'diff',
         });
 
-        bridge.emit("document_stream_token", {
-          operationId: "op-match",
-          token: "Matching token",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-match',
+          token: 'Matching token',
           index: 0,
         });
 
         // End event for a different operation ID
-        bridge.emit("document_stream_end", {
-          operationId: "op-different",
+        bridge.emit('document_stream_end', {
+          operationId: 'op-different',
           cancelled: false,
           totalTokens: 1,
         });
@@ -593,46 +568,46 @@ describe("useDiffReview", () => {
       expect(result.current.isDiffStreaming).toBe(true);
     });
 
-    it("tokenForDifferentOperation_IgnoredByBuffer", () => {
+    it('tokenForDifferentOperation_IgnoredByBuffer', () => {
       const { result } = renderDiffReviewHook();
 
       act(() => {
-        bridge.emit("document_stream_start", {
-          operationId: "op-active",
-          targetPosition: "selection",
-          operationType: "diff",
+        bridge.emit('document_stream_start', {
+          operationId: 'op-active',
+          targetPosition: 'selection',
+          operationType: 'diff',
         });
 
         // Token for the active operation
-        bridge.emit("document_stream_token", {
-          operationId: "op-active",
-          token: "Active ",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-active',
+          token: 'Active ',
           index: 0,
         });
 
         // Token for a different operation (should be ignored)
-        bridge.emit("document_stream_token", {
-          operationId: "op-other",
-          token: "Other ",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-other',
+          token: 'Other ',
           index: 0,
         });
 
         // Another token for the active operation
-        bridge.emit("document_stream_token", {
-          operationId: "op-active",
-          token: "content",
+        bridge.emit('document_stream_token', {
+          operationId: 'op-active',
+          token: 'content',
           index: 1,
         });
 
-        bridge.emit("document_stream_end", {
-          operationId: "op-active",
+        bridge.emit('document_stream_end', {
+          operationId: 'op-active',
           cancelled: false,
           totalTokens: 2,
         });
       });
 
       // Only active operation tokens should appear
-      expect(result.current.diffState.proposedText).toBe("Active content");
+      expect(result.current.diffState.proposedText).toBe('Active content');
     });
   });
 });

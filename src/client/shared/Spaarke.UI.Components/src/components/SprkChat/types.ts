@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Role of a chat message, matching the server-side ChatMessageRole enum. */
-export type ChatMessageRole = "User" | "Assistant" | "System";
+export type ChatMessageRole = 'User' | 'Assistant' | 'System';
 
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */
 export interface IChatMessage {
@@ -43,12 +43,7 @@ export interface IChatSession {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** SSE event types emitted by the streaming endpoints. */
-export type ChatSseEventType =
-  | "token"
-  | "done"
-  | "error"
-  | "suggestions"
-  | "citations";
+export type ChatSseEventType = 'token' | 'done' | 'error' | 'suggestions' | 'citations';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -181,7 +176,7 @@ export interface ISprkChatProps {
    *
    * Pass null or omit when no bridge is available (standalone mode).
    */
-  bridge?: import("../../services/SprkChatBridge").SprkChatBridge | null;
+  bridge?: import('../../services/SprkChatBridge').SprkChatBridge | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -259,21 +254,21 @@ export interface IQuickAction {
 
 /** Default quick action presets for highlight-refine. */
 export const DEFAULT_QUICK_ACTIONS: IQuickAction[] = [
-  { key: "simplify", label: "Simplify", instruction: "Simplify this text" },
+  { key: 'simplify', label: 'Simplify', instruction: 'Simplify this text' },
   {
-    key: "expand",
-    label: "Expand",
-    instruction: "Expand this text with more detail",
+    key: 'expand',
+    label: 'Expand',
+    instruction: 'Expand this text with more detail',
   },
   {
-    key: "concise",
-    label: "Make Concise",
-    instruction: "Make this text more concise",
+    key: 'concise',
+    label: 'Make Concise',
+    instruction: 'Make this text more concise',
   },
   {
-    key: "formal",
-    label: "Make Formal",
-    instruction: "Rewrite this text in a more formal tone",
+    key: 'formal',
+    label: 'Make Formal',
+    instruction: 'Rewrite this text in a more formal tone',
   },
 ];
 
@@ -287,7 +282,7 @@ export interface IRefineRequest {
   /** The refinement instruction (free-text or from quick action) */
   instruction: string;
   /** Source of the selection: "editor" for cross-pane, "chat" for local DOM */
-  source: "editor" | "chat";
+  source: 'editor' | 'chat';
   /** Key of the quick action used (undefined if free-text instruction) */
   quickAction?: string;
 }
@@ -417,11 +412,7 @@ export interface IUseSseStreamResult {
   /** Citation metadata received from the citations SSE event, keyed by citation ID for fast lookup */
   citations: ICitation[];
   /** Start a new SSE stream */
-  startStream: (
-    url: string,
-    body: Record<string, unknown>,
-    token: string,
-  ) => void;
+  startStream: (url: string, body: Record<string, unknown>, token: string) => void;
   /** Cancel the active stream */
   cancelStream: () => void;
   /** Clear stored suggestions (called when user sends a new message) */
@@ -439,11 +430,7 @@ export interface IUseChatSessionResult {
   /** Error from the last session operation */
   error: Error | null;
   /** Create a new session */
-  createSession: (
-    documentId?: string,
-    playbookId?: string,
-    hostContext?: IHostContext,
-  ) => Promise<IChatSession | null>;
+  createSession: (documentId?: string, playbookId?: string, hostContext?: IHostContext) => Promise<IChatSession | null>;
   /** Load message history for the current session */
   loadHistory: () => Promise<void>;
   /** Switch document/playbook context (optionally with additional document IDs) */
@@ -451,7 +438,7 @@ export interface IUseChatSessionResult {
     documentId?: string,
     playbookId?: string,
     hostContext?: IHostContext,
-    additionalDocumentIds?: string[],
+    additionalDocumentIds?: string[]
   ) => Promise<void>;
   /** Delete the current session */
   deleteSession: () => Promise<void>;

@@ -1,10 +1,10 @@
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
 import {
   DocumentRelationshipViewer as DocumentRelationshipViewerComponent,
   IDocumentRelationshipViewerProps,
-} from "./DocumentRelationshipViewer";
-import { initializeAuth } from "./authInit";
-import * as React from "react";
+} from './DocumentRelationshipViewer';
+import { initializeAuth } from './authInit';
+import * as React from 'react';
 
 /**
  * DocumentRelationshipViewer PCF Control
@@ -20,10 +20,7 @@ import * as React from "react";
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs with platform libraries
  */
-export class DocumentRelationshipViewer implements ComponentFramework.ReactControl<
-  IInputs,
-  IOutputs
-> {
+export class DocumentRelationshipViewer implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void;
   private selectedDocumentId: string | undefined;
   private authInitialized = false;
@@ -35,36 +32,28 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
   public init(
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
-    state: ComponentFramework.Dictionary,
+    state: ComponentFramework.Dictionary
   ): void {
     this.notifyOutputChanged = notifyOutputChanged;
 
     // Extract auth configuration from manifest parameters
     // These default to the dev environment values from the original msalConfig.ts
-    const tenantId =
-      context.parameters.tenantId?.raw ??
-      "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+    const tenantId = context.parameters.tenantId?.raw ?? 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
     const clientAppId =
-      (context.parameters as Record<string, { raw?: string }>).clientAppId
-        ?.raw ?? "170c98e1-d486-4355-bcbe-170454e0207c";
+      (context.parameters as Record<string, { raw?: string }>).clientAppId?.raw ??
+      '170c98e1-d486-4355-bcbe-170454e0207c';
     const bffAppId =
-      (context.parameters as Record<string, { raw?: string }>).bffAppId?.raw ??
-      "1e40baad-e065-4aea-a8d4-4b7ab273458c";
-    const apiBaseUrl =
-      context.parameters.apiBaseUrl?.raw ??
-      "https://spe-api-dev-67e2xz.azurewebsites.net";
+      (context.parameters as Record<string, { raw?: string }>).bffAppId?.raw ?? '1e40baad-e065-4aea-a8d4-4b7ab273458c';
+    const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
     // Initialize @spaarke/auth asynchronously (don't block init)
     void initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrl)
       .then(() => {
         this.authInitialized = true;
-        console.info("[DocumentRelationshipViewer] @spaarke/auth initialized");
+        console.info('[DocumentRelationshipViewer] @spaarke/auth initialized');
       })
-      .catch((error) => {
-        console.error(
-          "[DocumentRelationshipViewer] @spaarke/auth initialization failed:",
-          error,
-        );
+      .catch(error => {
+        console.error('[DocumentRelationshipViewer] @spaarke/auth initialization failed:', error);
       });
   }
 
@@ -72,9 +61,7 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
    * Called when any value in the property bag has changed.
    * Returns a React element (ReactControl pattern - ADR-022).
    */
-  public updateView(
-    context: ComponentFramework.Context<IInputs>,
-  ): React.ReactElement {
+  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
     const props: IDocumentRelationshipViewerProps = {
       context,
       notifyOutputChanged: this.notifyOutputChanged,

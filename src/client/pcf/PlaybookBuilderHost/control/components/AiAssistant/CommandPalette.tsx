@@ -13,28 +13,17 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { makeStyles, tokens, shorthands, Text, mergeClasses } from '@fluentui/react-components';
 import {
   BrainCircuit20Regular,
   Grid20Regular,
   Library20Regular,
   PlayCircle20Regular,
   Question20Regular,
-} from "@fluentui/react-icons";
-import {
-  filterCommands,
-  CATEGORY_LABELS,
-  CATEGORY_ORDER,
-  type SlashCommand,
-} from "./commands";
+} from '@fluentui/react-icons';
+import { filterCommands, CATEGORY_LABELS, CATEGORY_ORDER, type SlashCommand } from './commands';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -42,64 +31,64 @@ import {
 
 const useStyles = makeStyles({
   container: {
-    position: "absolute",
-    bottom: "100%",
+    position: 'absolute',
+    bottom: '100%',
     left: 0,
     right: 0,
-    maxHeight: "280px",
-    overflowY: "auto",
+    maxHeight: '280px',
+    overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     boxShadow: tokens.shadow16,
     zIndex: 1001,
     marginBottom: tokens.spacingVerticalXS,
   },
   categoryHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
-    position: "sticky",
+    position: 'sticky',
     top: 0,
     zIndex: 1,
   },
   categoryIcon: {
-    fontSize: "16px",
+    fontSize: '16px',
   },
   commandItem: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-    cursor: "pointer",
-    ":hover": {
+    cursor: 'pointer',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   commandItemSelected: {
     backgroundColor: tokens.colorBrandBackground2,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
   commandHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   commandName: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   commandSlash: {
     color: tokens.colorNeutralForeground4,
-    fontFamily: "monospace",
+    fontFamily: 'monospace',
   },
   commandLabel: {
     fontWeight: tokens.fontWeightSemibold,
@@ -107,40 +96,40 @@ const useStyles = makeStyles({
   commandShortcut: {
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase100,
-    fontFamily: "monospace",
+    fontFamily: 'monospace',
     backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.padding("2px", tokens.spacingHorizontalXS),
+    ...shorthands.padding('2px', tokens.spacingHorizontalXS),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
   },
   commandDescription: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   emptyState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalL),
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
   hint: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke1),
+    ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
   },
   hintKey: {
-    fontFamily: "monospace",
+    fontFamily: 'monospace',
     backgroundColor: tokens.colorNeutralBackground3,
-    ...shorthands.padding("1px", "4px"),
+    ...shorthands.padding('1px', '4px'),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
-    marginRight: "4px",
+    marginRight: '4px',
   },
 });
 
@@ -148,7 +137,7 @@ const useStyles = makeStyles({
 // Category Icons
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CATEGORY_ICONS: Record<SlashCommand["category"], React.ReactNode> = {
+const CATEGORY_ICONS: Record<SlashCommand['category'], React.ReactNode> = {
   nodes: <BrainCircuit20Regular />,
   canvas: <Grid20Regular />,
   scopes: <Library20Regular />,
@@ -175,12 +164,7 @@ export interface CommandPaletteProps {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({
-  query,
-  onSelectCommand,
-  onClose,
-  isOpen,
-}) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ query, onSelectCommand, onClose, isOpen }) => {
   const styles = useStyles();
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -222,11 +206,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   useEffect(() => {
     if (!containerRef.current || flatCommands.length === 0) return;
 
-    const selectedElement = containerRef.current.querySelector(
-      `[data-index="${selectedIndex}"]`,
-    );
+    const selectedElement = containerRef.current.querySelector(`[data-index="${selectedIndex}"]`);
     if (selectedElement) {
-      selectedElement.scrollIntoView({ block: "nearest" });
+      selectedElement.scrollIntoView({ block: 'nearest' });
     }
   }, [selectedIndex, flatCommands.length]);
 
@@ -236,54 +218,50 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       if (!isOpen || flatCommands.length === 0) return;
 
       switch (e.key) {
-        case "ArrowDown":
+        case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < flatCommands.length - 1 ? prev + 1 : 0,
-          );
+          setSelectedIndex(prev => (prev < flatCommands.length - 1 ? prev + 1 : 0));
           break;
-        case "ArrowUp":
+        case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : flatCommands.length - 1,
-          );
+          setSelectedIndex(prev => (prev > 0 ? prev - 1 : flatCommands.length - 1));
           break;
-        case "Enter":
+        case 'Enter':
           e.preventDefault();
           if (flatCommands[selectedIndex]) {
-            onSelectCommand(flatCommands[selectedIndex], "");
+            onSelectCommand(flatCommands[selectedIndex], '');
           }
           break;
-        case "Escape":
+        case 'Escape':
           e.preventDefault();
           onClose();
           break;
-        case "Tab":
+        case 'Tab':
           // Tab completes the command name
           e.preventDefault();
           if (flatCommands[selectedIndex]) {
-            onSelectCommand(flatCommands[selectedIndex], "");
+            onSelectCommand(flatCommands[selectedIndex], '');
           }
           break;
       }
     },
-    [isOpen, flatCommands, selectedIndex, onSelectCommand, onClose],
+    [isOpen, flatCommands, selectedIndex, onSelectCommand, onClose]
   );
 
   // Attach keyboard listener
   useEffect(() => {
     if (isOpen) {
-      window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
   }, [isOpen, handleKeyDown]);
 
   // Handle item click
   const handleItemClick = useCallback(
     (command: SlashCommand) => {
-      onSelectCommand(command, "");
+      onSelectCommand(command, '');
     },
-    [onSelectCommand],
+    [onSelectCommand]
   );
 
   if (!isOpen) return null;
@@ -294,24 +272,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   return (
     <div className={styles.container} ref={containerRef}>
       {flatCommands.length === 0 ? (
-        <div className={styles.emptyState}>
-          No commands found for &quot;{query}&quot;
-        </div>
+        <div className={styles.emptyState}>No commands found for &quot;{query}&quot;</div>
       ) : (
         <>
-          {CATEGORY_ORDER.map((category) => {
+          {CATEGORY_ORDER.map(category => {
             const commands = groupedCommands[category];
             if (!commands || commands.length === 0) return null;
 
             return (
               <div key={category}>
                 <div className={styles.categoryHeader}>
-                  <span className={styles.categoryIcon}>
-                    {CATEGORY_ICONS[category]}
-                  </span>
+                  <span className={styles.categoryIcon}>{CATEGORY_ICONS[category]}</span>
                   <Text>{CATEGORY_LABELS[category]}</Text>
                 </div>
-                {commands.map((cmd) => {
+                {commands.map(cmd => {
                   const index = globalIndex++;
                   const isSelected = index === selectedIndex;
 
@@ -319,10 +293,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     <div
                       key={cmd.name}
                       data-index={index}
-                      className={mergeClasses(
-                        styles.commandItem,
-                        isSelected && styles.commandItemSelected,
-                      )}
+                      className={mergeClasses(styles.commandItem, isSelected && styles.commandItemSelected)}
                       onClick={() => handleItemClick(cmd)}
                       onMouseEnter={() => setSelectedIndex(index)}
                       role="option"
@@ -331,9 +302,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <div className={styles.commandHeader}>
                         <div className={styles.commandName}>
                           <span className={styles.commandSlash}>/</span>
-                          <Text className={styles.commandLabel}>
-                            {cmd.name}
-                          </Text>
+                          <Text className={styles.commandLabel}>{cmd.name}</Text>
                           {cmd.argsHint && (
                             <Text
                               size={200}
@@ -345,15 +314,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                             </Text>
                           )}
                         </div>
-                        {cmd.shortcut && (
-                          <span className={styles.commandShortcut}>
-                            {cmd.shortcut}
-                          </span>
-                        )}
+                        {cmd.shortcut && <span className={styles.commandShortcut}>{cmd.shortcut}</span>}
                       </div>
-                      <Text className={styles.commandDescription}>
-                        {cmd.description}
-                      </Text>
+                      <Text className={styles.commandDescription}>{cmd.description}</Text>
                     </div>
                   );
                 })}

@@ -17,11 +17,11 @@
  */
 export enum FileViewerState {
   /** Initial state: authenticating, acquiring token */
-  Loading = "loading",
+  Loading = 'loading',
   /** Ready state: React component can render */
-  Ready = "ready",
+  Ready = 'ready',
   /** Error state: initialization failed */
-  Error = "error",
+  Error = 'error',
 }
 
 /**

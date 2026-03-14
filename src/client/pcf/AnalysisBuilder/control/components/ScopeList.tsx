@@ -5,7 +5,7 @@
  * Design Reference: UI Screenshots/01-ANALYSIS-BUILDER-MODAL.jpg
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Checkbox,
   Radio,
@@ -15,7 +15,7 @@ import {
   makeStyles,
   tokens,
   mergeClasses,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Play24Regular,
   BrainCircuit24Regular,
@@ -33,41 +33,41 @@ import {
   Certificate24Regular,
   Shield24Regular,
   Settings24Regular,
-} from "@fluentui/react-icons";
-import { IScopeItem, IScopeListProps } from "../types";
+} from '@fluentui/react-icons';
+import { IScopeItem, IScopeListProps } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
   },
   item: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "12px",
-    paddingTop: "12px",
-    paddingBottom: "12px",
-    paddingLeft: "12px",
-    paddingRight: "12px",
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '12px',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    cursor: "pointer",
+    cursor: 'pointer',
   },
   itemSelected: {
     backgroundColor: tokens.colorBrandBackground2,
   },
   selector: {
     flexShrink: 0,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   icon: {
     flexShrink: 0,
-    width: "32px",
-    height: "32px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorBrandForeground1,
@@ -80,27 +80,27 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    marginBottom: "2px",
+    marginBottom: '2px',
   },
   description: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    lineHeight: "1.4",
+    lineHeight: '1.4',
   },
   loading: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "48px",
-    gap: "16px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '48px',
+    gap: '16px',
   },
   empty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "48px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '48px',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -137,28 +137,25 @@ export function ScopeList<T extends IScopeItem>({
   items,
   onSelectionChange,
   isLoading,
-  emptyMessage = "No items available",
+  emptyMessage = 'No items available',
   multiSelect = true,
 }: IScopeListProps<T>): React.ReactElement {
   const styles = useStyles();
 
   const handleCheckboxChange = (itemId: string, checked: boolean): void => {
-    const currentSelected = items.filter((i) => i.isSelected).map((i) => i.id);
+    const currentSelected = items.filter(i => i.isSelected).map(i => i.id);
 
     let newSelected: string[];
     if (checked) {
       newSelected = [...currentSelected, itemId];
     } else {
-      newSelected = currentSelected.filter((id) => id !== itemId);
+      newSelected = currentSelected.filter(id => id !== itemId);
     }
 
     onSelectionChange(newSelected);
   };
 
-  const handleRadioChange = (
-    _event: unknown,
-    data: { value: string },
-  ): void => {
+  const handleRadioChange = (_event: unknown, data: { value: string }): void => {
     onSelectionChange([data.value]);
   };
 
@@ -180,29 +177,17 @@ export function ScopeList<T extends IScopeItem>({
 
   // Single select uses RadioGroup
   if (!multiSelect) {
-    const selectedValue = items.find((i) => i.isSelected)?.id || "";
+    const selectedValue = items.find(i => i.isSelected)?.id || '';
 
     return (
-      <RadioGroup
-        value={selectedValue}
-        onChange={handleRadioChange}
-        className={styles.container}
-      >
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={mergeClasses(
-              styles.item,
-              item.isSelected && styles.itemSelected,
-            )}
-          >
+      <RadioGroup value={selectedValue} onChange={handleRadioChange} className={styles.container}>
+        {items.map(item => (
+          <div key={item.id} className={mergeClasses(styles.item, item.isSelected && styles.itemSelected)}>
             <Radio value={item.id} className={styles.selector} />
             <div className={styles.icon}>{getIcon(item.icon)}</div>
             <div className={styles.content}>
               <Text className={styles.name}>{item.name}</Text>
-              {item.description && (
-                <Text className={styles.description}>{item.description}</Text>
-              )}
+              {item.description && <Text className={styles.description}>{item.description}</Text>}
             </div>
           </div>
         ))}
@@ -213,27 +198,17 @@ export function ScopeList<T extends IScopeItem>({
   // Multi-select uses Checkboxes
   return (
     <div className={styles.container}>
-      {items.map((item) => (
-        <div
-          key={item.id}
-          className={mergeClasses(
-            styles.item,
-            item.isSelected && styles.itemSelected,
-          )}
-        >
+      {items.map(item => (
+        <div key={item.id} className={mergeClasses(styles.item, item.isSelected && styles.itemSelected)}>
           <Checkbox
             checked={item.isSelected}
-            onChange={(_e, data) =>
-              handleCheckboxChange(item.id, !!data.checked)
-            }
+            onChange={(_e, data) => handleCheckboxChange(item.id, !!data.checked)}
             className={styles.selector}
           />
           <div className={styles.icon}>{getIcon(item.icon)}</div>
           <div className={styles.content}>
             <Text className={styles.name}>{item.name}</Text>
-            {item.description && (
-              <Text className={styles.description}>{item.description}</Text>
-            )}
+            {item.description && <Text className={styles.description}>{item.description}</Text>}
           </div>
         </div>
       ))}

@@ -18,10 +18,10 @@
  * @see ADR-008 - Endpoint filters for auth
  */
 
-import { PublicClientApplication } from "@azure/msal-browser";
-import { msalConfig, BFF_API_SCOPE } from "../config/msalConfig";
+import { PublicClientApplication } from '@azure/msal-browser';
+import { msalConfig, BFF_API_SCOPE } from '../config/msalConfig';
 
-const LOG_PREFIX = "[PlaybookBuilder:AuthService]";
+const LOG_PREFIX = '[PlaybookBuilder:AuthService]';
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
@@ -43,10 +43,10 @@ export class AuthError extends Error {
       isXrmUnavailable?: boolean;
       isRetryable?: boolean;
       cause?: unknown;
-    },
+    }
   ) {
     super(message);
-    this.name = "AuthError";
+    this.name = 'AuthError';
     this.isXrmUnavailable = options?.isXrmUnavailable ?? false;
     this.isRetryable = options?.isRetryable ?? false;
     this.originalCause = options?.cause;
@@ -63,8 +63,7 @@ function findXrm(): any | null {
     /* cross-origin */
   }
   try {
-    if (window.top && window.top !== window && window.top !== window.parent)
-      frames.push(window.top!);
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
   } catch {
     /* cross-origin */
   }
@@ -86,12 +85,12 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
     const xrm = findXrm();
     if (xrm) {
       const context = xrm.Utility.getGlobalContext();
-      if (typeof context.getAccessToken === "function") {
+      if (typeof context.getAccessToken === 'function') {
         const tokenResult = await context.getAccessToken();
-        if (tokenResult && typeof tokenResult === "string") {
+        if (tokenResult && typeof tokenResult === 'string') {
           return { token: tokenResult, expiresAt: parseJwtExpiry(tokenResult) };
         }
-        if (tokenResult && typeof tokenResult.token === "string") {
+        if (tokenResult && typeof tokenResult.token === 'string') {
           const expiresAt = tokenResult.expiresOn
             ? new Date(tokenResult.expiresOn).getTime()
             : Date.now() + 60 * 60 * 1000;
@@ -120,9 +119,9 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
     for (const frame of frames) {
       try {
         const provider = (frame as any).__crmTokenProvider;
-        if (provider && typeof provider.getToken === "function") {
+        if (provider && typeof provider.getToken === 'function') {
           const tokenResult = await provider.getToken();
-          if (tokenResult && typeof tokenResult === "string") {
+          if (tokenResult && typeof tokenResult === 'string') {
             return {
               token: tokenResult,
               expiresAt: parseJwtExpiry(tokenResult),
@@ -130,13 +129,13 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
           }
         }
         const globalToken = (frame as any).AUTHENTICATION_TOKEN;
-        if (globalToken && typeof globalToken === "string") {
+        if (globalToken && typeof globalToken === 'string') {
           return { token: globalToken, expiresAt: parseJwtExpiry(globalToken) };
         }
         const xrmPage = (frame as any).Xrm?.Page?.context;
-        if (xrmPage && typeof xrmPage.getAuthToken === "function") {
+        if (xrmPage && typeof xrmPage.getAuthToken === 'function') {
           const tokenResult = await xrmPage.getAuthToken();
-          if (tokenResult && typeof tokenResult === "string") {
+          if (tokenResult && typeof tokenResult === 'string') {
             return {
               token: tokenResult,
               expiresAt: parseJwtExpiry(tokenResult),
@@ -154,11 +153,9 @@ async function extractPlatformToken(): Promise<TokenCache | null> {
   // Strategy 3: Bridge token (__SPAARKE_BFF_TOKEN__)
   try {
     const bridgeToken = (window as any).__SPAARKE_BFF_TOKEN__;
-    if (bridgeToken)
-      return { token: bridgeToken, expiresAt: parseJwtExpiry(bridgeToken) };
+    if (bridgeToken) return { token: bridgeToken, expiresAt: parseJwtExpiry(bridgeToken) };
     const parentToken = (window.parent as any)?.__SPAARKE_BFF_TOKEN__;
-    if (parentToken)
-      return { token: parentToken, expiresAt: parseJwtExpiry(parentToken) };
+    if (parentToken) return { token: parentToken, expiresAt: parseJwtExpiry(parentToken) };
   } catch {
     /* cross-origin */
   }
@@ -205,9 +202,7 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
       if (result?.accessToken) {
         return {
           token: result.accessToken,
-          expiresAt: result.expiresOn
-            ? result.expiresOn.getTime()
-            : parseJwtExpiry(result.accessToken),
+          expiresAt: result.expiresOn ? result.expiresOn.getTime() : parseJwtExpiry(result.accessToken),
         };
       }
     }
@@ -215,9 +210,7 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
     if (ssoResult?.accessToken) {
       return {
         token: ssoResult.accessToken,
-        expiresAt: ssoResult.expiresOn
-          ? ssoResult.expiresOn.getTime()
-          : parseJwtExpiry(ssoResult.accessToken),
+        expiresAt: ssoResult.expiresOn ? ssoResult.expiresOn.getTime() : parseJwtExpiry(ssoResult.accessToken),
       };
     }
   } catch (err) {
@@ -228,10 +221,10 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
 
 function parseJwtExpiry(token: string): number {
   try {
-    const parts = token.split(".");
+    const parts = token.split('.');
     if (parts.length !== 3) return Date.now() + 60 * 60 * 1000;
     const payload = JSON.parse(atob(parts[1]));
-    if (typeof payload.exp === "number") return payload.exp * 1000;
+    if (typeof payload.exp === 'number') return payload.exp * 1000;
   } catch {
     /* malformed JWT */
   }
@@ -239,14 +232,10 @@ function parseJwtExpiry(token: string): number {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function retryWithBackoff<T>(
-  operation: () => Promise<T>,
-  maxAttempts: number,
-  baseDelay: number,
-): Promise<T> {
+async function retryWithBackoff<T>(operation: () => Promise<T>, maxAttempts: number, baseDelay: number): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -273,10 +262,7 @@ async function acquireToken(): Promise<TokenCache> {
     console.info(`${LOG_PREFIX} Token acquired via MSAL ssoSilent`);
     return msalToken;
   }
-  throw new AuthError(
-    "Could not acquire token. Xrm platform and MSAL both failed.",
-    { isRetryable: false },
-  );
+  throw new AuthError('Could not acquire token. Xrm platform and MSAL both failed.', { isRetryable: false });
 }
 
 let cachedToken: TokenCache | null = null;
@@ -303,11 +289,7 @@ export async function getAccessToken(): Promise<string> {
     }
     cachedToken = null;
   }
-  const tokenCache = await retryWithBackoff(
-    acquireToken,
-    MAX_RETRY_ATTEMPTS,
-    RETRY_BASE_DELAY_MS,
-  );
+  const tokenCache = await retryWithBackoff(acquireToken, MAX_RETRY_ATTEMPTS, RETRY_BASE_DELAY_MS);
   cachedToken = tokenCache;
   return tokenCache.token;
 }
@@ -341,7 +323,7 @@ export function isSameOriginDataverse(): boolean {
   // same-origin Dataverse. This handles the case where Xrm hasn't initialized
   // yet (e.g., embedded iframe loads before parent form is ready).
   const hostname = window.location.hostname.toLowerCase();
-  return hostname.endsWith(".dynamics.com");
+  return hostname.endsWith('.dynamics.com');
 }
 
 export async function initializeAuth(): Promise<string> {
@@ -354,19 +336,15 @@ export async function initializeAuth(): Promise<string> {
   // would override the session cookies and cause 401 errors.
   if (isSameOriginDataverse()) {
     console.info(
-      `${LOG_PREFIX} Same-origin Dataverse detected (${clientUrl}). Using session cookies — no Bearer token needed.`,
+      `${LOG_PREFIX} Same-origin Dataverse detected (${clientUrl}). Using session cookies — no Bearer token needed.`
     );
-    return "SESSION_COOKIE_AUTH";
+    return 'SESSION_COOKIE_AUTH';
   }
 
   if (clientUrl) {
-    console.info(
-      `${LOG_PREFIX} Dataverse org: ${clientUrl} (cross-origin — acquiring Bearer token)`,
-    );
+    console.info(`${LOG_PREFIX} Dataverse org: ${clientUrl} (cross-origin — acquiring Bearer token)`);
   } else {
-    console.info(
-      `${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`,
-    );
+    console.info(`${LOG_PREFIX} Xrm SDK not available, will use MSAL ssoSilent`);
   }
   const token = await getAccessToken();
 

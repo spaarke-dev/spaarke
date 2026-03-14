@@ -8,13 +8,8 @@
  * @see ChatEndpoints.cs - POST /sessions, GET /history, PATCH /context, DELETE /sessions
  */
 
-import { useState, useCallback } from "react";
-import {
-  IChatSession,
-  IChatMessage,
-  IUseChatSessionResult,
-  IHostContext,
-} from "../types";
+import { useState, useCallback } from 'react';
+import { IChatSession, IChatMessage, IUseChatSessionResult, IHostContext } from '../types';
 
 interface UseChatSessionOptions {
   /** Base URL for the BFF API */
@@ -38,9 +33,7 @@ interface UseChatSessionOptions {
  * } = useChatSession({ apiBaseUrl: "https://api.example.com", accessToken: "token" });
  * ```
  */
-export function useChatSession(
-  options: UseChatSessionOptions,
-): IUseChatSessionResult {
+export function useChatSession(options: UseChatSessionOptions): IUseChatSessionResult {
   const { apiBaseUrl, accessToken } = options;
 
   const [session, setSession] = useState<IChatSession | null>(null);
@@ -51,7 +44,7 @@ export function useChatSession(
   // Normalize: strip trailing slashes AND trailing /api to prevent double /api/api/ prefix.
   // The AnalysisWorkspace PCF stores apiBaseUrl as "https://host/api" but all route
   // constants below already include the /api prefix.
-  const baseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
 
   /**
    * Make an authenticated API request.
@@ -62,7 +55,7 @@ export function useChatSession(
    */
   const extractTenantId = (token: string): string | null => {
     try {
-      const parts = token.split(".");
+      const parts = token.split('.');
       if (parts.length !== 3) return null;
       const payload = JSON.parse(atob(parts[1]));
       return payload.tid || null;
@@ -77,15 +70,15 @@ export function useChatSession(
       const response = await fetch(url, {
         ...init,
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
-          ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
           ...(init?.headers || {}),
         },
       });
       return response;
     },
-    [accessToken],
+    [accessToken]
   );
 
   /**
@@ -93,17 +86,13 @@ export function useChatSession(
    * POST /api/ai/chat/sessions
    */
   const createSession = useCallback(
-    async (
-      documentId?: string,
-      playbookId?: string,
-      hostContext?: IHostContext,
-    ): Promise<IChatSession | null> => {
+    async (documentId?: string, playbookId?: string, hostContext?: IHostContext): Promise<IChatSession | null> => {
       setIsLoading(true);
       setError(null);
 
       try {
         const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions`, {
-          method: "POST",
+          method: 'POST',
           body: JSON.stringify({
             documentId: documentId || null,
             playbookId: playbookId || null,
@@ -113,9 +102,7 @@ export function useChatSession(
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(
-            `Failed to create session (${response.status}): ${errorText}`,
-          );
+          throw new Error(`Failed to create session (${response.status}): ${errorText}`);
         }
 
         const data = await response.json();
@@ -128,15 +115,14 @@ export function useChatSession(
         setMessages([]);
         return newSession;
       } catch (err: unknown) {
-        const errorObj =
-          err instanceof Error ? err : new Error("Failed to create session");
+        const errorObj = err instanceof Error ? err : new Error('Failed to create session');
         setError(errorObj);
         return null;
       } finally {
         setIsLoading(false);
       }
     },
-    [apiRequest, baseUrl],
+    [apiRequest, baseUrl]
   );
 
   /**
@@ -152,15 +138,11 @@ export function useChatSession(
     setError(null);
 
     try {
-      const response = await apiRequest(
-        `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`,
-      );
+      const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Failed to load history (${response.status}): ${errorText}`,
-        );
+        throw new Error(`Failed to load history (${response.status}): ${errorText}`);
       }
 
       const data = await response.json();
@@ -169,13 +151,12 @@ export function useChatSession(
           role: m.role,
           content: m.content,
           timestamp: m.timestamp,
-        }),
+        })
       );
 
       setMessages(historyMessages);
     } catch (err: unknown) {
-      const errorObj =
-        err instanceof Error ? err : new Error("Failed to load history");
+      const errorObj = err instanceof Error ? err : new Error('Failed to load history');
       setError(errorObj);
     } finally {
       setIsLoading(false);
@@ -196,7 +177,7 @@ export function useChatSession(
       documentId?: string,
       playbookId?: string,
       hostContext?: IHostContext,
-      additionalDocumentIds?: string[],
+      additionalDocumentIds?: string[]
     ): Promise<void> => {
       if (!session) {
         return;
@@ -218,29 +199,23 @@ export function useChatSession(
           body.additionalDocumentIds = additionalDocumentIds;
         }
 
-        const response = await apiRequest(
-          `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`,
-          {
-            method: "PATCH",
-            body: JSON.stringify(body),
-          },
-        );
+        const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(
-            `Failed to switch context (${response.status}): ${errorText}`,
-          );
+          throw new Error(`Failed to switch context (${response.status}): ${errorText}`);
         }
       } catch (err: unknown) {
-        const errorObj =
-          err instanceof Error ? err : new Error("Failed to switch context");
+        const errorObj = err instanceof Error ? err : new Error('Failed to switch context');
         setError(errorObj);
       } finally {
         setIsLoading(false);
       }
     },
-    [session, apiRequest, baseUrl],
+    [session, apiRequest, baseUrl]
   );
 
   /**
@@ -256,23 +231,17 @@ export function useChatSession(
     setError(null);
 
     try {
-      const response = await apiRequest(
-        `${baseUrl}/api/ai/chat/sessions/${session.sessionId}`,
-        { method: "DELETE" },
-      );
+      const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, { method: 'DELETE' });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Failed to delete session (${response.status}): ${errorText}`,
-        );
+        throw new Error(`Failed to delete session (${response.status}): ${errorText}`);
       }
 
       setSession(null);
       setMessages([]);
     } catch (err: unknown) {
-      const errorObj =
-        err instanceof Error ? err : new Error("Failed to delete session");
+      const errorObj = err instanceof Error ? err : new Error('Failed to delete session');
       setError(errorObj);
     } finally {
       setIsLoading(false);
@@ -283,14 +252,14 @@ export function useChatSession(
    * Add a message to the local history (used when sending/receiving messages).
    */
   const addMessage = useCallback((message: IChatMessage) => {
-    setMessages((prev) => [...prev, message]);
+    setMessages(prev => [...prev, message]);
   }, []);
 
   /**
    * Update the content of the last message in history (used during streaming).
    */
   const updateLastMessage = useCallback((content: string) => {
-    setMessages((prev) => {
+    setMessages(prev => {
       if (prev.length === 0) {
         return prev;
       }

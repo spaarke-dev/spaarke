@@ -14,22 +14,10 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, memo } from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Label,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-} from "@fluentui/react-components";
-import type {
-  OptionOnSelectData,
-  SelectionEvents,
-} from "@fluentui/react-components";
-import type { PlaybookNodeData } from "../../types/playbook";
+import { useCallback, memo } from 'react';
+import { makeStyles, tokens, Text, Label, Input, Textarea, Dropdown, Option } from '@fluentui/react-components';
+import type { OptionOnSelectData, SelectionEvents } from '@fluentui/react-components';
+import type { PlaybookNodeData } from '../../types/playbook';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -47,13 +35,13 @@ export interface DeliverToIndexFormProps {
 
 const useStyles = makeStyles({
   form: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   field: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   fieldHint: {
@@ -67,8 +55,8 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 const SOURCE_OPTIONS = [
-  { value: "document", label: "Document" },
-  { value: "content", label: "Content Variable" },
+  { value: 'document', label: 'Document' },
+  { value: 'content', label: 'Content Variable' },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -82,24 +70,23 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
 }: DeliverToIndexFormProps) {
   const styles = useStyles();
 
-  const indexName = (data.indexName as string) || "";
-  const indexSource = (data.indexSource as string) || "document";
-  const indexContentVariable = (data.indexContentVariable as string) || "";
-  const indexParentEntityType = (data.indexParentEntityType as string) || "";
-  const indexParentEntityId = (data.indexParentEntityId as string) || "";
-  const indexParentEntityName = (data.indexParentEntityName as string) || "";
-  const indexMetadata = (data.indexMetadata as string) || "";
+  const indexName = (data.indexName as string) || '';
+  const indexSource = (data.indexSource as string) || 'document';
+  const indexContentVariable = (data.indexContentVariable as string) || '';
+  const indexParentEntityType = (data.indexParentEntityType as string) || '';
+  const indexParentEntityId = (data.indexParentEntityId as string) || '';
+  const indexParentEntityName = (data.indexParentEntityName as string) || '';
+  const indexMetadata = (data.indexMetadata as string) || '';
 
-  const sourceLabel =
-    SOURCE_OPTIONS.find((s) => s.value === indexSource)?.label ?? "Document";
+  const sourceLabel = SOURCE_OPTIONS.find(s => s.value === indexSource)?.label ?? 'Document';
 
   const handleSourceChange = useCallback(
     (_event: SelectionEvents, item: OptionOnSelectData) => {
       if (item.optionValue) {
-        onUpdate("indexSource", item.optionValue);
+        onUpdate('indexSource', item.optionValue);
       }
     },
-    [onUpdate],
+    [onUpdate]
   );
 
   return (
@@ -113,12 +100,10 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           id={`${nodeId}-indexName`}
           size="small"
           value={indexName}
-          onChange={(_e, d) => onUpdate("indexName", d.value)}
+          onChange={(_e, d) => onUpdate('indexName', d.value)}
           placeholder="knowledge"
         />
-        <Text className={styles.fieldHint}>
-          Target search index name. Supports {"{{template}}"} syntax.
-        </Text>
+        <Text className={styles.fieldHint}>Target search index name. Supports {'{{template}}'} syntax.</Text>
       </div>
 
       {/* Source */}
@@ -133,19 +118,17 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           selectedOptions={[indexSource]}
           onOptionSelect={handleSourceChange}
         >
-          {SOURCE_OPTIONS.map((s) => (
+          {SOURCE_OPTIONS.map(s => (
             <Option key={s.value} value={s.value}>
               {s.label}
             </Option>
           ))}
         </Dropdown>
-        <Text className={styles.fieldHint}>
-          Index the document file or a content variable from a previous node.
-        </Text>
+        <Text className={styles.fieldHint}>Index the document file or a content variable from a previous node.</Text>
       </div>
 
       {/* Content Variable (shown when source=content) */}
-      {indexSource === "content" && (
+      {indexSource === 'content' && (
         <div className={styles.field}>
           <Label htmlFor={`${nodeId}-indexContentVar`} size="small" required>
             Content Variable
@@ -154,12 +137,10 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
             id={`${nodeId}-indexContentVar`}
             size="small"
             value={indexContentVariable}
-            onChange={(_e, d) => onUpdate("indexContentVariable", d.value)}
+            onChange={(_e, d) => onUpdate('indexContentVariable', d.value)}
             placeholder="analyze.output.content"
           />
-          <Text className={styles.fieldHint}>
-            Output variable name containing text to index.
-          </Text>
+          <Text className={styles.fieldHint}>Output variable name containing text to index.</Text>
         </div>
       )}
 
@@ -172,12 +153,10 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           id={`${nodeId}-parentType`}
           size="small"
           value={indexParentEntityType}
-          onChange={(_e, d) => onUpdate("indexParentEntityType", d.value)}
+          onChange={(_e, d) => onUpdate('indexParentEntityType', d.value)}
           placeholder="matter"
         />
-        <Text className={styles.fieldHint}>
-          Entity type for scoped search (matter, project, account, etc.)
-        </Text>
+        <Text className={styles.fieldHint}>Entity type for scoped search (matter, project, account, etc.)</Text>
       </div>
 
       {/* Parent Entity ID */}
@@ -189,7 +168,7 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           id={`${nodeId}-parentId`}
           size="small"
           value={indexParentEntityId}
-          onChange={(_e, d) => onUpdate("indexParentEntityId", d.value)}
+          onChange={(_e, d) => onUpdate('indexParentEntityId', d.value)}
           placeholder="{{document.parentEntityId}}"
         />
       </div>
@@ -203,7 +182,7 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           id={`${nodeId}-parentName`}
           size="small"
           value={indexParentEntityName}
-          onChange={(_e, d) => onUpdate("indexParentEntityName", d.value)}
+          onChange={(_e, d) => onUpdate('indexParentEntityName', d.value)}
           placeholder="{{document.parentEntityName}}"
         />
       </div>
@@ -217,13 +196,11 @@ export const DeliverToIndexForm = memo(function DeliverToIndexForm({
           id={`${nodeId}-indexMetadata`}
           size="small"
           value={indexMetadata}
-          onChange={(e) => onUpdate("indexMetadata", e.target.value)}
+          onChange={e => onUpdate('indexMetadata', e.target.value)}
           placeholder={'{"category": "legal", "source": "wizard"}'}
           resize="vertical"
         />
-        <Text className={styles.fieldHint}>
-          Optional key-value pairs as JSON. Supports {"{{template}}"} values.
-        </Text>
+        <Text className={styles.fieldHint}>Optional key-value pairs as JSON. Supports {'{{template}}'} values.</Text>
       </div>
     </div>
   );

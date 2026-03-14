@@ -18,27 +18,12 @@
  * @see ADR-021 — Fluent UI v9 design system
  */
 
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  useEffect,
-} from "react";
-import { makeStyles, tokens, Spinner, Text } from "@fluentui/react-components";
-import type {
-  DocumentSearchResult,
-  RecordSearchResult,
-  SearchDomain,
-  VisualizationColorBy,
-} from "../types";
-import { useTreemapLayout, type TreemapTile } from "../hooks/useTreemapLayout";
-import { getCategoryColor } from "../utils/colorScale";
-import {
-  getResultDomain,
-  extractClusterKey,
-  type SearchResult,
-} from "../utils/groupResults";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import type { DocumentSearchResult, RecordSearchResult, SearchDomain, VisualizationColorBy } from '../types';
+import { useTreemapLayout, type TreemapTile } from '../hooks/useTreemapLayout';
+import { getCategoryColor } from '../utils/colorScale';
+import { getResultDomain, extractClusterKey, type SearchResult } from '../utils/groupResults';
 
 // =============================================
 // Props
@@ -65,32 +50,32 @@ export interface SearchResultsTreemapProps {
 
 const useStyles = makeStyles({
   container: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   },
   breadcrumb: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
-    minHeight: "28px",
+    minHeight: '28px',
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
   },
   breadcrumbLink: {
-    cursor: "pointer",
+    cursor: 'pointer',
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorBrandForeground1,
-    ":hover": {
-      textDecorationLine: "underline",
+    ':hover': {
+      textDecorationLine: 'underline',
     },
   },
   breadcrumbSeparator: {
@@ -103,89 +88,89 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   tilesContainer: {
-    position: "relative",
+    position: 'relative',
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   tile: {
-    position: "absolute",
-    overflow: "hidden",
-    cursor: "pointer",
+    position: 'absolute',
+    overflow: 'hidden',
+    cursor: 'pointer',
     borderRadius: tokens.borderRadiusSmall,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    transitionProperty: "opacity, border-color",
-    transitionDuration: "0.15s",
-    transitionTimingFunction: "ease",
-    boxSizing: "border-box",
-    ":hover": {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    transitionProperty: 'opacity, border-color',
+    transitionDuration: '0.15s',
+    transitionTimingFunction: 'ease',
+    boxSizing: 'border-box',
+    ':hover': {
       opacity: 0.9,
     },
   },
   tileLabel: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    paddingTop: "4px",
-    paddingLeft: "4px",
-    paddingRight: "4px",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    paddingTop: '4px',
+    paddingLeft: '4px',
+    paddingRight: '4px',
     paddingBottom: 0,
     fontWeight: tokens.fontWeightRegular,
   },
   scoreBadge: {
-    position: "absolute",
-    bottom: "3px",
-    right: "3px",
+    position: 'absolute',
+    bottom: '3px',
+    right: '3px',
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusCircular,
-    paddingLeft: "4px",
-    paddingRight: "4px",
-    paddingTop: "1px",
-    paddingBottom: "1px",
+    paddingLeft: '4px',
+    paddingRight: '4px',
+    paddingTop: '1px',
+    paddingBottom: '1px',
     opacity: 0.85,
   },
   groupHeader: {
-    position: "absolute",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    paddingLeft: "4px",
-    paddingRight: "4px",
+    position: 'absolute',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    paddingLeft: '4px',
+    paddingRight: '4px',
     borderRadius: tokens.borderRadiusSmall,
     zIndex: 2,
-    ":hover": {
-      textDecorationLine: "underline",
+    ':hover': {
+      textDecorationLine: 'underline',
     },
   },
   groupHeaderLabel: {
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   centerMessage: {
-    position: "absolute",
+    position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   tooltip: {
-    position: "absolute",
-    pointerEvents: "none",
+    position: 'absolute',
+    pointerEvents: 'none',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
@@ -195,15 +180,15 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow8,
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     zIndex: 20,
-    maxWidth: "240px",
+    maxWidth: '240px',
   },
   tooltipName: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   tooltipDetail: {
     fontSize: tokens.fontSizeBase100,
@@ -235,45 +220,39 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
     height: 0,
   });
 
-  const tilesContainerCallbackRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (tilesContainerRef.current) {
-        const obs = (
-          tilesContainerRef.current as unknown as {
-            __resizeObserver?: ResizeObserver;
-          }
-        ).__resizeObserver;
-        obs?.disconnect();
-        tilesContainerRef.current = null;
-      }
+  const tilesContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    if (tilesContainerRef.current) {
+      const obs = (
+        tilesContainerRef.current as unknown as {
+          __resizeObserver?: ResizeObserver;
+        }
+      ).__resizeObserver;
+      obs?.disconnect();
+      tilesContainerRef.current = null;
+    }
 
-      if (node) {
-        tilesContainerRef.current = node;
-        const rect = node.getBoundingClientRect();
-        setDimensions({ width: rect.width, height: rect.height });
+    if (node) {
+      tilesContainerRef.current = node;
+      const rect = node.getBoundingClientRect();
+      setDimensions({ width: rect.width, height: rect.height });
 
-        const observer = new ResizeObserver((entries) => {
-          for (const entry of entries) {
-            const { width, height } = entry.contentRect;
-            setDimensions({ width, height });
-          }
-        });
-        observer.observe(node);
-        (
-          node as unknown as { __resizeObserver?: ResizeObserver }
-        ).__resizeObserver = observer;
-      }
-    },
-    [],
-  );
+      const observer = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          setDimensions({ width, height });
+        }
+      });
+      observer.observe(node);
+      (node as unknown as { __resizeObserver?: ResizeObserver }).__resizeObserver = observer;
+    }
+  }, []);
 
   // Cleanup ResizeObserver on unmount
   useEffect(() => {
     return () => {
       const node = tilesContainerRef.current;
       if (node) {
-        const obs = (node as unknown as { __resizeObserver?: ResizeObserver })
-          .__resizeObserver;
+        const obs = (node as unknown as { __resizeObserver?: ResizeObserver }).__resizeObserver;
         obs?.disconnect();
       }
     };
@@ -283,22 +262,13 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
   const [drilledGroup, setDrilledGroup] = useState<string | null>(null);
 
   // Filter results to drilled group if applicable
-  const effectiveResults = useMemo<
-    (DocumentSearchResult | RecordSearchResult)[]
-  >(() => {
+  const effectiveResults = useMemo<(DocumentSearchResult | RecordSearchResult)[]>(() => {
     if (!drilledGroup) return results;
-    return results.filter(
-      (r) => extractClusterKey(r as SearchResult, groupBy) === drilledGroup,
-    );
+    return results.filter(r => extractClusterKey(r as SearchResult, groupBy) === drilledGroup);
   }, [results, drilledGroup, groupBy]);
 
   // Layout hook
-  const { tiles, groups } = useTreemapLayout(
-    effectiveResults,
-    groupBy,
-    dimensions.width,
-    dimensions.height,
-  );
+  const { tiles, groups } = useTreemapLayout(effectiveResults, groupBy, dimensions.width, dimensions.height);
 
   // Hover state
   const [hoveredTileId, setHoveredTileId] = useState<string | null>(null);
@@ -335,7 +305,7 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
     (tile: TreemapTile) => {
       onResultClick(tile.id, getResultDomain(tile.result));
     },
-    [onResultClick],
+    [onResultClick]
   );
 
   const handleGroupHeaderClick = useCallback((groupKey: string) => {
@@ -348,15 +318,15 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
 
   // Drilled group label
   const drilledGroupLabel = useMemo(() => {
-    if (!drilledGroup) return "";
-    const group = groups.find((g) => g.key === drilledGroup);
+    if (!drilledGroup) return '';
+    const group = groups.find(g => g.key === drilledGroup);
     return group?.label ?? drilledGroup;
   }, [drilledGroup, groups]);
 
   // Hovered tile for tooltip
   const hoveredTile = useMemo(() => {
     if (!hoveredTileId) return null;
-    return tiles.find((t) => t.id === hoveredTileId) ?? null;
+    return tiles.find(t => t.id === hoveredTileId) ?? null;
   }, [hoveredTileId, tiles]);
 
   // Compute group header positions (first tile of each group, when not drilled)
@@ -376,7 +346,7 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
     for (const tile of tiles) {
       if (!seenGroups.has(tile.group)) {
         seenGroups.add(tile.group);
-        const group = groups.find((g) => g.key === tile.group);
+        const group = groups.find(g => g.key === tile.group);
         const colors = getCategoryColor(tile.group);
         headers.push({
           key: tile.group,
@@ -431,8 +401,8 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
             onClick={handleBreadcrumbReset}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") handleBreadcrumbReset();
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') handleBreadcrumbReset();
             }}
           >
             All Results
@@ -443,13 +413,9 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
       )}
 
       {/* Tiles area */}
-      <div
-        className={styles.tilesContainer}
-        ref={tilesContainerCallbackRef}
-        onMouseMove={handleTileMouseMove}
-      >
+      <div className={styles.tilesContainer} ref={tilesContainerCallbackRef} onMouseMove={handleTileMouseMove}>
         {/* Group headers (non-drilled view) */}
-        {groupHeaders.map((header) => (
+        {groupHeaders.map(header => (
           <div
             key={`header-${header.key}`}
             className={styles.groupHeader}
@@ -461,9 +427,8 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
             onClick={() => handleGroupHeaderClick(header.key)}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ")
-                handleGroupHeaderClick(header.key);
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') handleGroupHeaderClick(header.key);
             }}
             title={`Click to drill into ${header.label}`}
           >
@@ -474,7 +439,7 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
         ))}
 
         {/* Treemap tiles */}
-        {tiles.map((tile) => {
+        {tiles.map(tile => {
           const colors = getCategoryColor(tile.group);
           const isHovered = hoveredTileId === tile.id;
           const shouldShowLabel = showLabels || tile.width > 80;
@@ -497,18 +462,14 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
               onClick={() => handleTileClick(tile)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") handleTileClick(tile);
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') handleTileClick(tile);
               }}
               aria-label={`${tile.name} — score ${Math.round(tile.score * 100)}%`}
             >
-              {shouldShowLabel && tile.height > 20 && (
-                <span className={styles.tileLabel}>{tile.name}</span>
-              )}
+              {shouldShowLabel && tile.height > 20 && <span className={styles.tileLabel}>{tile.name}</span>}
               {tile.width > 50 && tile.height > 30 && (
-                <span className={styles.scoreBadge}>
-                  {Math.round(tile.score * 100)}%
-                </span>
+                <span className={styles.scoreBadge}>{Math.round(tile.score * 100)}%</span>
               )}
             </div>
           );
@@ -516,20 +477,11 @@ export const SearchResultsTreemap: React.FC<SearchResultsTreemapProps> = ({
 
         {/* Hover tooltip */}
         {hoveredTile && (
-          <div
-            className={styles.tooltip}
-            style={{ left: tooltipPos.x, top: tooltipPos.y }}
-          >
+          <div className={styles.tooltip} style={{ left: tooltipPos.x, top: tooltipPos.y }}>
             <div className={styles.tooltipName}>{hoveredTile.name}</div>
-            <div className={styles.tooltipDetail}>
-              Score: {Math.round(hoveredTile.score * 100)}%
-            </div>
-            <div className={styles.tooltipDetail}>
-              Group: {hoveredTile.group}
-            </div>
-            <div className={styles.tooltipDetail}>
-              Domain: {getResultDomain(hoveredTile.result)}
-            </div>
+            <div className={styles.tooltipDetail}>Score: {Math.round(hoveredTile.score * 100)}%</div>
+            <div className={styles.tooltipDetail}>Group: {hoveredTile.group}</div>
+            <div className={styles.tooltipDetail}>Domain: {getResultDomain(hoveredTile.result)}</div>
           </div>
         )}
       </div>

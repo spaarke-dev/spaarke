@@ -20,34 +20,34 @@
  * @version 2.0.0 (Code Page migration)
  */
 
-import { getAccessToken } from "./authInit";
+import { getAccessToken } from './authInit';
 
 // ============================================================================
 // SSE Event Types
 // ============================================================================
 
 export type SseEventType =
-  | "thinking"
-  | "dataverse_operation"
-  | "canvas_patch"
-  | "message"
-  | "done"
-  | "error"
-  | "clarification"
-  | "plan_preview";
+  | 'thinking'
+  | 'dataverse_operation'
+  | 'canvas_patch'
+  | 'message'
+  | 'done'
+  | 'error'
+  | 'clarification'
+  | 'plan_preview';
 
 // ============================================================================
 // Canvas Patch Types
 // ============================================================================
 
 export type CanvasPatchOperation =
-  | "AddNode"
-  | "RemoveNode"
-  | "UpdateNode"
-  | "AddEdge"
-  | "RemoveEdge"
-  | "ConfigureNode"
-  | "LinkScope";
+  | 'AddNode'
+  | 'RemoveNode'
+  | 'UpdateNode'
+  | 'AddEdge'
+  | 'RemoveEdge'
+  | 'ConfigureNode'
+  | 'LinkScope';
 
 export interface NodePosition {
   x: number;
@@ -128,7 +128,7 @@ export interface CanvasState {
 }
 
 export interface ConversationMessage {
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
@@ -160,7 +160,7 @@ export interface ThinkingEventData {
 }
 
 export interface DataverseOperationEventData {
-  operation: "create" | "update" | "link";
+  operation: 'create' | 'update' | 'link';
   entity: string;
   record?: Record<string, unknown>;
   id?: string;
@@ -254,10 +254,7 @@ export class AiPlaybookService {
    * Build playbook canvas via SSE streaming.
    * Acquires Bearer token from AuthService before each request.
    */
-  async buildPlaybookCanvas(
-    request: BuildPlaybookCanvasRequest,
-    handlers: AiPlaybookEventHandlers,
-  ): Promise<void> {
+  async buildPlaybookCanvas(request: BuildPlaybookCanvasRequest, handlers: AiPlaybookEventHandlers): Promise<void> {
     // Abort any existing request
     this.abort();
 
@@ -276,11 +273,11 @@ export class AiPlaybookService {
       const url = `${this.config.apiBaseUrl}/api/ai/playbook-builder/process`;
 
       const response = await fetch(url, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
-          Accept: "text/event-stream",
+          Accept: 'text/event-stream',
         },
         body: JSON.stringify(request),
         signal,
@@ -288,26 +285,24 @@ export class AiPlaybookService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `HTTP ${response.status}: ${errorText || response.statusText}`,
-        );
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
       }
 
       if (!response.body) {
-        throw new Error("Response body is null");
+        throw new Error('Response body is null');
       }
 
       // Process the SSE stream
       await this.processStream(response.body, handlers);
     } catch (error) {
       if (error instanceof Error) {
-        if (error.name === "AbortError") {
+        if (error.name === 'AbortError') {
           // Request was aborted, don't call error handler
           return;
         }
         handlers.onConnectionError?.(error);
       } else {
-        handlers.onConnectionError?.(new Error("Unknown error occurred"));
+        handlers.onConnectionError?.(new Error('Unknown error occurred'));
       }
     } finally {
       clearTimeout(timeoutId);
@@ -335,13 +330,10 @@ export class AiPlaybookService {
   /**
    * Process the SSE stream.
    */
-  private async processStream(
-    body: ReadableStream<Uint8Array>,
-    handlers: AiPlaybookEventHandlers,
-  ): Promise<void> {
+  private async processStream(body: ReadableStream<Uint8Array>, handlers: AiPlaybookEventHandlers): Promise<void> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
-    let buffer = "";
+    let buffer = '';
 
     try {
       while (true) {
@@ -363,7 +355,7 @@ export class AiPlaybookService {
           this.dispatchEvent(event, handlers);
 
           // Stop processing if done or error
-          if (event.type === "done" || event.type === "error") {
+          if (event.type === 'done' || event.type === 'error') {
             return;
           }
         }
@@ -371,7 +363,7 @@ export class AiPlaybookService {
 
       // Process any remaining data in buffer
       if (buffer.trim()) {
-        const events = this.parseEventsFromBuffer(buffer + "\n\n");
+        const events = this.parseEventsFromBuffer(buffer + '\n\n');
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
         }
@@ -390,8 +382,7 @@ export class AiPlaybookService {
     remaining: string;
   } {
     const parsed: SseEvent[] = [];
-    const eventRegex =
-      /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
+    const eventRegex = /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
 
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -403,11 +394,7 @@ export class AiPlaybookService {
       try {
         // Check if this event is complete (followed by double newline or end)
         const afterMatch = buffer.slice(lastIndex);
-        if (
-          !afterMatch.startsWith("\n") &&
-          afterMatch.length > 0 &&
-          !afterMatch.startsWith("\nevent:")
-        ) {
+        if (!afterMatch.startsWith('\n') && afterMatch.length > 0 && !afterMatch.startsWith('\nevent:')) {
           // Event might be incomplete, stop here
           break;
         }
@@ -418,16 +405,12 @@ export class AiPlaybookService {
           data,
         });
       } catch {
-        console.warn(
-          "[AiPlaybookService] Failed to parse event data:",
-          dataStr,
-        );
+        console.warn('[AiPlaybookService] Failed to parse event data:', dataStr);
       }
     }
 
     // Return remaining unparsed buffer
-    const remaining =
-      lastIndex > 0 ? buffer.slice(lastIndex).replace(/^\n+/, "") : buffer;
+    const remaining = lastIndex > 0 ? buffer.slice(lastIndex).replace(/^\n+/, '') : buffer;
 
     return { parsed, remaining };
   }
@@ -435,47 +418,42 @@ export class AiPlaybookService {
   /**
    * Dispatch event to appropriate handler.
    */
-  private dispatchEvent(
-    event: SseEvent,
-    handlers: AiPlaybookEventHandlers,
-  ): void {
+  private dispatchEvent(event: SseEvent, handlers: AiPlaybookEventHandlers): void {
     switch (event.type) {
-      case "thinking":
+      case 'thinking':
         handlers.onThinking?.(event.data as ThinkingEventData);
         break;
 
-      case "dataverse_operation":
-        handlers.onDataverseOperation?.(
-          event.data as DataverseOperationEventData,
-        );
+      case 'dataverse_operation':
+        handlers.onDataverseOperation?.(event.data as DataverseOperationEventData);
         break;
 
-      case "canvas_patch":
+      case 'canvas_patch':
         handlers.onCanvasPatch?.(event.data as CanvasPatchEventData);
         break;
 
-      case "message":
+      case 'message':
         handlers.onMessage?.(event.data as MessageEventData);
         break;
 
-      case "clarification":
+      case 'clarification':
         handlers.onClarification?.(event.data as ClarificationEventData);
         break;
 
-      case "plan_preview":
+      case 'plan_preview':
         handlers.onPlanPreview?.(event.data as PlanPreviewEventData);
         break;
 
-      case "error":
+      case 'error':
         handlers.onError?.(event.data as ErrorEventData);
         break;
 
-      case "done":
+      case 'done':
         handlers.onDone?.(event.data as DoneEventData);
         break;
 
       default:
-        console.warn("[AiPlaybookService] Unknown event type:", event.type);
+        console.warn('[AiPlaybookService] Unknown event type:', event.type);
     }
   }
 }
@@ -483,9 +461,7 @@ export class AiPlaybookService {
 /**
  * Create an AiPlaybookService instance.
  */
-export function createAiPlaybookService(
-  config: AiPlaybookServiceConfig,
-): AiPlaybookService {
+export function createAiPlaybookService(config: AiPlaybookServiceConfig): AiPlaybookService {
   return new AiPlaybookService(config);
 }
 

@@ -7,9 +7,9 @@
  * @see ADR-007 - Document access through BFF API
  */
 
-import { useCallback, useState } from "react";
-import { exportAnalysis } from "../services/analysisApi";
-import type { ExportState, ExportFormat } from "../types";
+import { useCallback, useState } from 'react';
+import { exportAnalysis } from '../services/analysisApi';
+import type { ExportState, ExportFormat } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,10 +43,10 @@ export interface UseExportAnalysisResult {
  */
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;
-  anchor.style.display = "none";
+  anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
 
@@ -62,12 +62,12 @@ function downloadBlob(blob: Blob, filename: string): void {
  */
 function getMimeType(format: ExportFormat): string {
   switch (format) {
-    case "docx":
-      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    case "pdf":
-      return "application/pdf";
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'pdf':
+      return 'application/pdf';
     default:
-      return "application/octet-stream";
+      return 'application/octet-stream';
   }
 }
 
@@ -91,34 +91,30 @@ function getMimeType(format: ExportFormat): string {
  * </Button>
  * ```
  */
-export function useExportAnalysis(
-  options: UseExportAnalysisOptions,
-): UseExportAnalysisResult {
+export function useExportAnalysis(options: UseExportAnalysisOptions): UseExportAnalysisResult {
   const { analysisId, token, analysisTitle } = options;
 
-  const [exportState, setExportState] = useState<ExportState>("idle");
+  const [exportState, setExportState] = useState<ExportState>('idle');
   const [exportError, setExportError] = useState<string | null>(null);
 
   const doExport = useCallback(
     async (format: ExportFormat) => {
       if (!analysisId || !token) {
-        setExportError(
-          "Cannot export: missing analysis ID or authentication token.",
-        );
-        setExportState("error");
+        setExportError('Cannot export: missing analysis ID or authentication token.');
+        setExportState('error');
         return;
       }
 
-      setExportState("exporting");
+      setExportState('exporting');
       setExportError(null);
 
       try {
         const blob = await exportAnalysis(analysisId, format, token);
 
         // Generate filename from title or use a default
-        const safeName = (analysisTitle ?? "analysis")
-          .replace(/[^a-zA-Z0-9\s-_]/g, "")
-          .replace(/\s+/g, "_")
+        const safeName = (analysisTitle ?? 'analysis')
+          .replace(/[^a-zA-Z0-9\s-_]/g, '')
+          .replace(/\s+/g, '_')
           .substring(0, 100);
         const filename = `${safeName}.${format}`;
 
@@ -126,21 +122,21 @@ export function useExportAnalysis(
         const typedBlob = new Blob([blob], { type: getMimeType(format) });
         downloadBlob(typedBlob, filename);
 
-        setExportState("completed");
+        setExportState('completed');
 
         // Reset to idle after a brief indicator
-        setTimeout(() => setExportState("idle"), 2000);
+        setTimeout(() => setExportState('idle'), 2000);
       } catch (err: unknown) {
         const message =
-          err && typeof err === "object" && "message" in err
+          err && typeof err === 'object' && 'message' in err
             ? (err as { message: string }).message
-            : "Failed to export analysis";
+            : 'Failed to export analysis';
         setExportError(message);
-        setExportState("error");
-        console.error("[useExportAnalysis] Export failed:", err);
+        setExportState('error');
+        console.error('[useExportAnalysis] Export failed:', err);
       }
     },
-    [analysisId, token, analysisTitle],
+    [analysisId, token, analysisTitle]
   );
 
   return {

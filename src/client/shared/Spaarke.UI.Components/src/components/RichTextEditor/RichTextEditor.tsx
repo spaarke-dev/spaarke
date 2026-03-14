@@ -18,31 +18,31 @@
  * Standards: ADR-012 (shared component library)
  */
 
-import * as React from "react";
-import { useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
-import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
+import * as React from 'react';
+import { useCallback, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
 
 // Lexical core
-import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import { ContentEditable } from "@lexical/react/LexicalContentEditable";
-import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
-import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ListPlugin } from "@lexical/react/LexicalListPlugin";
+import { LexicalComposer } from '@lexical/react/LexicalComposer';
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+import { ContentEditable } from '@lexical/react/LexicalContentEditable';
+import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
+import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
+import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { ListPlugin } from '@lexical/react/LexicalListPlugin';
 
 // Lexical nodes
-import { HeadingNode, QuoteNode } from "@lexical/rich-text";
-import { ListNode, ListItemNode } from "@lexical/list";
-import { LinkNode } from "@lexical/link";
+import { HeadingNode, QuoteNode } from '@lexical/rich-text';
+import { ListNode, ListItemNode } from '@lexical/list';
+import { LinkNode } from '@lexical/link';
 
 // Lexical utilities
-import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
-import { $getRoot, $insertNodes, EditorState, LexicalEditor } from "lexical";
+import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html';
+import { $getRoot, $insertNodes, EditorState, LexicalEditor } from 'lexical';
 
 // Local components
-import { ToolbarPlugin } from "./plugins/ToolbarPlugin";
+import { ToolbarPlugin } from './plugins/ToolbarPlugin';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -84,95 +84,95 @@ export interface RichTextEditorRef {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   containerDark: {
     backgroundColor: tokens.colorNeutralBackground3,
   },
   editorContainer: {
     flex: 1,
-    position: "relative" as const,
-    overflow: "auto",
+    position: 'relative' as const,
+    overflow: 'auto',
   },
   contentEditable: {
-    outline: "none",
-    padding: "12px 16px",
-    minHeight: "200px",
+    outline: 'none',
+    padding: '12px 16px',
+    minHeight: '200px',
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    "& p": {
-      margin: "0 0 8px 0",
+    '& p': {
+      margin: '0 0 8px 0',
     },
-    "& h1": {
+    '& h1': {
       fontSize: tokens.fontSizeBase600,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "16px 0 8px 0",
+      margin: '16px 0 8px 0',
     },
-    "& h2": {
+    '& h2': {
       fontSize: tokens.fontSizeBase500,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "12px 0 8px 0",
+      margin: '12px 0 8px 0',
     },
-    "& h3": {
+    '& h3': {
       fontSize: tokens.fontSizeBase400,
       fontWeight: tokens.fontWeightSemibold,
-      margin: "8px 0 8px 0",
+      margin: '8px 0 8px 0',
     },
-    "& ul, & ol": {
-      margin: "8px 0",
-      paddingLeft: "24px",
+    '& ul, & ol': {
+      margin: '8px 0',
+      paddingLeft: '24px',
     },
-    "& li": {
-      marginBottom: "4px",
+    '& li': {
+      marginBottom: '4px',
     },
-    "& a": {
+    '& a': {
       color: tokens.colorBrandForegroundLink,
-      textDecoration: "underline",
+      textDecoration: 'underline',
     },
-    "& blockquote": {
+    '& blockquote': {
       borderLeft: `3px solid ${tokens.colorNeutralStroke2}`,
       marginLeft: 0,
-      paddingLeft: "16px",
+      paddingLeft: '16px',
       color: tokens.colorNeutralForeground2,
     },
-    "& strong": {
+    '& strong': {
       fontWeight: tokens.fontWeightBold,
     },
-    "& em": {
-      fontStyle: "italic",
+    '& em': {
+      fontStyle: 'italic',
     },
-    "& u": {
-      textDecoration: "underline",
+    '& u': {
+      textDecoration: 'underline',
     },
-    "& s": {
-      textDecoration: "line-through",
+    '& s': {
+      textDecoration: 'line-through',
     },
   },
   placeholder: {
-    position: "absolute" as const,
-    top: "12px",
-    left: "16px",
+    position: 'absolute' as const,
+    top: '12px',
+    left: '16px',
     color: tokens.colorNeutralForeground3,
-    pointerEvents: "none" as const,
-    userSelect: "none",
+    pointerEvents: 'none' as const,
+    userSelect: 'none',
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    minHeight: "200px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    minHeight: '200px',
   },
 });
 
@@ -181,29 +181,29 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const theme = {
-  paragraph: "editor-paragraph",
+  paragraph: 'editor-paragraph',
   heading: {
-    h1: "editor-heading-h1",
-    h2: "editor-heading-h2",
-    h3: "editor-heading-h3",
+    h1: 'editor-heading-h1',
+    h2: 'editor-heading-h2',
+    h3: 'editor-heading-h3',
   },
   list: {
-    ul: "editor-list-ul",
-    ol: "editor-list-ol",
-    listitem: "editor-list-item",
+    ul: 'editor-list-ul',
+    ol: 'editor-list-ol',
+    listitem: 'editor-list-item',
   },
   text: {
-    bold: "editor-text-bold",
-    italic: "editor-text-italic",
-    underline: "editor-text-underline",
-    strikethrough: "editor-text-strikethrough",
+    bold: 'editor-text-bold',
+    italic: 'editor-text-italic',
+    underline: 'editor-text-underline',
+    strikethrough: 'editor-text-strikethrough',
   },
-  link: "editor-link",
-  quote: "editor-quote",
+  link: 'editor-link',
+  quote: 'editor-quote',
 };
 
 function onError(error: Error): void {
-  console.error("[RichTextEditor] Lexical error:", error);
+  console.error('[RichTextEditor] Lexical error:', error);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ function InitialContentPlugin({ html }: InitialContentPluginProps): null {
       hasInitialized.current = true;
       editor.update(() => {
         const parser = new DOMParser();
-        const dom = parser.parseFromString(html, "text/html");
+        const dom = parser.parseFromString(html, 'text/html');
         const nodes = $generateNodesFromDOM(editor, dom);
         const root = $getRoot();
         root.clear();
@@ -253,14 +253,11 @@ function EditorRefPlugin({ editorRef }: EditorRefPluginProps): null {
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RichTextEditor = forwardRef<
-  RichTextEditorRef,
-  IRichTextEditorProps
->(function RichTextEditor(props, ref) {
+export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps>(function RichTextEditor(props, ref) {
   const {
     value,
     onChange,
-    placeholder = "Start typing...",
+    placeholder = 'Start typing...',
     readOnly = false,
     isDarkMode = false,
     hideToolbar = false,
@@ -275,13 +272,13 @@ export const RichTextEditor = forwardRef<
   // Editor configuration
   const initialConfig = React.useMemo(
     () => ({
-      namespace: "SpaarkeRichTextEditor",
+      namespace: 'SpaarkeRichTextEditor',
       theme,
       onError,
       editable: !readOnly,
       nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode],
     }),
-    [readOnly],
+    [readOnly]
   );
 
   // Handle content changes
@@ -294,7 +291,7 @@ export const RichTextEditor = forwardRef<
         }
       });
     },
-    [onChange],
+    [onChange]
   );
 
   // Expose ref methods
@@ -305,7 +302,7 @@ export const RichTextEditor = forwardRef<
         editorRef.current?.focus();
       },
       getHtml: () => {
-        let html = "";
+        let html = '';
         if (editorRef.current) {
           editorRef.current.getEditorState().read(() => {
             html = $generateHtmlFromNodes(editorRef.current!);
@@ -317,7 +314,7 @@ export const RichTextEditor = forwardRef<
         if (editorRef.current) {
           editorRef.current.update(() => {
             const parser = new DOMParser();
-            const dom = parser.parseFromString(html, "text/html");
+            const dom = parser.parseFromString(html, 'text/html');
             const nodes = $generateNodesFromDOM(editorRef.current!, dom);
             const root = $getRoot();
             root.clear();
@@ -334,7 +331,7 @@ export const RichTextEditor = forwardRef<
         }
       },
     }),
-    [],
+    []
   );
 
   // Set ready state after mount
@@ -342,9 +339,7 @@ export const RichTextEditor = forwardRef<
     setIsReady(true);
   }, []);
 
-  const containerClass = isDarkMode
-    ? `${styles.container} ${styles.containerDark}`
-    : styles.container;
+  const containerClass = isDarkMode ? `${styles.container} ${styles.containerDark}` : styles.container;
 
   const editorStyle: React.CSSProperties = {
     minHeight: `${minHeight}px`,
@@ -365,12 +360,8 @@ export const RichTextEditor = forwardRef<
         {!hideToolbar && <ToolbarPlugin isDarkMode={isDarkMode} />}
         <div className={styles.editorContainer} style={editorStyle}>
           <RichTextPlugin
-            contentEditable={
-              <ContentEditable className={styles.contentEditable} />
-            }
-            placeholder={
-              <div className={styles.placeholder}>{placeholder}</div>
-            }
+            contentEditable={<ContentEditable className={styles.contentEditable} />}
+            placeholder={<div className={styles.placeholder}>{placeholder}</div>}
             ErrorBoundary={LexicalErrorBoundary}
           />
           <HistoryPlugin />

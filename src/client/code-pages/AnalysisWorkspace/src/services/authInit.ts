@@ -16,13 +16,8 @@
  * @see ADR-008 - Endpoint filters for auth
  */
 
-import {
-  initAuth,
-  getAuthProvider,
-  authenticatedFetch,
-  AuthError,
-} from "@spaarke/auth";
-import type { SpaarkeAuthProvider } from "@spaarke/auth";
+import { initAuth, getAuthProvider, authenticatedFetch, AuthError } from '@spaarke/auth';
+import type { SpaarkeAuthProvider } from '@spaarke/auth';
 
 // Re-export core symbols for consumers
 export { initAuth, getAuthProvider, authenticatedFetch, AuthError };

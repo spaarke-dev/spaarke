@@ -8,30 +8,24 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useCallback, KeyboardEvent } from "react";
-import {
-  makeStyles,
-  tokens,
-  Input,
-  Button,
-  Spinner,
-} from "@fluentui/react-components";
-import { Search20Regular, AddRegular } from "@fluentui/react-icons";
-import { ISearchInputProps } from "../types";
+import * as React from 'react';
+import { useCallback, KeyboardEvent } from 'react';
+import { makeStyles, tokens, Input, Button, Spinner } from '@fluentui/react-components';
+import { Search20Regular, AddRegular } from '@fluentui/react-icons';
+import { ISearchInputProps } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    alignItems: "center",
+    alignItems: 'center',
   },
   input: {
     flex: 1,
-    minWidth: "200px",
+    minWidth: '200px',
   },
   searchButton: {
-    minWidth: "90px",
+    minWidth: '90px',
   },
 });
 
@@ -60,17 +54,17 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
     (ev: React.ChangeEvent<HTMLInputElement>) => {
       onValueChange(ev.target.value);
     },
-    [onValueChange],
+    [onValueChange]
   );
 
   // Handle Enter key press — allow search with empty query
   const handleKeyDown = useCallback(
     (ev: KeyboardEvent<HTMLInputElement>) => {
-      if (ev.key === "Enter" && !disabled) {
+      if (ev.key === 'Enter' && !disabled) {
         onSearch();
       }
     },
-    [disabled, onSearch],
+    [disabled, onSearch]
   );
 
   // Handle search button click
@@ -100,14 +94,9 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
         onClick={handleSearchClick}
         icon={disabled ? <Spinner size="tiny" /> : undefined}
       >
-        {disabled ? "Searching..." : "Search"}
+        {disabled ? 'Searching...' : 'Search'}
       </Button>
-      <Button
-        appearance="secondary"
-        icon={<AddRegular />}
-        onClick={onAddDocument}
-        disabled={disabled}
-      >
+      <Button appearance="secondary" icon={<AddRegular />} onClick={onAddDocument} disabled={disabled}>
         Add Document
       </Button>
     </div>

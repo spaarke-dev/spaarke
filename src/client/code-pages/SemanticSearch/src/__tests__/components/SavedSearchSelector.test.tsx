@@ -12,20 +12,17 @@
  *   - Selection callback invocations
  */
 
-import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import {
-  SavedSearchSelector,
-  type SavedSearchSelectorProps,
-} from "../../components/SavedSearchSelector";
-import type { SavedSearch, SearchFilters } from "../../types";
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { SavedSearchSelector, type SavedSearchSelectorProps } from '../../components/SavedSearchSelector';
+import type { SavedSearch, SearchFilters } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Mock icons
 // ---------------------------------------------------------------------------
 
-jest.mock("@fluentui/react-icons", () => ({
+jest.mock('@fluentui/react-icons', () => ({
   ChevronDownRegular: () => <span data-testid="icon-chevron-down" />,
   SaveRegular: () => <span data-testid="icon-save" />,
   StarRegular: () => <span data-testid="icon-star" />,
@@ -41,20 +38,20 @@ const DEFAULT_FILTERS: SearchFilters = {
   matterTypes: [],
   dateRange: { from: null, to: null },
   threshold: 50,
-  searchMode: "rrf",
+  searchMode: 'rrf',
 };
 
 function makeSavedSearch(overrides: Partial<SavedSearch> = {}): SavedSearch {
   return {
-    id: "test-1",
-    name: "Test Search",
-    searchDomain: "documents",
-    query: "test",
+    id: 'test-1',
+    name: 'Test Search',
+    searchDomain: 'documents',
+    query: 'test',
     filters: DEFAULT_FILTERS,
-    viewMode: "grid",
-    columns: ["name"],
-    sortColumn: "name",
-    sortDirection: "asc",
+    viewMode: 'grid',
+    columns: ['name'],
+    sortColumn: 'name',
+    sortDirection: 'asc',
     ...overrides,
   };
 }
@@ -71,7 +68,7 @@ function renderSelector(props: Partial<SavedSearchSelectorProps> = {}) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <SavedSearchSelector {...DEFAULT_PROPS} {...props} />
-    </FluentProvider>,
+    </FluentProvider>
   );
 }
 
@@ -79,7 +76,7 @@ function renderSelector(props: Partial<SavedSearchSelectorProps> = {}) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("SavedSearchSelector", () => {
+describe('SavedSearchSelector', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -89,154 +86,150 @@ describe("SavedSearchSelector", () => {
   it("renders trigger button with 'Saved Searches' when currentSearchName is null", () => {
     renderSelector({ currentSearchName: null });
 
-    expect(screen.getByText("Saved Searches")).toBeInTheDocument();
+    expect(screen.getByText('Saved Searches')).toBeInTheDocument();
   });
 
-  it("renders trigger button with current search name when provided", () => {
-    renderSelector({ currentSearchName: "My Custom Filter" });
+  it('renders trigger button with current search name when provided', () => {
+    renderSelector({ currentSearchName: 'My Custom Filter' });
 
-    expect(screen.getByText("My Custom Filter")).toBeInTheDocument();
+    expect(screen.getByText('My Custom Filter')).toBeInTheDocument();
   });
 
-  it("renders star icon on trigger button", () => {
+  it('renders star icon on trigger button', () => {
     renderSelector();
 
-    expect(screen.getByTestId("icon-star")).toBeInTheDocument();
+    expect(screen.getByTestId('icon-star')).toBeInTheDocument();
   });
 
-  it("renders chevron-down icon on trigger button", () => {
+  it('renders chevron-down icon on trigger button', () => {
     renderSelector();
 
-    expect(screen.getByTestId("icon-chevron-down")).toBeInTheDocument();
+    expect(screen.getByTestId('icon-chevron-down')).toBeInTheDocument();
   });
 
   // ---- Menu Content (requires opening the menu) ----
 
-  describe("when menu is opened", () => {
+  describe('when menu is opened', () => {
     function openMenu() {
-      const triggerButton = screen
-        .getByText("Saved Searches")
-        .closest("button");
+      const triggerButton = screen.getByText('Saved Searches').closest('button');
       if (triggerButton) {
         fireEvent.click(triggerButton);
       }
     }
 
-    it("shows Default Searches group header", () => {
+    it('shows Default Searches group header', () => {
       renderSelector();
       openMenu();
 
-      expect(screen.getByText("Default Searches")).toBeInTheDocument();
+      expect(screen.getByText('Default Searches')).toBeInTheDocument();
     });
 
-    it("shows all four default searches", () => {
+    it('shows all four default searches', () => {
       renderSelector();
       openMenu();
 
-      expect(screen.getByText("All Documents")).toBeInTheDocument();
-      expect(screen.getByText("All Matters")).toBeInTheDocument();
-      expect(screen.getByText("Recent Documents")).toBeInTheDocument();
-      expect(screen.getByText("High Similarity")).toBeInTheDocument();
+      expect(screen.getByText('All Documents')).toBeInTheDocument();
+      expect(screen.getByText('All Matters')).toBeInTheDocument();
+      expect(screen.getByText('Recent Documents')).toBeInTheDocument();
+      expect(screen.getByText('High Similarity')).toBeInTheDocument();
     });
 
-    it("shows My Searches group header", () => {
+    it('shows My Searches group header', () => {
       renderSelector();
       openMenu();
 
-      expect(screen.getByText("My Searches")).toBeInTheDocument();
+      expect(screen.getByText('My Searches')).toBeInTheDocument();
     });
 
     it("shows 'No saved searches' when personal list is empty and not loading", () => {
       renderSelector({ savedSearches: [], isLoading: false });
       openMenu();
 
-      expect(screen.getByText("No saved searches")).toBeInTheDocument();
+      expect(screen.getByText('No saved searches')).toBeInTheDocument();
     });
 
-    it("shows spinner when personal searches are loading", () => {
+    it('shows spinner when personal searches are loading', () => {
       renderSelector({ isLoading: true });
       openMenu();
 
-      expect(screen.getByText("Loading...")).toBeInTheDocument();
+      expect(screen.getByText('Loading...')).toBeInTheDocument();
     });
 
-    it("shows personal saved searches when provided", () => {
+    it('shows personal saved searches when provided', () => {
       const personal = [
-        makeSavedSearch({ id: "p1", name: "Contracts Q1" }),
-        makeSavedSearch({ id: "p2", name: "Invoices Review" }),
+        makeSavedSearch({ id: 'p1', name: 'Contracts Q1' }),
+        makeSavedSearch({ id: 'p2', name: 'Invoices Review' }),
       ];
       renderSelector({ savedSearches: personal });
       openMenu();
 
-      expect(screen.getByText("Contracts Q1")).toBeInTheDocument();
-      expect(screen.getByText("Invoices Review")).toBeInTheDocument();
+      expect(screen.getByText('Contracts Q1')).toBeInTheDocument();
+      expect(screen.getByText('Invoices Review')).toBeInTheDocument();
     });
 
     it("does not show 'No saved searches' when personal searches exist", () => {
-      const personal = [makeSavedSearch({ id: "p1", name: "My Search" })];
+      const personal = [makeSavedSearch({ id: 'p1', name: 'My Search' })];
       renderSelector({ savedSearches: personal });
       openMenu();
 
-      expect(screen.queryByText("No saved searches")).not.toBeInTheDocument();
+      expect(screen.queryByText('No saved searches')).not.toBeInTheDocument();
     });
 
     it("shows 'Save Current Search' action", () => {
       renderSelector();
       openMenu();
 
-      expect(screen.getByText("Save Current Search")).toBeInTheDocument();
+      expect(screen.getByText('Save Current Search')).toBeInTheDocument();
     });
 
     it("renders save icon on 'Save Current Search' item", () => {
       renderSelector();
       openMenu();
 
-      expect(screen.getByTestId("icon-save")).toBeInTheDocument();
+      expect(screen.getByTestId('icon-save')).toBeInTheDocument();
     });
   });
 
   // ---- Callbacks ----
 
-  describe("callback invocations", () => {
+  describe('callback invocations', () => {
     function openMenu() {
-      const triggerButton = screen
-        .getByText("Saved Searches")
-        .closest("button");
+      const triggerButton = screen.getByText('Saved Searches').closest('button');
       if (triggerButton) {
         fireEvent.click(triggerButton);
       }
     }
 
-    it("calls onSelectSavedSearch when a default search is clicked", () => {
+    it('calls onSelectSavedSearch when a default search is clicked', () => {
       const onSelect = jest.fn();
       renderSelector({ onSelectSavedSearch: onSelect });
       openMenu();
 
-      fireEvent.click(screen.getByText("All Documents"));
+      fireEvent.click(screen.getByText('All Documents'));
 
       expect(onSelect).toHaveBeenCalledTimes(1);
       expect(onSelect.mock.calls[0][0]).toMatchObject({
-        id: "default-all-documents",
-        name: "All Documents",
-        searchDomain: "documents",
+        id: 'default-all-documents',
+        name: 'All Documents',
+        searchDomain: 'documents',
       });
     });
 
-    it("calls onSelectSavedSearch when a personal search is clicked", () => {
+    it('calls onSelectSavedSearch when a personal search is clicked', () => {
       const onSelect = jest.fn();
-      const personal = [makeSavedSearch({ id: "my-1", name: "My Filter" })];
+      const personal = [makeSavedSearch({ id: 'my-1', name: 'My Filter' })];
       renderSelector({
         onSelectSavedSearch: onSelect,
         savedSearches: personal,
       });
       openMenu();
 
-      fireEvent.click(screen.getByText("My Filter"));
+      fireEvent.click(screen.getByText('My Filter'));
 
       expect(onSelect).toHaveBeenCalledTimes(1);
       expect(onSelect.mock.calls[0][0]).toMatchObject({
-        id: "my-1",
-        name: "My Filter",
+        id: 'my-1',
+        name: 'My Filter',
       });
     });
 
@@ -245,7 +238,7 @@ describe("SavedSearchSelector", () => {
       renderSelector({ onSaveCurrentSearch: onSave });
       openMenu();
 
-      fireEvent.click(screen.getByText("Save Current Search"));
+      fireEvent.click(screen.getByText('Save Current Search'));
 
       expect(onSave).toHaveBeenCalledTimes(1);
     });
@@ -253,9 +246,8 @@ describe("SavedSearchSelector", () => {
 
   // ---- Edge Cases ----
 
-  it("handles long currentSearchName with truncation via CSS", () => {
-    const longName =
-      "This is a very long saved search name that should be truncated by CSS";
+  it('handles long currentSearchName with truncation via CSS', () => {
+    const longName = 'This is a very long saved search name that should be truncated by CSS';
     renderSelector({ currentSearchName: longName });
 
     expect(screen.getByText(longName)).toBeInTheDocument();

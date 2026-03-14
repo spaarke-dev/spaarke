@@ -5,14 +5,14 @@
  * the parent can publish its token so the child skips MSAL initialization (~0.1ms vs 500-1300ms).
  */
 
-const BRIDGE_KEY = "__SPAARKE_BFF_TOKEN__";
+const BRIDGE_KEY = '__SPAARKE_BFF_TOKEN__';
 
 /**
  * Publish a token on the current window for child iframes to read.
  * Call this from the parent page after acquiring a token.
  */
 export function publishToken(token: string): void {
-  if (typeof window !== "undefined") {
+  if (typeof window !== 'undefined') {
     (window as Window)[BRIDGE_KEY] = token;
   }
 }
@@ -26,7 +26,7 @@ export function publishToken(token: string): void {
  *   2. window.parent.__SPAARKE_BFF_TOKEN__ (parent iframe)
  */
 export function readBridgeToken(): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
 
   // 1. Own frame
   const ownToken = (window as Window)[BRIDGE_KEY];
@@ -50,7 +50,7 @@ export function readBridgeToken(): string | null {
  * Call on logout or dialog close.
  */
 export function clearBridgeToken(): void {
-  if (typeof window !== "undefined") {
+  if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (window as any)[BRIDGE_KEY];
   }

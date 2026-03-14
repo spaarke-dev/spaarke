@@ -18,12 +18,12 @@
  * Run Analysis button, bypassing the shouldAutoExecute guard.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { executeAnalysis } from "../services/analysisApi";
-import type { AnalysisStreamChunk } from "../services/analysisApi";
-import type { AnalysisRecord, AnalysisError } from "../types";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { executeAnalysis } from '../services/analysisApi';
+import type { AnalysisStreamChunk } from '../services/analysisApi';
+import type { AnalysisRecord, AnalysisError } from '../types';
 
-const LOG_PREFIX = "[AnalysisWorkspace:useAnalysisExecution]";
+const LOG_PREFIX = '[AnalysisWorkspace:useAnalysisExecution]';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,16 +59,12 @@ export interface UseAnalysisExecutionResult {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useAnalysisExecution(
-  options: UseAnalysisExecutionOptions,
-): UseAnalysisExecutionResult {
+export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseAnalysisExecutionResult {
   const { analysis, documentId, token, onComplete, onStreamContent } = options;
 
   const [isExecuting, setIsExecuting] = useState(false);
-  const [executionError, setExecutionError] = useState<AnalysisError | null>(
-    null,
-  );
-  const [progressMessage, setProgressMessage] = useState("");
+  const [executionError, setExecutionError] = useState<AnalysisError | null>(null);
+  const [progressMessage, setProgressMessage] = useState('');
   const [chunkCount, setChunkCount] = useState(0);
 
   // Track whether we've already triggered execution for this analysis
@@ -87,14 +83,14 @@ export function useAnalysisExecution(
     if (isExecuting) return false;
     if (executedRef.current === analysis.id) return false;
 
-    const isDraft = analysis.statusCode === 1 || analysis.status === "draft";
+    const isDraft = analysis.statusCode === 1 || analysis.status === 'draft';
     const isEmpty = !analysis.content || analysis.content.trim().length === 0;
     const hasAction = !!analysis.actionId || !!analysis.playbookId;
 
     if (!isDraft || !isEmpty || !hasAction) return false;
 
     console.log(
-      `${LOG_PREFIX} Auto-execute conditions met: draft=${isDraft}, empty=${isEmpty}, hasAction=${hasAction}`,
+      `${LOG_PREFIX} Auto-execute conditions met: draft=${isDraft}, empty=${isEmpty}, hasAction=${hasAction}`
     );
     return true;
   }, [analysis, token, isExecuting]);
@@ -106,21 +102,21 @@ export function useAnalysisExecution(
     if (!analysis || !token) return;
 
     console.log(`${LOG_PREFIX} Executing analysis: ${analysis.id}`);
-    console.log(`${LOG_PREFIX}   actionId: ${analysis.actionId ?? "none"}`);
-    console.log(`${LOG_PREFIX}   playbookId: ${analysis.playbookId ?? "none"}`);
+    console.log(`${LOG_PREFIX}   actionId: ${analysis.actionId ?? 'none'}`);
+    console.log(`${LOG_PREFIX}   playbookId: ${analysis.playbookId ?? 'none'}`);
     console.log(`${LOG_PREFIX}   documentId: ${documentId}`);
 
     // Mark as executed to prevent re-trigger
     executedRef.current = analysis.id;
     setIsExecuting(true);
     setExecutionError(null);
-    setProgressMessage("Starting analysis...");
+    setProgressMessage('Starting analysis...');
     setChunkCount(0);
 
     const abortController = new AbortController();
     abortRef.current = abortController;
 
-    let contentBuffer = "";
+    let contentBuffer = '';
     let lastRenderTime = 0;
     const RENDER_INTERVAL = 150; // ms — throttle to ~6-7 renders/sec to prevent Lexical DOM jank
 
@@ -133,12 +129,12 @@ export function useAnalysisExecution(
         token,
         signal: abortController.signal,
         onChunk: (chunk: AnalysisStreamChunk) => {
-          if (chunk.type === "metadata") {
-            setProgressMessage("Processing document...");
-          } else if (chunk.type === "chunk" && chunk.content) {
+          if (chunk.type === 'metadata') {
+            setProgressMessage('Processing document...');
+          } else if (chunk.type === 'chunk' && chunk.content) {
             contentBuffer += chunk.content;
-            setChunkCount((prev) => prev + 1);
-            setProgressMessage("Generating analysis...");
+            setChunkCount(prev => prev + 1);
+            setProgressMessage('Generating analysis...');
 
             // Throttle render updates for per-token streaming
             const now = Date.now();
@@ -146,44 +142,39 @@ export function useAnalysisExecution(
               onStreamContent?.(contentBuffer);
               lastRenderTime = now;
             }
-          } else if (chunk.type === "status" && chunk.content === "done") {
+          } else if (chunk.type === 'status' && chunk.content === 'done') {
             // Final flush — always render complete content
             onStreamContent?.(contentBuffer);
-            setProgressMessage("Analysis complete");
+            setProgressMessage('Analysis complete');
           }
         },
       });
 
-      console.log(
-        `${LOG_PREFIX} Execution complete, reloading analysis from Dataverse`,
-      );
-      setProgressMessage("Loading results...");
+      console.log(`${LOG_PREFIX} Execution complete, reloading analysis from Dataverse`);
+      setProgressMessage('Loading results...');
 
       // Small delay to allow Dataverse write to propagate
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Trigger reload from Dataverse
       onComplete();
     } catch (err) {
       if (abortController.signal.aborted) {
         console.log(`${LOG_PREFIX} Execution cancelled`);
-        setProgressMessage("");
+        setProgressMessage('');
         return;
       }
 
       console.error(`${LOG_PREFIX} Execution failed:`, err);
       const analysisErr: AnalysisError =
-        typeof err === "object" && err !== null && "errorCode" in err
+        typeof err === 'object' && err !== null && 'errorCode' in err
           ? (err as AnalysisError)
           : {
-              errorCode: "EXECUTION_FAILED",
-              message:
-                err instanceof Error
-                  ? err.message
-                  : "Analysis execution failed",
+              errorCode: 'EXECUTION_FAILED',
+              message: err instanceof Error ? err.message : 'Analysis execution failed',
             };
       setExecutionError(analysisErr);
-      setProgressMessage("Execution failed");
+      setProgressMessage('Execution failed');
     } finally {
       setIsExecuting(false);
       abortRef.current = null;

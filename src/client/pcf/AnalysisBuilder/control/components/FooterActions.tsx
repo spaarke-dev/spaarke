@@ -10,7 +10,7 @@
  * - Designed for mini modal size (works in all sizes)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Button,
   Spinner,
@@ -22,51 +22,46 @@ import {
   DialogBody,
   DialogActions,
   DialogContent,
-} from "@fluentui/react-components";
-import {
-  Save24Regular,
-  SaveCopy24Regular,
-  Play24Filled,
-  Dismiss24Regular,
-} from "@fluentui/react-icons";
-import { IFooterActionsProps } from "../types";
+} from '@fluentui/react-components';
+import { Save24Regular, SaveCopy24Regular, Play24Filled, Dismiss24Regular } from '@fluentui/react-icons';
+import { IFooterActionsProps } from '../types';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingTop: "8px",
-    paddingBottom: "8px",
-    paddingLeft: "8px",
-    paddingRight: "8px",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    paddingLeft: '8px',
+    paddingRight: '8px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground2,
-    boxSizing: "border-box",
-    minHeight: "48px",
+    boxSizing: 'border-box',
+    minHeight: '48px',
   },
   buttonGroup: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: "4px",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: '4px',
   },
   dialogContent: {
-    paddingTop: "8px",
-    paddingBottom: "16px",
+    paddingTop: '8px',
+    paddingBottom: '16px',
   },
   dialogActions: {
-    paddingTop: "8px",
+    paddingTop: '8px',
   },
   dialogButtonRow: {
-    display: "flex",
-    gap: "8px",
-    justifyContent: "flex-end",
-    flexWrap: "nowrap",
-    whiteSpace: "nowrap",
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'flex-end',
+    flexWrap: 'nowrap',
+    whiteSpace: 'nowrap',
   },
 });
 
@@ -115,21 +110,10 @@ export const FooterActions: React.FC<IFooterActionsProps> = ({
         >
           Save
         </Button>
-        <Button
-          appearance="subtle"
-          icon={<SaveCopy24Regular />}
-          onClick={onSaveAs}
-          disabled={isExecuting}
-          size="small"
-        >
+        <Button appearance="subtle" icon={<SaveCopy24Regular />} onClick={onSaveAs} disabled={isExecuting} size="small">
           Save As
         </Button>
-        <Button
-          appearance="secondary"
-          onClick={onCancel}
-          disabled={isExecuting}
-          size="small"
-        >
+        <Button appearance="secondary" onClick={onCancel} disabled={isExecuting} size="small">
           Cancel
         </Button>
         <Button
@@ -139,15 +123,12 @@ export const FooterActions: React.FC<IFooterActionsProps> = ({
           disabled={!canExecute || isExecuting}
           size="small"
         >
-          {isExecuting ? "Running..." : "Execute"}
+          {isExecuting ? 'Running...' : 'Execute'}
         </Button>
       </div>
 
       {/* Save Configuration Dialog - all buttons in one row */}
-      <Dialog
-        open={showExecuteDialog}
-        onOpenChange={(_, data) => setShowExecuteDialog(data.open)}
-      >
+      <Dialog open={showExecuteDialog} onOpenChange={(_, data) => setShowExecuteDialog(data.open)}>
         <DialogSurface>
           <DialogBody>
             <DialogTitle
@@ -175,17 +156,10 @@ export const FooterActions: React.FC<IFooterActionsProps> = ({
                 >
                   Save Playbook
                 </Button>
-                <Button
-                  appearance="primary"
-                  icon={<SaveCopy24Regular />}
-                  onClick={handleSaveAsAndExecute}
-                >
+                <Button appearance="primary" icon={<SaveCopy24Regular />} onClick={handleSaveAsAndExecute}>
                   Save As
                 </Button>
-                <Button
-                  appearance="secondary"
-                  onClick={handleExecuteWithoutSave}
-                >
+                <Button appearance="secondary" onClick={handleExecuteWithoutSave}>
                   Do Not Save
                 </Button>
               </div>

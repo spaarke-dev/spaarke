@@ -7,8 +7,8 @@
  * @see spec.md for API contract details
  */
 
-import { authenticatedFetch } from "@spaarke/auth";
-import { SearchRequest, SearchResponse, SearchError } from "../types";
+import { authenticatedFetch } from '@spaarke/auth';
+import { SearchRequest, SearchResponse, SearchError } from '../types';
 
 /**
  * API error response structure
@@ -57,7 +57,7 @@ export class SemanticSearchApiService {
    * @param apiBaseUrl - Base URL for the BFF API (e.g., https://api.example.com)
    */
   constructor(apiBaseUrl: string) {
-    this.apiBaseUrl = apiBaseUrl.replace(/\/$/, ""); // Remove trailing slash
+    this.apiBaseUrl = apiBaseUrl.replace(/\/$/, ''); // Remove trailing slash
   }
 
   /**
@@ -74,7 +74,7 @@ export class SemanticSearchApiService {
       const apiRequest = this.transformRequest(request);
 
       // DEBUG: Log the API request
-      console.log("[SemanticSearchApiService] API request:", {
+      console.log('[SemanticSearchApiService] API request:', {
         endpoint,
         pcfRequest: request,
         apiRequest,
@@ -82,9 +82,9 @@ export class SemanticSearchApiService {
 
       // Use authenticatedFetch — token acquisition and 401 retry handled by @spaarke/auth
       const response = await authenticatedFetch(endpoint, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify(apiRequest),
       });
@@ -98,11 +98,11 @@ export class SemanticSearchApiService {
       const data: SearchResponse = await response.json();
 
       // DEBUG: Log the API response including documentId fields
-      console.log("[SemanticSearchApiService] API response:", {
+      console.log('[SemanticSearchApiService] API response:', {
         totalCount: data.totalCount,
         resultsCount: data.results?.length ?? 0,
         metadata: data.metadata,
-        firstResults: data.results?.slice(0, 3).map((r) => ({
+        firstResults: data.results?.slice(0, 3).map(r => ({
           documentId: r.documentId,
           name: r.name,
           keys: Object.keys(r as object),
@@ -117,20 +117,16 @@ export class SemanticSearchApiService {
       }
 
       // Handle network errors
-      if (error instanceof TypeError && error.message.includes("fetch")) {
+      if (error instanceof TypeError && error.message.includes('fetch')) {
         throw this.createError(
-          "Unable to connect to the search service. Please check your connection.",
-          "NETWORK_ERROR",
-          true,
+          'Unable to connect to the search service. Please check your connection.',
+          'NETWORK_ERROR',
+          true
         );
       }
 
       // Unknown error
-      throw this.createError(
-        "An unexpected error occurred while searching.",
-        "UNKNOWN_ERROR",
-        true,
-      );
+      throw this.createError('An unexpected error occurred while searching.', 'UNKNOWN_ERROR', true);
     }
   }
 
@@ -145,13 +141,13 @@ export class SemanticSearchApiService {
     const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/open-links`;
 
     try {
-      console.log("[SemanticSearchApiService] getOpenLinks:", {
+      console.log('[SemanticSearchApiService] getOpenLinks:', {
         documentId,
         endpoint,
       });
 
       const response = await authenticatedFetch(endpoint, {
-        method: "GET",
+        method: 'GET',
       });
 
       if (!response.ok) {
@@ -161,7 +157,7 @@ export class SemanticSearchApiService {
 
       const data = (await response.json()) as OpenLinksResponse;
 
-      console.log("[SemanticSearchApiService] getOpenLinks response:", {
+      console.log('[SemanticSearchApiService] getOpenLinks response:', {
         hasDesktopUrl: !!data.desktopUrl,
         hasWebUrl: !!data.webUrl,
         mimeType: data.mimeType,
@@ -172,18 +168,10 @@ export class SemanticSearchApiService {
       if (this.isSearchError(error)) {
         throw error;
       }
-      if (error instanceof TypeError && error.message.includes("fetch")) {
-        throw this.createError(
-          "Unable to connect to the search service.",
-          "NETWORK_ERROR",
-          true,
-        );
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw this.createError('Unable to connect to the search service.', 'NETWORK_ERROR', true);
       }
-      throw this.createError(
-        "Failed to get file open links.",
-        "OPEN_LINKS_ERROR",
-        false,
-      );
+      throw this.createError('Failed to get file open links.', 'OPEN_LINKS_ERROR', false);
     }
   }
 
@@ -198,26 +186,23 @@ export class SemanticSearchApiService {
     const endpoint = `${this.apiBaseUrl}/api/documents/${encodeURIComponent(documentId)}/preview-url`;
 
     try {
-      console.log("[SemanticSearchApiService] getPreviewUrl:", {
+      console.log('[SemanticSearchApiService] getPreviewUrl:', {
         documentId,
         endpoint,
       });
 
       const response = await authenticatedFetch(endpoint, {
-        method: "GET",
+        method: 'GET',
       });
 
       if (!response.ok) {
-        console.warn(
-          "[SemanticSearchApiService] getPreviewUrl failed:",
-          response.status,
-        );
+        console.warn('[SemanticSearchApiService] getPreviewUrl failed:', response.status);
         return null;
       }
 
       const data = (await response.json()) as PreviewUrlResponse;
 
-      console.log("[SemanticSearchApiService] getPreviewUrl response:", {
+      console.log('[SemanticSearchApiService] getPreviewUrl response:', {
         hasPreviewUrl: !!data.previewUrl,
         documentInfo: data.documentInfo,
       });
@@ -227,7 +212,7 @@ export class SemanticSearchApiService {
       if (this.isSearchError(error)) {
         throw error;
       }
-      console.error("[SemanticSearchApiService] getPreviewUrl error:", error);
+      console.error('[SemanticSearchApiService] getPreviewUrl error:', error);
       return null;
     }
   }
@@ -236,7 +221,7 @@ export class SemanticSearchApiService {
    * Handle HTTP error responses
    */
   private async handleHttpError(response: Response): Promise<never> {
-    let errorMessage = "Search failed";
+    let errorMessage = 'Search failed';
     let errorCode = `HTTP_${response.status}`;
     let retryable = false;
 
@@ -253,44 +238,24 @@ export class SemanticSearchApiService {
 
     switch (response.status) {
       case 400:
-        throw this.createError(
-          "Invalid search request. Please modify your query.",
-          errorCode,
-          false,
-        );
+        throw this.createError('Invalid search request. Please modify your query.', errorCode, false);
       case 401:
-        throw this.createError(
-          "Your session has expired. Please sign in again.",
-          "AUTH_EXPIRED",
-          true,
-        );
+        throw this.createError('Your session has expired. Please sign in again.', 'AUTH_EXPIRED', true);
       case 403:
-        throw this.createError(
-          "You do not have permission to perform this search.",
-          "FORBIDDEN",
-          false,
-        );
+        throw this.createError('You do not have permission to perform this search.', 'FORBIDDEN', false);
       case 404:
-        throw this.createError(
-          "Search service not found. Please contact support.",
-          "NOT_FOUND",
-          false,
-        );
+        throw this.createError('Search service not found. Please contact support.', 'NOT_FOUND', false);
       case 429:
-        throw this.createError(
-          "Too many requests. Please wait a moment and try again.",
-          "RATE_LIMITED",
-          true,
-        );
+        throw this.createError('Too many requests. Please wait a moment and try again.', 'RATE_LIMITED', true);
       case 500:
       case 502:
       case 503:
       case 504:
         retryable = true;
         throw this.createError(
-          "The search service is temporarily unavailable. Please try again.",
+          'The search service is temporarily unavailable. Please try again.',
           errorCode,
-          retryable,
+          retryable
         );
       default:
         throw this.createError(errorMessage, errorCode, retryable);
@@ -302,46 +267,35 @@ export class SemanticSearchApiService {
    */
   private validateResponse(data: unknown): SearchResponse {
     // Type guard for response structure
-    if (!data || typeof data !== "object") {
-      throw this.createError(
-        "Invalid response from search service.",
-        "INVALID_RESPONSE",
-        true,
-      );
+    if (!data || typeof data !== 'object') {
+      throw this.createError('Invalid response from search service.', 'INVALID_RESPONSE', true);
     }
 
     const response = data as SearchResponse;
 
     // Ensure required fields exist
     if (!Array.isArray(response.results)) {
-      throw this.createError(
-        "Invalid response format from search service.",
-        "INVALID_RESPONSE",
-        true,
-      );
+      throw this.createError('Invalid response format from search service.', 'INVALID_RESPONSE', true);
     }
 
     // Normalize response — ensure array fields are never null (API may return null instead of [])
     return {
-      results: response.results.map((r) => ({
+      results: response.results.map(r => ({
         ...r,
         highlights: Array.isArray(r.highlights) ? r.highlights : [],
-        documentType: r.documentType ?? "",
-        fileUrl: r.fileUrl ?? "",
-        recordUrl: r.recordUrl ?? "",
+        documentType: r.documentType ?? '',
+        fileUrl: r.fileUrl ?? '',
+        recordUrl: r.recordUrl ?? '',
         createdBy: r.createdBy ?? null,
         summary: r.summary ?? null,
         tldr: r.tldr ?? null,
       })),
       // BFF returns total count in metadata.totalResults, not at top level
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      totalCount:
-        response.totalCount ??
-        (response.metadata as any)?.totalResults ??
-        response.results.length,
+      totalCount: response.totalCount ?? (response.metadata as any)?.totalResults ?? response.results.length,
       metadata: response.metadata ?? {
         searchTimeMs: 0,
-        query: "",
+        query: '',
       },
     };
   }
@@ -349,11 +303,7 @@ export class SemanticSearchApiService {
   /**
    * Create a SearchError
    */
-  private createError(
-    message: string,
-    code: string,
-    retryable: boolean,
-  ): SearchError {
+  private createError(message: string, code: string, retryable: boolean): SearchError {
     return {
       message,
       code,
@@ -365,12 +315,7 @@ export class SemanticSearchApiService {
    * Type guard for SearchError
    */
   private isSearchError(error: unknown): error is SearchError {
-    return (
-      typeof error === "object" &&
-      error !== null &&
-      "message" in error &&
-      "retryable" in error
-    );
+    return typeof error === 'object' && error !== null && 'message' in error && 'retryable' in error;
   }
 
   /**
@@ -393,28 +338,28 @@ export class SemanticSearchApiService {
     let entityId: string | undefined;
 
     switch (request.scope) {
-      case "matter":
-      case "project":
-      case "invoice":
-      case "account":
-      case "contact":
-      case "document":
+      case 'matter':
+      case 'project':
+      case 'invoice':
+      case 'account':
+      case 'contact':
+      case 'document':
         // Entity scopes map to API entity scope with corresponding entityType
-        apiScope = "entity";
+        apiScope = 'entity';
         entityType = request.scope;
         entityId = request.scopeId ?? undefined;
         break;
-      case "all":
-        apiScope = "all";
+      case 'all':
+        apiScope = 'all';
         break;
-      case "custom":
+      case 'custom':
         // Custom scope would use documentIds, not implemented yet
-        apiScope = "documentIds";
+        apiScope = 'documentIds';
         break;
       default:
         // Unknown entity types still scope to "entity" with scopeId
         // so the BFF filters by the record, not returning all documents
-        apiScope = "entity";
+        apiScope = 'entity';
         entityType = request.scope;
         entityId = request.scopeId ?? undefined;
     }
@@ -432,13 +377,9 @@ export class SemanticSearchApiService {
             fileTypes: request.filters.fileTypes,
             dateRange: request.filters.dateRange
               ? {
-                  field: "createdAt",
-                  from: request.filters.dateRange.from
-                    ? `${request.filters.dateRange.from}T00:00:00Z`
-                    : undefined,
-                  to: request.filters.dateRange.to
-                    ? `${request.filters.dateRange.to}T23:59:59Z`
-                    : undefined,
+                  field: 'createdAt',
+                  from: request.filters.dateRange.from ? `${request.filters.dateRange.from}T00:00:00Z` : undefined,
+                  to: request.filters.dateRange.to ? `${request.filters.dateRange.to}T23:59:59Z` : undefined,
                 }
               : undefined,
           }
@@ -449,8 +390,7 @@ export class SemanticSearchApiService {
             skip: request.options.offset,
             includeHighlights: request.options.includeHighlights,
             // Pass search mode (hybrid, vectorOnly, keywordOnly) to BFF
-            ...(request.filters?.searchMode &&
-            request.filters.searchMode !== "hybrid"
+            ...(request.filters?.searchMode && request.filters.searchMode !== 'hybrid'
               ? { hybridMode: request.filters.searchMode }
               : {}),
           }

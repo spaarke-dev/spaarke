@@ -7,8 +7,8 @@
  * @version 2.7.0
  */
 
-import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
+import * as React from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Dialog,
   DialogSurface,
@@ -29,17 +29,9 @@ import {
   MessageBar,
   MessageBarBody,
   Badge,
-} from "@fluentui/react-components";
-import {
-  Search20Regular,
-  Copy20Regular,
-  DocumentMultiple20Regular,
-  Dismiss20Regular,
-} from "@fluentui/react-icons";
-import {
-  useTemplateStore,
-  type PlaybookTemplate,
-} from "../../stores/templateStore";
+} from '@fluentui/react-components';
+import { Search20Regular, Copy20Regular, DocumentMultiple20Regular, Dismiss20Regular } from '@fluentui/react-icons';
+import { useTemplateStore, type PlaybookTemplate } from '../../stores/templateStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -47,76 +39,76 @@ import {
 
 const useStyles = makeStyles({
   dialogSurface: {
-    maxWidth: "900px",
-    width: "90vw",
-    maxHeight: "80vh",
+    maxWidth: '900px',
+    width: '90vw',
+    maxHeight: '80vh',
   },
   searchContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalM),
     marginBottom: tokens.spacingVerticalL,
   },
   searchInput: {
     flex: 1,
-    maxWidth: "400px",
+    maxWidth: '400px',
   },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     ...shorthands.gap(tokens.spacingHorizontalL),
-    ...shorthands.padding(tokens.spacingVerticalS, "0"),
-    maxHeight: "50vh",
-    overflowY: "auto",
+    ...shorthands.padding(tokens.spacingVerticalS, '0'),
+    maxHeight: '50vh',
+    overflowY: 'auto',
   },
   card: {
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   },
   cardContent: {
     flex: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
   },
   description: {
     color: tokens.colorNeutralForeground2,
-    display: "-webkit-box",
+    display: '-webkit-box',
     WebkitLineClamp: 3,
-    WebkitBoxOrient: "vertical",
-    ...shorthands.overflow("hidden"),
+    WebkitBoxOrient: 'vertical',
+    ...shorthands.overflow('hidden'),
     marginTop: tokens.spacingVerticalXS,
     flex: 1,
   },
   cardFooter: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    ...shorthands.padding(tokens.spacingVerticalS, "0", "0"),
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...shorthands.padding(tokens.spacingVerticalS, '0', '0'),
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalXXL),
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground2,
   },
   emptyIcon: {
-    fontSize: "48px",
+    fontSize: '48px',
     marginBottom: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalXXL),
   },
   titleContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   templateBadge: {
@@ -138,26 +130,14 @@ export interface TemplateLibraryDialogProps {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
-  open,
-  onClose,
-  onCloneSuccess,
-}) => {
+export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({ open, onClose, onCloneSuccess }) => {
   const styles = useStyles();
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState('');
   const [cloningId, setCloningId] = useState<string | null>(null);
 
   // Store state
-  const {
-    templates,
-    isLoading,
-    error,
-    isCloning,
-    cloneError,
-    fetchTemplates,
-    clonePlaybook,
-    clearError,
-  } = useTemplateStore();
+  const { templates, isLoading, error, isCloning, cloneError, fetchTemplates, clonePlaybook, clearError } =
+    useTemplateStore();
 
   // Fetch templates when dialog opens
   useEffect(() => {
@@ -174,11 +154,11 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
   // Handle search on Enter
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
+      if (e.key === 'Enter') {
         handleSearch();
       }
     },
-    [handleSearch],
+    [handleSearch]
   );
 
   // Handle clone
@@ -195,13 +175,13 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
         setCloningId(null);
       }
     },
-    [clonePlaybook, onCloneSuccess, onClose],
+    [clonePlaybook, onCloneSuccess, onClose]
   );
 
   // Handle close
   const handleClose = useCallback(() => {
     clearError();
-    setSearchTerm("");
+    setSearchTerm('');
     onClose();
   }, [clearError, onClose]);
 
@@ -219,10 +199,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
           <DialogContent>
             {/* Error message */}
             {(error || cloneError) && (
-              <MessageBar
-                intent="error"
-                style={{ marginBottom: tokens.spacingVerticalM }}
-              >
+              <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                 <MessageBarBody>{error || cloneError}</MessageBarBody>
               </MessageBar>
             )}
@@ -237,11 +214,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
                 onKeyDown={handleSearchKeyDown}
                 contentBefore={<Search20Regular />}
               />
-              <Button
-                appearance="primary"
-                onClick={handleSearch}
-                disabled={isLoading}
-              >
+              <Button appearance="primary" onClick={handleSearch} disabled={isLoading}>
                 Search
               </Button>
             </div>
@@ -263,9 +236,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
                   No templates found
                 </Text>
                 <Text size={300}>
-                  {searchTerm
-                    ? "Try adjusting your search terms"
-                    : "No playbook templates are available yet"}
+                  {searchTerm ? 'Try adjusting your search terms' : 'No playbook templates are available yet'}
                 </Text>
               </div>
             )}
@@ -273,17 +244,13 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
             {/* Template grid */}
             {!isLoading && templates.length > 0 && (
               <div className={styles.grid}>
-                {templates.map((template) => (
+                {templates.map(template => (
                   <Card key={template.id} className={styles.card}>
                     <CardHeader
                       header={
                         <div className={styles.titleContainer}>
                           <Text weight="semibold">{template.name}</Text>
-                          <Badge
-                            appearance="filled"
-                            size="small"
-                            className={styles.templateBadge}
-                          >
+                          <Badge appearance="filled" size="small" className={styles.templateBadge}>
                             Template
                           </Badge>
                         </div>
@@ -291,16 +258,12 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
                     />
                     <div className={styles.cardContent}>
                       <Text className={styles.description} size={200}>
-                        {template.description || "No description available"}
+                        {template.description || 'No description available'}
                       </Text>
                     </div>
                     <CardFooter className={styles.cardFooter}>
-                      <Text
-                        size={100}
-                        style={{ color: tokens.colorNeutralForeground3 }}
-                      >
-                        Updated:{" "}
-                        {new Date(template.modifiedOn).toLocaleDateString()}
+                      <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                        Updated: {new Date(template.modifiedOn).toLocaleDateString()}
                       </Text>
                       <Button
                         appearance="primary"
@@ -309,7 +272,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
                         disabled={isCloning}
                         onClick={() => handleClone(template)}
                       >
-                        {cloningId === template.id ? "Cloning..." : "Clone"}
+                        {cloningId === template.id ? 'Cloning...' : 'Clone'}
                       </Button>
                     </CardFooter>
                   </Card>
@@ -320,11 +283,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
         </DialogBody>
 
         <DialogActions>
-          <Button
-            appearance="secondary"
-            icon={<Dismiss20Regular />}
-            onClick={handleClose}
-          >
+          <Button appearance="secondary" icon={<Dismiss20Regular />} onClick={handleClose}>
             Close
           </Button>
         </DialogActions>

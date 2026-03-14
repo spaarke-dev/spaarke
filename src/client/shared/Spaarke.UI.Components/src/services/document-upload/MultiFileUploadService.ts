@@ -11,15 +11,9 @@
  * @version 1.0.0
  */
 
-import { FileUploadService } from "./FileUploadService";
-import type {
-  ILogger,
-  SpeFileMetadata,
-  UploadFilesRequest,
-  UploadProgress,
-  UploadFilesResult,
-} from "./types";
-import { consoleLogger } from "./types";
+import { FileUploadService } from './FileUploadService';
+import type { ILogger, SpeFileMetadata, UploadFilesRequest, UploadProgress, UploadFilesResult } from './types';
+import { consoleLogger } from './types';
 
 /**
  * Service for orchestrating multi-file uploads.
@@ -29,7 +23,7 @@ export class MultiFileUploadService {
 
   constructor(
     private readonly fileUploadService: FileUploadService,
-    logger?: ILogger,
+    logger?: ILogger
   ) {
     this.logger = logger ?? consoleLogger;
   }
@@ -46,23 +40,18 @@ export class MultiFileUploadService {
    */
   async uploadFiles(
     request: UploadFilesRequest,
-    onProgress?: (progress: UploadProgress) => void,
+    onProgress?: (progress: UploadProgress) => void
   ): Promise<UploadFilesResult> {
     const { files, containerId } = request;
 
-    this.logger.info(
-      "MultiFileUploadService",
-      `Starting upload of ${files.length} files to container: ${containerId}`,
-    );
+    this.logger.info('MultiFileUploadService', `Starting upload of ${files.length} files to container: ${containerId}`);
 
     const errors: { fileName: string; error: string }[] = [];
     const uploadedFiles: SpeFileMetadata[] = [];
 
     // Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      files.map((file) =>
-        this.fileUploadService.uploadFile({ file, driveId: containerId }),
-      ),
+      files.map(file => this.fileUploadService.uploadFile({ file, driveId: containerId }))
     );
 
     // Process results
@@ -76,17 +65,17 @@ export class MultiFileUploadService {
           current: i + 1,
           total: files.length,
           currentFileName: file.name,
-          status: "uploading",
+          status: 'uploading',
         });
 
         // Check if upload succeeded
-        if (uploadResult.status === "rejected") {
-          throw new Error(uploadResult.reason?.message || "Upload failed");
+        if (uploadResult.status === 'rejected') {
+          throw new Error(uploadResult.reason?.message || 'Upload failed');
         }
 
         const serviceResult = uploadResult.value;
         if (!serviceResult.success || !serviceResult.data) {
-          throw new Error(serviceResult.error || "Upload failed");
+          throw new Error(serviceResult.error || 'Upload failed');
         }
 
         // Store SPE metadata
@@ -97,25 +86,20 @@ export class MultiFileUploadService {
           current: i + 1,
           total: files.length,
           currentFileName: file.name,
-          status: "complete",
+          status: 'complete',
         });
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         errors.push({ fileName: file.name, error: errorMessage });
 
-        this.logger.error(
-          "MultiFileUploadService",
-          `Failed to upload: ${file.name}`,
-          error,
-        );
+        this.logger.error('MultiFileUploadService', `Failed to upload: ${file.name}`, error);
 
         // Report progress: failed
         onProgress?.({
           current: i + 1,
           total: files.length,
           currentFileName: file.name,
-          status: "failed",
+          status: 'failed',
           error: errorMessage,
         });
       }
@@ -131,8 +115,8 @@ export class MultiFileUploadService {
     };
 
     this.logger.info(
-      "MultiFileUploadService",
-      `Upload complete: ${result.successCount}/${result.totalFiles} successful`,
+      'MultiFileUploadService',
+      `Upload complete: ${result.successCount}/${result.totalFiles} successful`
     );
     return result;
   }

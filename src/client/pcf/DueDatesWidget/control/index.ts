@@ -11,25 +11,22 @@
  * - ADR-006: PCF control structure
  */
 
-import * as React from "react";
-import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
-import { FluentProvider } from "@fluentui/react-components";
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import { DueDatesWidgetRoot } from "./components/DueDatesWidgetRoot";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+import * as React from 'react';
+import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
+import { FluentProvider } from '@fluentui/react-components';
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { DueDatesWidgetRoot } from './components/DueDatesWidgetRoot';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { resolveTheme, setupThemeListener } from './providers/ThemeProvider';
 
-export class DueDatesWidget implements ComponentFramework.StandardControl<
-  IInputs,
-  IOutputs
-> {
+export class DueDatesWidget implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private context: ComponentFramework.Context<IInputs> | null = null;
   private notifyOutputChanged: () => void;
   private cleanupThemeListener: (() => void) | null = null;
 
   // Output values
-  private selectedEventOutputValue: string = "";
+  private selectedEventOutputValue = '';
 
   constructor() {
     // Constructor
@@ -43,7 +40,7 @@ export class DueDatesWidget implements ComponentFramework.StandardControl<
     context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
     state: ComponentFramework.Dictionary,
-    container: HTMLDivElement,
+    container: HTMLDivElement
   ): void {
     this.container = container;
     this.context = context;
@@ -125,23 +122,17 @@ export class DueDatesWidget implements ComponentFramework.StandardControl<
     const modeAny = this.context.mode as any;
     const contextInfo = modeAny?.contextInfo;
 
-    let parentRecordId = this.context.parameters.parentRecordId?.raw || "";
+    let parentRecordId = this.context.parameters.parentRecordId?.raw || '';
     if (!parentRecordId && contextInfo?.entityId) {
       parentRecordId = contextInfo.entityId;
-      console.log(
-        "[DueDatesWidget] v1.0.8 parentRecordId from context:",
-        parentRecordId,
-      );
+      console.log('[DueDatesWidget] v1.0.8 parentRecordId from context:', parentRecordId);
     }
 
     // Fallback to context.mode.contextInfo.entityTypeName when property is not bound
-    let parentEntityName = this.context.parameters.parentEntityName?.raw || "";
+    let parentEntityName = this.context.parameters.parentEntityName?.raw || '';
     if (!parentEntityName && contextInfo?.entityTypeName) {
       parentEntityName = contextInfo.entityTypeName;
-      console.log(
-        "[DueDatesWidget] v1.0.8 parentEntityName from context:",
-        parentEntityName,
-      );
+      console.log('[DueDatesWidget] v1.0.8 parentEntityName from context:', parentEntityName);
     }
     const maxItems = this.context.parameters.maxItems?.raw ?? 5;
     const daysAhead = this.context.parameters.daysAhead?.raw ?? 30;
@@ -161,10 +152,10 @@ export class DueDatesWidget implements ComponentFramework.StandardControl<
             maxItems,
             daysAhead,
             onEventSelect: this.handleEventSelect,
-          }),
-        ),
+          })
+        )
       ),
-      this.container,
+      this.container
     );
   }
 }

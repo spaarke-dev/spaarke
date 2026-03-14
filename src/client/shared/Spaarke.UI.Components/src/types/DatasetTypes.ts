@@ -2,10 +2,10 @@
  * Core types for Universal Dataset component
  */
 
-export type ViewMode = "Grid" | "Card" | "List";
-export type ThemeMode = "Auto" | "Spaarke" | "Host";
-export type SelectionMode = "None" | "Single" | "Multiple";
-export type ScrollBehavior = "Auto" | "Infinite" | "Paged";
+export type ViewMode = 'Grid' | 'Card' | 'List';
+export type ThemeMode = 'Auto' | 'Spaarke' | 'Host';
+export type SelectionMode = 'None' | 'Single' | 'Multiple';
+export type ScrollBehavior = 'Auto' | 'Infinite' | 'Paged';
 
 export interface IDatasetRecord {
   id: string;

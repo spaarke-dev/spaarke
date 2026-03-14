@@ -16,15 +16,9 @@
  * @see types/index.ts — RecordSearchRequest, RecordSearchResponse, etc.
  */
 
-import { useState, useCallback, useRef } from "react";
-import { search as searchRecords } from "../services/RecordSearchApiService";
-import type {
-  RecordSearchResult,
-  RecordSearchResponse,
-  SearchFilters,
-  SearchState,
-  ApiError,
-} from "../types";
+import { useState, useCallback, useRef } from 'react';
+import { search as searchRecords } from '../services/RecordSearchApiService';
+import type { RecordSearchResult, RecordSearchResponse, SearchFilters, SearchState, ApiError } from '../types';
 
 /** Number of results fetched per page */
 const PAGE_SIZE = 20;
@@ -49,11 +43,7 @@ export interface UseRecordSearchReturn {
   /** Search execution duration in milliseconds, or null if no search has completed */
   searchTime: number | null;
   /** Execute a new record search, clearing previous results */
-  search: (
-    query: string,
-    recordTypes: string[],
-    filters: SearchFilters,
-  ) => void;
+  search: (query: string, recordTypes: string[], filters: SearchFilters) => void;
   /** Load the next page of results (appends to existing) */
   loadMore: () => void;
   /** Reset all state to initial idle values */
@@ -65,25 +55,25 @@ export interface UseRecordSearchReturn {
  */
 function extractErrorMessage(err: unknown): string {
   // ApiError (thrown by handleApiResponse)
-  if (typeof err === "object" && err !== null && "status" in err) {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
     const apiError = err as ApiError;
     if (apiError.status === 429) {
-      return "Too many requests. Please wait a moment and try again.";
+      return 'Too many requests. Please wait a moment and try again.';
     }
     if (apiError.status === 401 || apiError.status === 403) {
-      return "You do not have permission to perform this search. Please sign in again.";
+      return 'You do not have permission to perform this search. Please sign in again.';
     }
-    return apiError.detail || apiError.title || "An unexpected error occurred.";
+    return apiError.detail || apiError.title || 'An unexpected error occurred.';
   }
   // AbortError
-  if (err instanceof DOMException && err.name === "AbortError") {
-    return "Search was cancelled.";
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return 'Search was cancelled.';
   }
   // Generic Error
   if (err instanceof Error) {
     return err.message;
   }
-  return "An unexpected error occurred.";
+  return 'An unexpected error occurred.';
 }
 
 /**
@@ -110,12 +100,12 @@ export function useRecordSearch(): UseRecordSearchReturn {
   // --- State ---
   const [results, setResults] = useState<RecordSearchResult[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [searchState, setSearchState] = useState<SearchState>("idle");
+  const [searchState, setSearchState] = useState<SearchState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTime, setSearchTime] = useState<number | null>(null);
 
   // --- Refs (stable across renders, used by loadMore) ---
-  const currentQueryRef = useRef("");
+  const currentQueryRef = useRef('');
   const currentRecordTypesRef = useRef<string[]>([]);
   const currentFiltersRef = useRef<SearchFilters | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -129,53 +119,50 @@ export function useRecordSearch(): UseRecordSearchReturn {
    * Cancels any in-flight request before starting. Stores query, recordTypes,
    * and filters in refs so loadMore() can reuse them for subsequent pages.
    */
-  const search = useCallback(
-    (query: string, recordTypes: string[], filters: SearchFilters): void => {
-      // Cancel any in-flight request
-      abortControllerRef.current?.abort();
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+  const search = useCallback((query: string, recordTypes: string[], filters: SearchFilters): void => {
+    // Cancel any in-flight request
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-      // Store for loadMore
-      currentQueryRef.current = query;
-      currentRecordTypesRef.current = recordTypes;
-      currentFiltersRef.current = filters;
+    // Store for loadMore
+    currentQueryRef.current = query;
+    currentRecordTypesRef.current = recordTypes;
+    currentFiltersRef.current = filters;
 
-      // Reset state for new search
-      setResults([]);
-      setTotalCount(0);
-      setErrorMessage(null);
-      setSearchTime(null);
-      setSearchState("loading");
+    // Reset state for new search
+    setResults([]);
+    setTotalCount(0);
+    setErrorMessage(null);
+    setSearchTime(null);
+    setSearchState('loading');
 
-      searchRecords({
-        query,
-        recordTypes,
-        options: {
-          limit: PAGE_SIZE,
-          offset: 0,
-          hybridMode: filters.searchMode,
-        },
+    searchRecords({
+      query,
+      recordTypes,
+      options: {
+        limit: PAGE_SIZE,
+        offset: 0,
+        hybridMode: filters.searchMode,
+      },
+    })
+      .then((response: RecordSearchResponse) => {
+        // If this request was cancelled, discard the result
+        if (controller.signal.aborted) return;
+
+        setResults(response.results);
+        setTotalCount(response.metadata.totalCount);
+        setSearchTime(response.metadata.searchTime);
+        setSearchState('success');
       })
-        .then((response: RecordSearchResponse) => {
-          // If this request was cancelled, discard the result
-          if (controller.signal.aborted) return;
+      .catch((err: unknown) => {
+        // If this request was cancelled, do not surface the error
+        if (controller.signal.aborted) return;
 
-          setResults(response.results);
-          setTotalCount(response.metadata.totalCount);
-          setSearchTime(response.metadata.searchTime);
-          setSearchState("success");
-        })
-        .catch((err: unknown) => {
-          // If this request was cancelled, do not surface the error
-          if (controller.signal.aborted) return;
-
-          setErrorMessage(extractErrorMessage(err));
-          setSearchState("error");
-        });
-    },
-    [],
-  );
+        setErrorMessage(extractErrorMessage(err));
+        setSearchState('error');
+      });
+  }, []);
 
   /**
    * Load the next page of results, appending to the existing set.
@@ -184,7 +171,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
    * results to fetch.
    */
   const loadMore = useCallback((): void => {
-    if (searchState !== "success" || !hasMore) return;
+    if (searchState !== 'success' || !hasMore) return;
 
     const filters = currentFiltersRef.current;
     if (!filters) return;
@@ -194,7 +181,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setSearchState("loadingMore");
+    setSearchState('loadingMore');
 
     // Capture current length for offset (stable at call time)
     const currentLength = results.length;
@@ -211,15 +198,15 @@ export function useRecordSearch(): UseRecordSearchReturn {
       .then((response: RecordSearchResponse) => {
         if (controller.signal.aborted) return;
 
-        setResults((prev) => [...prev, ...response.results]);
+        setResults(prev => [...prev, ...response.results]);
         setTotalCount(response.metadata.totalCount);
-        setSearchState("success");
+        setSearchState('success');
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
 
         setErrorMessage(extractErrorMessage(err));
-        setSearchState("error");
+        setSearchState('error');
       });
   }, [searchState, hasMore, results.length]);
 
@@ -229,13 +216,13 @@ export function useRecordSearch(): UseRecordSearchReturn {
   const reset = useCallback((): void => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    currentQueryRef.current = "";
+    currentQueryRef.current = '';
     currentRecordTypesRef.current = [];
     currentFiltersRef.current = null;
 
     setResults([]);
     setTotalCount(0);
-    setSearchState("idle");
+    setSearchState('idle');
     setErrorMessage(null);
     setSearchTime(null);
   }, []);

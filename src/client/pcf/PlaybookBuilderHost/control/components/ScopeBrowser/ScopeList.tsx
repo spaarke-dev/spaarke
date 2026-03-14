@@ -7,8 +7,8 @@
  * @version 1.1.0
  */
 
-import * as React from "react";
-import { useCallback, useMemo } from "react";
+import * as React from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   DataGrid,
   DataGridHeader,
@@ -32,7 +32,7 @@ import {
   makeStyles,
   tokens,
   shorthands,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   MoreHorizontal20Regular,
   Eye20Regular,
@@ -42,8 +42,8 @@ import {
   ReOrderRegular,
   LockClosedRegular,
   PersonRegular,
-} from "@fluentui/react-icons";
-import type { ScopeItem, ScopeType, OwnershipType } from "./ScopeBrowser";
+} from '@fluentui/react-icons';
+import type { ScopeItem, ScopeType, OwnershipType } from './ScopeBrowser';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -71,39 +71,39 @@ export interface ScopeListProps {
 const useStyles = makeStyles({
   container: {
     flex: 1,
-    ...shorthands.overflow("auto"),
+    ...shorthands.overflow('auto'),
   },
   grid: {
-    minWidth: "100%",
+    minWidth: '100%',
   },
   row: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   rowSelected: {
     backgroundColor: tokens.colorNeutralBackground1Selected,
-    "&:hover": {
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Selected,
     },
   },
   rowDraggable: {
-    cursor: "grab",
-    "&:active": {
-      cursor: "grabbing",
+    cursor: 'grab',
+    '&:active': {
+      cursor: 'grabbing',
     },
   },
   nameCell: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   dragHandle: {
     color: tokens.colorNeutralForeground3,
     opacity: 0,
-    transition: "opacity 0.15s ease",
-    ".fui-DataGridRow:hover &": {
+    transition: 'opacity 0.15s ease',
+    '.fui-DataGridRow:hover &': {
       opacity: 1,
     },
   },
@@ -124,18 +124,18 @@ const useStyles = makeStyles({
   },
   descriptionCell: {
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    ...shorthands.overflow("hidden"),
-    maxWidth: "300px",
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+    ...shorthands.overflow('hidden'),
+    maxWidth: '300px',
   },
   dateCell: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
   actionsCell: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
   },
   parentBadge: {
     fontSize: tokens.fontSizeBase100,
@@ -152,24 +152,17 @@ interface OwnershipBadgeProps {
   isImmutable: boolean;
 }
 
-const OwnershipBadge: React.FC<OwnershipBadgeProps> = ({
-  ownershipType,
-  isImmutable,
-}) => {
+const OwnershipBadge: React.FC<OwnershipBadgeProps> = ({ ownershipType, isImmutable }) => {
   const styles = useStyles();
 
   return (
     <Badge
       appearance="filled"
       size="small"
-      className={
-        ownershipType === "system" ? styles.systemBadge : styles.customerBadge
-      }
-      icon={
-        ownershipType === "system" ? <LockClosedRegular /> : <PersonRegular />
-      }
+      className={ownershipType === 'system' ? styles.systemBadge : styles.customerBadge}
+      icon={ownershipType === 'system' ? <LockClosedRegular /> : <PersonRegular />}
     >
-      {ownershipType === "system" ? "SYS" : "CUST"}
+      {ownershipType === 'system' ? 'SYS' : 'CUST'}
       {isImmutable && (
         <Tooltip content="This scope cannot be modified" relationship="label">
           <LockClosedRegular className={styles.immutableIcon} />
@@ -203,26 +196,26 @@ export const ScopeList: React.FC<ScopeListProps> = ({
       if (onDragStart) {
         // Set drag data for canvas drop
         event.dataTransfer.setData(
-          "application/x-scope",
+          'application/x-scope',
           JSON.stringify({
             type: scopeType,
             scope,
-          }),
+          })
         );
-        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.effectAllowed = 'copy';
         onDragStart(scope);
       }
     },
-    [onDragStart, scopeType],
+    [onDragStart, scopeType]
   );
 
   // Format date for display
   const formatDate = useCallback((dateString: string) => {
     try {
       return new Date(dateString).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
       });
     } catch {
       return dateString;
@@ -233,37 +226,25 @@ export const ScopeList: React.FC<ScopeListProps> = ({
   const columns: TableColumnDefinition<ScopeItem>[] = useMemo(
     () => [
       createTableColumn<ScopeItem>({
-        columnId: "name",
+        columnId: 'name',
         compare: (a, b) => a.displayName.localeCompare(b.displayName),
-        renderHeaderCell: () => "Name",
-        renderCell: (item) => (
+        renderHeaderCell: () => 'Name',
+        renderCell: item => (
           <TableCellLayout>
             <div className={styles.nameCell}>
-              {onDragStart && (
-                <ReOrderRegular
-                  className={styles.dragHandle}
-                  aria-hidden="true"
-                />
-              )}
-              <OwnershipBadge
-                ownershipType={item.ownershipType}
-                isImmutable={item.isImmutable}
-              />
+              {onDragStart && <ReOrderRegular className={styles.dragHandle} aria-hidden="true" />}
+              <OwnershipBadge ownershipType={item.ownershipType} isImmutable={item.isImmutable} />
               <span>{item.displayName}</span>
-              {item.parentName && (
-                <Text className={styles.parentBadge}>
-                  (extends: {item.parentName})
-                </Text>
-              )}
+              {item.parentName && <Text className={styles.parentBadge}>(extends: {item.parentName})</Text>}
             </div>
           </TableCellLayout>
         ),
       }),
       createTableColumn<ScopeItem>({
-        columnId: "description",
+        columnId: 'description',
         compare: (a, b) => a.description.localeCompare(b.description),
-        renderHeaderCell: () => "Description",
-        renderCell: (item) => (
+        renderHeaderCell: () => 'Description',
+        renderCell: item => (
           <TableCellLayout>
             <Tooltip content={item.description} relationship="label">
               <Text className={styles.descriptionCell}>{item.description}</Text>
@@ -272,71 +253,50 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         ),
       }),
       createTableColumn<ScopeItem>({
-        columnId: "modifiedOn",
-        compare: (a, b) =>
-          new Date(a.modifiedOn).getTime() - new Date(b.modifiedOn).getTime(),
-        renderHeaderCell: () => "Modified",
-        renderCell: (item) => (
+        columnId: 'modifiedOn',
+        compare: (a, b) => new Date(a.modifiedOn).getTime() - new Date(b.modifiedOn).getTime(),
+        renderHeaderCell: () => 'Modified',
+        renderCell: item => (
           <TableCellLayout>
-            <Text className={styles.dateCell}>
-              {formatDate(item.modifiedOn)}
-            </Text>
+            <Text className={styles.dateCell}>{formatDate(item.modifiedOn)}</Text>
           </TableCellLayout>
         ),
       }),
       createTableColumn<ScopeItem>({
-        columnId: "actions",
-        renderHeaderCell: () => "",
-        renderCell: (item) => (
+        columnId: 'actions',
+        renderHeaderCell: () => '',
+        renderCell: item => (
           <TableCellLayout>
             <div className={styles.actionsCell}>
               <Menu>
                 <MenuTrigger disableButtonEnhancement>
-                  <Button
-                    appearance="subtle"
-                    icon={<MoreHorizontal20Regular />}
-                    aria-label="More actions"
-                  />
+                  <Button appearance="subtle" icon={<MoreHorizontal20Regular />} aria-label="More actions" />
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>
                     {onView && (
-                      <MenuItem
-                        icon={<Eye20Regular />}
-                        onClick={() => onView(item)}
-                      >
+                      <MenuItem icon={<Eye20Regular />} onClick={() => onView(item)}>
                         View
                       </MenuItem>
                     )}
                     {onSaveAs && (
-                      <MenuItem
-                        icon={<Copy20Regular />}
-                        onClick={() => onSaveAs(item)}
-                      >
+                      <MenuItem icon={<Copy20Regular />} onClick={() => onSaveAs(item)}>
                         Save As
                       </MenuItem>
                     )}
                     {onExtend && (
-                      <MenuItem
-                        icon={<ArrowForward20Regular />}
-                        onClick={() => onExtend(item)}
-                      >
+                      <MenuItem icon={<ArrowForward20Regular />} onClick={() => onExtend(item)}>
                         Extend
                       </MenuItem>
                     )}
-                    {onDelete &&
-                      !readOnly &&
-                      item.ownershipType === "customer" && (
-                        <>
-                          <MenuDivider />
-                          <MenuItem
-                            icon={<Delete20Regular />}
-                            onClick={() => onDelete(item)}
-                          >
-                            Delete
-                          </MenuItem>
-                        </>
-                      )}
+                    {onDelete && !readOnly && item.ownershipType === 'customer' && (
+                      <>
+                        <MenuDivider />
+                        <MenuItem icon={<Delete20Regular />} onClick={() => onDelete(item)}>
+                          Delete
+                        </MenuItem>
+                      </>
+                    )}
                   </MenuList>
                 </MenuPopover>
               </Menu>
@@ -345,16 +305,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         ),
       }),
     ],
-    [
-      styles,
-      onView,
-      onSaveAs,
-      onExtend,
-      onDelete,
-      onDragStart,
-      readOnly,
-      formatDate,
-    ],
+    [styles, onView, onSaveAs, onExtend, onDelete, onDragStart, readOnly, formatDate]
   );
 
   // Build row class names based on state
@@ -367,15 +318,9 @@ export const ScopeList: React.FC<ScopeListProps> = ({
       if (selectedScopeId === itemId) {
         classNames.push(styles.rowSelected);
       }
-      return classNames.join(" ");
+      return classNames.join(' ');
     },
-    [
-      styles.row,
-      styles.rowDraggable,
-      styles.rowSelected,
-      selectedScopeId,
-      onDragStart,
-    ],
+    [styles.row, styles.rowDraggable, styles.rowSelected, selectedScopeId, onDragStart]
   );
 
   // Handle row click
@@ -385,23 +330,15 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         onRowClick(item);
       }
     },
-    [onRowClick],
+    [onRowClick]
   );
 
   return (
     <div className={styles.container}>
-      <DataGrid
-        items={scopes}
-        columns={columns}
-        sortable
-        getRowId={(item) => item.id}
-        className={styles.grid}
-      >
+      <DataGrid items={scopes} columns={columns} sortable getRowId={item => item.id} className={styles.grid}>
         <DataGridHeader>
           <DataGridRow>
-            {({ renderHeaderCell }) => (
-              <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-            )}
+            {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
           </DataGridRow>
         </DataGridHeader>
         <DataGridBody<ScopeItem>>
@@ -410,14 +347,10 @@ export const ScopeList: React.FC<ScopeListProps> = ({
               key={rowId}
               className={getRowClassName(item.id)}
               draggable={!!onDragStart}
-              onDragStart={(e: React.DragEvent<HTMLDivElement>) =>
-                handleDragStart(item, e)
-              }
+              onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(item, e)}
               onClick={() => handleRowClick(item)}
             >
-              {({ renderCell }) => (
-                <DataGridCell>{renderCell(item)}</DataGridCell>
-              )}
+              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
           )}
         </DataGridBody>

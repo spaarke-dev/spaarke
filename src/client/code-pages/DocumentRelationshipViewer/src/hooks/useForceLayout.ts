@@ -3,7 +3,7 @@
  * Identical d3-force layout logic; framework-agnostic.
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   forceSimulation,
   forceLink,
@@ -13,12 +13,8 @@ import {
   type Simulation,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
-} from "d3-force";
-import type {
-  DocumentNode,
-  DocumentEdge,
-  ForceLayoutOptions,
-} from "../types/graph";
+} from 'd3-force';
+import type { DocumentNode, DocumentEdge, ForceLayoutOptions } from '../types/graph';
 
 const DEFAULT_OPTIONS: Required<ForceLayoutOptions> = {
   distanceMultiplier: 400,
@@ -49,7 +45,7 @@ export interface UseForceLayoutResult {
 export function useForceLayout(
   nodes: DocumentNode[],
   edges: DocumentEdge[],
-  options?: ForceLayoutOptions,
+  options?: ForceLayoutOptions
 ): UseForceLayoutResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const [layoutNodes, setLayoutNodes] = useState<DocumentNode[]>(nodes);
@@ -64,10 +60,10 @@ export function useForceLayout(
 
     setIsSimulating(true);
 
-    const nonSourceNodes = nodes.filter((n) => !n.data.isSource);
+    const nonSourceNodes = nodes.filter(n => !n.data.isSource);
     const numNonSource = nonSourceNodes.length;
 
-    const forceNodes: ForceNode[] = nodes.map((node) => {
+    const forceNodes: ForceNode[] = nodes.map(node => {
       if (node.data.isSource) {
         return {
           id: node.id,
@@ -78,7 +74,7 @@ export function useForceLayout(
           fy: opts.centerY,
         };
       }
-      const nodeIndex = nonSourceNodes.findIndex((n) => n.id === node.id);
+      const nodeIndex = nonSourceNodes.findIndex(n => n.id === node.id);
       const angle = (2 * Math.PI * nodeIndex) / numNonSource - Math.PI / 2;
       const radius = 150;
       return {
@@ -91,7 +87,7 @@ export function useForceLayout(
       };
     });
 
-    const forceLinks: ForceLink[] = edges.map((edge) => ({
+    const forceLinks: ForceLink[] = edges.map(edge => ({
       source: edge.source,
       target: edge.target,
       similarity: edge.data?.similarity ?? 0.5,
@@ -101,26 +97,23 @@ export function useForceLayout(
 
     const simulation = forceSimulation<ForceNode, ForceLink>(forceNodes)
       .force(
-        "link",
+        'link',
         forceLink<ForceNode, ForceLink>(forceLinks)
-          .id((d) => d.id)
-          .distance((link) => opts.distanceMultiplier * (1 - link.similarity))
-          .strength(0.5),
+          .id(d => d.id)
+          .distance(link => opts.distanceMultiplier * (1 - link.similarity))
+          .strength(0.5)
       )
-      .force("charge", forceManyBody<ForceNode>().strength(opts.chargeStrength))
-      .force("center", forceCenter<ForceNode>(opts.centerX, opts.centerY))
-      .force(
-        "collide",
-        forceCollide<ForceNode>().radius(opts.collisionRadius).strength(0.7),
-      )
+      .force('charge', forceManyBody<ForceNode>().strength(opts.chargeStrength))
+      .force('center', forceCenter<ForceNode>(opts.centerX, opts.centerY))
+      .force('collide', forceCollide<ForceNode>().radius(opts.collisionRadius).strength(0.7))
       .alphaDecay(0.05)
       .velocityDecay(0.3);
 
     simulationRef.current = simulation;
 
-    simulation.on("tick", () => {
-      const updatedNodes = nodes.map((node) => {
-        const forceNode = forceNodes.find((fn) => fn.id === node.id);
+    simulation.on('tick', () => {
+      const updatedNodes = nodes.map(node => {
+        const forceNode = forceNodes.find(fn => fn.id === node.id);
         return {
           ...node,
           position: { x: forceNode?.x ?? 0, y: forceNode?.y ?? 0 },
@@ -129,17 +122,9 @@ export function useForceLayout(
       setLayoutNodes(updatedNodes);
     });
 
-    simulation.on("end", () => setIsSimulating(false));
+    simulation.on('end', () => setIsSimulating(false));
     simulation.alpha(1).restart();
-  }, [
-    nodes,
-    edges,
-    opts.distanceMultiplier,
-    opts.collisionRadius,
-    opts.centerX,
-    opts.centerY,
-    opts.chargeStrength,
-  ]);
+  }, [nodes, edges, opts.distanceMultiplier, opts.collisionRadius, opts.centerX, opts.centerY, opts.chargeStrength]);
 
   useEffect(() => {
     runSimulation();

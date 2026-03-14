@@ -1,12 +1,12 @@
-import * as React from "react";
-import { Field, makeStyles } from "@fluentui/react-components";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { Field, makeStyles } from '@fluentui/react-components';
+import { logger } from '../utils/logger';
 
 const useStyles = makeStyles({
   fileInfo: {
-    marginTop: "8px",
-    fontSize: "12px",
-    color: "#666",
+    marginTop: '8px',
+    fontSize: '12px',
+    color: '#666',
   },
 });
 
@@ -26,11 +26,7 @@ export interface FilePickerFieldProps {
  * @param onChange - File change callback
  * @param required - Is file selection required
  */
-export const FilePickerField: React.FC<FilePickerFieldProps> = ({
-  value,
-  onChange,
-  required = false,
-}) => {
+export const FilePickerField: React.FC<FilePickerFieldProps> = ({ value, onChange, required = false }) => {
   const styles = useStyles();
 
   const handleFileChange = React.useCallback(
@@ -39,14 +35,14 @@ export const FilePickerField: React.FC<FilePickerFieldProps> = ({
       onChange(file);
 
       if (file) {
-        logger.info("FilePickerField", "File selected", {
+        logger.info('FilePickerField', 'File selected', {
           name: file.name,
           size: file.size,
           type: file.type,
         });
       }
     },
-    [onChange],
+    [onChange]
   );
 
   const formatFileSize = (bytes: number): string => {
@@ -61,12 +57,12 @@ export const FilePickerField: React.FC<FilePickerFieldProps> = ({
         type="file"
         onChange={handleFileChange}
         style={{
-          padding: "8px",
-          border: "1px solid #d1d1d1",
-          borderRadius: "4px",
-          width: "100%",
+          padding: '8px',
+          border: '1px solid #d1d1d1',
+          borderRadius: '4px',
+          width: '100%',
           fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-          fontSize: "14px",
+          fontSize: '14px',
         }}
       />
       {value && (

@@ -8,69 +8,63 @@
  * using Fluent design tokens instead of hard-coded hex values.
  */
 
-import React from "react";
-import { Handle, Position } from "@xyflow/react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-  shorthands,
-} from "@fluentui/react-components";
-import type { PlaybookNodeData, PlaybookNodeType } from "../../types/canvas";
+import React from 'react';
+import { Handle, Position } from '@xyflow/react';
+import { makeStyles, tokens, Text, mergeClasses, shorthands } from '@fluentui/react-components';
+import type { PlaybookNodeData, PlaybookNodeType } from '../../types/canvas';
 
 const useStyles = makeStyles({
   container: {
-    minWidth: "140px",
-    maxWidth: "180px",
-    ...shorthands.borderRadius("0"),
+    minWidth: '140px',
+    maxWidth: '180px',
+    ...shorthands.borderRadius('0'),
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke1),
-    ...shorthands.overflow("hidden"),
-    transitionProperty: "border-color",
-    transitionDuration: "0.2s",
-    transitionTimingFunction: "ease",
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke1),
+    ...shorthands.overflow('hidden'),
+    transitionProperty: 'border-color',
+    transitionDuration: '0.2s',
+    transitionTimingFunction: 'ease',
   },
   selected: {
     ...shorthands.borderColor(tokens.colorBrandStroke1),
-    ...shorthands.borderWidth("2px"),
+    ...shorthands.borderWidth('2px'),
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "24px",
-    height: "24px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
     borderRadius: tokens.borderRadiusSmall,
     flexShrink: 0,
   },
   headerText: {
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   label: {
-    display: "block",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    display: 'block',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   typeLabel: {
-    display: "block",
+    display: 'block',
     color: tokens.colorNeutralForeground3,
   },
   body: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
   },
   validationIndicator: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -94,10 +88,7 @@ const useStyles = makeStyles({
  *   wait=#E3008C                  -> colorPaletteMagentaBackground2 (magenta)
  *   start                        -> colorNeutralForeground2 (neutral)
  */
-export const nodeColorSchemes: Record<
-  PlaybookNodeType,
-  { background: string; iconColor: string }
-> = {
+export const nodeColorSchemes: Record<PlaybookNodeType, { background: string; iconColor: string }> = {
   start: {
     background: tokens.colorNeutralBackground5,
     iconColor: tokens.colorNeutralForeground2,
@@ -169,13 +160,9 @@ export const BaseNode = React.memo(function BaseNode({
   const hasErrors = data.validationErrors && data.validationErrors.length > 0;
 
   return (
-    <div
-      className={mergeClasses(styles.container, selected && styles.selected)}
-    >
+    <div className={mergeClasses(styles.container, selected && styles.selected)}>
       {/* Target handle (input) */}
-      {targetHandleCount > 0 && (
-        <Handle type="target" position={Position.Top} />
-      )}
+      {targetHandleCount > 0 && <Handle type="target" position={Position.Top} />}
 
       {/* Header */}
       <div className={styles.header}>
@@ -204,19 +191,14 @@ export const BaseNode = React.memo(function BaseNode({
       {/* Validation indicator */}
       {data.isConfigured !== undefined && (
         <div className={styles.validationIndicator}>
-          <Text
-            size={100}
-            className={hasErrors ? styles.validationError : styles.validationOk}
-          >
-            {hasErrors ? "Needs configuration" : "Configured"}
+          <Text size={100} className={hasErrors ? styles.validationError : styles.validationOk}>
+            {hasErrors ? 'Needs configuration' : 'Configured'}
           </Text>
         </div>
       )}
 
       {/* Source handle (output) */}
-      {sourceHandleCount > 0 && (
-        <Handle type="source" position={Position.Bottom} />
-      )}
+      {sourceHandleCount > 0 && <Handle type="source" position={Position.Bottom} />}
     </div>
   );
 });

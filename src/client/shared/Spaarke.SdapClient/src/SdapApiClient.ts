@@ -1,8 +1,8 @@
-import { SdapClientConfig, DriveItem, FileMetadata } from "./types";
-import { TokenProvider } from "./auth/TokenProvider";
-import { UploadOperation } from "./operations/UploadOperation";
-import { DownloadOperation } from "./operations/DownloadOperation";
-import { DeleteOperation } from "./operations/DeleteOperation";
+import { SdapClientConfig, DriveItem, FileMetadata } from './types';
+import { TokenProvider } from './auth/TokenProvider';
+import { UploadOperation } from './operations/UploadOperation';
+import { DownloadOperation } from './operations/DownloadOperation';
+import { DeleteOperation } from './operations/DeleteOperation';
 
 /**
  * SDAP API Client for file operations with SharePoint Embedded.
@@ -46,25 +46,13 @@ export class SdapApiClient {
   constructor(config: SdapClientConfig) {
     this.validateConfig(config);
 
-    this.baseUrl = config.baseUrl.replace(/\/$/, ""); // Remove trailing slash
+    this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
     this.timeout = config.timeout ?? 300000; // 5 minutes default
 
     this.tokenProvider = new TokenProvider();
-    this.uploadOp = new UploadOperation(
-      this.baseUrl,
-      this.timeout,
-      this.tokenProvider,
-    );
-    this.downloadOp = new DownloadOperation(
-      this.baseUrl,
-      this.timeout,
-      this.tokenProvider,
-    );
-    this.deleteOp = new DeleteOperation(
-      this.baseUrl,
-      this.timeout,
-      this.tokenProvider,
-    );
+    this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.tokenProvider);
+    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.tokenProvider);
+    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.tokenProvider);
   }
 
   /**
@@ -84,7 +72,7 @@ export class SdapApiClient {
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
-    },
+    }
   ): Promise<DriveItem> {
     const SMALL_FILE_THRESHOLD = 4 * 1024 * 1024; // 4MB
 
@@ -126,20 +114,14 @@ export class SdapApiClient {
    * @returns File metadata
    * @throws Error if retrieval fails
    */
-  public async getFileMetadata(
-    driveId: string,
-    itemId: string,
-  ): Promise<FileMetadata> {
+  public async getFileMetadata(driveId: string, itemId: string): Promise<FileMetadata> {
     const token = await this.tokenProvider.getToken();
 
-    const response = await fetch(
-      `${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}`,
-      {
-        method: "GET",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        signal: AbortSignal.timeout(this.timeout),
-      },
-    );
+    const response = await fetch(`${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(this.timeout),
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to get file metadata: ${response.statusText}`);
@@ -150,17 +132,17 @@ export class SdapApiClient {
 
   private validateConfig(config: SdapClientConfig): void {
     if (!config.baseUrl) {
-      throw new Error("baseUrl is required");
+      throw new Error('baseUrl is required');
     }
 
     try {
       new URL(config.baseUrl);
     } catch {
-      throw new Error("baseUrl must be a valid URL");
+      throw new Error('baseUrl must be a valid URL');
     }
 
     if (config.timeout !== undefined && config.timeout < 0) {
-      throw new Error("timeout must be >= 0");
+      throw new Error('timeout must be >= 0');
     }
   }
 }

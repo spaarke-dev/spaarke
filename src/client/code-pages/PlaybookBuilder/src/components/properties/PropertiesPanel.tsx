@@ -5,16 +5,11 @@
  * Reads selectedNodeId from canvasStore and finds the corresponding node.
  */
 
-import { memo } from "react";
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-} from "@fluentui/react-components";
-import { Settings20Regular } from "@fluentui/react-icons";
-import { useCanvasStore } from "../../stores/canvasStore";
-import { NodePropertiesForm } from "./NodePropertiesForm";
+import { memo } from 'react';
+import { makeStyles, tokens, shorthands, Text } from '@fluentui/react-components';
+import { Settings20Regular } from '@fluentui/react-icons';
+import { useCanvasStore } from '../../stores/canvasStore';
+import { NodePropertiesForm } from './NodePropertiesForm';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -22,38 +17,38 @@ import { NodePropertiesForm } from "./NodePropertiesForm";
 
 const useStyles = makeStyles({
   panel: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "300px",
-    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke2),
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '300px',
+    ...shorthands.borderLeft('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    ...shorthands.gap("8px"),
-    ...shorthands.padding("12px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
+    ...shorthands.padding('12px'),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground3,
   },
   content: {
     flex: 1,
-    overflowY: "auto",
+    overflowY: 'auto',
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    ...shorthands.gap("8px"),
-    ...shorthands.padding("24px"),
-    textAlign: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    ...shorthands.gap('8px'),
+    ...shorthands.padding('24px'),
+    textAlign: 'center',
   },
   emptyIcon: {
     color: tokens.colorNeutralForeground4,
-    fontSize: "32px",
+    fontSize: '32px',
   },
 });
 
@@ -64,12 +59,10 @@ const useStyles = makeStyles({
 export const PropertiesPanel = memo(function PropertiesPanel() {
   const styles = useStyles();
 
-  const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
-  const nodes = useCanvasStore((s) => s.nodes);
+  const selectedNodeId = useCanvasStore(s => s.selectedNodeId);
+  const nodes = useCanvasStore(s => s.nodes);
 
-  const selectedNode = selectedNodeId
-    ? (nodes.find((n) => n.id === selectedNodeId) ?? null)
-    : null;
+  const selectedNode = selectedNodeId ? (nodes.find(n => n.id === selectedNodeId) ?? null) : null;
 
   return (
     <div className={styles.panel}>
@@ -91,9 +84,7 @@ export const PropertiesPanel = memo(function PropertiesPanel() {
             <Text size={300} weight="semibold">
               No node selected
             </Text>
-            <Text size={200}>
-              Select a node on the canvas to view and edit its properties
-            </Text>
+            <Text size={200}>Select a node on the canvas to view and edit its properties</Text>
           </div>
         )}
       </div>

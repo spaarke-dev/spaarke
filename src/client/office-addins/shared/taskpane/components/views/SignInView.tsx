@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 import {
   makeStyles,
   tokens,
@@ -9,57 +9,57 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
-import { PersonRegular } from "@fluentui/react-icons";
-import { SpaarkeLogo } from "../SpaarkeLogo";
+} from '@fluentui/react-components';
+import { PersonRegular } from '@fluentui/react-icons';
+import { SpaarkeLogo } from '../SpaarkeLogo';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalXXL,
   },
   logo: {
-    fontSize: "64px",
+    fontSize: '64px',
     color: tokens.colorBrandForeground1,
     marginBottom: tokens.spacingVerticalM,
   },
   title: {
-    textAlign: "center",
+    textAlign: 'center',
     marginBottom: tokens.spacingVerticalS,
   },
   description: {
-    textAlign: "center",
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
-    maxWidth: "280px",
+    maxWidth: '280px',
     marginBottom: tokens.spacingVerticalL,
   },
   card: {
-    width: "100%",
-    maxWidth: "320px",
+    width: '100%',
+    maxWidth: '320px',
     padding: tokens.spacingVerticalL,
-    textAlign: "center",
+    textAlign: 'center',
   },
   features: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
-    textAlign: "left",
+    textAlign: 'left',
   },
   featureItem: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   errorMessage: {
-    width: "100%",
-    maxWidth: "320px",
+    width: '100%',
+    maxWidth: '320px',
   },
 });
 
@@ -72,11 +72,7 @@ export interface SignInViewProps {
   error?: string | null;
 }
 
-export const SignInView: React.FC<SignInViewProps> = ({
-  onSignIn,
-  isLoading = false,
-  error,
-}) => {
+export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, isLoading = false, error }) => {
   const styles = useStyles();
 
   const handleSignIn = async () => {
@@ -95,8 +91,7 @@ export const SignInView: React.FC<SignInViewProps> = ({
         Welcome to Spaarke
       </Text>
       <Body1 className={styles.description}>
-        Sign in with your Microsoft account to access document management
-        features.
+        Sign in with your Microsoft account to access document management features.
       </Body1>
 
       {/* Error Message */}
@@ -114,9 +109,9 @@ export const SignInView: React.FC<SignInViewProps> = ({
           icon={isLoading ? <Spinner size="tiny" /> : <PersonRegular />}
           onClick={handleSignIn}
           disabled={isLoading}
-          style={{ width: "100%" }}
+          style={{ width: '100%' }}
         >
-          {isLoading ? "Signing in..." : "Sign in with Microsoft"}
+          {isLoading ? 'Signing in...' : 'Sign in with Microsoft'}
         </Button>
 
         {/* Features List */}

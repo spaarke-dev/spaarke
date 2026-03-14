@@ -13,10 +13,10 @@
  * @see projects/events-workspace-apps-UX-r1/tasks/002-implement-fluent-calendar-component.poml
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Button } from "@fluentui/react-components";
-import { ChevronUpRegular, ChevronDownRegular } from "@fluentui/react-icons";
-import { CalendarMonth } from "./CalendarMonth";
+import * as React from 'react';
+import { makeStyles, tokens, Button } from '@fluentui/react-components';
+import { ChevronUpRegular, ChevronDownRegular } from '@fluentui/react-icons';
+import { CalendarMonth } from './CalendarMonth';
 
 /**
  * Event date with count for indicator display
@@ -89,56 +89,56 @@ interface MonthInfo {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   navigationTop: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   navigationBottom: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   scrollContainer: {
     flex: 1,
-    overflowY: "auto",
-    overflowX: "hidden",
+    overflowY: 'auto',
+    overflowX: 'hidden',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
     // Hide scrollbar for cleaner look (navigation buttons provide control)
-    scrollbarWidth: "thin",
-    "::-webkit-scrollbar": {
-      width: "4px",
+    scrollbarWidth: 'thin',
+    '::-webkit-scrollbar': {
+      width: '4px',
     },
-    "::-webkit-scrollbar-track": {
+    '::-webkit-scrollbar-track': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
-    "::-webkit-scrollbar-thumb": {
+    '::-webkit-scrollbar-thumb': {
       backgroundColor: tokens.colorNeutralStroke1,
-      borderRadius: "2px",
+      borderRadius: '2px',
     },
   },
   monthsWrapper: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
   navButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
     padding: tokens.spacingHorizontalXS,
   },
 });
@@ -177,8 +177,8 @@ const navigateMonth = (current: Date, delta: number): Date => {
  */
 const toIsoDateString = (date: Date): string => {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
@@ -219,9 +219,7 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
 
   // State: Currently focused date for keyboard navigation (ISO string)
   // Task 003: Keyboard accessibility per ADR-021
-  const [focusedDate, setFocusedDate] = React.useState<string | undefined>(
-    undefined,
-  );
+  const [focusedDate, setFocusedDate] = React.useState<string | undefined>(undefined);
 
   // Convert eventDateInfos to Map<string, number> for O(1) lookup in CalendarMonth
   const eventCountsMap = React.useMemo(() => {
@@ -229,12 +227,12 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
 
     // Prefer eventDateInfos (new API with counts)
     if (eventDateInfos.length > 0) {
-      eventDateInfos.forEach((info) => {
+      eventDateInfos.forEach(info => {
         map.set(info.date, info.count);
       });
     } else if (eventDates.length > 0) {
       // Fallback to legacy eventDates (count = 1 for each)
-      eventDates.forEach((date) => {
+      eventDates.forEach(date => {
         map.set(date, 1);
       });
     }
@@ -245,29 +243,23 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
   // Convert arrays to Sets for O(1) lookup in CalendarMonth (legacy support)
   const eventDatesSet = React.useMemo(() => new Set(eventDates), [eventDates]);
 
-  const selectedDatesSet = React.useMemo(
-    () => new Set(selectedDates),
-    [selectedDates],
-  );
+  const selectedDatesSet = React.useMemo(() => new Set(selectedDates), [selectedDates]);
 
   // Generate array of months to display
-  const displayedMonths = React.useMemo(
-    () => getMonthsArray(baseDate, monthsToShow),
-    [baseDate, monthsToShow],
-  );
+  const displayedMonths = React.useMemo(() => getMonthsArray(baseDate, monthsToShow), [baseDate, monthsToShow]);
 
   /**
    * Navigate to earlier months (scroll up)
    */
   const handleNavigateUp = React.useCallback(() => {
-    setBaseDate((prev) => navigateMonth(prev, -1));
+    setBaseDate(prev => navigateMonth(prev, -1));
   }, []);
 
   /**
    * Navigate to later months (scroll down)
    */
   const handleNavigateDown = React.useCallback(() => {
-    setBaseDate((prev) => navigateMonth(prev, 1));
+    setBaseDate(prev => navigateMonth(prev, 1));
   }, []);
 
   /**
@@ -279,7 +271,7 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
         onDateClick(date);
       }
     },
-    [onDateClick],
+    [onDateClick]
   );
 
   /**
@@ -292,7 +284,7 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
         onDateShiftClick(date);
       }
     },
-    [onDateShiftClick],
+    [onDateShiftClick]
   );
 
   /**
@@ -314,21 +306,19 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
       // If focused date is before first displayed month, navigate up
       if (
         focusedYear < firstDisplayed.year ||
-        (focusedYear === firstDisplayed.year &&
-          focusedMonth < firstDisplayed.month)
+        (focusedYear === firstDisplayed.year && focusedMonth < firstDisplayed.month)
       ) {
         handleNavigateUp();
       }
       // If focused date is after last displayed month, navigate down
       else if (
         focusedYear > lastDisplayed.year ||
-        (focusedYear === lastDisplayed.year &&
-          focusedMonth > lastDisplayed.month)
+        (focusedYear === lastDisplayed.year && focusedMonth > lastDisplayed.month)
       ) {
         handleNavigateDown();
       }
     },
-    [displayedMonths, handleNavigateUp, handleNavigateDown],
+    [displayedMonths, handleNavigateUp, handleNavigateDown]
   );
 
   /**
@@ -358,29 +348,25 @@ export const CalendarStack: React.FC<ICalendarStackProps> = ({
         handleNavigateDown();
       }
     },
-    [handleNavigateUp, handleNavigateDown],
+    [handleNavigateUp, handleNavigateDown]
   );
 
   // Keyboard navigation support
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "PageUp") {
+      if (e.key === 'PageUp') {
         e.preventDefault();
         handleNavigateUp();
-      } else if (e.key === "PageDown") {
+      } else if (e.key === 'PageDown') {
         e.preventDefault();
         handleNavigateDown();
       }
     },
-    [handleNavigateUp, handleNavigateDown],
+    [handleNavigateUp, handleNavigateDown]
   );
 
   return (
-    <div
-      className={styles.container}
-      style={height ? { height } : undefined}
-      onKeyDown={handleKeyDown}
-    >
+    <div className={styles.container} style={height ? { height } : undefined} onKeyDown={handleKeyDown}>
       {/* Top Navigation - Navigate to Earlier Months */}
       <div className={styles.navigationTop}>
         <Button

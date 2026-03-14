@@ -12,19 +12,14 @@
  * @see dateFilter.ts
  */
 
-import {
-  buildDateFilter,
-  applyDateFilter,
-  DATE_FILTER_FIELD,
-  DateFilterResult,
-} from "../dateFilter";
+import { buildDateFilter, applyDateFilter, DATE_FILTER_FIELD, DateFilterResult } from '../dateFilter';
 import {
   parseCalendarFilter,
   CalendarFilter,
   ICalendarFilterSingle,
   ICalendarFilterRange,
   ICalendarFilterClear,
-} from "../../types";
+} from '../../types';
 
 // PCF ConditionOperator values for verification
 const ConditionOperator = {
@@ -38,17 +33,17 @@ const FilterOperator = {
   And: 0,
 };
 
-describe("dateFilter utilities", () => {
-  describe("buildDateFilter", () => {
-    describe("null/undefined handling", () => {
-      it("returns shouldFilter=false for null filter", () => {
+describe('dateFilter utilities', () => {
+  describe('buildDateFilter', () => {
+    describe('null/undefined handling', () => {
+      it('returns shouldFilter=false for null filter', () => {
         const result = buildDateFilter(null);
 
         expect(result.shouldFilter).toBe(false);
         expect(result.filterExpression).toBeNull();
       });
 
-      it("returns shouldFilter=false for undefined filter", () => {
+      it('returns shouldFilter=false for undefined filter', () => {
         const result = buildDateFilter(undefined);
 
         expect(result.shouldFilter).toBe(false);
@@ -56,16 +51,16 @@ describe("dateFilter utilities", () => {
       });
     });
 
-    describe("clear filter handling", () => {
-      it("returns shouldFilter=false for clear filter type", () => {
-        const clearFilter: ICalendarFilterClear = { type: "clear" };
+    describe('clear filter handling', () => {
+      it('returns shouldFilter=false for clear filter type', () => {
+        const clearFilter: ICalendarFilterClear = { type: 'clear' };
         const result = buildDateFilter(clearFilter);
 
         expect(result.shouldFilter).toBe(false);
         expect(result.filterExpression).toBeNull();
       });
 
-      it("handles clear filter from parseCalendarFilter", () => {
+      it('handles clear filter from parseCalendarFilter', () => {
         const filter = parseCalendarFilter('{"type":"clear"}');
         const result = buildDateFilter(filter);
 
@@ -73,147 +68,135 @@ describe("dateFilter utilities", () => {
       });
     });
 
-    describe("single date filter", () => {
-      it("creates single date filter expression", () => {
+    describe('single date filter', () => {
+      it('creates single date filter expression', () => {
         const singleFilter: ICalendarFilterSingle = {
-          type: "single",
-          date: "2026-02-10",
+          type: 'single',
+          date: '2026-02-10',
         };
         const result = buildDateFilter(singleFilter);
 
         expect(result.shouldFilter).toBe(true);
         expect(result.filterExpression).not.toBeNull();
-        expect(result.filterExpression!.filterOperator).toBe(
-          FilterOperator.And,
-        );
+        expect(result.filterExpression!.filterOperator).toBe(FilterOperator.And);
         expect(result.filterExpression!.conditions).toHaveLength(1);
         expect(result.filterExpression!.conditions[0]).toEqual({
           attributeName: DATE_FILTER_FIELD,
           conditionOperator: ConditionOperator.On,
-          value: "2026-02-10",
+          value: '2026-02-10',
         });
       });
 
-      it("handles single date from parseCalendarFilter", () => {
-        const filter = parseCalendarFilter(
-          '{"type":"single","date":"2026-02-15"}',
-        );
+      it('handles single date from parseCalendarFilter', () => {
+        const filter = parseCalendarFilter('{"type":"single","date":"2026-02-15"}');
         const result = buildDateFilter(filter);
 
         expect(result.shouldFilter).toBe(true);
-        expect(result.filterExpression!.conditions[0].value).toBe("2026-02-15");
+        expect(result.filterExpression!.conditions[0].value).toBe('2026-02-15');
       });
 
-      it("uses sprk_duedate as filter field", () => {
+      it('uses sprk_duedate as filter field', () => {
         const singleFilter: ICalendarFilterSingle = {
-          type: "single",
-          date: "2026-03-01",
+          type: 'single',
+          date: '2026-03-01',
         };
         const result = buildDateFilter(singleFilter);
 
-        expect(result.filterExpression!.conditions[0].attributeName).toBe(
-          "sprk_duedate",
-        );
+        expect(result.filterExpression!.conditions[0].attributeName).toBe('sprk_duedate');
       });
     });
 
-    describe("range date filter", () => {
-      it("creates range filter with two conditions", () => {
+    describe('range date filter', () => {
+      it('creates range filter with two conditions', () => {
         const rangeFilter: ICalendarFilterRange = {
-          type: "range",
-          start: "2026-02-01",
-          end: "2026-02-07",
+          type: 'range',
+          start: '2026-02-01',
+          end: '2026-02-07',
         };
         const result = buildDateFilter(rangeFilter);
 
         expect(result.shouldFilter).toBe(true);
         expect(result.filterExpression).not.toBeNull();
-        expect(result.filterExpression!.filterOperator).toBe(
-          FilterOperator.And,
-        );
+        expect(result.filterExpression!.filterOperator).toBe(FilterOperator.And);
         expect(result.filterExpression!.conditions).toHaveLength(2);
       });
 
-      it("uses OnOrAfter for start date condition", () => {
+      it('uses OnOrAfter for start date condition', () => {
         const rangeFilter: ICalendarFilterRange = {
-          type: "range",
-          start: "2026-02-01",
-          end: "2026-02-07",
+          type: 'range',
+          start: '2026-02-01',
+          end: '2026-02-07',
         };
         const result = buildDateFilter(rangeFilter);
 
         expect(result.filterExpression!.conditions[0]).toEqual({
           attributeName: DATE_FILTER_FIELD,
           conditionOperator: ConditionOperator.OnOrAfter,
-          value: "2026-02-01",
+          value: '2026-02-01',
         });
       });
 
-      it("uses OnOrBefore for end date condition", () => {
+      it('uses OnOrBefore for end date condition', () => {
         const rangeFilter: ICalendarFilterRange = {
-          type: "range",
-          start: "2026-02-01",
-          end: "2026-02-07",
+          type: 'range',
+          start: '2026-02-01',
+          end: '2026-02-07',
         };
         const result = buildDateFilter(rangeFilter);
 
         expect(result.filterExpression!.conditions[1]).toEqual({
           attributeName: DATE_FILTER_FIELD,
           conditionOperator: ConditionOperator.OnOrBefore,
-          value: "2026-02-07",
+          value: '2026-02-07',
         });
       });
 
-      it("handles range filter from parseCalendarFilter", () => {
-        const filter = parseCalendarFilter(
-          '{"type":"range","start":"2026-02-01","end":"2026-02-28"}',
-        );
+      it('handles range filter from parseCalendarFilter', () => {
+        const filter = parseCalendarFilter('{"type":"range","start":"2026-02-01","end":"2026-02-28"}');
         const result = buildDateFilter(filter);
 
         expect(result.shouldFilter).toBe(true);
         expect(result.filterExpression!.conditions).toHaveLength(2);
-        expect(result.filterExpression!.conditions[0].value).toBe("2026-02-01");
-        expect(result.filterExpression!.conditions[1].value).toBe("2026-02-28");
+        expect(result.filterExpression!.conditions[0].value).toBe('2026-02-01');
+        expect(result.filterExpression!.conditions[1].value).toBe('2026-02-28');
       });
 
-      it("handles week range (7 days)", () => {
-        const filter = parseCalendarFilter(
-          '{"type":"range","start":"2026-02-01","end":"2026-02-07"}',
-        );
+      it('handles week range (7 days)', () => {
+        const filter = parseCalendarFilter('{"type":"range","start":"2026-02-01","end":"2026-02-07"}');
         const result = buildDateFilter(filter);
 
         expect(result.shouldFilter).toBe(true);
-        expect(result.filterExpression!.conditions[0].value).toBe("2026-02-01");
-        expect(result.filterExpression!.conditions[1].value).toBe("2026-02-07");
+        expect(result.filterExpression!.conditions[0].value).toBe('2026-02-01');
+        expect(result.filterExpression!.conditions[1].value).toBe('2026-02-07');
       });
 
-      it("handles same-day range", () => {
+      it('handles same-day range', () => {
         const rangeFilter: ICalendarFilterRange = {
-          type: "range",
-          start: "2026-02-10",
-          end: "2026-02-10",
+          type: 'range',
+          start: '2026-02-10',
+          end: '2026-02-10',
         };
         const result = buildDateFilter(rangeFilter);
 
         expect(result.shouldFilter).toBe(true);
-        expect(result.filterExpression!.conditions[0].value).toBe("2026-02-10");
-        expect(result.filterExpression!.conditions[1].value).toBe("2026-02-10");
+        expect(result.filterExpression!.conditions[0].value).toBe('2026-02-10');
+        expect(result.filterExpression!.conditions[1].value).toBe('2026-02-10');
       });
     });
 
-    describe("unknown filter types", () => {
-      it("returns shouldFilter=false for unknown filter type", () => {
+    describe('unknown filter types', () => {
+      it('returns shouldFilter=false for unknown filter type', () => {
         // Cast to CalendarFilter to simulate unknown type
-        const unknownFilter = { type: "unknown" } as CalendarFilter;
+        const unknownFilter = { type: 'unknown' } as CalendarFilter;
         const result = buildDateFilter(unknownFilter);
 
         expect(result.shouldFilter).toBe(false);
         expect(result.filterExpression).toBeNull();
       });
 
-      it("returns shouldFilter=false for malformed filter", () => {
+      it('returns shouldFilter=false for malformed filter', () => {
         // Malformed filter missing required fields
-        const malformedFilter = { type: "single" } as CalendarFilter;
+        const malformedFilter = { type: 'single' } as CalendarFilter;
         const result = buildDateFilter(malformedFilter);
 
         // Type guard will fail, so it falls through to unknown
@@ -222,7 +205,7 @@ describe("dateFilter utilities", () => {
     });
   });
 
-  describe("applyDateFilter", () => {
+  describe('applyDateFilter', () => {
     // Mock dataset
     const createMockDataset = () =>
       ({
@@ -239,11 +222,11 @@ describe("dateFilter utilities", () => {
       jest.clearAllMocks();
     });
 
-    it("applies filter and refreshes dataset for single date", () => {
+    it('applies filter and refreshes dataset for single date', () => {
       const mockDataset = createMockDataset();
       const singleFilter: ICalendarFilterSingle = {
-        type: "single",
-        date: "2026-02-10",
+        type: 'single',
+        date: '2026-02-10',
       };
 
       const result = applyDateFilter(mockDataset, singleFilter);
@@ -253,12 +236,12 @@ describe("dateFilter utilities", () => {
       expect(mockDataset.refresh).toHaveBeenCalledTimes(1);
     });
 
-    it("applies filter for range", () => {
+    it('applies filter for range', () => {
       const mockDataset = createMockDataset();
       const rangeFilter: ICalendarFilterRange = {
-        type: "range",
-        start: "2026-02-01",
-        end: "2026-02-07",
+        type: 'range',
+        start: '2026-02-01',
+        end: '2026-02-07',
       };
 
       const result = applyDateFilter(mockDataset, rangeFilter);
@@ -268,7 +251,7 @@ describe("dateFilter utilities", () => {
       expect(mockDataset.refresh).toHaveBeenCalledTimes(1);
     });
 
-    it("clears filter and refreshes for null", () => {
+    it('clears filter and refreshes for null', () => {
       const mockDataset = createMockDataset();
 
       const result = applyDateFilter(mockDataset, null);
@@ -279,9 +262,9 @@ describe("dateFilter utilities", () => {
       expect(mockDataset.refresh).toHaveBeenCalledTimes(1);
     });
 
-    it("clears filter for clear type", () => {
+    it('clears filter for clear type', () => {
       const mockDataset = createMockDataset();
-      const clearFilter: ICalendarFilterClear = { type: "clear" };
+      const clearFilter: ICalendarFilterClear = { type: 'clear' };
 
       const result = applyDateFilter(mockDataset, clearFilter);
 
@@ -290,14 +273,14 @@ describe("dateFilter utilities", () => {
       expect(mockDataset.filtering.setFilter).not.toHaveBeenCalled();
     });
 
-    it("returns false if dataset filtering API not available", () => {
+    it('returns false if dataset filtering API not available', () => {
       const mockDataset = {
         refresh: jest.fn(),
       } as unknown as ComponentFramework.PropertyTypes.DataSet;
 
       const singleFilter: ICalendarFilterSingle = {
-        type: "single",
-        date: "2026-02-10",
+        type: 'single',
+        date: '2026-02-10',
       };
 
       const result = applyDateFilter(mockDataset, singleFilter);
@@ -305,7 +288,7 @@ describe("dateFilter utilities", () => {
       expect(result).toBe(false);
     });
 
-    it("returns false if dataset is undefined", () => {
+    it('returns false if dataset is undefined', () => {
       // @ts-expect-error Testing undefined case
       const result = applyDateFilter(undefined, null);
 
@@ -313,18 +296,18 @@ describe("dateFilter utilities", () => {
     });
   });
 
-  describe("parseCalendarFilter integration", () => {
-    it("parses and builds single date filter end-to-end", () => {
+  describe('parseCalendarFilter integration', () => {
+    it('parses and builds single date filter end-to-end', () => {
       const json = '{"type":"single","date":"2026-02-15"}';
       const filter = parseCalendarFilter(json);
       const result = buildDateFilter(filter);
 
       expect(result.shouldFilter).toBe(true);
       expect(result.filterExpression!.conditions).toHaveLength(1);
-      expect(result.filterExpression!.conditions[0].value).toBe("2026-02-15");
+      expect(result.filterExpression!.conditions[0].value).toBe('2026-02-15');
     });
 
-    it("parses and builds range filter end-to-end", () => {
+    it('parses and builds range filter end-to-end', () => {
       const json = '{"type":"range","start":"2026-02-01","end":"2026-02-28"}';
       const filter = parseCalendarFilter(json);
       const result = buildDateFilter(filter);
@@ -333,22 +316,22 @@ describe("dateFilter utilities", () => {
       expect(result.filterExpression!.conditions).toHaveLength(2);
     });
 
-    it("handles invalid JSON gracefully", () => {
-      const filter = parseCalendarFilter("not json");
+    it('handles invalid JSON gracefully', () => {
+      const filter = parseCalendarFilter('not json');
       const result = buildDateFilter(filter);
 
       expect(result.shouldFilter).toBe(false);
     });
 
-    it("handles empty string gracefully", () => {
-      const filter = parseCalendarFilter("");
+    it('handles empty string gracefully', () => {
+      const filter = parseCalendarFilter('');
       const result = buildDateFilter(filter);
 
       expect(result.shouldFilter).toBe(false);
     });
 
-    it("handles whitespace string gracefully", () => {
-      const filter = parseCalendarFilter("   ");
+    it('handles whitespace string gracefully', () => {
+      const filter = parseCalendarFilter('   ');
       const result = buildDateFilter(filter);
 
       expect(result.shouldFilter).toBe(false);

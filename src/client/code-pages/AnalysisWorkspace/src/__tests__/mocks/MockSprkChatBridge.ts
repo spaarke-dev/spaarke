@@ -9,25 +9,18 @@ export class SprkChatBridge {
   context: string;
   channelName: string;
   isDisconnected = false;
-  transportType = "broadcast";
+  transportType = 'broadcast';
 
   private _handlers: Map<string, Array<(payload: unknown) => void>> = new Map();
 
-  constructor(options: {
-    context: string;
-    transport?: string;
-    allowedOrigin?: string;
-  }) {
+  constructor(options: { context: string; transport?: string; allowedOrigin?: string }) {
     this.context = options.context;
     this.channelName = `sprk-workspace-${options.context}`;
   }
 
-  subscribe<T = unknown>(
-    event: string,
-    handler: (payload: T) => void,
-  ): () => void {
+  subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {
     if (this.isDisconnected) {
-      throw new Error("Cannot subscribe after disconnect");
+      throw new Error('Cannot subscribe after disconnect');
     }
     const handlers = this._handlers.get(event) ?? [];
     handlers.push(handler as (payload: unknown) => void);
@@ -42,7 +35,7 @@ export class SprkChatBridge {
 
   emit(event: string, payload: unknown): void {
     if (this.isDisconnected) {
-      throw new Error("Cannot emit after disconnect");
+      throw new Error('Cannot emit after disconnect');
     }
     const handlers = this._handlers.get(event) ?? [];
     for (const handler of handlers) {
@@ -64,7 +57,7 @@ export class SprkChatBridge {
 export interface DocumentStreamStartPayload {
   operationId: string;
   targetPosition: string;
-  operationType: "insert" | "replace" | "diff";
+  operationType: 'insert' | 'replace' | 'diff';
 }
 
 export interface DocumentStreamTokenPayload {
@@ -86,8 +79,8 @@ export interface DocumentReplacedPayload {
 }
 
 export type SprkChatBridgeEventName =
-  | "document_stream_start"
-  | "document_stream_token"
-  | "document_stream_end"
-  | "document_replaced"
-  | "selection_changed";
+  | 'document_stream_start'
+  | 'document_stream_token'
+  | 'document_stream_end'
+  | 'document_replaced'
+  | 'selection_changed';

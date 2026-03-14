@@ -7,24 +7,24 @@
  * @xyflow/react v12: Uses Node<T> and Edge<T> typed generics.
  */
 
-import type { Node, Edge } from "@xyflow/react";
-import type { PromptSchema } from "./promptSchema";
+import type { Node, Edge } from '@xyflow/react';
+import type { PromptSchema } from './promptSchema';
 
 /**
  * All supported playbook node types.
  * Maps 1:1 to the nodeTypes registry keys and the canvas store.
  */
 export type PlaybookNodeType =
-  | "start"
-  | "aiAnalysis"
-  | "aiCompletion"
-  | "condition"
-  | "deliverOutput"
-  | "deliverToIndex"
-  | "updateRecord"
-  | "createTask"
-  | "sendEmail"
-  | "wait";
+  | 'start'
+  | 'aiAnalysis'
+  | 'aiCompletion'
+  | 'condition'
+  | 'deliverOutput'
+  | 'deliverToIndex'
+  | 'updateRecord'
+  | 'createTask'
+  | 'sendEmail'
+  | 'wait';
 
 /**
  * Data payload for all playbook nodes.
@@ -80,7 +80,7 @@ export interface PlaybookNodeData {
  */
 export interface ConditionEdgeData {
   /** Which branch this edge represents */
-  branch: "true" | "false";
+  branch: 'true' | 'false';
   /** Optional human-readable condition label */
   conditionLabel?: string;
   /** Index signature for React Flow v12 compatibility */

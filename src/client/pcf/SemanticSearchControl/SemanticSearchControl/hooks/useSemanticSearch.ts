@@ -7,16 +7,9 @@
  * @see spec.md for search behavior requirements
  */
 
-import { useState, useCallback, useRef } from "react";
-import {
-  SearchResult,
-  SearchFilters,
-  SearchScope,
-  SearchState,
-  SearchError,
-  SearchOptions,
-} from "../types";
-import { SemanticSearchApiService } from "../services";
+import { useState, useCallback, useRef } from 'react';
+import { SearchResult, SearchFilters, SearchScope, SearchState, SearchError, SearchOptions } from '../types';
+import { SemanticSearchApiService } from '../services';
 
 /**
  * Default search options
@@ -94,14 +87,14 @@ interface UseSemanticSearchResult {
 export function useSemanticSearch(
   apiService: SemanticSearchApiService,
   scope: SearchScope,
-  scopeId: string | null,
+  scopeId: string | null
 ): UseSemanticSearchResult {
   // Search state
   const [results, setResults] = useState<SearchResult[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [state, setState] = useState<SearchState>("idle");
+  const [state, setState] = useState<SearchState>('idle');
   const [error, setError] = useState<SearchError | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
 
   // Track current filters to use in loadMore
   const filtersRef = useRef<SearchFilters>({
@@ -110,15 +103,15 @@ export function useSemanticSearch(
     dateRange: null,
     fileTypes: [],
     threshold: 0,
-    searchMode: "hybrid",
+    searchMode: 'hybrid',
   });
 
   // Calculate if more results available
   const hasMore = results.length < totalCount;
 
   // Derived loading states
-  const isLoading = state === "loading";
-  const isLoadingMore = state === "loadingMore";
+  const isLoading = state === 'loading';
+  const isLoadingMore = state === 'loadingMore';
 
   /**
    * Execute a new search (clears previous results).
@@ -129,7 +122,7 @@ export function useSemanticSearch(
       // Update state
       setQuery(searchQuery);
       filtersRef.current = filters;
-      setState("loading");
+      setState('loading');
       setError(null);
 
       // Clear previous results
@@ -150,14 +143,14 @@ export function useSemanticSearch(
 
         setResults(response.results);
         setTotalCount(response.totalCount);
-        setState("success");
+        setState('success');
       } catch (err) {
         const searchError = err as SearchError;
         setError(searchError);
-        setState("error");
+        setState('error');
       }
     },
-    [apiService, scope, scopeId],
+    [apiService, scope, scopeId]
   );
 
   /**
@@ -165,11 +158,11 @@ export function useSemanticSearch(
    */
   const loadMore = useCallback(async (): Promise<void> => {
     // Don't load more if already loading or no more results
-    if (state === "loading" || state === "loadingMore" || !hasMore) {
+    if (state === 'loading' || state === 'loadingMore' || !hasMore) {
       return;
     }
 
-    setState("loadingMore");
+    setState('loadingMore');
 
     try {
       const response = await apiService.search({
@@ -184,13 +177,13 @@ export function useSemanticSearch(
       });
 
       // Append new results to existing
-      setResults((prev) => [...prev, ...response.results]);
+      setResults(prev => [...prev, ...response.results]);
       setTotalCount(response.totalCount);
-      setState("success");
+      setState('success');
     } catch (err) {
       const searchError = err as SearchError;
       setError(searchError);
-      setState("error");
+      setState('error');
     }
   }, [apiService, scope, scopeId, query, results.length, state, hasMore]);
 
@@ -200,16 +193,16 @@ export function useSemanticSearch(
   const reset = useCallback(() => {
     setResults([]);
     setTotalCount(0);
-    setState("idle");
+    setState('idle');
     setError(null);
-    setQuery("");
+    setQuery('');
     filtersRef.current = {
       documentTypes: [],
       matterTypes: [],
       dateRange: null,
       fileTypes: [],
       threshold: 0,
-      searchMode: "hybrid",
+      searchMode: 'hybrid',
     };
   }, []);
 

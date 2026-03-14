@@ -4,46 +4,32 @@
  * Fetches event data from Dataverse and maps to shared component props.
  */
 
-import * as React from "react";
-import { useState, useEffect } from "react";
-import {
-  Spinner,
-  makeStyles,
-  tokens,
-  Text,
-  MessageBar,
-  MessageBarBody,
-} from "@fluentui/react-components";
-import {
-  EventDueDateCard,
-  type IEventDueDateCardProps,
-} from "./EventDueDateCard";
-import type { IChartDefinition } from "../types";
-import type { IConfigWebApi } from "../services/ConfigurationLoader";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import { Spinner, makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { EventDueDateCard, type IEventDueDateCardProps } from './EventDueDateCard';
+import type { IChartDefinition } from '../types';
+import type { IConfigWebApi } from '../services/ConfigurationLoader';
+import { logger } from '../utils/logger';
 
 export interface IDueDateCardVisualProps {
   chartDefinition: IChartDefinition;
   webApi: IConfigWebApi;
   contextRecordId?: string;
-  onClickAction?: (
-    recordId: string,
-    entityName?: string,
-    recordData?: Record<string, unknown>,
-  ) => void;
+  onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
 }
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    minHeight: "80px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    minHeight: '80px',
   },
   empty: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
     padding: tokens.spacingVerticalM,
   },
 });
@@ -67,37 +53,27 @@ function calculateDaysUntilDue(dueDate: Date): {
 /**
  * Map a Dataverse event record to EventDueDateCard props
  */
-function mapEventToCardProps(
-  record: Record<string, unknown>,
-): IEventDueDateCardProps {
-  const dueDate = record.sprk_duedate
-    ? new Date(record.sprk_duedate as string)
-    : new Date();
+function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
+  const dueDate = record.sprk_duedate ? new Date(record.sprk_duedate as string) : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value
-  const eventTypeColor =
-    (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
+  const eventTypeColor = (record['eventtype.sprk_eventtypecolor'] as string) || undefined;
   const eventTypeName =
-    (record[
-      "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"
-    ] as string) ||
-    (record["eventtype.sprk_name"] as string) ||
-    "Event";
+    (record['_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'] as string) ||
+    (record['eventtype.sprk_name'] as string) ||
+    'Event';
 
   return {
-    eventId: (record.sprk_eventid as string) || "",
-    eventName: (record.sprk_eventname as string) || "Untitled Event",
+    eventId: (record.sprk_eventid as string) || '',
+    eventName: (record.sprk_eventname as string) || 'Untitled Event',
     eventTypeName,
     dueDate,
     daysUntilDue,
     isOverdue,
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
-    assignedTo:
-      (record[
-        "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"
-      ] as string) || undefined,
+    assignedTo: (record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] as string) || undefined,
   };
 }
 
@@ -108,9 +84,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
   onClickAction,
 }) => {
   const styles = useStyles();
-  const [cardProps, setCardProps] = useState<IEventDueDateCardProps | null>(
-    null,
-  );
+  const [cardProps, setCardProps] = useState<IEventDueDateCardProps | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -133,8 +107,8 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
       }
 
       // Use FetchXML with link-entity for event type (avoids navigation property naming issues)
-      const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
-      const cleanRecordId = recordId.replace(/[{}]/g, "");
+      const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
+      const cleanRecordId = recordId.replace(/[{}]/g, '');
       const singleFetchXml = [
         `<fetch top="1">`,
         `  <entity name="${entityName}">`,
@@ -153,13 +127,10 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         `    </filter>`,
         `  </entity>`,
         `</fetch>`,
-      ].join("");
+      ].join('');
 
       const encodedFetchXml = encodeURIComponent(singleFetchXml);
-      const result = await webApi.retrieveMultipleRecords(
-        entityName,
-        `?fetchXml=${encodedFetchXml}`,
-      );
+      const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFetchXml}`);
       const record = result.entities[0];
       if (!record) {
         setLoading(false);
@@ -170,7 +141,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
       setCardProps(mapEventToCardProps(record));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("DueDateCardVisual", "Failed to fetch event data", err);
+      logger.error('DueDateCardVisual', 'Failed to fetch event data', err);
       setError(`Failed to load event: ${msg}`);
     } finally {
       setLoading(false);
@@ -184,7 +155,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         await onClickAction(
           eventId,
           chartDefinition.sprk_entitylogicalname,
-          cardProps as unknown as Record<string, unknown>,
+          cardProps as unknown as Record<string, unknown>
         );
       } finally {
         setIsNavigating(false);
@@ -217,10 +188,6 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
   }
 
   return (
-    <EventDueDateCard
-      {...cardProps}
-      onClick={onClickAction ? handleClick : undefined}
-      isNavigating={isNavigating}
-    />
+    <EventDueDateCard {...cardProps} onClick={onClickAction ? handleClick : undefined} isNavigating={isNavigating} />
   );
 };

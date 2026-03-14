@@ -14,10 +14,10 @@
  * @see SelectionChangedPayload in SprkChatBridge.ts
  */
 
-import { useEffect, useRef, useCallback } from "react";
-import type { SprkChatBridge } from "@spaarke/ui-components/services/SprkChatBridge";
-import type { RichTextEditorRef } from "@spaarke/ui-components";
-import type { SelectionBoundingRect } from "../types";
+import { useEffect, useRef, useCallback } from 'react';
+import type { SprkChatBridge } from '@spaarke/ui-components/services/SprkChatBridge';
+import type { RichTextEditorRef } from '@spaarke/ui-components';
+import type { SelectionBoundingRect } from '../types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,13 +58,11 @@ export interface UseSelectionBroadcastOptions {
  * });
  * ```
  */
-export function useSelectionBroadcast(
-  options: UseSelectionBroadcastOptions,
-): void {
+export function useSelectionBroadcast(options: UseSelectionBroadcastOptions): void {
   const { editorRef, bridge, enabled = true } = options;
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSelectionTextRef = useRef<string>("");
+  const lastSelectionTextRef = useRef<string>('');
 
   /**
    * Read the current selection from the DOM and emit the appropriate
@@ -79,13 +77,13 @@ export function useSelectionBroadcast(
     if (!selection || selection.rangeCount === 0) {
       // Emit clear if we had a previous selection
       if (lastSelectionTextRef.current) {
-        lastSelectionTextRef.current = "";
+        lastSelectionTextRef.current = '';
         try {
-          bridge.emit("selection_changed", {
-            text: "",
+          bridge.emit('selection_changed', {
+            text: '',
             startOffset: 0,
             endOffset: 0,
-            context: "selection_cleared",
+            context: 'selection_cleared',
           });
         } catch {
           // Bridge disconnected or errored -- silently drop
@@ -108,13 +106,13 @@ export function useSelectionBroadcast(
     if (!selectedText) {
       // Selection is empty (e.g., just a cursor placement)
       if (lastSelectionTextRef.current) {
-        lastSelectionTextRef.current = "";
+        lastSelectionTextRef.current = '';
         try {
-          bridge.emit("selection_changed", {
-            text: "",
+          bridge.emit('selection_changed', {
+            text: '',
             startOffset: 0,
             endOffset: 0,
-            context: "selection_cleared",
+            context: 'selection_cleared',
           });
         } catch {
           // Silently drop
@@ -141,19 +139,19 @@ export function useSelectionBroadcast(
 
     // Get selected HTML content
     const fragment = range.cloneContents();
-    const tempDiv = document.createElement("div");
+    const tempDiv = document.createElement('div');
     tempDiv.appendChild(fragment);
     const selectedHtml = tempDiv.innerHTML;
 
     try {
-      bridge.emit("selection_changed", {
+      bridge.emit('selection_changed', {
         text: selectedText,
         startOffset: range.startOffset,
         endOffset: range.endOffset,
         context: JSON.stringify({
           selectedHtml,
           boundingRect,
-          source: "analysis-editor",
+          source: 'analysis-editor',
         }),
       });
     } catch {
@@ -184,10 +182,10 @@ export function useSelectionBroadcast(
       return;
     }
 
-    document.addEventListener("selectionchange", debouncedHandleSelection);
+    document.addEventListener('selectionchange', debouncedHandleSelection);
 
     return () => {
-      document.removeEventListener("selectionchange", debouncedHandleSelection);
+      document.removeEventListener('selectionchange', debouncedHandleSelection);
 
       // Clear any pending debounce timer
       if (debounceTimerRef.current) {
@@ -196,7 +194,7 @@ export function useSelectionBroadcast(
       }
 
       // Reset tracked selection
-      lastSelectionTextRef.current = "";
+      lastSelectionTextRef.current = '';
     };
   }, [enabled, bridge, debouncedHandleSelection]);
 }
@@ -215,8 +213,7 @@ function findEditorContainer(node: Node | null): HTMLElement | null {
   while (current) {
     if (
       current instanceof HTMLElement &&
-      (current.getAttribute("contenteditable") === "true" ||
-        current.getAttribute("data-lexical-editor") === "true")
+      (current.getAttribute('contenteditable') === 'true' || current.getAttribute('data-lexical-editor') === 'true')
     ) {
       return current;
     }

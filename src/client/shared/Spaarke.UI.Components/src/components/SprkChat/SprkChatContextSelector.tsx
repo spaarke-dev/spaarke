@@ -13,7 +13,7 @@
  * @see ADR-012 - Shared Component Library
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -26,15 +26,10 @@ import {
   Tag,
   TagGroup,
   Text,
-} from "@fluentui/react-components";
-import type { ComboboxProps } from "@fluentui/react-components";
-import {
-  AddRegular,
-  DocumentRegular,
-  DismissRegular,
-  SearchRegular,
-} from "@fluentui/react-icons";
-import { ISprkChatContextSelectorProps, IDocumentOption } from "./types";
+} from '@fluentui/react-components';
+import type { ComboboxProps } from '@fluentui/react-components';
+import { AddRegular, DocumentRegular, DismissRegular, SearchRegular } from '@fluentui/react-icons';
+import { ISprkChatContextSelectorProps, IDocumentOption } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -49,57 +44,57 @@ const DEFAULT_MAX_ADDITIONAL_DOCUMENTS = 5;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground2,
   },
   selectorRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   selectorGroup: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   label: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
   select: {
-    minWidth: "120px",
+    minWidth: '120px',
   },
   additionalDocsSection: {
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "wrap",
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalXS),
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalM),
     paddingBottom: tokens.spacingVerticalXS,
   },
   tagGroup: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalXXS),
   },
   addDocGroup: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXXS),
   },
   addDocCombobox: {
-    minWidth: "160px",
-    maxWidth: "240px",
+    minWidth: '160px',
+    maxWidth: '240px',
   },
   countBadge: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground3,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
     ...shorthands.padding(0, tokens.spacingHorizontalXS),
   },
 });
@@ -127,9 +122,7 @@ const useStyles = makeStyles({
  * />
  * ```
  */
-export const SprkChatContextSelector: React.FC<
-  ISprkChatContextSelectorProps
-> = ({
+export const SprkChatContextSelector: React.FC<ISprkChatContextSelectorProps> = ({
   selectedDocumentId,
   selectedPlaybookId,
   documents,
@@ -166,7 +159,7 @@ export const SprkChatContextSelector: React.FC<
     if (selectedDocumentId) {
       excludedIds.add(selectedDocumentId);
     }
-    return documents.filter((doc) => !excludedIds.has(doc.id));
+    return documents.filter(doc => !excludedIds.has(doc.id));
   }, [documents, additionalDocumentIds, selectedDocumentId]);
 
   // ── Handlers ─────────────────────────────────────────────────────────
@@ -175,20 +168,18 @@ export const SprkChatContextSelector: React.FC<
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       onDocumentChange(event.target.value);
     },
-    [onDocumentChange],
+    [onDocumentChange]
   );
 
   const handlePlaybookChange = React.useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       onPlaybookChange(event.target.value);
     },
-    [onPlaybookChange],
+    [onPlaybookChange]
   );
 
   /** Add a document to the additional documents list via Combobox selection. */
-  const handleAddDocument = React.useCallback<
-    NonNullable<ComboboxProps["onOptionSelect"]>
-  >(
+  const handleAddDocument = React.useCallback<NonNullable<ComboboxProps['onOptionSelect']>>(
     (_event, data) => {
       const docId = data.optionValue;
       if (!docId || !onAdditionalDocumentsChange) {
@@ -204,11 +195,7 @@ export const SprkChatContextSelector: React.FC<
       onAdditionalDocumentsChange([...additionalDocumentIds, docId]);
       setIsAddingDocument(false);
     },
-    [
-      additionalDocumentIds,
-      maxAdditionalDocuments,
-      onAdditionalDocumentsChange,
-    ],
+    [additionalDocumentIds, maxAdditionalDocuments, onAdditionalDocumentsChange]
   );
 
   /** Remove a document from the additional documents list. */
@@ -217,16 +204,14 @@ export const SprkChatContextSelector: React.FC<
       if (!onAdditionalDocumentsChange) {
         return;
       }
-      onAdditionalDocumentsChange(
-        additionalDocumentIds.filter((id) => id !== docId),
-      );
+      onAdditionalDocumentsChange(additionalDocumentIds.filter(id => id !== docId));
     },
-    [additionalDocumentIds, onAdditionalDocumentsChange],
+    [additionalDocumentIds, onAdditionalDocumentsChange]
   );
 
   /** Toggle the add-document picker visibility. */
   const handleToggleAddDocument = React.useCallback(() => {
-    setIsAddingDocument((prev) => !prev);
+    setIsAddingDocument(prev => !prev);
   }, []);
 
   /** Cancel the add-document picker. */
@@ -246,12 +231,11 @@ export const SprkChatContextSelector: React.FC<
       // Fallback: show first 8 chars of the ID
       return docId.length > 12 ? `${docId.substring(0, 8)}...` : docId;
     },
-    [documentMap],
+    [documentMap]
   );
 
   // ── Determine if additional documents section should be shown ────────
-  const showAdditionalDocs =
-    onAdditionalDocumentsChange !== undefined && documents.length > 1;
+  const showAdditionalDocs = onAdditionalDocumentsChange !== undefined && documents.length > 1;
   const hasAdditionalDocs = additionalDocumentIds.length > 0;
 
   return (
@@ -266,14 +250,14 @@ export const SprkChatContextSelector: React.FC<
             <Select
               id="sprkchat-doc-select"
               className={styles.select}
-              value={selectedDocumentId || ""}
+              value={selectedDocumentId || ''}
               onChange={handleDocumentChange}
               disabled={disabled}
               aria-label="Select document"
               data-testid="context-document-select"
             >
               <option value="">None</option>
-              {documents.map((doc) => (
+              {documents.map(doc => (
                 <option key={doc.id} value={doc.id}>
                   {doc.name}
                 </option>
@@ -290,13 +274,13 @@ export const SprkChatContextSelector: React.FC<
             <Select
               id="sprkchat-playbook-select"
               className={styles.select}
-              value={selectedPlaybookId || ""}
+              value={selectedPlaybookId || ''}
               onChange={handlePlaybookChange}
               disabled={disabled}
               aria-label="Select playbook"
               data-testid="context-playbook-select"
             >
-              {playbooks.map((pb) => (
+              {playbooks.map(pb => (
                 <option key={pb.id} value={pb.id}>
                   {pb.name}
                 </option>
@@ -314,30 +298,25 @@ export const SprkChatContextSelector: React.FC<
             onClick={handleToggleAddDocument}
             disabled={disabled || isAtLimit}
             aria-label={
-              isAtLimit
-                ? `Maximum ${maxAdditionalDocuments} additional documents reached`
-                : "Add additional document"
+              isAtLimit ? `Maximum ${maxAdditionalDocuments} additional documents reached` : 'Add additional document'
             }
             title={
               isAtLimit
                 ? `Maximum ${maxAdditionalDocuments} additional documents`
-                : "Add additional document to context"
+                : 'Add additional document to context'
             }
             data-testid="add-document-button"
           >
             {hasAdditionalDocs
-              ? `+${additionalDocumentIds.length} doc${additionalDocumentIds.length !== 1 ? "s" : ""}`
-              : "Add doc"}
+              ? `+${additionalDocumentIds.length} doc${additionalDocumentIds.length !== 1 ? 's' : ''}`
+              : 'Add doc'}
           </Button>
         )}
       </div>
 
       {/* Additional documents section: tag chips + add picker */}
       {showAdditionalDocs && (hasAdditionalDocs || isAddingDocument) && (
-        <div
-          className={styles.additionalDocsSection}
-          data-testid="additional-docs-section"
-        >
+        <div className={styles.additionalDocsSection} data-testid="additional-docs-section">
           {/* Selected additional documents as removable tags */}
           {hasAdditionalDocs && (
             <TagGroup
@@ -346,7 +325,7 @@ export const SprkChatContextSelector: React.FC<
               aria-label="Additional documents"
               data-testid="additional-docs-tags"
             >
-              {additionalDocumentIds.map((docId) => (
+              {additionalDocumentIds.map(docId => (
                 <Tag
                   key={docId}
                   shape="rounded"
@@ -354,15 +333,9 @@ export const SprkChatContextSelector: React.FC<
                   appearance="brand"
                   icon={<DocumentRegular />}
                   dismissible
-                  dismissIcon={
-                    <DismissRegular
-                      aria-label={`Remove ${getDocumentName(docId)}`}
-                    />
-                  }
+                  dismissIcon={<DismissRegular aria-label={`Remove ${getDocumentName(docId)}`} />}
                   value={docId}
-                  onClick={
-                    disabled ? undefined : () => handleRemoveDocument(docId)
-                  }
+                  onClick={disabled ? undefined : () => handleRemoveDocument(docId)}
                   aria-label={`${getDocumentName(docId)} (click to remove)`}
                   data-testid={`additional-doc-tag-${docId}`}
                 >
@@ -377,11 +350,7 @@ export const SprkChatContextSelector: React.FC<
             <div className={styles.addDocGroup}>
               <Combobox
                 className={styles.addDocCombobox}
-                placeholder={
-                  availableDocuments.length === 0
-                    ? "No documents available"
-                    : "Search documents..."
-                }
+                placeholder={availableDocuments.length === 0 ? 'No documents available' : 'Search documents...'}
                 onOptionSelect={handleAddDocument}
                 disabled={disabled || availableDocuments.length === 0}
                 aria-label="Search and select additional document"
@@ -390,7 +359,7 @@ export const SprkChatContextSelector: React.FC<
                 expandIcon={<SearchRegular />}
                 data-testid="additional-doc-picker"
               >
-                {availableDocuments.map((doc) => (
+                {availableDocuments.map(doc => (
                   <Option key={doc.id} value={doc.id} text={doc.name}>
                     {doc.name}
                   </Option>
@@ -409,10 +378,7 @@ export const SprkChatContextSelector: React.FC<
 
           {/* Count indicator */}
           {hasAdditionalDocs && (
-            <Text
-              className={styles.countBadge}
-              data-testid="additional-docs-count"
-            >
+            <Text className={styles.countBadge} data-testid="additional-docs-count">
               {additionalDocumentIds.length}/{maxAdditionalDocuments}
             </Text>
           )}

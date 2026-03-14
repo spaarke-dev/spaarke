@@ -4,7 +4,7 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -17,8 +17,8 @@ import {
   TableCell,
   TableCellLayout,
   mergeClasses,
-} from "@fluentui/react-components";
-import type { DrillInteraction } from "../../types";
+} from '@fluentui/react-components';
+import type { DrillInteraction } from '../../types';
 
 export interface IMiniTableColumn {
   /** Column key */
@@ -61,9 +61,9 @@ export interface IMiniTableProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     gap: tokens.spacingVerticalXS,
   },
   title: {
@@ -73,11 +73,11 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXS,
   },
   tableWrapper: {
-    overflowX: "auto",
+    overflowX: 'auto',
   },
   table: {
-    minWidth: "100%",
-    tableLayout: "auto",
+    minWidth: '100%',
+    tableLayout: 'auto',
   },
   headerCell: {
     fontWeight: tokens.fontWeightSemibold,
@@ -86,25 +86,25 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
   row: {
-    cursor: "default",
+    cursor: 'default',
   },
   rowInteractive: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    "&:active": {
+    '&:active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
   rankCell: {
-    width: "40px",
-    textAlign: "center",
+    width: '40px',
+    textAlign: 'center',
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightMedium,
   },
   valueCell: {
-    textAlign: "right",
+    textAlign: 'right',
     fontWeight: tokens.fontWeightMedium,
     color: tokens.colorNeutralForeground1,
   },
@@ -113,9 +113,9 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
     color: tokens.colorNeutralForeground3,
   },
@@ -140,19 +140,15 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
     if (interactive && onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: item.fieldValue,
         label: `#${rank} - ${item.values[columns[0]?.key] || item.id}`,
       });
     }
   };
 
-  const handleKeyDown = (
-    e: React.KeyboardEvent,
-    item: IMiniTableItem,
-    rank: number,
-  ) => {
-    if (interactive && (e.key === "Enter" || e.key === " ")) {
+  const handleKeyDown = (e: React.KeyboardEvent, item: IMiniTableItem, rank: number) => {
+    if (interactive && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
       handleRowClick(item, rank);
     }
@@ -180,19 +176,12 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
           <TableHeader>
             <TableRow>
               {showRank && (
-                <TableHeaderCell
-                  className={mergeClasses(styles.headerCell, styles.rankCell)}
-                >
-                  #
-                </TableHeaderCell>
+                <TableHeaderCell className={mergeClasses(styles.headerCell, styles.rankCell)}>#</TableHeaderCell>
               )}
-              {columns.map((column) => (
+              {columns.map(column => (
                 <TableHeaderCell
                   key={column.key}
-                  className={mergeClasses(
-                    styles.headerCell,
-                    column.isValue && styles.valueCell,
-                  )}
+                  className={mergeClasses(styles.headerCell, column.isValue && styles.valueCell)}
                   style={column.width ? { width: column.width } : undefined}
                 >
                   {column.header}
@@ -206,39 +195,19 @@ export const MiniTable: React.FC<IMiniTableProps> = ({
               return (
                 <TableRow
                   key={item.id}
-                  className={mergeClasses(
-                    styles.row,
-                    isInteractive && styles.rowInteractive,
-                  )}
-                  onClick={
-                    isInteractive ? () => handleRowClick(item, rank) : undefined
-                  }
-                  onKeyDown={
-                    isInteractive
-                      ? (e) => handleKeyDown(e, item, rank)
-                      : undefined
-                  }
+                  className={mergeClasses(styles.row, isInteractive && styles.rowInteractive)}
+                  onClick={isInteractive ? () => handleRowClick(item, rank) : undefined}
+                  onKeyDown={isInteractive ? e => handleKeyDown(e, item, rank) : undefined}
                   tabIndex={isInteractive ? 0 : undefined}
                   aria-label={`Rank ${rank}: ${item.values[columns[0]?.key] || item.id}`}
                 >
-                  {showRank && (
-                    <TableCell
-                      className={mergeClasses(styles.cell, styles.rankCell)}
-                    >
-                      {rank}
-                    </TableCell>
-                  )}
-                  {columns.map((column) => (
+                  {showRank && <TableCell className={mergeClasses(styles.cell, styles.rankCell)}>{rank}</TableCell>}
+                  {columns.map(column => (
                     <TableCell
                       key={column.key}
-                      className={mergeClasses(
-                        styles.cell,
-                        column.isValue && styles.valueCell,
-                      )}
+                      className={mergeClasses(styles.cell, column.isValue && styles.valueCell)}
                     >
-                      <TableCellLayout>
-                        {item.values[column.key] ?? "-"}
-                      </TableCellLayout>
+                      <TableCellLayout>{item.values[column.key] ?? '-'}</TableCellLayout>
                     </TableCell>
                   ))}
                 </TableRow>

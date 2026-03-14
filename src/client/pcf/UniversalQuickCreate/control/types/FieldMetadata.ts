@@ -17,14 +17,7 @@ export interface FieldMetadata {
   label: string;
 
   /** Field type - determines which input component to render */
-  type:
-    | "text"
-    | "textarea"
-    | "number"
-    | "date"
-    | "datetime"
-    | "boolean"
-    | "optionset";
+  type: 'text' | 'textarea' | 'number' | 'date' | 'datetime' | 'boolean' | 'optionset';
 
   /** Is this field required? User must provide a value before saving */
   required?: boolean;

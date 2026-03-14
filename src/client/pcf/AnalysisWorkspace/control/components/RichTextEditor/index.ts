@@ -3,5 +3,5 @@
  * Local copy for PCF control - can be refactored to use shared library later
  */
 
-export { RichTextEditor } from "./RichTextEditor";
-export type { IRichTextEditorProps, RichTextEditorRef } from "./RichTextEditor";
+export { RichTextEditor } from './RichTextEditor';
+export type { IRichTextEditorProps, RichTextEditorRef } from './RichTextEditor';

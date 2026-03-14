@@ -4,7 +4,7 @@
  * Provides mock implementations for components imported from the shared library.
  * Used by jest moduleNameMapper to replace the real library in tests.
  */
-import React from "react";
+import React from 'react';
 
 // Mock RichTextEditor as a simple div that calls onChange
 export const RichTextEditor = React.forwardRef(function MockRichTextEditor(
@@ -14,11 +14,11 @@ export const RichTextEditor = React.forwardRef(function MockRichTextEditor(
     readOnly?: boolean;
     placeholder?: string;
   },
-  ref: React.Ref<unknown>,
+  ref: React.Ref<unknown>
 ) {
   React.useImperativeHandle(ref, () => ({
     focus: jest.fn(),
-    getHtml: () => props.value ?? "",
+    getHtml: () => props.value ?? '',
     setHtml: jest.fn(),
     clear: jest.fn(),
     beginStreamingInsert: jest.fn(),
@@ -27,13 +27,13 @@ export const RichTextEditor = React.forwardRef(function MockRichTextEditor(
   }));
 
   return React.createElement(
-    "div",
+    'div',
     {
-      "data-testid": "mock-rich-text-editor",
-      "data-value": props.value ?? "",
-      "data-readonly": String(props.readOnly ?? false),
+      'data-testid': 'mock-rich-text-editor',
+      'data-value': props.value ?? '',
+      'data-readonly': String(props.readOnly ?? false),
     },
-    props.placeholder ?? "",
+    props.placeholder ?? ''
   );
 });
 
@@ -61,42 +61,42 @@ export function DiffCompareView(props: {
   ariaLabel?: string;
 }) {
   return React.createElement(
-    "div",
+    'div',
     {
-      "data-testid": "mock-diff-compare-view",
-      "data-original": props.originalText,
-      "data-proposed": props.proposedText,
+      'data-testid': 'mock-diff-compare-view',
+      'data-original': props.originalText,
+      'data-proposed': props.proposedText,
     },
     [
       React.createElement(
-        "button",
+        'button',
         {
-          key: "accept",
-          "data-testid": "diff-accept-button",
+          key: 'accept',
+          'data-testid': 'diff-accept-button',
           onClick: () => props.onAccept(props.proposedText),
         },
-        "Accept",
+        'Accept'
       ),
       React.createElement(
-        "button",
+        'button',
         {
-          key: "reject",
-          "data-testid": "diff-reject-button",
+          key: 'reject',
+          'data-testid': 'diff-reject-button',
           onClick: () => props.onReject(),
         },
-        "Reject",
+        'Reject'
       ),
       props.onEdit
         ? React.createElement(
-            "button",
+            'button',
             {
-              key: "edit",
-              "data-testid": "diff-edit-button",
-              onClick: () => props.onEdit!(props.proposedText + " (edited)"),
+              key: 'edit',
+              'data-testid': 'diff-edit-button',
+              onClick: () => props.onEdit!(props.proposedText + ' (edited)'),
             },
-            "Edit",
+            'Edit'
           )
         : null,
-    ],
+    ]
   );
 }

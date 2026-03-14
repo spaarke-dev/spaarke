@@ -9,14 +9,8 @@
  * @version 2.0.0.0
  */
 
-import * as React from "react";
-import {
-  ProgressBar,
-  Field,
-  Text,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { ProgressBar, Field, Text, makeStyles, tokens } from '@fluentui/react-components';
 
 /**
  * Component Props
@@ -34,24 +28,21 @@ export interface UploadProgressBarProps {
  */
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   progressText: {
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
-    textAlign: "center",
+    textAlign: 'center',
   },
 });
 
 /**
  * Upload Progress Bar Component
  */
-export const UploadProgressBar: React.FC<UploadProgressBarProps> = ({
-  current,
-  total,
-}) => {
+export const UploadProgressBar: React.FC<UploadProgressBarProps> = ({ current, total }) => {
   const styles = useStyles();
 
   // Calculate progress percentage

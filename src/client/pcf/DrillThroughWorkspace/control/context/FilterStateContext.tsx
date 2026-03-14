@@ -8,16 +8,10 @@
  * @version 1.0.0
  */
 
-import * as React from "react";
-import {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
-import type { DrillInteraction, DrillOperator } from "../types";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import type { DrillInteraction, DrillOperator } from '../types';
+import { logger } from '../utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -26,14 +20,12 @@ import { logger } from "../utils/logger";
 /**
  * Type alias for PCF ConditionOperator
  */
-type ConditionOperator =
-  ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator;
+type ConditionOperator = ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator;
 
 /**
  * Type alias for PCF FilterOperator
  */
-type FilterOperator =
-  ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator;
+type FilterOperator = ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator;
 
 /**
  * PCF Condition Operator mapping
@@ -100,10 +92,10 @@ export interface IFilterStateProviderProps {
 const defaultContextValue: IFilterStateContextValue = {
   activeFilter: null,
   setFilter: () => {
-    logger.warn("FilterStateContext", "setFilter called without provider");
+    logger.warn('FilterStateContext', 'setFilter called without provider');
   },
   clearFilter: () => {
-    logger.warn("FilterStateContext", "clearFilter called without provider");
+    logger.warn('FilterStateContext', 'clearFilter called without provider');
   },
   isFiltered: false,
   dataset: null,
@@ -112,8 +104,7 @@ const defaultContextValue: IFilterStateContextValue = {
 /**
  * Filter State Context
  */
-export const FilterStateContext =
-  createContext<IFilterStateContextValue>(defaultContextValue);
+export const FilterStateContext = createContext<IFilterStateContextValue>(defaultContextValue);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -122,15 +113,13 @@ export const FilterStateContext =
 /**
  * Convert DrillOperator to PCF ConditionOperator
  */
-function drillOperatorToConditionOperator(
-  operator: DrillOperator,
-): ConditionOperator {
+function drillOperatorToConditionOperator(operator: DrillOperator): ConditionOperator {
   switch (operator) {
-    case "eq":
+    case 'eq':
       return ConditionOperatorMap.Equal;
-    case "in":
+    case 'in':
       return ConditionOperatorMap.In;
-    case "between":
+    case 'between':
       return ConditionOperatorMap.Between;
     default:
       return ConditionOperatorMap.Equal;
@@ -144,12 +133,12 @@ function drillOperatorToConditionOperator(
  * @returns FilterExpression for dataset.filtering.setFilter()
  */
 export function drillInteractionToFilterExpression(
-  interaction: DrillInteraction,
+  interaction: DrillInteraction
 ): ComponentFramework.PropertyHelper.DataSetApi.FilterExpression {
   const { field, operator, value } = interaction;
 
   // Handle "between" operator - needs two conditions with ge/le
-  if (operator === "between" && Array.isArray(value) && value.length === 2) {
+  if (operator === 'between' && Array.isArray(value) && value.length === 2) {
     return {
       filterOperator: FilterOperatorMap.And,
       conditions: [
@@ -168,14 +157,14 @@ export function drillInteractionToFilterExpression(
   }
 
   // Handle "in" operator - value is an array
-  if (operator === "in" && Array.isArray(value)) {
+  if (operator === 'in' && Array.isArray(value)) {
     return {
       filterOperator: FilterOperatorMap.And,
       conditions: [
         {
           attributeName: field,
           conditionOperator: ConditionOperatorMap.In,
-          value: value.map((v) => String(v)),
+          value: value.map(v => String(v)),
         },
       ],
     };
@@ -204,25 +193,18 @@ export function drillInteractionToFilterExpression(
  * Wraps the drill-through workspace to provide filter state context.
  * Manages the connection between chart drill interactions and the platform dataset.
  */
-export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
-  dataset,
-  children,
-}) => {
-  const [activeFilter, setActiveFilterState] =
-    useState<DrillInteraction | null>(null);
+export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({ dataset, children }) => {
+  const [activeFilter, setActiveFilterState] = useState<DrillInteraction | null>(null);
 
   /**
    * Apply a drill interaction filter to the dataset
    */
   const setFilter = useCallback(
     (filter: DrillInteraction) => {
-      logger.info("FilterStateContext", "setFilter called", filter);
+      logger.info('FilterStateContext', 'setFilter called', filter);
 
       if (!dataset?.filtering) {
-        logger.error(
-          "FilterStateContext",
-          "Dataset filtering API not available",
-        );
+        logger.error('FilterStateContext', 'Dataset filtering API not available');
         return;
       }
 
@@ -230,11 +212,7 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
         // Convert drill interaction to PCF filter expression
         const filterExpression = drillInteractionToFilterExpression(filter);
 
-        logger.info(
-          "FilterStateContext",
-          "Applying filter expression",
-          filterExpression,
-        );
+        logger.info('FilterStateContext', 'Applying filter expression', filterExpression);
 
         // Apply filter via platform API
         dataset.filtering.setFilter(filterExpression);
@@ -245,22 +223,22 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
         // Refresh dataset to apply filter
         dataset.refresh();
 
-        logger.info("FilterStateContext", "Filter applied successfully");
+        logger.info('FilterStateContext', 'Filter applied successfully');
       } catch (error) {
-        logger.error("FilterStateContext", "Failed to apply filter", error);
+        logger.error('FilterStateContext', 'Failed to apply filter', error);
       }
     },
-    [dataset],
+    [dataset]
   );
 
   /**
    * Clear the active filter from the dataset
    */
   const clearFilter = useCallback(() => {
-    logger.info("FilterStateContext", "clearFilter called");
+    logger.info('FilterStateContext', 'clearFilter called');
 
     if (!dataset?.filtering) {
-      logger.error("FilterStateContext", "Dataset filtering API not available");
+      logger.error('FilterStateContext', 'Dataset filtering API not available');
       return;
     }
 
@@ -274,9 +252,9 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
       // Refresh dataset to remove filter
       dataset.refresh();
 
-      logger.info("FilterStateContext", "Filter cleared successfully");
+      logger.info('FilterStateContext', 'Filter cleared successfully');
     } catch (error) {
-      logger.error("FilterStateContext", "Failed to clear filter", error);
+      logger.error('FilterStateContext', 'Failed to clear filter', error);
     }
   }, [dataset]);
 
@@ -291,14 +269,10 @@ export const FilterStateProvider: React.FC<IFilterStateProviderProps> = ({
       isFiltered: activeFilter !== null,
       dataset,
     }),
-    [activeFilter, setFilter, clearFilter, dataset],
+    [activeFilter, setFilter, clearFilter, dataset]
   );
 
-  return (
-    <FilterStateContext.Provider value={contextValue}>
-      {children}
-    </FilterStateContext.Provider>
-  );
+  return <FilterStateContext.Provider value={contextValue}>{children}</FilterStateContext.Provider>;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -328,10 +302,7 @@ export function useFilterState(): IFilterStateContextValue {
   const context = useContext(FilterStateContext);
 
   if (context === defaultContextValue) {
-    logger.warn(
-      "FilterStateContext",
-      "useFilterState called outside of FilterStateProvider",
-    );
+    logger.warn('FilterStateContext', 'useFilterState called outside of FilterStateProvider');
   }
 
   return context;

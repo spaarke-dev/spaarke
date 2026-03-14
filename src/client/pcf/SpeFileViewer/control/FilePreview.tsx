@@ -9,7 +9,7 @@
  * See: projects/mda-darkmode-theme/spec.md
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   FluentProvider,
   webLightTheme,
@@ -20,15 +20,10 @@ import {
   MessageBarBody,
   MessageBarTitle,
   tokens,
-} from "@fluentui/react-components";
-import {
-  EditRegular,
-  GlobeRegular,
-  ArrowClockwiseRegular,
-  LockClosedRegular,
-} from "@fluentui/react-icons";
-import { FilePreviewProps, FilePreviewState } from "./types";
-import { BffClient } from "./BffClient";
+} from '@fluentui/react-components';
+import { EditRegular, GlobeRegular, ArrowClockwiseRegular, LockClosedRegular } from '@fluentui/react-icons';
+import { FilePreviewProps, FilePreviewState } from './types';
+import { BffClient } from './BffClient';
 
 /** Timeout duration for iframe loading (10 seconds) */
 const IFRAME_LOAD_TIMEOUT_MS = 10000;
@@ -41,10 +36,7 @@ const IFRAME_LOAD_TIMEOUT_MS = 10000;
  * - Preview: Displaying SharePoint preview iframe
  * - Error: Displaying error message
  */
-export class FilePreview extends React.Component<
-  FilePreviewProps,
-  FilePreviewState
-> {
+export class FilePreview extends React.Component<FilePreviewProps, FilePreviewState> {
   private bffClient: BffClient;
 
   /** Timeout ID for iframe load timeout */
@@ -93,12 +85,10 @@ export class FilePreview extends React.Component<
     this.clearIframeLoadTimeout();
 
     this.iframeLoadTimeoutId = setTimeout(() => {
-      console.error(
-        "[FilePreview] Iframe load timeout - document took too long to load",
-      );
+      console.error('[FilePreview] Iframe load timeout - document took too long to load');
       this.setState({
         isIframeLoading: false,
-        error: "Document load timeout. Please try again.",
+        error: 'Document load timeout. Please try again.',
       });
     }, IFRAME_LOAD_TIMEOUT_MS);
   }
@@ -108,7 +98,7 @@ export class FilePreview extends React.Component<
    */
   private handleIframeLoad = (): void => {
     this.clearIframeLoadTimeout();
-    console.log("[FilePreview] Iframe loaded successfully");
+    console.log('[FilePreview] Iframe loaded successfully');
 
     this.setState({
       isIframeLoading: false,
@@ -120,11 +110,11 @@ export class FilePreview extends React.Component<
    */
   private handleIframeError = (): void => {
     this.clearIframeLoadTimeout();
-    console.error("[FilePreview] Iframe failed to load");
+    console.error('[FilePreview] Iframe failed to load');
 
     this.setState({
       isIframeLoading: false,
-      error: "Failed to load document preview. Please try again.",
+      error: 'Failed to load document preview. Please try again.',
     });
   };
 
@@ -140,7 +130,7 @@ export class FilePreview extends React.Component<
    */
   public async componentDidUpdate(prevProps: FilePreviewProps): Promise<void> {
     if (prevProps.documentId !== this.props.documentId) {
-      console.log("[FilePreview] Document ID changed, reloading preview...");
+      console.log('[FilePreview] Document ID changed, reloading preview...');
       await this.loadPreview();
     }
   }
@@ -152,10 +142,10 @@ export class FilePreview extends React.Component<
     const { documentId, correlationId } = this.props;
 
     // Validate documentId
-    if (!documentId || documentId.trim() === "") {
+    if (!documentId || documentId.trim() === '') {
       this.setState({
         isLoading: false,
-        error: "No document selected",
+        error: 'No document selected',
         previewUrl: null,
         documentInfo: null,
       });
@@ -177,10 +167,7 @@ export class FilePreview extends React.Component<
 
     try {
       // Call BFF API - use view-url endpoint for real-time viewing (no cache)
-      const response = await this.bffClient.getViewUrl(
-        documentId,
-        correlationId,
-      );
+      const response = await this.bffClient.getViewUrl(documentId, correlationId);
 
       // Update state with view URL and checkout status
       this.setState({
@@ -199,18 +186,13 @@ export class FilePreview extends React.Component<
       // Start timeout for iframe loading
       this.startIframeLoadTimeout();
 
-      console.log(
-        `[FilePreview] View URL received: ${response.documentInfo.name}`,
-      );
+      console.log(`[FilePreview] View URL received: ${response.documentInfo.name}`);
       if (response.checkoutStatus?.isCheckedOut) {
-        console.log(
-          `[FilePreview] Document checked out by: ${response.checkoutStatus.checkedOutBy?.name}`,
-        );
+        console.log(`[FilePreview] Document checked out by: ${response.checkoutStatus.checkedOutBy?.name}`);
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.error("[FilePreview] Failed to load preview:", errorMessage);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[FilePreview] Failed to load preview:', errorMessage);
 
       this.setState({
         isLoading: false,
@@ -226,7 +208,7 @@ export class FilePreview extends React.Component<
    * Handle refresh button click
    */
   private handleRefresh = async (): Promise<void> => {
-    console.log("[FilePreview] Refresh clicked");
+    console.log('[FilePreview] Refresh clicked');
 
     // Call parent refresh callback if provided
     if (this.props.onRefresh) {
@@ -253,28 +235,28 @@ export class FilePreview extends React.Component<
     }
 
     const officeExtensions = [
-      "docx",
-      "doc",
-      "docm",
-      "dot",
-      "dotx",
-      "dotm",
-      "xlsx",
-      "xls",
-      "xlsm",
-      "xlsb",
-      "xlt",
-      "xltx",
-      "xltm",
-      "pptx",
-      "ppt",
-      "pptm",
-      "pot",
-      "potx",
-      "potm",
-      "pps",
-      "ppsx",
-      "ppsm",
+      'docx',
+      'doc',
+      'docm',
+      'dot',
+      'dotx',
+      'dotm',
+      'xlsx',
+      'xls',
+      'xlsm',
+      'xlsb',
+      'xlt',
+      'xltx',
+      'xltm',
+      'pptx',
+      'ppt',
+      'pptm',
+      'pot',
+      'potx',
+      'potm',
+      'pps',
+      'ppsx',
+      'ppsm',
     ];
 
     return officeExtensions.includes(extension.toLowerCase());
@@ -287,36 +269,30 @@ export class FilePreview extends React.Component<
     const { documentId, correlationId } = this.props;
     const { documentInfo } = this.state;
 
-    console.log(
-      `[FilePreview] Open in Desktop clicked for: ${documentInfo?.name}`,
-    );
+    console.log(`[FilePreview] Open in Desktop clicked for: ${documentInfo?.name}`);
 
     this.setState({ isEditLoading: true });
 
     try {
-      const response = await this.bffClient.getOpenLinks(
-        documentId,
-        correlationId,
-      );
+      const response = await this.bffClient.getOpenLinks(documentId, correlationId);
 
       if (!response.desktopUrl) {
         this.setState({
           isEditLoading: false,
-          error: "This file type cannot be opened in a desktop application.",
+          error: 'This file type cannot be opened in a desktop application.',
         });
         return;
       }
 
-      console.log("[FilePreview] Launching desktop application...");
+      console.log('[FilePreview] Launching desktop application...');
       window.location.href = response.desktopUrl;
 
       setTimeout(() => {
         this.setState({ isEditLoading: false });
       }, 1000);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.error("[FilePreview] Failed to get open links:", errorMessage);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[FilePreview] Failed to get open links:', errorMessage);
 
       this.setState({
         isEditLoading: false,
@@ -337,27 +313,23 @@ export class FilePreview extends React.Component<
     this.setState({ isWebLoading: true });
 
     try {
-      const response = await this.bffClient.getOpenLinks(
-        documentId,
-        correlationId,
-      );
+      const response = await this.bffClient.getOpenLinks(documentId, correlationId);
 
       if (!response.webUrl) {
         this.setState({
           isWebLoading: false,
-          error: "Unable to get web URL for this document.",
+          error: 'Unable to get web URL for this document.',
         });
         return;
       }
 
-      console.log("[FilePreview] Opening in Office Online...");
-      window.open(response.webUrl, "_blank", "noopener,noreferrer");
+      console.log('[FilePreview] Opening in Office Online...');
+      window.open(response.webUrl, '_blank', 'noopener,noreferrer');
 
       this.setState({ isWebLoading: false });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.error("[FilePreview] Failed to get open links:", errorMessage);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[FilePreview] Failed to get open links:', errorMessage);
 
       this.setState({
         isWebLoading: false,
@@ -370,16 +342,8 @@ export class FilePreview extends React.Component<
    * Render component
    */
   public render(): React.ReactNode {
-    const {
-      isLoading,
-      isIframeLoading,
-      isEditLoading,
-      isWebLoading,
-      error,
-      previewUrl,
-      documentInfo,
-      checkoutStatus,
-    } = this.state;
+    const { isLoading, isIframeLoading, isEditLoading, isWebLoading, error, previewUrl, documentInfo, checkoutStatus } =
+      this.state;
 
     // Use isDarkTheme from props (controlled by global theme menu)
     const { isDarkTheme } = this.props;
@@ -395,26 +359,16 @@ export class FilePreview extends React.Component<
 
     // Checkout status display
     const isCheckedOut = checkoutStatus?.isCheckedOut ?? false;
-    const checkedOutByName = checkoutStatus?.checkedOutBy?.name ?? "Unknown";
+    const checkedOutByName = checkoutStatus?.checkedOutBy?.name ?? 'Unknown';
     const isCheckedOutByCurrentUser = checkoutStatus?.isCurrentUser ?? false;
 
     return (
-      <FluentProvider
-        theme={theme}
-        style={{ height: "100%", display: "flex", flexDirection: "column" }}
-      >
-        <div
-          className={`spe-file-viewer ${isDarkTheme ? "spe-file-viewer--dark" : ""}`}
-        >
+      <FluentProvider theme={theme} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <div className={`spe-file-viewer ${isDarkTheme ? 'spe-file-viewer--dark' : ''}`}>
           {/* Loading State */}
           {showSpinner && (
             <div className="spe-file-viewer__loading">
-              <Spinner
-                size="large"
-                label={
-                  isLoading ? "Loading preview..." : "Rendering document..."
-                }
-              />
+              <Spinner size="large" label={isLoading ? 'Loading preview...' : 'Rendering document...'} />
             </div>
           )}
 
@@ -427,11 +381,7 @@ export class FilePreview extends React.Component<
                   {error}
                 </MessageBarBody>
               </MessageBar>
-              <Button
-                appearance="outline"
-                onClick={this.handleRetry}
-                style={{ marginTop: tokens.spacingVerticalM }}
-              >
+              <Button appearance="outline" onClick={this.handleRetry} style={{ marginTop: tokens.spacingVerticalM }}>
                 Retry
               </Button>
             </div>
@@ -460,8 +410,8 @@ export class FilePreview extends React.Component<
                   {isCheckedOut ? (
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
+                        display: 'flex',
+                        alignItems: 'center',
                         gap: tokens.spacingHorizontalXS,
                         padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
                         backgroundColor: isCheckedOutByCurrentUser
@@ -473,22 +423,20 @@ export class FilePreview extends React.Component<
                       }}
                       title={
                         isCheckedOutByCurrentUser
-                          ? "You have this document checked out"
+                          ? 'You have this document checked out'
                           : `Checked out by ${checkedOutByName}`
                       }
                     >
                       <LockClosedRegular />
                       <span>
-                        {isCheckedOutByCurrentUser
-                          ? "Checked out by you"
-                          : `Checked out by ${checkedOutByName}`}
+                        {isCheckedOutByCurrentUser ? 'Checked out by you' : `Checked out by ${checkedOutByName}`}
                       </span>
                     </div>
                   ) : (
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
+                        display: 'flex',
+                        alignItems: 'center',
                         gap: tokens.spacingHorizontalXS,
                         padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
                         backgroundColor: tokens.colorNeutralBackground3,
@@ -509,22 +457,14 @@ export class FilePreview extends React.Component<
                   {this.isOfficeFile(documentInfo.fileExtension) && (
                     <Button
                       appearance="outline"
-                      icon={
-                        isEditLoading ? (
-                          <Spinner size="tiny" />
-                        ) : (
-                          <EditRegular />
-                        )
-                      }
+                      icon={isEditLoading ? <Spinner size="tiny" /> : <EditRegular />}
                       onClick={this.handleEditInDesktop}
                       disabled={anyButtonLoading}
-                      aria-label={
-                        isEditLoading ? "Opening..." : "Open in Desktop"
-                      }
+                      aria-label={isEditLoading ? 'Opening...' : 'Open in Desktop'}
                       title="Open in Word, Excel, or PowerPoint"
                       data-testid="edit-in-desktop-btn"
                     >
-                      {isEditLoading ? "Opening..." : "Open in Desktop"}
+                      {isEditLoading ? 'Opening...' : 'Open in Desktop'}
                     </Button>
                   )}
 
@@ -532,20 +472,14 @@ export class FilePreview extends React.Component<
                   {this.isOfficeFile(documentInfo.fileExtension) && (
                     <Button
                       appearance="outline"
-                      icon={
-                        isWebLoading ? (
-                          <Spinner size="tiny" />
-                        ) : (
-                          <GlobeRegular />
-                        )
-                      }
+                      icon={isWebLoading ? <Spinner size="tiny" /> : <GlobeRegular />}
                       onClick={this.handleOpenInWeb}
                       disabled={anyButtonLoading}
-                      aria-label={isWebLoading ? "Opening..." : "Open in Web"}
+                      aria-label={isWebLoading ? 'Opening...' : 'Open in Web'}
                       title="Open in Office Online (browser)"
                       data-testid="open-in-web-btn"
                     >
-                      {isWebLoading ? "Opening..." : "Open in Web"}
+                      {isWebLoading ? 'Opening...' : 'Open in Web'}
                     </Button>
                   )}
                 </div>
@@ -554,7 +488,7 @@ export class FilePreview extends React.Component<
               {/* Preview Iframe */}
               <iframe
                 className="spe-file-viewer__iframe"
-                style={{ visibility: isIframeLoading ? "hidden" : "visible" }}
+                style={{ visibility: isIframeLoading ? 'hidden' : 'visible' }}
                 src={previewUrl}
                 title="File Preview"
                 sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
@@ -577,7 +511,7 @@ export class FilePreview extends React.Component<
           {/* Version Footer */}
           <div
             style={{
-              position: "absolute",
+              position: 'absolute',
               bottom: tokens.spacingVerticalXS,
               right: tokens.spacingHorizontalS,
               fontSize: tokens.fontSizeBase100,

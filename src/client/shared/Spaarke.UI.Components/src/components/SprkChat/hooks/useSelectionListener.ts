@@ -20,13 +20,10 @@
  * @see useSelectionBroadcast in AnalysisWorkspace (emitter side)
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import type {
-  SprkChatBridge,
-  SelectionChangedPayload,
-} from "../../../services/SprkChatBridge";
-import type { ICrossPaneSelection } from "../types";
-import { CROSS_PANE_SELECTION_MAX_PREVIEW } from "../types";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { SprkChatBridge, SelectionChangedPayload } from '../../../services/SprkChatBridge';
+import type { ICrossPaneSelection } from '../types';
+import { CROSS_PANE_SELECTION_MAX_PREVIEW } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,8 +58,8 @@ function parseSelectionContext(contextStr: string | undefined): {
   selectedHtml: string;
   source: string;
 } {
-  if (!contextStr || contextStr === "selection_cleared") {
-    return { selectedHtml: "", source: "" };
+  if (!contextStr || contextStr === 'selection_cleared') {
+    return { selectedHtml: '', source: '' };
   }
 
   try {
@@ -71,13 +68,12 @@ function parseSelectionContext(contextStr: string | undefined): {
       source?: string;
     };
     return {
-      selectedHtml:
-        typeof parsed.selectedHtml === "string" ? parsed.selectedHtml : "",
-      source: typeof parsed.source === "string" ? parsed.source : "",
+      selectedHtml: typeof parsed.selectedHtml === 'string' ? parsed.selectedHtml : '',
+      source: typeof parsed.source === 'string' ? parsed.source : '',
     };
   } catch {
     // Malformed context — treat as no context
-    return { selectedHtml: "", source: "" };
+    return { selectedHtml: '', source: '' };
   }
 }
 
@@ -88,7 +84,7 @@ function truncatePreview(text: string, maxLength: number): string {
   if (text.length <= maxLength) {
     return text;
   }
-  return text.substring(0, maxLength) + "\u2026"; // Unicode ellipsis
+  return text.substring(0, maxLength) + '\u2026'; // Unicode ellipsis
 }
 
 // ---------------------------------------------------------------------------
@@ -116,9 +112,7 @@ function truncatePreview(text: string, maxLength: number): string {
  * />
  * ```
  */
-export function useSelectionListener(
-  options: UseSelectionListenerOptions,
-): IUseSelectionListenerResult {
+export function useSelectionListener(options: UseSelectionListenerOptions): IUseSelectionListenerResult {
   const { bridge, enabled = true } = options;
 
   const [selection, setSelection] = useState<ICrossPaneSelection | null>(null);
@@ -152,10 +146,7 @@ export function useSelectionListener(
 
     const handleSelectionChanged = (payload: SelectionChangedPayload): void => {
       // Determine if this is a selection-clear event
-      const isClear =
-        !payload.text ||
-        payload.text.length === 0 ||
-        payload.context === "selection_cleared";
+      const isClear = !payload.text || payload.text.length === 0 || payload.context === 'selection_cleared';
 
       if (isClear) {
         setSelection(null);
@@ -179,10 +170,7 @@ export function useSelectionListener(
     };
 
     // Subscribe — returns an unsubscribe function
-    const unsubscribe = bridge.subscribe(
-      "selection_changed",
-      handleSelectionChanged,
-    );
+    const unsubscribe = bridge.subscribe('selection_changed', handleSelectionChanged);
 
     return () => {
       unsubscribe();

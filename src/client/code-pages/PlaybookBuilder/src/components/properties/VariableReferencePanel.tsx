@@ -9,7 +9,7 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { useCallback, useMemo, memo, useState } from "react";
+import { useCallback, useMemo, memo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -23,13 +23,9 @@ import {
   Badge,
   shorthands,
   mergeClasses,
-} from "@fluentui/react-components";
-import {
-  Copy20Regular,
-  Checkmark20Regular,
-  Code20Regular,
-} from "@fluentui/react-icons";
-import type { NodeReference, VariableEntry } from "../../types/forms";
+} from '@fluentui/react-components';
+import { Copy20Regular, Checkmark20Regular, Code20Regular } from '@fluentui/react-icons';
+import type { NodeReference, VariableEntry } from '../../types/forms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -37,40 +33,37 @@ import type { NodeReference, VariableEntry } from "../../types/forms";
 
 const useStyles = makeStyles({
   panel: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   header: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    ...shorthands.padding(tokens.spacingVerticalS, "0"),
+    ...shorthands.padding(tokens.spacingVerticalS, '0'),
   },
   emptyState: {
     color: tokens.colorNeutralForeground3,
-    fontStyle: "italic",
+    fontStyle: 'italic',
     ...shorthands.padding(tokens.spacingVerticalM),
-    textAlign: "center",
+    textAlign: 'center',
   },
   variableItem: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    ...shorthands.padding(
-      tokens.spacingVerticalXXS,
-      tokens.spacingHorizontalXS,
-    ),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalXS),
     borderRadius: tokens.borderRadiusSmall,
-    cursor: "pointer",
-    ":hover": {
+    cursor: 'pointer',
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   variableInfo: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
     flex: 1,
     minWidth: 0,
   },
@@ -78,7 +71,7 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground1,
-    wordBreak: "break-all",
+    wordBreak: 'break-all',
   },
   variableTypeHint: {
     fontSize: tokens.fontSizeBase100,
@@ -88,7 +81,7 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   accordionPanel: {
-    ...shorthands.padding(tokens.spacingVerticalXS, "0"),
+    ...shorthands.padding(tokens.spacingVerticalXS, '0'),
   },
   copiedFeedback: {
     color: tokens.colorPaletteGreenForeground1,
@@ -110,36 +103,33 @@ interface VariableReferencePanelProps {
 // Well-known output fields by node type
 // ---------------------------------------------------------------------------
 
-const OUTPUT_FIELDS_BY_TYPE: Record<
-  string,
-  Array<{ field: string; typeHint: VariableEntry["typeHint"] }>
-> = {
+const OUTPUT_FIELDS_BY_TYPE: Record<string, Array<{ field: string; typeHint: VariableEntry['typeHint'] }>> = {
   aiAnalysis: [
-    { field: "result", typeHint: "string" },
-    { field: "summary", typeHint: "string" },
-    { field: "entities", typeHint: "array" },
-    { field: "confidence", typeHint: "number" },
+    { field: 'result', typeHint: 'string' },
+    { field: 'summary', typeHint: 'string' },
+    { field: 'entities', typeHint: 'array' },
+    { field: 'confidence', typeHint: 'number' },
   ],
   aiCompletion: [
-    { field: "result", typeHint: "string" },
-    { field: "tokensUsed", typeHint: "number" },
+    { field: 'result', typeHint: 'string' },
+    { field: 'tokensUsed', typeHint: 'number' },
   ],
   condition: [
-    { field: "branch", typeHint: "string" },
-    { field: "evaluatedValue", typeHint: "boolean" },
+    { field: 'branch', typeHint: 'string' },
+    { field: 'evaluatedValue', typeHint: 'boolean' },
   ],
-  deliverOutput: [{ field: "status", typeHint: "string" }],
+  deliverOutput: [{ field: 'status', typeHint: 'string' }],
   createTask: [
-    { field: "taskId", typeHint: "string" },
-    { field: "status", typeHint: "string" },
+    { field: 'taskId', typeHint: 'string' },
+    { field: 'status', typeHint: 'string' },
   ],
   sendEmail: [
-    { field: "messageId", typeHint: "string" },
-    { field: "status", typeHint: "string" },
+    { field: 'messageId', typeHint: 'string' },
+    { field: 'status', typeHint: 'string' },
   ],
   wait: [
-    { field: "completedAt", typeHint: "string" },
-    { field: "status", typeHint: "string" },
+    { field: 'completedAt', typeHint: 'string' },
+    { field: 'status', typeHint: 'string' },
   ],
 };
 
@@ -147,10 +137,7 @@ const OUTPUT_FIELDS_BY_TYPE: Record<
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildVariableEntries(
-  currentNodeId: string,
-  nodes: NodeReference[],
-): Map<string, VariableEntry[]> {
+function buildVariableEntries(currentNodeId: string, nodes: NodeReference[]): Map<string, VariableEntry[]> {
   const grouped = new Map<string, VariableEntry[]>();
 
   for (const node of nodes) {
@@ -158,14 +145,11 @@ function buildVariableEntries(
     if (node.id === currentNodeId) continue;
 
     const label = node.data.label || node.id;
-    const nodeName =
-      node.data.outputVariable || label.replace(/\s+/g, "_").toLowerCase();
+    const nodeName = node.data.outputVariable || label.replace(/\s+/g, '_').toLowerCase();
     const nodeType = node.data.type;
-    const fields = OUTPUT_FIELDS_BY_TYPE[nodeType] ?? [
-      { field: "result", typeHint: "string" as const },
-    ];
+    const fields = OUTPUT_FIELDS_BY_TYPE[nodeType] ?? [{ field: 'result', typeHint: 'string' as const }];
 
-    const entries: VariableEntry[] = fields.map((f) => ({
+    const entries: VariableEntry[] = fields.map(f => ({
       expression: `{{${nodeName}.output.${f.field}}}`,
       label: f.field,
       typeHint: f.typeHint,
@@ -191,10 +175,7 @@ export const VariableReferencePanel = memo(function VariableReferencePanel({
   const styles = useStyles();
   const [copiedExpression, setCopiedExpression] = useState<string | null>(null);
 
-  const groupedVariables = useMemo(
-    () => buildVariableEntries(nodeId, nodes),
-    [nodeId, nodes],
-  );
+  const groupedVariables = useMemo(() => buildVariableEntries(nodeId, nodes), [nodeId, nodes]);
 
   const handleCopy = useCallback(async (expression: string) => {
     try {
@@ -204,23 +185,20 @@ export const VariableReferencePanel = memo(function VariableReferencePanel({
       setTimeout(() => setCopiedExpression(null), 2000);
     } catch {
       // Fallback for environments without clipboard API
-      const textArea = document.createElement("textarea");
+      const textArea = document.createElement('textarea');
       textArea.value = expression;
-      textArea.style.position = "fixed";
-      textArea.style.opacity = "0";
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
       document.body.appendChild(textArea);
       textArea.select();
-      document.execCommand("copy");
+      document.execCommand('copy');
       document.body.removeChild(textArea);
       setCopiedExpression(expression);
       setTimeout(() => setCopiedExpression(null), 2000);
     }
   }, []);
 
-  const groupKeys = useMemo(
-    () => Array.from(groupedVariables.keys()),
-    [groupedVariables],
-  );
+  const groupKeys = useMemo(() => Array.from(groupedVariables.keys()), [groupedVariables]);
 
   if (groupKeys.length === 0) {
     return (
@@ -232,8 +210,7 @@ export const VariableReferencePanel = memo(function VariableReferencePanel({
           </Text>
         </div>
         <Text className={styles.emptyState}>
-          No upstream nodes available. Add nodes before this one to reference
-          their outputs.
+          No upstream nodes available. Add nodes before this one to reference their outputs.
         </Text>
       </div>
     );
@@ -249,22 +226,18 @@ export const VariableReferencePanel = memo(function VariableReferencePanel({
       </div>
 
       <Accordion multiple collapsible defaultOpenItems={groupKeys}>
-        {groupKeys.map((groupLabel) => {
+        {groupKeys.map(groupLabel => {
           const entries = groupedVariables.get(groupLabel)!;
           return (
             <AccordionItem key={groupLabel} value={groupLabel}>
               <AccordionHeader size="small">
                 {groupLabel}
-                <Badge
-                  appearance="tint"
-                  size="small"
-                  style={{ marginLeft: tokens.spacingHorizontalXS }}
-                >
+                <Badge appearance="tint" size="small" style={{ marginLeft: tokens.spacingHorizontalXS }}>
                   {entries.length}
                 </Badge>
               </AccordionHeader>
               <AccordionPanel className={styles.accordionPanel}>
-                {entries.map((entry) => {
+                {entries.map(entry => {
                   const isCopied = copiedExpression === entry.expression;
                   return (
                     <div
@@ -273,40 +246,26 @@ export const VariableReferencePanel = memo(function VariableReferencePanel({
                       onClick={() => handleCopy(entry.expression)}
                       role="button"
                       tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           handleCopy(entry.expression);
                         }
                       }}
                     >
                       <div className={styles.variableInfo}>
-                        <Text className={styles.variableExpression}>
-                          {entry.expression}
-                        </Text>
+                        <Text className={styles.variableExpression}>{entry.expression}</Text>
                         <Text className={styles.variableTypeHint}>
                           {entry.label} ({entry.typeHint})
                         </Text>
                       </div>
-                      <Tooltip
-                        content={isCopied ? "Copied!" : "Click to copy"}
-                        relationship="label"
-                      >
+                      <Tooltip content={isCopied ? 'Copied!' : 'Click to copy'} relationship="label">
                         <Button
-                          className={mergeClasses(
-                            styles.copyButton,
-                            isCopied ? styles.copiedFeedback : undefined,
-                          )}
+                          className={mergeClasses(styles.copyButton, isCopied ? styles.copiedFeedback : undefined)}
                           appearance="subtle"
                           size="small"
-                          icon={
-                            isCopied ? (
-                              <Checkmark20Regular />
-                            ) : (
-                              <Copy20Regular />
-                            )
-                          }
-                          onClick={(e) => {
+                          icon={isCopied ? <Checkmark20Regular /> : <Copy20Regular />}
+                          onClick={e => {
                             e.stopPropagation();
                             handleCopy(entry.expression);
                           }}

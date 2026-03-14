@@ -10,9 +10,9 @@
  * round-trip or Bearer token needed.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { saveAnalysisContent } from "../services/analysisApi";
-import type { SaveState } from "../types";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { saveAnalysisContent } from '../services/analysisApi';
+import type { SaveState } from '../types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -72,21 +72,15 @@ export interface UseAutoSaveResult {
  * ```
  */
 export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
-  const {
-    analysisId,
-    enabled = true,
-    debounceMs = DEFAULT_DEBOUNCE_MS,
-  } = options;
+  const { analysisId, enabled = true, debounceMs = DEFAULT_DEBOUNCE_MS } = options;
 
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Refs for debounce management
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const savedIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContentRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
 
@@ -118,7 +112,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
       }
 
       isSavingRef.current = true;
-      setSaveState("saving");
+      setSaveState('saving');
       setSaveError(null);
 
       try {
@@ -126,20 +120,20 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
 
         const now = new Date().toISOString();
         setLastSavedAt(now);
-        setSaveState("saved");
+        setSaveState('saved');
 
         // Reset to idle after a brief "saved" indicator
         savedIndicatorTimerRef.current = setTimeout(() => {
-          setSaveState("idle");
+          setSaveState('idle');
         }, SAVED_INDICATOR_MS);
       } catch (err: unknown) {
         const message =
-          err && typeof err === "object" && "message" in err
+          err && typeof err === 'object' && 'message' in err
             ? (err as { message: string }).message
-            : "Failed to save analysis content";
+            : 'Failed to save analysis content';
         setSaveError(message);
-        setSaveState("error");
-        console.error("[useAutoSave] Save failed:", err);
+        setSaveState('error');
+        console.error('[useAutoSave] Save failed:', err);
       } finally {
         isSavingRef.current = false;
 
@@ -151,7 +145,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
         }
       }
     },
-    [analysisId, enabled],
+    [analysisId, enabled]
   );
 
   /**
@@ -173,7 +167,7 @@ export function useAutoSave(options: UseAutoSaveOptions): UseAutoSaveResult {
         doSave(content);
       }, debounceMs);
     },
-    [enabled, analysisId, debounceMs, doSave],
+    [enabled, analysisId, debounceMs, doSave]
   );
 
   /**

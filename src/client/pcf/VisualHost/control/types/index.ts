@@ -126,7 +126,7 @@ export interface IChartDefinition {
 /**
  * Drill interaction contract
  */
-export type DrillOperator = "eq" | "in" | "between";
+export type DrillOperator = 'eq' | 'in' | 'between';
 
 export interface DrillInteraction {
   field: string;
@@ -185,12 +185,7 @@ export const DEFAULT_VISUAL_HOST_CONFIG: IVisualHostConfig = {
  * Each maps to a predefined set of Fluent UI v9 semantic tokens
  * that auto-adapt to light/dark mode.
  */
-export type ColorTokenSet =
-  | "brand"
-  | "warning"
-  | "danger"
-  | "success"
-  | "neutral";
+export type ColorTokenSet = 'brand' | 'warning' | 'danger' | 'success' | 'neutral';
 
 /**
  * Color threshold rule — maps a value range to a Fluent token set
@@ -205,33 +200,29 @@ export interface IColorThreshold {
 /**
  * Card size controls responsive grid min-width and typography scale
  */
-export type CardSize = "small" | "medium" | "large";
+export type CardSize = 'small' | 'medium' | 'large';
 
 /**
  * Sort order for cards in matrix layout
  */
-export type CardSortBy = "label" | "value" | "valueAsc" | "optionSetOrder";
+export type CardSortBy = 'label' | 'value' | 'valueAsc' | 'optionSetOrder';
 
 /**
  * Value format type as string (for config resolution)
  */
 export type ValueFormatType =
-  | "shortNumber"
-  | "letterGrade"
-  | "percentage"
-  | "wholeNumber"
-  | "decimal"
-  | "currency"
-  | "signedPercentage";
+  | 'shortNumber'
+  | 'letterGrade'
+  | 'percentage'
+  | 'wholeNumber'
+  | 'decimal'
+  | 'currency'
+  | 'signedPercentage';
 
 /**
  * Color source type as string (for config resolution)
  */
-export type ColorSourceType =
-  | "none"
-  | "optionSetColor"
-  | "valueThreshold"
-  | "signBased";
+export type ColorSourceType = 'none' | 'optionSetColor' | 'valueThreshold' | 'signBased';
 
 /**
  * Resolved card configuration — merged from Chart Definition fields,
@@ -273,12 +264,7 @@ export interface ICardConfig {
   /** Card aspect ratio (e.g., "5 / 3", "1 / 1", "3 / 5") from sprk_metriccardshape */
   aspectRatio?: string;
   /** Content alignment within each card: left, left-center, center, right-center, right */
-  dataJustification?:
-    | "left"
-    | "left-center"
-    | "center"
-    | "right-center"
-    | "right";
+  dataJustification?: 'left' | 'left-center' | 'center' | 'right-center' | 'right';
   /** Invert sign-based coloring (negative=success, positive=danger) */
   invertSign?: boolean;
 }

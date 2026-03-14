@@ -18,7 +18,7 @@
 /**
  * Filter type discriminator for calendar output
  */
-export type CalendarFilterType = "single" | "range" | "clear";
+export type CalendarFilterType = 'single' | 'range' | 'clear';
 
 /**
  * Base filter output interface
@@ -35,7 +35,7 @@ interface ICalendarFilterBase {
  * Example: {"type":"single","date":"2026-02-10"}
  */
 export interface ICalendarFilterSingle extends ICalendarFilterBase {
-  type: "single";
+  type: 'single';
   /** Selected date in ISO 8601 format (YYYY-MM-DD) */
   date: string;
 }
@@ -49,7 +49,7 @@ export interface ICalendarFilterSingle extends ICalendarFilterBase {
  * Note: start is always <= end (sorted chronologically)
  */
 export interface ICalendarFilterRange extends ICalendarFilterBase {
-  type: "range";
+  type: 'range';
   /** Range start date in ISO 8601 format (YYYY-MM-DD) */
   start: string;
   /** Range end date in ISO 8601 format (YYYY-MM-DD) */
@@ -63,43 +63,34 @@ export interface ICalendarFilterRange extends ICalendarFilterBase {
  * Example: {"type":"clear"}
  */
 export interface ICalendarFilterClear extends ICalendarFilterBase {
-  type: "clear";
+  type: 'clear';
 }
 
 /**
  * Union type for all filter outputs
  * This is the type of value written to filterOutput property
  */
-export type CalendarFilterOutput =
-  | ICalendarFilterSingle
-  | ICalendarFilterRange
-  | ICalendarFilterClear;
+export type CalendarFilterOutput = ICalendarFilterSingle | ICalendarFilterRange | ICalendarFilterClear;
 
 /**
  * Type guard: Check if filter is a single date selection
  */
-export function isSingleDateFilter(
-  filter: CalendarFilterOutput,
-): filter is ICalendarFilterSingle {
-  return filter.type === "single";
+export function isSingleDateFilter(filter: CalendarFilterOutput): filter is ICalendarFilterSingle {
+  return filter.type === 'single';
 }
 
 /**
  * Type guard: Check if filter is a date range selection
  */
-export function isRangeFilter(
-  filter: CalendarFilterOutput,
-): filter is ICalendarFilterRange {
-  return filter.type === "range";
+export function isRangeFilter(filter: CalendarFilterOutput): filter is ICalendarFilterRange {
+  return filter.type === 'range';
 }
 
 /**
  * Type guard: Check if filter is a clear action
  */
-export function isClearFilter(
-  filter: CalendarFilterOutput,
-): filter is ICalendarFilterClear {
-  return filter.type === "clear";
+export function isClearFilter(filter: CalendarFilterOutput): filter is ICalendarFilterClear {
+  return filter.type === 'clear';
 }
 
 /**
@@ -114,10 +105,8 @@ export function isClearFilter(
  *   console.log(filter.date); // "2026-02-10"
  * }
  */
-export function parseFilterOutput(
-  json: string | null | undefined,
-): CalendarFilterOutput | null {
-  if (!json || json.trim() === "") {
+export function parseFilterOutput(json: string | null | undefined): CalendarFilterOutput | null {
+  if (!json || json.trim() === '') {
     return null;
   }
 
@@ -125,24 +114,20 @@ export function parseFilterOutput(
     const parsed = JSON.parse(json);
 
     // Validate structure
-    if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
+    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) {
       return null;
     }
 
     // Validate type field
-    if (parsed.type === "single" && typeof parsed.date === "string") {
+    if (parsed.type === 'single' && typeof parsed.date === 'string') {
       return parsed as ICalendarFilterSingle;
     }
 
-    if (
-      parsed.type === "range" &&
-      typeof parsed.start === "string" &&
-      typeof parsed.end === "string"
-    ) {
+    if (parsed.type === 'range' && typeof parsed.start === 'string' && typeof parsed.end === 'string') {
       return parsed as ICalendarFilterRange;
     }
 
-    if (parsed.type === "clear") {
+    if (parsed.type === 'clear') {
       return parsed as ICalendarFilterClear;
     }
 

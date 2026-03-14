@@ -19,7 +19,7 @@
  * ```
  */
 
-import { useMemo } from "react";
+import { useMemo } from 'react';
 import {
   forceSimulation,
   forceLink,
@@ -28,7 +28,7 @@ import {
   forceCollide,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
-} from "d3-force";
+} from 'd3-force';
 
 // ─── Public interfaces ───────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ export interface ForceSimulationOptions {
   /** Minimum distance between node centres (default 60). */
   collisionRadius?: number;
   /** Layout mode. */
-  mode: "hub-spoke" | "peer-mesh";
+  mode: 'hub-spoke' | 'peer-mesh';
   /** Layout center point (default `{ x: 0, y: 0 }`). */
   center?: { x: number; y: number };
 }
@@ -114,7 +114,7 @@ interface SimLink extends SimulationLinkDatum<SimNode> {
 
 // ─── Defaults ────────────────────────────────────────────────────────
 
-const DEFAULTS: Required<Omit<ForceSimulationOptions, "mode">> = {
+const DEFAULTS: Required<Omit<ForceSimulationOptions, 'mode'>> = {
   ticks: 300,
   chargeStrength: -800,
   linkDistanceMultiplier: 400,
@@ -126,11 +126,7 @@ const DEFAULTS: Required<Omit<ForceSimulationOptions, "mode">> = {
 
 const VIEWPORT_PADDING = 80;
 
-function computeViewport(
-  positioned: PositionedNode[],
-  cx: number,
-  cy: number,
-): Viewport {
+function computeViewport(positioned: PositionedNode[], cx: number, cy: number): Viewport {
   if (positioned.length === 0) {
     return { x: cx, y: cy, zoom: 1 };
   }
@@ -174,7 +170,7 @@ function computeViewport(
 export function useForceSimulation(
   nodes: ForceNode[],
   edges: ForceEdge[],
-  options: ForceSimulationOptions,
+  options: ForceSimulationOptions
 ): ForceLayoutResult {
   const {
     ticks = DEFAULTS.ticks,
@@ -205,10 +201,10 @@ export function useForceSimulation(
     }
 
     // ── Determine hub node for hub-spoke mode ──
-    const isHubSpoke = mode === "hub-spoke";
+    const isHubSpoke = mode === 'hub-spoke';
     let hubIndex = 0;
     if (isHubSpoke) {
-      const sourceIdx = nodes.findIndex((n) => n.isSource === true);
+      const sourceIdx = nodes.findIndex(n => n.isSource === true);
       hubIndex = sourceIdx >= 0 ? sourceIdx : 0;
     }
 
@@ -222,8 +218,7 @@ export function useForceSimulation(
         return { id: node.id, _srcIndex: i, x: cx, y: cy, fx: cx, fy: cy };
       }
       // Spread non-hub nodes in a circle for stable initial positions
-      const angle =
-        (2 * Math.PI * nonHubCounter) / Math.max(nonHubCount, 1) - Math.PI / 2;
+      const angle = (2 * Math.PI * nonHubCounter) / Math.max(nonHubCount, 1) - Math.PI / 2;
       nonHubCounter++;
       const radius = 150;
       return {
@@ -235,7 +230,7 @@ export function useForceSimulation(
     });
 
     // ── Build simulation links (only for edges whose nodes exist) ──
-    const nodeIdSet = new Set(nodes.map((n) => n.id));
+    const nodeIdSet = new Set(nodes.map(n => n.id));
     const simLinks: SimLink[] = edges
       .map((edge, i) => ({
         source: edge.source,
@@ -243,27 +238,20 @@ export function useForceSimulation(
         weight: edge.weight ?? 0.5,
         _srcIndex: i,
       }))
-      .filter(
-        (link) =>
-          nodeIdSet.has(link.source as string) &&
-          nodeIdSet.has(link.target as string),
-      );
+      .filter(link => nodeIdSet.has(link.source as string) && nodeIdSet.has(link.target as string));
 
     // ── Create and run simulation synchronously ──
     const simulation = forceSimulation<SimNode>(simNodes)
       .force(
-        "link",
+        'link',
         forceLink<SimNode, SimLink>(simLinks)
-          .id((d) => d.id)
-          .distance((link) => linkDistanceMultiplier * (1 - link.weight))
-          .strength(0.5),
+          .id(d => d.id)
+          .distance(link => linkDistanceMultiplier * (1 - link.weight))
+          .strength(0.5)
       )
-      .force("charge", forceManyBody<SimNode>().strength(chargeStrength))
-      .force("center", forceCenter<SimNode>(cx, cy))
-      .force(
-        "collide",
-        forceCollide<SimNode>().radius(collisionRadius).strength(0.7),
-      )
+      .force('charge', forceManyBody<SimNode>().strength(chargeStrength))
+      .force('center', forceCenter<SimNode>(cx, cy))
+      .force('collide', forceCollide<SimNode>().radius(collisionRadius).strength(0.7))
       .alphaDecay(0.05)
       .velocityDecay(0.3)
       .stop();
@@ -277,27 +265,23 @@ export function useForceSimulation(
       nodeMap.set(sn.id, sn);
     }
 
-    const positionedNodes: PositionedNode[] = simNodes.map((sn) => ({
+    const positionedNodes: PositionedNode[] = simNodes.map(sn => ({
       ...nodes[sn._srcIndex],
       x: sn.x ?? cx,
       y: sn.y ?? cy,
     }));
 
     // ── Map back to positioned edges ──
-    const positionedEdges: PositionedEdge[] = simLinks.map((sl) => {
-      const srcNode =
-        typeof sl.source === "object" ? sl.source : nodeMap.get(sl.source);
-      const tgtNode =
-        typeof sl.target === "object" ? sl.target : nodeMap.get(sl.target);
+    const positionedEdges: PositionedEdge[] = simLinks.map(sl => {
+      const srcNode = typeof sl.source === 'object' ? sl.source : nodeMap.get(sl.source);
+      const tgtNode = typeof sl.target === 'object' ? sl.target : nodeMap.get(sl.target);
       const originalEdge = edges[sl._srcIndex];
       // Copy extensible properties, overwriting source/target with string ids
       const { source: _s, target: _t, weight: _w, ...rest } = originalEdge;
       return {
         ...rest,
-        source:
-          nodes[srcNode?._srcIndex ?? 0]?.id ?? (originalEdge.source as string),
-        target:
-          nodes[tgtNode?._srcIndex ?? 0]?.id ?? (originalEdge.target as string),
+        source: nodes[srcNode?._srcIndex ?? 0]?.id ?? (originalEdge.source as string),
+        target: nodes[tgtNode?._srcIndex ?? 0]?.id ?? (originalEdge.target as string),
         sourceX: srcNode?.x ?? cx,
         sourceY: srcNode?.y ?? cy,
         targetX: tgtNode?.x ?? cx,
@@ -309,17 +293,7 @@ export function useForceSimulation(
     const viewport = computeViewport(positionedNodes, cx, cy);
 
     return { nodes: positionedNodes, edges: positionedEdges, viewport };
-  }, [
-    nodes,
-    edges,
-    mode,
-    ticks,
-    chargeStrength,
-    linkDistanceMultiplier,
-    collisionRadius,
-    cx,
-    cy,
-  ]);
+  }, [nodes, edges, mode, ticks, chargeStrength, linkDistanceMultiplier, collisionRadius, cx, cy]);
 }
 
 export default useForceSimulation;
