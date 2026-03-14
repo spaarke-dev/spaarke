@@ -33,7 +33,6 @@ import {
   Card,
   CardHeader,
   Textarea,
-  Spinner,
   Text,
   Badge,
   makeStyles,
@@ -43,10 +42,18 @@ import {
   SparkleRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
-import { fetchAiDraftSummary } from './matterService';
+import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from '@spaarke/ui-components';
+import { streamAiDraftSummary } from './matterService';
 import { RecipientField, IRecipientItem } from './RecipientField';
 import type { ICreateMatterFormState } from './formTypes';
 import type { ILookupItem } from '../../types/entities';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+// Step IDs match DOCUMENT_ANALYSIS_STEPS from the shared library
+const ALL_STEP_IDS = DOCUMENT_ANALYSIS_STEPS.map((s) => s.id);
 
 // ---------------------------------------------------------------------------
 // Props
@@ -177,7 +184,10 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
   >('idle');
   const hasFetchedRef = React.useRef(false);
 
-  // ── Fetch AI summary on mount (once) ────────────────────────────────────
+  const [activeStepId, setActiveStepId] = React.useState<string | null>(null);
+  const [completedStepIds, setCompletedStepIds] = React.useState<string[]>([]);
+
+  // ── Stream AI summary on mount (once) — SSE-driven step state ───────────
   React.useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
@@ -188,26 +198,38 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
       return;
     }
 
-    let cancelled = false;
+    const abortController = new AbortController();
     setSummaryStatus('loading');
+    setActiveStepId('document_loaded');
+    setCompletedStepIds([]);
 
-    fetchAiDraftSummary(
+    streamAiDraftSummary(
       formValues.matterName,
       formValues.matterTypeName,
-      formValues.practiceAreaName
+      formValues.practiceAreaName,
+      {
+        onProgress: (stepId: string) => {
+          const idx = ALL_STEP_IDS.indexOf(stepId);
+          setActiveStepId(stepId);
+          setCompletedStepIds(ALL_STEP_IDS.slice(0, Math.max(0, idx)));
+        },
+      },
+      abortController.signal,
     )
       .then((result) => {
-        if (cancelled) return;
+        if (abortController.signal.aborted) return;
         onSummaryChange(result.summary);
+        setCompletedStepIds(ALL_STEP_IDS);
+        setActiveStepId(null);
         setSummaryStatus('loaded');
       })
       .catch(() => {
-        if (cancelled) return;
+        if (abortController.signal.aborted) return;
         setSummaryStatus('error');
       });
 
     return () => {
-      cancelled = true;
+      abortController.abort();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -252,10 +274,14 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
         />
 
         {summaryStatus === 'loading' && (
-          <div className={styles.summaryLoading}>
-            <Spinner size="tiny" />
-            <Text size={200}>Generating summary&hellip;</Text>
-          </div>
+          <AiProgressStepper
+            variant="inline"
+            steps={DOCUMENT_ANALYSIS_STEPS}
+            activeStepId={activeStepId}
+            completedStepIds={completedStepIds}
+            title="Generating Summary"
+            isStreaming
+          />
         )}
 
         {summaryStatus === 'error' && (

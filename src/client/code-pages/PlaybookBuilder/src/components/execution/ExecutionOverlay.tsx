@@ -29,6 +29,7 @@ import {
     BrainCircuit20Regular,
     Sparkle20Regular,
 } from "@fluentui/react-icons";
+import { AiProgressStepper, type AiProgressStep } from "@spaarke/ui-components";
 import { useExecutionStore, type NodeExecutionStatus } from "../../stores/executionStore";
 import { ConfidenceBadge, ConfidenceNodeBadge } from "./ConfidenceBadge";
 
@@ -68,6 +69,13 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorPaletteRedBackground2,
     },
     stopButton: {
+        pointerEvents: "auto",
+    },
+    // Node progress stepper (bottom left during execution)
+    nodeStepperPanel: {
+        position: "absolute",
+        bottom: tokens.spacingVerticalM,
+        left: tokens.spacingHorizontalM,
         pointerEvents: "auto",
     },
     // Metrics panel (bottom right during/after execution)
@@ -121,6 +129,30 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
 
     const { status, nodeStates, totalTokensUsed, error, startedAt, completedAt, overallConfidence } =
         useExecutionStore();
+
+    // Derive AiProgressStepper steps from node states (ordered by startedAt)
+    const { nodeSteps, activeNodeStepId, completedNodeStepIds, errorNodeStepId } = useMemo(() => {
+        const nodes = Array.from(nodeStates.values())
+            .filter((n) => n.nodeName)
+            .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+
+        const steps: AiProgressStep[] = nodes.map((n) => ({
+            id: n.nodeId,
+            label: n.nodeName!,
+        }));
+
+        const runningNode = nodes.find((n) => n.status === "running");
+        const failedNode = nodes.find((n) => n.status === "failed");
+
+        return {
+            nodeSteps: steps,
+            activeNodeStepId: runningNode?.nodeId ?? null,
+            completedNodeStepIds: nodes
+                .filter((n) => n.status === "completed")
+                .map((n) => n.nodeId),
+            errorNodeStepId: failedNode?.nodeId ?? null,
+        };
+    }, [nodeStates]);
 
     // Calculate execution metrics
     const metrics = useMemo(() => {
@@ -214,6 +246,21 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
                             />
                         </Tooltip>
                     )}
+                </div>
+            )}
+
+            {/* Node Progress Stepper (bottom-left, only while running and nodes are known) */}
+            {isExecuting && nodeSteps.length > 0 && (
+                <div className={styles.nodeStepperPanel}>
+                    <AiProgressStepper
+                        variant="card"
+                        steps={nodeSteps}
+                        activeStepId={activeNodeStepId}
+                        completedStepIds={completedNodeStepIds}
+                        errorStepId={errorNodeStepId}
+                        title="Running Playbook"
+                        isStreaming
+                    />
                 </div>
             )}
 

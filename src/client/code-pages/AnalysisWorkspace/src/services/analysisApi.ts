@@ -331,12 +331,20 @@ export async function saveAnalysisContent(
 
 /**
  * Chunk received from the BFF SSE stream during analysis execution.
+ * - `metadata`: stream opened, contains analysisId and documentName
+ * - `progress`: pipeline step event, contains step identifier in `step` field
+ * - `chunk`: text content token
+ * - `done`: analysis complete (backend-sent completion event)
+ * - `error`: execution failed
+ * - `status`: client-side sentinel emitted when SSE stream ends (content="done")
  */
 export interface AnalysisStreamChunk {
-    type: "metadata" | "chunk" | "error" | "status";
+    type: "metadata" | "progress" | "chunk" | "done" | "error" | "status";
     content?: string;
     analysisId?: string;
     error?: string;
+    /** Step identifier for progress events (e.g. "extracting_text"). */
+    step?: string;
 }
 
 /**

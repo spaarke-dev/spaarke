@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http.Features;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -28,6 +30,11 @@ public static class WorkspaceFileEndpoints
     private static readonly Guid DefaultSummarizePlaybookId =
         Guid.Parse("4a72f99c-a119-f111-8343-7ced8d1dc988");
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     /// <summary>
     /// Registers workspace file endpoints under /api/workspace/files.
     /// </summary>
@@ -54,19 +61,19 @@ public static class WorkspaceFileEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // POST /api/workspace/files/summarize
+        // POST /api/workspace/files/summarize  (SSE stream)
         group.MapPost("/summarize", HandleSummarize)
             .AddEndpointFilter<WorkspaceAuthorizationFilter>()
             .RequireRateLimiting("ai-stream")
             .DisableAntiforgery()
             .WithName("FileSummarize")
-            .WithSummary("Summarize uploaded files using AI")
+            .WithSummary("Summarize uploaded files using AI (SSE stream)")
             .WithDescription(
                 "Accepts multipart/form-data uploads (PDF, DOCX, XLSX — max 10 MB each). " +
-                "Extracts text, invokes the Summarize playbook, and returns a structured summary " +
-                "with TL;DR, narrative summary, practice areas, mentioned parties, and call to action.")
+                "Extracts text, invokes the Summarize playbook, and streams progress events " +
+                "followed by a structured result chunk (tldr, summary, practice areas, parties, call to action).")
             .Accepts<IFormFileCollection>("multipart/form-data")
-            .Produces<SummarizeResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
@@ -118,10 +125,10 @@ public static class WorkspaceFileEndpoints
     }
 
     // =========================================================================
-    // POST /api/workspace/files/summarize
+    // POST /api/workspace/files/summarize  (SSE stream)
     // =========================================================================
 
-    private static async Task<IResult> HandleSummarize(
+    private static async Task HandleSummarize(
         IFormFileCollection files,
         ITextExtractor textExtractor,
         IPlaybookOrchestrationService playbookService,
@@ -130,63 +137,182 @@ public static class WorkspaceFileEndpoints
         ILogger<Program> logger,
         CancellationToken ct)
     {
+        var response = httpContext.Response;
         var userId = ResolveUserId(httpContext);
 
-        logger.LogInformation(
-            "File summarize request received. UserId={UserId}, FileCount={FileCount}, " +
-            "CorrelationId={CorrelationId}",
-            userId, files?.Count ?? 0, httpContext.TraceIdentifier);
-
+        // Validate before setting SSE headers so we can still return a proper 400
         var validationErrors = ValidateFiles(files!);
         if (validationErrors.Count > 0)
-            return ValidationProblem(validationErrors, httpContext);
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            response.ContentType = "application/problem+json";
+            var problem = JsonSerializer.Serialize(new
+            {
+                title = "Invalid Files",
+                status = 400,
+                detail = string.Join(" | ", validationErrors),
+                correlationId = httpContext.TraceIdentifier
+            }, JsonOptions);
+            await response.WriteAsync(problem, ct);
+            return;
+        }
+
+        // Set SSE headers — must happen before first write
+        response.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+        response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
+        httpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+        logger.LogInformation(
+            "File summarize SSE request. UserId={UserId}, FileCount={FileCount}, CorrelationId={CorrelationId}",
+            userId, files!.Count, httpContext.TraceIdentifier);
 
         try
         {
-            // Step 1: Extract text from all files
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("document_loaded", "Opening document..."), ct);
+
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("extracting_text", "Reading content..."), ct);
             var extractedText = await ExtractTextFromFilesAsync(files!, textExtractor, logger, ct);
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                logger.LogWarning(
-                    "No text could be extracted from any uploaded files. CorrelationId={CorrelationId}",
-                    httpContext.TraceIdentifier);
-
-                return Results.Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: "No Text Extracted",
-                    detail: "No text could be extracted from the uploaded files. Please try different files.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+                logger.LogWarning("No text extracted from uploaded files. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+                await WriteSSEAsync(response, AnalysisStreamChunk.FromError("No text could be extracted from the uploaded files."), CancellationToken.None);
+                await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
+                await response.Body.FlushAsync(CancellationToken.None);
+                return;
             }
 
             logger.LogInformation(
                 "Text extraction complete for summarize. TotalChars={TotalChars}. CorrelationId={CorrelationId}",
                 extractedText.Length, httpContext.TraceIdentifier);
 
-            // Step 2: Invoke summarize playbook
-            var result = await RunSummarizePlaybookAsync(
-                extractedText, playbookService, configuration, httpContext, logger, ct);
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing analysis..."), ct);
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
-            return TypedResults.Ok(new SummarizeResponse(result));
+            await RunSummarizePlaybookAsSSEAsync(
+                extractedText, playbookService, configuration, response, httpContext, logger, ct);
+
+            await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
+            await response.WriteAsync("data: [DONE]\n\n", ct);
+            await response.Body.FlushAsync(ct);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            logger.LogWarning(
-                "Summarize request timed out. CorrelationId={CorrelationId}",
-                httpContext.TraceIdentifier);
-
-            return Results.Problem(
-                statusCode: StatusCodes.Status504GatewayTimeout,
-                title: "Timeout",
-                detail: "The summarization timed out. Please try again with fewer or smaller files.");
+            logger.LogWarning("Summarize SSE timed out. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            await WriteSSEAsync(response, AnalysisStreamChunk.FromError("Summarization timed out. Please try again with fewer or smaller files."), CancellationToken.None);
+            await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            logger.LogError(ex,
-                "File summarize failed. UserId={UserId}, CorrelationId={CorrelationId}",
-                userId, httpContext.TraceIdentifier);
+            logger.LogError(ex, "File summarize SSE failed. UserId={UserId}, CorrelationId={CorrelationId}", userId, httpContext.TraceIdentifier);
+            await WriteSSEAsync(response, AnalysisStreamChunk.FromError("An error occurred while summarizing the uploaded documents."), CancellationToken.None);
+            await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
+        }
+    }
 
-            return ServerError("An error occurred while summarizing the uploaded documents.", httpContext);
+    /// <summary>
+    /// Invokes the Summarize playbook and emits a single "result" SSE chunk with the structured output.
+    /// </summary>
+    private static async Task RunSummarizePlaybookAsSSEAsync(
+        string documentText,
+        IPlaybookOrchestrationService playbookService,
+        IConfiguration configuration,
+        HttpResponse response,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        // Truncate to ~80KB to avoid excessive token usage
+        const int maxTextChars = 80_000;
+        if (documentText.Length > maxTextChars)
+        {
+            logger.LogDebug("Truncating combined text from {Original} to {Truncated} chars.", documentText.Length, maxTextChars);
+            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
+        }
+
+        var playbookIdStr = configuration[SummarizePlaybookIdConfigKey];
+        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
+            ? parsed
+            : DefaultSummarizePlaybookId;
+
+        logger.LogInformation("Invoking summarize playbook as SSE. PlaybookId={PlaybookId}, TextLength={TextLength}", playbookId, documentText.Length);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(60));
+
+        var request = new PlaybookRunRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [],
+            UserContext = documentText,
+            Document = new DocumentContext
+            {
+                DocumentId = Guid.NewGuid(),
+                Name = "Summarize upload",
+                ExtractedText = documentText,
+            },
+            Parameters = new Dictionary<string, string>
+            {
+                ["operation"] = "summarize",
+            }
+        };
+
+        JsonElement? structuredOutput = null;
+        string? textOutput = null;
+
+        await foreach (var evt in playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
+        {
+            if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
+            {
+                if (evt.NodeOutput.StructuredData.HasValue)
+                {
+                    structuredOutput = evt.NodeOutput.StructuredData.Value;
+                    var jsonStr = JsonSerializer.Serialize(structuredOutput.Value, JsonOptions);
+                    await WriteSSEAsync(response, AnalysisStreamChunk.Result(jsonStr), ct);
+                    logger.LogDebug("Emitted structured summarize result from node '{NodeName}'.", evt.NodeName);
+                }
+                else if (!string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent))
+                {
+                    textOutput = evt.NodeOutput.TextContent;
+                }
+            }
+
+            if (evt.Type == PlaybookEventType.RunFailed)
+            {
+                logger.LogWarning("Summarize playbook failed. Error={Error}.", evt.Error);
+                throw new InvalidOperationException($"Summarize playbook failed: {evt.Error}");
+            }
+        }
+
+        // Fall back to text output if no structured data
+        if (!structuredOutput.HasValue && !string.IsNullOrWhiteSpace(textOutput))
+        {
+            var json = StripMarkdownCodeFences(textOutput.Trim());
+            string resultJson;
+            try
+            {
+                var element = JsonDocument.Parse(json).RootElement;
+                resultJson = JsonSerializer.Serialize(element, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                resultJson = JsonSerializer.Serialize(new
+                {
+                    tldr = json.Length > 200 ? json[..200] + "..." : json,
+                    summary = json,
+                    shortSummary = json.Length > 200 ? json[..200] + "..." : json,
+                    confidence = 0.5
+                }, JsonOptions);
+            }
+            await WriteSSEAsync(response, AnalysisStreamChunk.Result(resultJson), ct);
+        }
+
+        if (!structuredOutput.HasValue && string.IsNullOrWhiteSpace(textOutput))
+        {
+            logger.LogWarning("Summarize playbook completed but produced no output.");
+            throw new InvalidOperationException("Summarize playbook completed but produced no output.");
         }
     }
 
@@ -243,117 +369,6 @@ public static class WorkspaceFileEndpoints
         }
 
         return allExtractedText.ToString().Trim();
-    }
-
-    /// <summary>
-    /// Invokes the Summarize playbook with extracted text and collects the structured output.
-    /// </summary>
-    private static async Task<JsonElement> RunSummarizePlaybookAsync(
-        string documentText,
-        IPlaybookOrchestrationService playbookService,
-        IConfiguration configuration,
-        HttpContext httpContext,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        // Truncate to ~80KB to avoid excessive token usage
-        const int maxTextChars = 80_000;
-        if (documentText.Length > maxTextChars)
-        {
-            logger.LogDebug(
-                "Truncating combined text from {Original} to {Truncated} chars for summarize.",
-                documentText.Length, maxTextChars);
-            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
-        }
-
-        // Resolve playbook ID from configuration
-        var playbookIdStr = configuration[SummarizePlaybookIdConfigKey];
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultSummarizePlaybookId;
-
-        logger.LogInformation(
-            "Invoking summarize playbook. PlaybookId={PlaybookId}, TextLength={TextLength}",
-            playbookId, documentText.Length);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(60)); // Summary may take longer than pre-fill
-
-        var request = new PlaybookRunRequest
-        {
-            PlaybookId = playbookId,
-            DocumentIds = [],
-            UserContext = documentText,
-            Document = new DocumentContext
-            {
-                DocumentId = Guid.NewGuid(),
-                Name = "Summarize upload",
-                ExtractedText = documentText,
-            },
-            Parameters = new Dictionary<string, string>
-            {
-                ["operation"] = "summarize",
-            }
-        };
-
-        // Collect the final structured output from the playbook stream
-        JsonElement? structuredOutput = null;
-        string? textOutput = null;
-
-        await foreach (var evt in playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
-        {
-            if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
-            {
-                if (evt.NodeOutput.StructuredData.HasValue)
-                {
-                    structuredOutput = evt.NodeOutput.StructuredData.Value;
-                    logger.LogDebug(
-                        "Received structured summarize data from node '{NodeName}'. Confidence={Confidence}.",
-                        evt.NodeName, evt.NodeOutput.Confidence);
-                }
-                else if (!string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent))
-                {
-                    textOutput = evt.NodeOutput.TextContent;
-                }
-            }
-
-            if (evt.Type == PlaybookEventType.RunFailed)
-            {
-                logger.LogWarning("Summarize playbook failed. Error={Error}.", evt.Error);
-                throw new InvalidOperationException($"Summarize playbook failed: {evt.Error}");
-            }
-        }
-
-        // Prefer structured data; fall back to parsing text output as JSON
-        if (structuredOutput.HasValue)
-        {
-            return structuredOutput.Value;
-        }
-
-        if (!string.IsNullOrWhiteSpace(textOutput))
-        {
-            var json = StripMarkdownCodeFences(textOutput.Trim());
-            try
-            {
-                return JsonDocument.Parse(json).RootElement;
-            }
-            catch (JsonException ex)
-            {
-                logger.LogWarning(ex,
-                    "Failed to parse summarize text output as JSON. Wrapping as text response.");
-                // Return a minimal result with the text as summary
-                return JsonDocument.Parse(JsonSerializer.Serialize(new
-                {
-                    tldr = json.Length > 200 ? json[..200] + "..." : json,
-                    summary = json,
-                    shortSummary = json.Length > 200 ? json[..200] + "..." : json,
-                    confidence = 0.5
-                })).RootElement;
-            }
-        }
-
-        logger.LogWarning("Summarize playbook completed but produced no output.");
-        throw new InvalidOperationException("Summarize playbook completed but produced no output.");
     }
 
     private static string StripMarkdownCodeFences(string text)
@@ -438,15 +453,16 @@ public static class WorkspaceFileEndpoints
                 ["correlationId"] = httpContext.TraceIdentifier
             });
     }
+
+    private static async Task WriteSSEAsync(HttpResponse response, AnalysisStreamChunk chunk, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(chunk, JsonOptions);
+        await response.WriteAsync($"data: {json}\n\n", ct);
+        await response.Body.FlushAsync(ct);
+    }
 }
 
 /// <summary>
 /// Response from the text extraction endpoint.
 /// </summary>
 public record ExtractTextResponse(string Text);
-
-/// <summary>
-/// Response from the summarize endpoint. Wraps the playbook's structured output.
-/// </summary>
-/// <param name="Result">The structured summary result from the AI playbook.</param>
-public record SummarizeResponse(JsonElement Result);

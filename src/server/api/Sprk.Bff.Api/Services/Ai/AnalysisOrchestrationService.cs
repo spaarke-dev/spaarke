@@ -191,6 +191,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
+        yield return AnalysisStreamChunk.Progress("document_loaded", "Opening document...");
 
         // 3. Resolve scopes (Skills, Knowledge, Tools) and action
         // Note: Playbook-based analysis is handled via early delegation to ExecutePlaybookAsync above.
@@ -201,21 +202,26 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         var actionId = request.ActionId.Value;
-        var scopes = await _scopeResolver.ResolveScopesAsync(
+
+        // Resolve scopes and action in parallel — both are independent Dataverse reads
+        var scopesTask = _scopeResolver.ResolveScopesAsync(
             request.SkillIds ?? [],
             request.KnowledgeIds ?? [],
             request.ToolIds ?? [],
             cancellationToken);
+        var actionTask = _scopeResolver.GetActionAsync(actionId, cancellationToken);
+        await Task.WhenAll(scopesTask, actionTask);
+        var scopes = await scopesTask;
+        var action = await actionTask
+            ?? throw new KeyNotFoundException($"Action {actionId} not found");
 
         // Update analysis record with resolved action ID
         analysis.ActionId = actionId;
 
-        // 4. Get action definition
-        var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Action {actionId} not found");
-
         // 5. Extract document text from SPE via TextExtractor (uses OBO auth)
+        yield return AnalysisStreamChunk.Progress("extracting_text", "Reading content...");
         var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        yield return AnalysisStreamChunk.Progress("text_extracted", "Preparing analysis...");
 
         // Log extraction result for debugging
         var textPreview = documentText.Length > 200 ? documentText[..200] + "..." : documentText;
@@ -245,6 +251,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         };
         var processedKnowledge = await ProcessRagKnowledgeAsync(
             scopes.Knowledge, ragAnalysisContext, cancellationToken);
+        yield return AnalysisStreamChunk.Progress("context_ready", "Running analysis...");
 
         // 7. Build prompts
         var systemPrompt = _contextBuilder.BuildSystemPrompt(action, scopes.Skills);
@@ -266,6 +273,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         var fullPrompt = BuildFullPrompt(systemPrompt, userPrompt);
 
+        yield return AnalysisStreamChunk.Progress("analyzing", "Analyzing...");
         await foreach (var token in _openAiClient.StreamCompletionAsync(fullPrompt, cancellationToken: cancellationToken))
         {
             outputBuilder.Append(token);

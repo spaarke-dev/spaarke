@@ -52,8 +52,9 @@ import {
 } from './SummarizeSendEmailStep';
 import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
-import { runSummarize } from './summarizeService';
+import { streamSummarize } from './summarizeService';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
+import { DOCUMENT_ANALYSIS_STEPS } from '@spaarke/ui-components';
 import type { ICreateProjectFormState } from '../CreateProject/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProject/projectFormTypes';
 import { ProjectService } from '../CreateProject/projectService';
@@ -164,6 +165,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   const [summarizeError, setSummarizeError] = React.useState<string | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
+  // ── SSE progress step state (driven by real backend events) ──────────
+  const ALL_STEP_IDS = React.useMemo(() => DOCUMENT_ANALYSIS_STEPS.map((s) => s.id), []);
+  const [activeStepId, setActiveStepId] = React.useState<string | null>(null);
+  const [completedStepIds, setCompletedStepIds] = React.useState<string[]>([]);
+
   // ── Next Steps state ──────────────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<SummaryActionId[]>([]);
   const [includeShortSummary, setIncludeShortSummary] = React.useState(false);
@@ -184,6 +190,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       setSummarizeStatus('idle');
       setSummarizeResult(null);
       setSummarizeError(null);
+      setActiveStepId(null);
+      setCompletedStepIds([]);
       setSelectedActions([]);
       setIncludeShortSummary(false);
       setEmailTo('');
@@ -251,12 +259,29 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
     setSummarizeStatus('loading');
     setSummarizeError(null);
+    setActiveStepId(ALL_STEP_IDS[0] ?? null);
+    setCompletedStepIds([]);
 
     try {
-      const result = await runSummarize(fileState.uploadedFiles, controller.signal);
+      const result = await streamSummarize(
+        fileState.uploadedFiles,
+        {
+          onProgress: (stepId) => {
+            if (controller.signal.aborted) return;
+            setActiveStepId(stepId);
+            setCompletedStepIds((prev) => {
+              const idx = ALL_STEP_IDS.indexOf(stepId);
+              return idx > 0 ? ALL_STEP_IDS.slice(0, idx) : prev;
+            });
+          },
+        },
+        controller.signal,
+      );
       if (!controller.signal.aborted) {
         setSummarizeResult(result);
         setSummarizeStatus('success');
+        setCompletedStepIds(ALL_STEP_IDS);
+        setActiveStepId(null);
       }
     } catch (err: unknown) {
       if (!controller.signal.aborted) {
@@ -265,7 +290,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         setSummarizeStatus('error');
       }
     }
-  }, [fileState.uploadedFiles]);
+  }, [fileState.uploadedFiles, ALL_STEP_IDS]);
 
   // Auto-run analysis when entering Step 2 (on first visit with files)
   const analysisAttemptedRef = React.useRef(false);
@@ -276,6 +301,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     setSummarizeStatus('idle');
     setSummarizeResult(null);
     setSummarizeError(null);
+    setActiveStepId(null);
+    setCompletedStepIds([]);
   }, [fileState.uploadedFiles.length]);
 
   // ── Skip handler for follow-on steps ────────────────────────────────
@@ -589,6 +616,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
               result={summarizeResult}
               errorMessage={summarizeError}
               onRetry={runAnalysis}
+              activeStepId={activeStepId}
+              completedStepIds={completedStepIds}
             />
           );
         },

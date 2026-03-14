@@ -70,6 +70,7 @@ import {
     PanelRight20Regular,
 } from "@fluentui/react-icons";
 import type { RichTextEditorRef } from "@spaarke/ui-components";
+import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from "@spaarke/ui-components";
 import { useDocumentHistory } from "@spaarke/ui-components/hooks/useDocumentHistory";
 import { useAuth } from "./hooks/useAuth";
 import { useAnalysisLoader } from "./hooks/useAnalysisLoader";
@@ -272,7 +273,10 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         executionError,
         progressMessage: executionProgress,
         chunkCount,
+        activeStepId,
+        completedStepIds,
         triggerExecute,
+        cancelExecution,
     } = useAnalysisExecution({
         analysis,
         documentId: resolvedDocumentId,
@@ -645,6 +649,18 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                             canUndo={canUndo}
                             canRedo={canRedo}
                             historyLength={historyLength}
+                        />
+                    )}
+                    {/* AI analysis progress stepper (new analysis only — hide once streaming begins) */}
+                    {isExecuting && chunkCount < 5 && (
+                        <AiProgressStepper
+                            variant="card"
+                            steps={DOCUMENT_ANALYSIS_STEPS}
+                            activeStepId={activeStepId}
+                            completedStepIds={completedStepIds}
+                            title="Analyzing Document"
+                            onCancel={cancelExecution}
+                            isStreaming={isExecuting}
                         />
                     )}
                     {/* Task 081: Re-analysis progress overlay (positioned over editor) */}

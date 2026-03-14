@@ -118,44 +118,24 @@ public class ScopeResolverService : IScopeResolverService
 
         try
         {
-            var skills = Array.Empty<AnalysisSkill>();
-            if (skillIds.Length > 0)
-            {
-                _logger.LogDebug("Loading {Count} skill entities", skillIds.Length);
-                var skillTasks = skillIds.Select(id => _skillService.GetSkillAsync(id, cancellationToken));
-                var skillResults = await Task.WhenAll(skillTasks);
-                skills = skillResults.Where(s => s != null).Cast<AnalysisSkill>().ToArray();
+            // Start all three sub-loads concurrently — they are independent Dataverse reads
+            var skillsTask = skillIds.Length > 0
+                ? Task.WhenAll(skillIds.Select(id => _skillService.GetSkillAsync(id, cancellationToken)))
+                : Task.FromResult(Array.Empty<AnalysisSkill?>());
 
-                _logger.LogDebug(
-                    "Resolved {SkillCount} skills: {SkillNames}",
-                    skills.Length, string.Join(", ", skills.Select(s => s.Name)));
-            }
+            var knowledgeTask = knowledgeIds.Length > 0
+                ? Task.WhenAll(knowledgeIds.Select(id => _knowledgeService.GetKnowledgeAsync(id, cancellationToken)))
+                : Task.FromResult(Array.Empty<AnalysisKnowledge?>());
 
-            var knowledge = Array.Empty<AnalysisKnowledge>();
-            if (knowledgeIds.Length > 0)
-            {
-                _logger.LogDebug("Loading {Count} knowledge entities", knowledgeIds.Length);
-                var knowledgeTasks = knowledgeIds.Select(id => _knowledgeService.GetKnowledgeAsync(id, cancellationToken));
-                var knowledgeResults = await Task.WhenAll(knowledgeTasks);
-                knowledge = knowledgeResults.Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
+            var toolsTask = toolIds.Length > 0
+                ? Task.WhenAll(toolIds.Select(id => _toolService.GetToolAsync(id, cancellationToken)))
+                : Task.FromResult(Array.Empty<AnalysisTool?>());
 
-                _logger.LogDebug(
-                    "Resolved {KnowledgeCount} knowledge sources: {KnowledgeNames}",
-                    knowledge.Length, string.Join(", ", knowledge.Select(k => k.Name)));
-            }
+            await Task.WhenAll(skillsTask, knowledgeTask, toolsTask);
 
-            var tools = Array.Empty<AnalysisTool>();
-            if (toolIds.Length > 0)
-            {
-                _logger.LogDebug("Loading {Count} tool entities", toolIds.Length);
-                var toolTasks = toolIds.Select(id => _toolService.GetToolAsync(id, cancellationToken));
-                var toolResults = await Task.WhenAll(toolTasks);
-                tools = toolResults.Where(t => t != null).Cast<AnalysisTool>().ToArray();
-
-                _logger.LogDebug(
-                    "Resolved {ToolCount} tools: {ToolNames}",
-                    tools.Length, string.Join(", ", tools.Select(t => t.Name)));
-            }
+            var skills = (await skillsTask).Where(s => s != null).Cast<AnalysisSkill>().ToArray();
+            var knowledge = (await knowledgeTask).Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
+            var tools = (await toolsTask).Where(t => t != null).Cast<AnalysisTool>().ToArray();
 
             _logger.LogInformation(
                 "Scope resolution complete: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",

@@ -439,6 +439,7 @@ public static class AnalysisEndpoints
 /// <param name="Error">Error message (set on error event).</param>
 /// <param name="PartialStorage">Whether storage partially succeeded (outputs in sprk_analysisoutput but field mapping failed). Set on done event for Document Profile.</param>
 /// <param name="StorageMessage">User-friendly message about storage result. Set when PartialStorage is true.</param>
+/// <param name="Step">Pipeline step identifier for progress events (e.g. "extracting_text"). Set on progress events.</param>
 public record AnalysisStreamChunk(
     string Type,
     string? Content,
@@ -448,7 +449,8 @@ public record AnalysisStreamChunk(
     TokenUsage? TokenUsage = null,
     string? Error = null,
     bool? PartialStorage = null,
-    string? StorageMessage = null)
+    string? StorageMessage = null,
+    string? Step = null)
 {
     public static AnalysisStreamChunk Metadata(Guid analysisId, string documentName) =>
         new("metadata", null, false, AnalysisId: analysisId, DocumentName: documentName);
@@ -469,6 +471,13 @@ public record AnalysisStreamChunk(
 
     public static AnalysisStreamChunk FromError(string error) =>
         new("error", null, true, Error: error);
+
+    public static AnalysisStreamChunk Progress(string step, string message) =>
+        new("progress", message, false, Step: step);
+
+    /// <summary>Final structured result payload (used by non-analysis SSE endpoints e.g. summarize).</summary>
+    public static AnalysisStreamChunk Result(string jsonContent) =>
+        new("result", jsonContent, false);
 }
 
 /// <summary>

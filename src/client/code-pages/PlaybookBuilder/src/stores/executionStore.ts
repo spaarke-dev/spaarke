@@ -36,6 +36,8 @@ export type ExecutionEventType =
 /** Node execution state */
 export interface NodeExecutionState {
     nodeId: string;
+    /** Display name from the SSE event (e.g. "Risk Assessment Node"). */
+    nodeName?: string;
     status: NodeExecutionStatus;
     startedAt?: string;
     completedAt?: string;
@@ -141,6 +143,7 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
                     if (nodeId) {
                         newNodeStates.set(nodeId, {
                             nodeId,
+                            nodeName: event.nodeName,
                             status: "running",
                             startedAt: event.timestamp,
                             progress: 0,

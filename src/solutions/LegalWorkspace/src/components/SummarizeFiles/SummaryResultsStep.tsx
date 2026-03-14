@@ -17,13 +17,16 @@ import {
   makeStyles,
   MessageBar,
   MessageBarBody,
-  Spinner,
   Text,
   tokens,
 } from '@fluentui/react-components';
 import { SparkleRegular } from '@fluentui/react-icons';
+import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from '@spaarke/ui-components';
 import type { ISummarizeResult } from './summarizeTypes';
 import type { SummarizeStatus } from './summarizeTypes';
+
+// Step IDs match DOCUMENT_ANALYSIS_STEPS from the shared library
+const ALL_STEP_IDS = DOCUMENT_ANALYSIS_STEPS.map((s) => s.id);
 
 // ---------------------------------------------------------------------------
 // Props
@@ -34,6 +37,10 @@ export interface ISummaryResultsStepProps {
   result: ISummarizeResult | null;
   errorMessage: string | null;
   onRetry: () => void;
+  /** Active step ID driven by SSE progress events from the parent. */
+  activeStepId: string | null;
+  /** Completed step IDs driven by SSE progress events from the parent. */
+  completedStepIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +147,8 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
   result,
   errorMessage,
   onRetry,
+  activeStepId,
+  completedStepIds,
 }) => {
   const styles = useStyles();
 
@@ -147,10 +156,14 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
   if (status === 'loading') {
     return (
       <div className={styles.loadingContainer}>
-        <Spinner size="large" label="Analyzing files..." labelPosition="below" />
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          The AI is reading and summarizing your documents. This may take a moment.
-        </Text>
+        <AiProgressStepper
+          variant="inline"
+          steps={DOCUMENT_ANALYSIS_STEPS}
+          activeStepId={activeStepId}
+          completedStepIds={completedStepIds}
+          title="Analyzing Files"
+          isStreaming
+        />
       </div>
     );
   }
