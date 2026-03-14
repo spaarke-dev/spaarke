@@ -331,7 +331,7 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = if (empty(ac
     emailReceivers: [
       {
         name: 'Admin Email'
-        emailAddress: 'admin@contoso.com'
+        emailAddress: 'admin-dev@spaarke.com'
         useCommonAlertSchema: true
       }
     ]

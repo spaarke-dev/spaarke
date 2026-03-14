@@ -19,7 +19,7 @@ This document provides a comprehensive visual representation of the authenticati
 │                                                                             │
 │                          SPAARKE AUTHENTICATION FLOW                        │
 │                                                                             │
-│  User: ralph.schroeder@spaarke.com                                         │
+│  User: admin-dev@spaarke.com                                         │
 │  Tenant: a221a95e-6abc-4434-aecc-e48338a1b2f2                              │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -241,7 +241,7 @@ This document provides a comprehensive visual representation of the authenticati
          │  Issues:                                         │
          │  • New token for Microsoft Graph                 │
          │  • Audience: https://graph.microsoft.com         │
-         │  • On behalf of: ralph.schroeder@spaarke.com     │
+         │  • On behalf of: admin-dev@spaarke.com     │
          │  • Scopes: Files.*, Sites.*                      │
          │  • Expires: 1 hour                               │
          │                                                  │
@@ -249,7 +249,7 @@ This document provides a comprehensive visual representation of the authenticati
                           │
                           │ ⑤ Graph Token Issued
                           │    JWT: Audience = https://graph.microsoft.com
-                          │    Delegated: ralph.schroeder@spaarke.com
+                          │    Delegated: admin-dev@spaarke.com
                           │
                           ▼
          ┌──────────────────────────────────────────────────┐
@@ -282,7 +282,7 @@ This document provides a comprehensive visual representation of the authenticati
          │                                                  │
          │  Permission Check:                               │
          │  • Token has Files.ReadWrite.All (Delegated)     │
-         │  • User = ralph.schroeder@spaarke.com            │
+         │  • User = admin-dev@spaarke.com            │
          │  • Check user's SharePoint permissions           │
          │                                                  │
          └────────────────┬─────────────────────────────────┘
@@ -402,7 +402,7 @@ Payload:
   "azp": "170c98e1-d486-4355-bcbe-170454e0207c",  // Dataverse App
   "name": "Ralph Schroeder",
   "oid": "...",
-  "preferred_username": "ralph.schroeder@spaarke.com",
+  "preferred_username": "admin-dev@spaarke.com",
   "rh": "...",
   "scp": "user_impersonation",  // Scope granted
   "sub": "...",
@@ -445,7 +445,7 @@ Payload:
   "idtyp": "user",  // On behalf of user
   "name": "Ralph Schroeder",
   "oid": "...",
-  "preferred_username": "ralph.schroeder@spaarke.com",
+  "preferred_username": "admin-dev@spaarke.com",
   "scp": "Files.Read.All Files.ReadWrite.All Sites.Read.All Sites.ReadWrite.All",  // Delegated scopes
   "sub": "...",
   "tid": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
@@ -482,7 +482,7 @@ Signature: (verified using Azure AD public key)
 | **Tenant** | spaarke.com | a221a95e-6abc-4434-aecc-e48338a1b2f2 |
 | **App Registration** | Sparke DSM-SPE Dev 2 | 170c98e1-d486-4355-bcbe-170454e0207c |
 | **App Registration** | SPE BFF API | 1e40baad-e065-4aea-a8d4-4b7ab273458c |
-| **User** | ralph.schroeder@spaarke.com | (Object ID in Azure AD) |
+| **User** | admin-dev@spaarke.com | (Object ID in Azure AD) |
 
 ### Dataverse Resources
 
@@ -585,7 +585,7 @@ Signature: (verified using Azure AD public key)
 ### User Permissions (Delegated)
 
 ```
-User: ralph.schroeder@spaarke.com
+User: admin-dev@spaarke.com
   │
   ├─> Dataverse
   │     └─> Has access to: sprk_document table (via security role)

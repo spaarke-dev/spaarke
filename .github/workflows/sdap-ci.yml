@@ -4,8 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
-      - master  # Current main branch
+      - master
 
 permissions:
   contents: read
@@ -129,7 +128,7 @@ jobs:
 
       - name: ADR architecture tests (NetArchTest)
         id: adr-tests
-        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-restore --logger "trx;LogFileName=adr-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --logger "trx;LogFileName=adr-results.trx" --results-directory ./TestResults
         continue-on-error: true  # Don't block PR - violations reported via comment
 
       - name: Upload ADR test results
@@ -137,6 +136,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: adr-test-results
+          if-no-files-found: warn
           path: ./TestResults/adr-results.trx
 
       - name: Plugin size validation
@@ -218,6 +218,7 @@ jobs:
     steps:
       - name: Download test results
         uses: actions/download-artifact@v7
+        continue-on-error: true
         with:
           name: adr-test-results
           path: ./test-results
