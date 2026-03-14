@@ -154,7 +154,7 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Download coverage artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: coverage-reports
           path: ./coverage
@@ -342,7 +342,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: ./artifacts
         continue-on-error: true
