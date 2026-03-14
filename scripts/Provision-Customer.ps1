@@ -834,33 +834,173 @@ function Invoke-Step7_ImportSolutions {
 function Invoke-Step8_ProvisionSPEContainers {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 8 "Provisioning SPE (SharePoint Embedded) containers"
+    Write-StepHeader 8 "Provisioning SPE container for root business unit"
 
-    # SPE container provisioning is done via the BFF API after it's configured
-    # for this customer. At this stage, we register the container type.
-    # Actual container creation happens when users interact with the app.
+    # Each business unit gets one SPE container. During provisioning, we create
+    # the container for the root BU. Additional BU containers are created via
+    # New-BusinessUnitContainer.ps1 when new BUs are added.
 
-    Write-Log "SPE container provisioning requires BFF API integration." -Level INFO
-    Write-Log "Container types are registered during BFF API configuration." -Level INFO
-    Write-Log "Validating BFF API is reachable at $BffApiBaseUrl..."
+    # 1. Get container type ID from platform Key Vault
+    Write-Log "Retrieving SPE container type ID from Key Vault ($PlatformKeyVaultName)..."
+
+    $containerTypeId = az keyvault secret show `
+        --vault-name $PlatformKeyVaultName `
+        --name "Spe--ContainerTypeId" `
+        --query value -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerTypeId)) {
+        Write-Log "Failed to retrieve Spe--ContainerTypeId from Key Vault: $containerTypeId" -Level ERROR
+        Write-Log "Ensure the container type has been created and its ID stored in Key Vault." -Level ERROR
+        Write-Log "See: scripts/Create-NewContainerType.ps1 or Create-ContainerType-PowerShell.ps1" -Level INFO
+        throw "SPE container type ID not found in Key Vault"
+    }
+
+    Write-Log "Container Type ID: $containerTypeId" -Level INFO
+
+    # 2. Get Graph API token via service principal (uses az CLI logged-in identity)
+    Write-Log "Acquiring Graph API access token..."
+
+    $graphToken = az account get-access-token `
+        --resource "https://graph.microsoft.com" `
+        --query accessToken -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($graphToken)) {
+        Write-Log "Failed to acquire Graph API token: $graphToken" -Level ERROR
+        throw "Cannot acquire Graph API token. Ensure az CLI is logged in with appropriate permissions."
+    }
+
+    Write-Log "Graph API token acquired." -Level SUCCESS
+
+    # 3. Create SPE container via Graph API
+    $containerDisplayName = "$DisplayName Documents"
+    Write-Log "Creating SPE container: '$containerDisplayName'..."
+
+    $createBody = @{
+        displayName     = $containerDisplayName
+        description     = "Document storage for $CustomerId"
+        containerTypeId = $containerTypeId
+    } | ConvertTo-Json
+
+    $graphHeaders = @{
+        "Authorization" = "Bearer $graphToken"
+        "Content-Type"  = "application/json"
+    }
 
     try {
-        $healthResponse = Invoke-WebRequest -Uri "$BffApiBaseUrl/healthz" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
-        if ($healthResponse.StatusCode -eq 200) {
-            Write-Log "BFF API is healthy. SPE container provisioning will be handled by the application." -Level SUCCESS
+        $container = Invoke-RestMethod `
+            -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" `
+            -Method Post `
+            -Headers $graphHeaders `
+            -Body $createBody `
+            -ErrorAction Stop
+
+        $containerId = $container.id
+        Write-Log "SPE container created: $containerId" -Level SUCCESS
+    }
+    catch {
+        Write-Log "Failed to create SPE container: $($_.Exception.Message)" -Level ERROR
+        if ($_.ErrorDetails.Message) {
+            Write-Log "Details: $($_.ErrorDetails.Message)" -Level ERROR
+        }
+        throw "SPE container creation failed"
+    }
+
+    # 4. Get Dataverse instance URL from prior steps
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+
+    if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
+        Write-Log "No Dataverse instance URL available. Cannot set sprk_containerid on business unit." -Level ERROR
+        Write-Log "Container was created ($containerId) but BU update must be done manually." -Level WARN
+        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+            -Outputs @{ SpeContainerId = $containerId }
+        return
+    }
+
+    # 5. Get Dataverse token
+    Write-Log "Acquiring Dataverse access token for $dataverseUrl..."
+
+    $dvToken = az account get-access-token `
+        --resource $dataverseUrl `
+        --query accessToken -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
+        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level WARN
+        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
+        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+            -Outputs @{ SpeContainerId = $containerId }
+        return
+    }
+
+    # 6. Find the root business unit (parentbusinessunitid eq null)
+    Write-Log "Finding root business unit in Dataverse..."
+
+    $dvHeaders = @{
+        "Authorization" = "Bearer $dvToken"
+        "Content-Type"  = "application/json"
+        "OData-MaxVersion" = "4.0"
+        "OData-Version"    = "4.0"
+    }
+
+    try {
+        $buResponse = Invoke-RestMethod `
+            -Uri "$dataverseUrl/api/data/v9.2/businessunits?`$filter=parentbusinessunitid eq null&`$select=businessunitid,name,sprk_containerid" `
+            -Headers $dvHeaders `
+            -Method Get `
+            -ErrorAction Stop
+
+        $rootBu = $buResponse.value | Select-Object -First 1
+
+        if (-not $rootBu) {
+            Write-Log "No root business unit found in Dataverse." -Level ERROR
+            throw "Root business unit not found"
+        }
+
+        Write-Log "Root BU: $($rootBu.name) ($($rootBu.businessunitid))" -Level INFO
+
+        # Check if already has a container ID (idempotent)
+        if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
+            Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid)" -Level WARN
+            Write-Log "Skipping BU update. New container ID: $containerId (not applied)." -Level WARN
+            Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (BU already set)" `
+                -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
+            return
         }
     }
     catch {
-        Write-Log "BFF API health check failed: $($_.Exception.Message)" -Level WARN
-        Write-Log "SPE containers will be provisioned when BFF API is configured for this customer." -Level WARN
+        Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
+        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
+        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+            -Outputs @{ SpeContainerId = $containerId }
+        return
     }
 
-    # Note: In the current architecture, SPE containers are created on-demand
-    # by the BFF API when a customer first accesses document storage.
-    # The container type registration is part of the app registration (Entra ID),
-    # not per-customer provisioning.
+    # 7. Set sprk_containerid on the root business unit
+    $rootBuId = $rootBu.businessunitid
+    Write-Log "Setting sprk_containerid=$containerId on BU $rootBuId..."
 
-    Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers"
+    try {
+        Invoke-RestMethod `
+            -Uri "$dataverseUrl/api/data/v9.2/businessunits($rootBuId)" `
+            -Headers $dvHeaders `
+            -Method Patch `
+            -Body (@{ sprk_containerid = $containerId } | ConvertTo-Json) `
+            -ErrorAction Stop
+
+        Write-Log "sprk_containerid set on root business unit." -Level SUCCESS
+    }
+    catch {
+        Write-Log "Failed to update business unit: $($_.Exception.Message)" -Level ERROR
+        Write-Log "Container created ($containerId) — update BU manually." -Level WARN
+    }
+
+    Write-Log "SPE provisioning complete. Container ID: $containerId" -Level SUCCESS
+
+    Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers" `
+        -Outputs @{ SpeContainerId = $containerId }
 }
 
 # ============================================================================

@@ -2,8 +2,11 @@
 # Purpose: Identify which Azure AD app owns the container type so we can register BFF API
 
 param(
-    [string]$ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06"
+    [Parameter(Mandatory)][string]$ContainerTypeId,
+    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
 )
+
+$adminUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"
 
 Write-Host "=== Finding Container Type Owner ===" -ForegroundColor Cyan
 Write-Host "Container Type ID: $ContainerTypeId" -ForegroundColor Gray
@@ -25,8 +28,7 @@ Write-Host "You'll be prompted to sign in with your user account (e.g., admin-de
 Write-Host ""
 
 # Construct admin center URL
-# For spaarke.sharepoint.com, admin center is spaarke-admin.sharepoint.com
-$adminUrl = "https://spaarke-admin.sharepoint.com"
+# Admin URL derived from SharePointDomain parameter above
 
 Write-Host "Connecting to: $adminUrl" -ForegroundColor Gray
 
@@ -213,6 +215,6 @@ try {
     Write-Host ""
     Write-Host "Troubleshooting:" -ForegroundColor Yellow
     Write-Host "  1. Make sure you're a SharePoint Admin or Global Admin" -ForegroundColor Gray
-    Write-Host "  2. Verify the tenant URL is correct (spaarke-admin.sharepoint.com)" -ForegroundColor Gray
+    Write-Host "  2. Verify the tenant URL is correct ($adminUrl)" -ForegroundColor Gray
     Write-Host "  3. Check if MFA is required for your account" -ForegroundColor Gray
 }

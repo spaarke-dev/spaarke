@@ -1,28 +1,30 @@
-# Create New Container Type for OBO Flow
-# Owner: PCF App (so it can register BFF API immediately)
+# Create New Container Type for SPE Document Storage
+# Owner: BFF API app (performs all server-side Graph operations)
+# Creates container type, registers owning app, and optionally creates a test container
 
 param(
-    [string]$OwningAppId = "170c98e1-d486-4355-bcbe-170454e0207c",
-    [string]$OwningAppSecret = "~Ac8Q~JGnsrvNEODvFo8qmtKbgj1PmwmJ6GVUaJj",
-    [string]$BffApiAppId = "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-    [string]$DisplayName = "Spaarke Document Storage (OBO)",
-    [string]$Description = "Container type for document storage via OBO flow - owned by PCF app"
+    [Parameter(Mandatory)][string]$OwningAppId,
+    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+    [Parameter(Mandatory)][string]$OwningAppSecret,
+    [Parameter(Mandatory)][string]$TenantId,
+    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
+    [string]$DisplayName = "Spaarke Document Storage",
+    [string]$Description = "Container type for document storage - owned by BFF API app",
+    [switch]$CreateTestContainer = $false
 )
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE NEW CONTAINER TYPE" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "This will create a NEW container type owned by PCF app," -ForegroundColor White
-Write-Host "allowing immediate registration of BFF API." -ForegroundColor White
+Write-Host "This will create a NEW container type owned by the BFF API app." -ForegroundColor White
 Write-Host ""
-Write-Host "Owning App:  $OwningAppId (PCF)" -ForegroundColor Gray
-Write-Host "Guest App:   $BffApiAppId (BFF API)" -ForegroundColor Gray
+Write-Host "Owning App:   $OwningAppId (BFF API)" -ForegroundColor Gray
 Write-Host "Display Name: $DisplayName" -ForegroundColor Gray
+Write-Host "SP Domain:    $SharePointDomain" -ForegroundColor Gray
 Write-Host ""
 
-# Step 1: Get Graph token for PCF app
+# Step 1: Get Graph token for owning app
 Write-Host "Step 1: Getting Graph API access token..." -ForegroundColor Yellow
 
 $tokenBody = @{
@@ -40,7 +42,7 @@ try {
 
     $graphToken = $graphTokenResponse.access_token
 
-    Write-Host "✅ Got Graph access token" -ForegroundColor Green
+    Write-Host "Got Graph access token" -ForegroundColor Green
     Write-Host ""
 
     # Step 2: Create container type via Graph API
@@ -61,7 +63,6 @@ try {
     $createUri = "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes"
 
     Write-Host "Calling: POST $createUri" -ForegroundColor Gray
-    Write-Host "Body: $containerTypeBody" -ForegroundColor Gray
     Write-Host ""
 
     $containerType = Invoke-RestMethod -Uri $createUri `
@@ -70,7 +71,7 @@ try {
         -Body $containerTypeBody `
         -ErrorAction Stop
 
-    Write-Host "✅ CONTAINER TYPE CREATED!" -ForegroundColor Green
+    Write-Host "CONTAINER TYPE CREATED!" -ForegroundColor Green
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
     Write-Host "NEW CONTAINER TYPE DETAILS" -ForegroundColor Cyan
@@ -90,7 +91,7 @@ try {
     $spTokenBody = @{
         client_id = $OwningAppId
         client_secret = $OwningAppSecret
-        scope = "https://spaarke.sharepoint.com/.default"
+        scope = "https://$SharePointDomain/.default"
         grant_type = "client_credentials"
     }
 
@@ -101,13 +102,12 @@ try {
 
     $spToken = $spTokenResponse.access_token
 
-    Write-Host "✅ Got SharePoint access token" -ForegroundColor Green
+    Write-Host "Got SharePoint access token" -ForegroundColor Green
     Write-Host ""
 
-    # Step 4: Register both PCF app and BFF API with new container type
-    Write-Host "Step 4: Registering applications with new container type..." -ForegroundColor Yellow
-    Write-Host "  - Owning App (PCF): Full permissions" -ForegroundColor Gray
-    Write-Host "  - Guest App (BFF API): WriteContent delegated" -ForegroundColor Gray
+    # Step 4: Register owning app with container type (full permissions)
+    Write-Host "Step 4: Registering owning app with container type..." -ForegroundColor Yellow
+    Write-Host "  - Owning App: Full delegated + Full appOnly permissions" -ForegroundColor Gray
 
     $registrationBody = @{
         value = @(
@@ -115,11 +115,6 @@ try {
                 appId = $OwningAppId
                 delegated = @("full")
                 appOnly = @("full")
-            },
-            @{
-                appId = $BffApiAppId
-                delegated = @("WriteContent", "ReadContent")
-                appOnly = @()
             }
         )
     } | ConvertTo-Json -Depth 3
@@ -130,7 +125,7 @@ try {
         "Accept" = "application/json"
     }
 
-    $regUri = "https://spaarke.sharepoint.com/_api/v2.1/storageContainerTypes/$newContainerTypeId/applicationPermissions"
+    $regUri = "https://$SharePointDomain/_api/v2.1/storageContainerTypes/$newContainerTypeId/applicationPermissions"
 
     Write-Host "Calling: PUT $regUri" -ForegroundColor Gray
     Write-Host ""
@@ -141,9 +136,9 @@ try {
         -Body $registrationBody `
         -ErrorAction Stop
 
-    Write-Host "✅ APPLICATIONS REGISTERED!" -ForegroundColor Green
+    Write-Host "APPLICATION REGISTERED!" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Registered Applications:" -ForegroundColor Cyan
+    Write-Host "Registered Application:" -ForegroundColor Cyan
     foreach ($app in $regResponse.value) {
         Write-Host "  - App ID: $($app.appId)" -ForegroundColor White
         Write-Host "    Delegated: $($app.delegated -join ', ')" -ForegroundColor Green
@@ -151,73 +146,64 @@ try {
         Write-Host ""
     }
 
-    # Step 5: Create a test container
-    Write-Host "Step 5: Creating test container..." -ForegroundColor Yellow
+    # Step 5: Optionally create a test container
+    if ($CreateTestContainer) {
+        Write-Host "Step 5: Creating test container..." -ForegroundColor Yellow
 
-    $testContainerBody = @{
-        displayName = "Spaarke Inc (New)"
-        description = "Test container for OBO flow"
-        containerTypeId = $newContainerTypeId
-    } | ConvertTo-Json
+        $testContainerBody = @{
+            displayName = "$DisplayName - Test"
+            description = "Test container for validation"
+            containerTypeId = $newContainerTypeId
+        } | ConvertTo-Json
 
-    $containerUri = "https://graph.microsoft.com/beta/storage/fileStorage/containers"
+        $testContainer = Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/storage/fileStorage/containers" `
+            -Method Post `
+            -Headers $headers `
+            -Body $testContainerBody `
+            -ErrorAction Stop
 
-    $testContainer = Invoke-RestMethod -Uri $containerUri `
-        -Method Post `
-        -Headers $headers `
-        -Body $testContainerBody `
-        -ErrorAction Stop
-
-    Write-Host "✅ TEST CONTAINER CREATED!" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "Container ID:   $($testContainer.id)" -ForegroundColor Yellow
-    Write-Host "Display Name:   $($testContainer.displayName)" -ForegroundColor White
-    Write-Host "Status:         $($testContainer.status)" -ForegroundColor Green
-    Write-Host ""
+        Write-Host "TEST CONTAINER CREATED!" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Container ID:   $($testContainer.id)" -ForegroundColor Yellow
+        Write-Host "Display Name:   $($testContainer.displayName)" -ForegroundColor White
+        Write-Host "Status:         $($testContainer.status)" -ForegroundColor Green
+        Write-Host ""
+    }
 
     # Final summary
     Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host "SUCCESS - READY TO TEST!" -ForegroundColor Cyan
+    Write-Host "SUCCESS" -ForegroundColor Cyan
     Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "NEW CONTAINER TYPE ID:" -ForegroundColor Yellow
-    Write-Host "  $newContainerTypeId" -ForegroundColor White
-    Write-Host ""
-    Write-Host "NEW CONTAINER ID:" -ForegroundColor Yellow
-    Write-Host "  $($testContainer.id)" -ForegroundColor White
+    Write-Host "Container Type ID: $newContainerTypeId" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "NEXT STEPS:" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "1. Update PCF Control configuration (if needed):" -ForegroundColor White
-    Write-Host "   - Use new container ID in Quick Create form" -ForegroundColor Gray
+    Write-Host "1. Store container type ID in Key Vault:" -ForegroundColor White
+    Write-Host "   az keyvault secret set --vault-name <name> --name 'Spe--ContainerTypeId' --value '$newContainerTypeId'" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "2. Test OBO file upload:" -ForegroundColor White
-    Write-Host "   PUT /api/obo/containers/$($testContainer.id)/files/test.txt" -ForegroundColor Gray
+    Write-Host "2. Create a container for the root business unit:" -ForegroundColor White
+    Write-Host "   .\New-BusinessUnitContainer.ps1 -ContainerTypeId '$newContainerTypeId' ..." -ForegroundColor Gray
     Write-Host ""
-    Write-Host "3. Expected result: HTTP 200 OK (no 403!)" -ForegroundColor White
-    Write-Host ""
-    Write-Host "4. Grant yourself permissions on new container:" -ForegroundColor White
-    Write-Host "   POST /containers/$($testContainer.id)/permissions" -ForegroundColor Gray
-    Write-Host "   (Add yourself as owner)" -ForegroundColor Gray
+    Write-Host "3. Test file upload via BFF API:" -ForegroundColor White
+    Write-Host "   PUT /api/containers/{containerId}/files/test.txt" -ForegroundColor Gray
     Write-Host ""
 
     # Save configuration
     $config = @{
         ContainerTypeId = $newContainerTypeId
-        ContainerId = $testContainer.id
         OwningAppId = $OwningAppId
-        BffApiAppId = $BffApiAppId
         CreatedDateTime = $containerType.createdDateTime
     }
 
-    $configPath = "c:\code_files\spaarke\scripts\new-container-type-config.json"
+    $configPath = Join-Path $PSScriptRoot "new-container-type-config.json"
     $config | ConvertTo-Json -Depth 3 | Out-File -FilePath $configPath -Encoding UTF8
 
     Write-Host "Configuration saved to: $configPath" -ForegroundColor Gray
     Write-Host ""
 
 } catch {
-    Write-Host "❌ ERROR" -ForegroundColor Red
+    Write-Host "ERROR" -ForegroundColor Red
     Write-Host ""
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
 
@@ -253,12 +239,11 @@ try {
     Write-Host "Common Issues:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "1. Missing Graph permissions:" -ForegroundColor White
-    Write-Host "   - PCF app needs FileStorageContainer.Selected (app-only)" -ForegroundColor Gray
+    Write-Host "   - Owning app needs FileStorageContainer.Selected (app-only)" -ForegroundColor Gray
     Write-Host "   - Check Azure Portal > App Registrations > API Permissions" -ForegroundColor Gray
     Write-Host ""
     Write-Host "2. Missing SharePoint permissions:" -ForegroundColor White
-    Write-Host "   - PCF app needs Container.Selected (app-only)" -ForegroundColor Gray
-    Write-Host "   - Should already have this based on earlier confirmation" -ForegroundColor Gray
+    Write-Host "   - Owning app needs Container.Selected (app-only)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "3. Admin consent not granted:" -ForegroundColor White
     Write-Host "   - Check permissions show 'Granted' status" -ForegroundColor Gray

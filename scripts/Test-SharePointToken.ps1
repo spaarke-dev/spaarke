@@ -1,23 +1,27 @@
 # Test SharePoint token validity
 
-$clientId = "170c98e1-d486-4355-bcbe-170454e0207c"
-$clientSecret = "~Ac8Q~JGnsrvNEODvFo8qmtKbgj1PmwmJ6GVUaJj"
-$tenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"
-$containerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06"
+param(
+    [Parameter(Mandatory)][string]$ClientId,
+    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+    [Parameter(Mandatory)][string]$ClientSecret,
+    [Parameter(Mandatory)][string]$TenantId,
+    [Parameter(Mandatory)][string]$ContainerTypeId,
+    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
+)
 
 Write-Host "Testing SharePoint token..." -ForegroundColor Cyan
 
 # Get token
 $tokenBody = @{
-    client_id = $clientId
-    client_secret = $clientSecret
-    scope = "https://spaarke.sharepoint.com/.default"
+    client_id = $ClientId
+    client_secret = $ClientSecret
+    scope = "https://$SharePointDomain/.default"
     grant_type = "client_credentials"
 }
 
 try {
     $tokenResponse = Invoke-RestMethod `
-        -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
+        -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
         -Method Post `
         -Body $tokenBody
 
@@ -48,7 +52,7 @@ try {
         "Accept" = "application/json"
     }
 
-    $uri = "https://spaarke.sharepoint.com/_api/v2.1/storageContainerTypes/$containerTypeId/applicationPermissions"
+    $uri = "https://$SharePointDomain/_api/v2.1/storageContainerTypes/$ContainerTypeId/applicationPermissions"
 
     $result = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers -ErrorAction Stop
 

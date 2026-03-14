@@ -1,7 +1,7 @@
 # HOW TO: Setup SharePoint Embedded Container Types and Containers
 
-**Version:** 1.0
-**Last Updated:** 2025-10-09
+**Version:** 2.0
+**Last Updated:** 2026-03-14
 **Author:** Claude Code Session
 **Status:** Production Guide
 
@@ -11,11 +11,11 @@
 2. [Prerequisites](#prerequisites)
 3. [Container Type Architecture](#container-type-architecture)
 4. [Step-by-Step Setup Guide](#step-by-step-setup-guide)
-5. [Critical Pitfalls & Solutions](#critical-pitfalls--solutions)
-6. [Registration Scripts](#registration-scripts)
-7. [Verification & Testing](#verification--testing)
-8. [Troubleshooting](#troubleshooting)
-9. [AI Assistant Prompts](#ai-assistant-prompts)
+5. [Business Unit Container Provisioning](#business-unit-container-provisioning)
+6. [Critical Pitfalls & Solutions](#critical-pitfalls--solutions)
+7. [Scripts Reference](#scripts-reference)
+8. [Verification & Testing](#verification--testing)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -25,31 +25,39 @@ SharePoint Embedded (SPE) uses **Container Types** and **Containers** to organiz
 
 - **Container Type**: A template/blueprint that defines how containers behave (owned by one application)
 - **Container**: An instance of a Container Type that actually stores files (like a SharePoint site)
+- **Business Unit**: Each Dataverse business unit gets one SPE container, referenced by `sprk_containerid`
 
 ### Key Concepts
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Container Type                          │
-│  - Owned by ONE Azure AD Application (PCF app)              │
-│  - Can have multiple GUEST applications registered          │
-│  - Container Type ID: e.g., d26c1e41-4e5e-4b15-8a4b-...     │
+│  - Owned by ONE Azure AD Application (BFF API app)          │
+│  - Owning app has full delegated + full appOnly permissions  │
+│  - Container Type ID stored in Key Vault                     │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ creates instances
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                         Container                            │
-│  - Instance of Container Type                                │
-│  - Stores actual files                                       │
-│  - Container ID (Drive ID): e.g., b!yLRdWEOAdka...          │
+│  - One per Business Unit                                     │
+│  - Stores actual files (documents, uploads)                  │
+│  - Container ID stored in businessunit.sprk_containerid      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Application Roles
 
-1. **Owning Application**: The PCF application that creates and owns the Container Type
-2. **Guest Applications**: Other applications (like BFF API) that need access to containers
+In Spaarke's architecture, the **BFF API app** is the single owning application:
+
+| Role | Application | Permissions |
+|------|-------------|-------------|
+| **Owning App** | BFF API (`spaarke-bff-api-{env}`) | `full` delegated + `full` appOnly |
+
+The BFF API performs all server-side SPE operations: container creation, file upload/download (OBO flow), and metadata queries. There is no separate "guest app" — the BFF API owns the container type and accesses containers directly.
+
+> **History**: In dev (October 2025), a PCF app (`170c98e1`) was the owning app and BFF API was a guest. This model is retired. For production, BFF API is the owning app.
 
 ---
 
@@ -60,465 +68,234 @@ SharePoint Embedded (SPE) uses **Container Types** and **Containers** to organiz
 Before starting, gather:
 
 ```yaml
-# PCF Application (Owning App)
-PCF_APP_ID: "your-pcf-app-id"
-PCF_APP_NAME: "Spaarke PCF Controls"
-
-# BFF API Application (Guest App)
-BFF_APP_ID: "your-bff-api-app-id"
+# BFF API Application (Owning App)
+BFF_APP_ID: "<spaarke-bff-api-{env}-client-id>"
 BFF_APP_NAME: "Spaarke BFF API"
-BFF_CLIENT_SECRET: "your-bff-client-secret"  # ⚠️ DEPRECATED - Use certificate
-BFF_CERTIFICATE_THUMBPRINT: "your-cert-thumbprint"  # ✅ REQUIRED
-
-# Container Type
-CONTAINER_TYPE_ID: "your-container-type-id"  # Generated during creation
-CONTAINER_TYPE_NAME: "SpaarkeDocuments"
+# Retrieve secret from Key Vault:
+#   az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
 
 # Tenant
-TENANT_ID: "your-tenant-id"
-ADMIN_UPN: "admin@yourtenant.onmicrosoft.com"
+TENANT_ID: "<your-azure-ad-tenant-id>"
+SHAREPOINT_DOMAIN: "<tenant>.sharepoint.com"  # e.g., "spaarke.sharepoint.com"
+
+# Container Type (generated during creation)
+CONTAINER_TYPE_ID: "<guid>"  # Stored in Key Vault as Spe--ContainerTypeId
 ```
 
 ### Required Permissions
 
-#### PCF Application (Owning App)
-```json
-{
-  "requiredResourceAccess": [
-    {
-      "resourceAppId": "00000003-0000-0000-c000-000000000000",
-      "resourceAccess": [
-        {
-          "id": "40dc41bc-0f7e-42ff-89bd-d9516947e474",
-          "type": "Scope"  // FileStorageContainer.Selected
-        }
-      ]
-    }
-  ]
-}
-```
+The BFF API app registration needs:
 
-#### BFF API Application (Guest App)
-```json
-{
-  "requiredResourceAccess": [
-    {
-      "resourceAppId": "00000003-0000-0000-c000-000000000000",
-      "resourceAccess": [
-        {
-          "id": "085ca537-6565-41c2-aca7-db852babc212",
-          "type": "Scope"  // Container.Selected (delegated)
-        }
-      ]
-    }
-  ]
-}
-```
+| Permission | Type | Resource | Purpose |
+|-----------|------|----------|---------|
+| `FileStorageContainer.Selected` | Application | Microsoft Graph | Create/access SPE containers |
+| `Container.Selected` | Application | SharePoint | Register app with container types |
+
+Grant admin consent for both permissions in Azure Portal > App Registrations > API Permissions.
 
 ### Required Tools
 
 - **PowerShell 7+**
-- **Azure CLI** or **PowerShell Az module**
-- **PAC CLI** (for Container Type creation via Dataverse)
-- **Postman** or **curl** (for API testing)
-- **.pfx certificate** (for BFF API authentication)
+- **Azure CLI** (`az`)
+- **SharePoint Online Management Shell** (for container type creation via PowerShell)
+- **PnP PowerShell** (optional, for discovery scripts)
 
 ---
 
 ## Container Type Architecture
 
-### Authentication Methods
+### Ownership Model
 
-| Operation | Authentication Method | Why |
-|-----------|----------------------|-----|
-| Container Type Management | ✅ **Certificate** | Microsoft Graph requires certificate auth for Container Type APIs |
-| File Upload/Download (OBO) | ✅ **Client Secret or Certificate** | Works with either, but certificate is more secure |
-| PCF Control Access | ✅ **User Delegated** | Uses user's token via Xrm.WebApi |
+The BFF API is the **owning application** for the container type. This means:
 
-### ⚠️ CRITICAL PITFALL #1: Client Secret vs Certificate
+1. BFF API authenticates with **client credentials** (client secret via Key Vault)
+2. BFF API can create containers, manage permissions, and perform all CRUD operations
+3. No separate "guest" registration is needed — the owner has full access
+4. Container type management (registration) uses the SharePoint API, not Graph API
 
-**Problem:**
-```powershell
-# ❌ THIS WILL FAIL for Container Type management
-$body = @{
-    client_id     = $BffApiAppId
-    client_secret = $BffApiClientSecret
-    scope         = "https://graph.microsoft.com/.default"
-    grant_type    = "client_credentials"
-}
+### Registration Flow
+
+```
+1. Create Container Type (SPO Management Shell or Graph API)
+   └── Output: ContainerTypeId (GUID)
+
+2. Register Owning App with Container Type (SharePoint API)
+   └── PUT /_api/v2.1/storageContainerTypes/{id}/applicationPermissions
+   └── Body: { appId: BFF_APP_ID, delegated: ["full"], appOnly: ["full"] }
+
+3. Store ContainerTypeId in Key Vault
+   └── Spe--ContainerTypeId = <guid>
+
+4. Configure BFF API App Setting
+   └── Spe__ContainerTypeId = @Microsoft.KeyVault(...)
 ```
 
-**Error:**
+### Container-to-Business-Unit Mapping
+
+Each **Dataverse business unit** has exactly one SPE container:
+
 ```
-403 Forbidden: The application does not have permission to perform this operation
+Business Unit (Dataverse)          SPE Container (SharePoint Embedded)
+┌──────────────────────────┐       ┌──────────────────────────┐
+│ Root BU                  │──────>│ "Root BU Documents"      │
+│ sprk_containerid = abc123│       │ Container ID: abc123     │
+└──────────────────────────┘       └──────────────────────────┘
+
+┌──────────────────────────┐       ┌──────────────────────────┐
+│ Child BU                 │──────>│ "Child BU Documents"     │
+│ sprk_containerid = def456│       │ Container ID: def456     │
+└──────────────────────────┘       └──────────────────────────┘
 ```
 
-**Solution:**
-```powershell
-# ✅ THIS WORKS - Use certificate authentication
-$certThumbprint = "YOUR_CERT_THUMBPRINT"
-$cert = Get-ChildItem -Path "Cert:\CurrentUser\My\$certThumbprint"
-
-# Build JWT assertion signed with certificate
-$token = Get-MsalToken -ClientId $BffApiAppId `
-                       -TenantId $TenantId `
-                       -ClientCertificate $cert `
-                       -Scopes "https://graph.microsoft.com/.default"
-```
-
-### Registration Requirements
-
-**Container Type Registration** requires registering BOTH applications:
-
-1. **Owning App (PCF)**: Full permissions (owner)
-2. **Guest App (BFF API)**: Limited permissions (read/write content)
-
-```json
-{
-  "value": [
-    {
-      "appId": "PCF_APP_ID",
-      "delegated": ["full"],
-      "appOnly": ["full"]
-    },
-    {
-      "appId": "BFF_APP_ID",
-      "delegated": ["ReadContent", "WriteContent"],
-      "appOnly": ["none"]
-    }
-  ]
-}
-```
+**How containers are resolved at runtime:**
+- Document Upload Wizard: `AssociateToStep.tsx` → `resolveBusinessUnitContainerId()` → reads user's BU → gets `sprk_containerid`
+- Legal Workspace: `xrmProvider.ts` → `getSpeContainerIdFromBusinessUnit()` → same lookup
 
 ---
 
 ## Step-by-Step Setup Guide
 
-### Phase 1: Create Container Type (via Dataverse)
+### Phase 1: Create Container Type
 
-**Note:** Container Types should be created through Dataverse, not directly via Graph API.
+**[HUMAN]** Requires SharePoint Administrator or Global Administrator. One-time operation per environment.
 
-1. **Create Container entity in Dataverse**
-
-```xml
-<!-- src/Entities/sprk_Container/Entity.xml -->
-<attribute PhysicalName="sprk_ContainerTypeId">
-  <Type>nvarchar</Type>
-  <Name>sprk_containertypeid</Name>
-  <MaxLength>100</MaxLength>
-  <RequiredLevel>required</RequiredLevel>
-</attribute>
-```
-
-2. **Deploy entity to Dataverse**
-
-```bash
-cd src/Entities
-pac solution init --publisher-name yourpublisher --publisher-prefix sprk
-pac solution add-reference --path ../Entities/sprk_Container
-msbuild /t:build /restore
-pac solution import --path bin/Release/YourSolution.zip
-```
-
-3. **Container Type is automatically created** when you create the first Container record in Dataverse (if using Dataverse integration for SPE)
-
-### Phase 2: Prepare Certificate for BFF API
-
-1. **Generate self-signed certificate** (for development)
+**Option A: PowerShell (recommended)**
 
 ```powershell
-# Generate certificate
-$cert = New-SelfSignedCertificate -Subject "CN=SpeBffApi" `
-                                   -CertStoreLocation "Cert:\CurrentUser\My" `
-                                   -KeyExportPolicy Exportable `
-                                   -KeySpec Signature `
-                                   -KeyLength 2048 `
-                                   -KeyAlgorithm RSA `
-                                   -HashAlgorithm SHA256 `
-                                   -NotAfter (Get-Date).AddYears(2)
-
-# Export certificate
-$certPath = "C:\Certs\SpeBffApi.pfx"
-$certPassword = ConvertTo-SecureString -String "YourPassword" -Force -AsPlainText
-Export-PfxCertificate -Cert $cert -FilePath $certPath -Password $certPassword
-
-# Get thumbprint
-$cert.Thumbprint
+.\scripts\Create-ContainerType-PowerShell.ps1 `
+    -ContainerTypeName "Spaarke Document Storage" `
+    -OwningAppId "<bff-api-client-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
 ```
 
-2. **Upload certificate to Azure AD Application**
-
-```bash
-# Via Azure CLI
-az ad app credential reset --id $BFF_APP_ID --cert @C:\Certs\SpeBffApi.cer
-
-# Or via Azure Portal:
-# Azure AD > App Registrations > [BFF API App] > Certificates & secrets > Upload certificate
-```
-
-### Phase 3: Register BFF API with Container Type
-
-Use the PowerShell script below to register the BFF API as a guest application.
-
-**File:** `scripts/Register-BffApi-WithCertificate.ps1`
+**Option B: Graph API**
 
 ```powershell
-<#
-.SYNOPSIS
-    Register BFF API with SharePoint Embedded Container Type using certificate authentication
-.DESCRIPTION
-    Registers the BFF API as a guest application with the Container Type.
-    Uses certificate authentication (required for Container Type management APIs).
-.PARAMETER ContainerTypeId
-    The Container Type ID (GUID)
-.PARAMETER BffApiAppId
-    The BFF API Application ID (GUID)
-.PARAMETER OwningAppId
-    The owning PCF Application ID (GUID)
-.PARAMETER CertificateThumbprint
-    Certificate thumbprint for authentication
-.PARAMETER TenantId
-    Azure AD Tenant ID
-#>
-
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$ContainerTypeId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$BffApiAppId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$OwningAppId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$CertificateThumbprint,
-
-    [Parameter(Mandatory=$true)]
-    [string]$TenantId
-)
-
-# Load certificate
-Write-Host "Loading certificate with thumbprint: $CertificateThumbprint"
-$cert = Get-ChildItem -Path "Cert:\CurrentUser\My\$CertificateThumbprint"
-if (-not $cert) {
-    Write-Error "Certificate not found: $CertificateThumbprint"
-    exit 1
-}
-
-# Build JWT assertion
-Write-Host "Building JWT assertion..."
-$now = [System.DateTime]::UtcNow
-$exp = $now.AddMinutes(10)
-
-$header = @{
-    alg = "RS256"
-    typ = "JWT"
-    x5t = [Convert]::ToBase64String($cert.GetCertHash())
-} | ConvertTo-Json -Compress
-
-$payload = @{
-    aud = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-    exp = [int][double]::Parse((Get-Date $exp -UFormat %s))
-    iss = $BffApiAppId
-    jti = [guid]::NewGuid()
-    nbf = [int][double]::Parse((Get-Date $now -UFormat %s))
-    sub = $BffApiAppId
-} | ConvertTo-Json -Compress
-
-# Encode and sign
-$headerEncoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($header)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-$payloadEncoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-$dataToSign = "$headerEncoded.$payloadEncoded"
-
-$rsa = $cert.PrivateKey
-$signature = $rsa.SignData([System.Text.Encoding]::UTF8.GetBytes($dataToSign), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-$signatureEncoded = [Convert]::ToBase64String($signature).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-
-$jwt = "$headerEncoded.$payloadEncoded.$signatureEncoded"
-
-# Get access token
-Write-Host "Getting access token with certificate authentication..."
-$tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-$tokenBody = @{
-    client_id = $BffApiAppId
-    client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-    client_assertion = $jwt
-    scope = "https://graph.microsoft.com/.default"
-    grant_type = "client_credentials"
-}
-
-$tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
-$accessToken = $tokenResponse.access_token
-
-# Register applications with Container Type
-Write-Host "Registering applications with Container Type..."
-$registerUrl = "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/$ContainerTypeId/applications"
-$registerBody = @{
-    value = @(
-        @{
-            appId = $OwningAppId
-            delegated = @("full")
-            appOnly = @("full")
-        },
-        @{
-            appId = $BffApiAppId
-            delegated = @("ReadContent", "WriteContent")
-            appOnly = @("none")
-        }
-    )
-} | ConvertTo-Json -Depth 3
-
-$headers = @{
-    "Authorization" = "Bearer $accessToken"
-    "Content-Type" = "application/json"
-}
-
-try {
-    $response = Invoke-RestMethod -Method Post -Uri $registerUrl -Headers $headers -Body $registerBody
-    Write-Host "✅ Successfully registered applications with Container Type" -ForegroundColor Green
-    Write-Host "Response:" -ForegroundColor Cyan
-    $response | ConvertTo-Json -Depth 10
-} catch {
-    Write-Error "❌ Failed to register applications: $_"
-    Write-Error "Response: $($_.Exception.Response)"
-    exit 1
-}
-
-# Verify registration
-Write-Host "`nVerifying registration..."
-$verifyUrl = "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/$ContainerTypeId/applications"
-$verifyResponse = Invoke-RestMethod -Method Get -Uri $verifyUrl -Headers $headers
-
-Write-Host "✅ Registered applications:" -ForegroundColor Green
-$verifyResponse.value | ForEach-Object {
-    Write-Host "  - App ID: $($_.appId)" -ForegroundColor Cyan
-    Write-Host "    Delegated: $($_.delegated -join ', ')" -ForegroundColor Gray
-    Write-Host "    AppOnly: $($_.appOnly -join ', ')" -ForegroundColor Gray
-}
+.\scripts\Create-NewContainerType.ps1 `
+    -OwningAppId "<bff-api-client-id>" `
+    -OwningAppSecret "<secret-from-key-vault>" `
+    -TenantId "<tenant-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
 ```
 
-**Usage:**
+**Output**: A new `ContainerTypeId` (GUID). Save this for subsequent steps.
+
+### Phase 2: Register Owning App with Container Type
+
+**[AI/HUMAN]** Register the BFF API as the owning app:
 
 ```powershell
-.\Register-BffApi-WithCertificate.ps1 `
-    -ContainerTypeId "d26c1e41-4e5e-4b15-8a4b-..." `
-    -BffApiAppId "your-bff-api-app-id" `
-    -OwningAppId "your-pcf-app-id" `
-    -CertificateThumbprint "ABC123..." `
-    -TenantId "your-tenant-id"
+.\scripts\Register-BffApiWithContainerType.ps1 `
+    -ContainerTypeId "<container-type-id>" `
+    -OwningAppId "<bff-api-client-id>" `
+    -OwningAppSecret "<secret-from-key-vault>" `
+    -TenantId "<tenant-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
 ```
 
-### Phase 4: Create Container Instance
+This calls `PUT /_api/v2.1/storageContainerTypes/{id}/applicationPermissions` to register the app with `full` delegated and `full` appOnly permissions.
 
-Once the Container Type is registered, create a container instance:
+### Phase 3: Store Container Type ID
 
-```http
-POST https://graph.microsoft.com/v1.0/storage/fileStorage/containers
-Authorization: Bearer {token}
-Content-Type: application/json
+**[AI]** Store in Key Vault and configure App Service:
 
-{
-  "containerTypeId": "d26c1e41-4e5e-4b15-8a4b-...",
-  "displayName": "Matter MRT.P0001US01 Documents",
-  "description": "Document container for matter MRT.P0001US01"
-}
+```powershell
+# Store in Key Vault
+az keyvault secret set `
+    --vault-name <platform-key-vault> `
+    --name "Spe--ContainerTypeId" `
+    --value "<container-type-id>"
+
+# Configure BFF API app setting
+az webapp config appsettings set `
+    -g <resource-group> `
+    -n <app-service-name> `
+    --settings "Spe__ContainerTypeId=@Microsoft.KeyVault(VaultName=<vault>;SecretName=Spe--ContainerTypeId)"
 ```
 
-**Response:**
+### Phase 4: Verify Setup
 
-```json
-{
-  "id": "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb...",
-  "containerTypeId": "d26c1e41-4e5e-4b15-8a4b-...",
-  "displayName": "Matter MRT.P0001US01 Documents",
-  "createdDateTime": "2025-10-09T12:00:00Z",
-  "status": "active"
-}
+```powershell
+# Check container type registration
+.\scripts\Check-ContainerType-Registration.ps1 `
+    -ContainerTypeId "<container-type-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com" `
+    -OwningAppId "<bff-api-client-id>"
+
+# Test SharePoint token and API access
+.\scripts\Test-SharePointToken.ps1 `
+    -ClientId "<bff-api-client-id>" `
+    -ClientSecret "<secret>" `
+    -TenantId "<tenant-id>" `
+    -ContainerTypeId "<container-type-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
+
+# Restart BFF API to pick up new config
+az webapp restart --name <app-service-name> --resource-group <resource-group>
 ```
 
-Store the container `id` (Drive ID) in Dataverse `sprk_graphdriveid` field.
+---
+
+## Business Unit Container Provisioning
+
+### During Initial Customer Provisioning
+
+`Provision-Customer.ps1` Step 8 automatically:
+1. Retrieves ContainerTypeId from Key Vault
+2. Creates an SPE container via Graph API
+3. Finds the root business unit in Dataverse
+4. Sets `sprk_containerid` on the root BU
+
+### When Adding New Business Units
+
+Run the standalone script when a new BU is created:
+
+```powershell
+.\scripts\New-BusinessUnitContainer.ps1 `
+    -BusinessUnitId "<bu-guid>" `
+    -BusinessUnitName "New Business Unit" `
+    -ContainerTypeId "<container-type-id>" `
+    -DataverseUrl "https://<env>.crm.dynamics.com"
+```
+
+### Automation Options
+
+ADR-002 prohibits Dataverse plugins, so automatic container creation on BU creation uses alternatives:
+
+| Method | Trigger | Complexity |
+|--------|---------|------------|
+| **Power Automate flow** | BU record created in Dataverse | Medium — calls Graph API + updates BU |
+| **BFF API endpoint** | Ribbon button / command bar action | Medium — new endpoint + UI button |
+| **Manual script** | Operator runs `New-BusinessUnitContainer.ps1` | Low — current approach |
 
 ---
 
 ## Critical Pitfalls & Solutions
 
-### Pitfall #1: 403 Forbidden - Client Secret Authentication
+### Pitfall #1: Incorrect @odata.bind Syntax for Lookups
 
-**Symptom:**
-```
-403 Forbidden when trying to register applications with Container Type
-The application does not have permission to perform this operation
-```
+**Symptom:** First Document record has Matter lookup set but Document Name is NULL; subsequent records have Document Name set but Matter lookup is NULL.
 
-**Root Cause:**
-Container Type management APIs require certificate authentication, not client secret.
+**Root Cause:** Using navigation property name (e.g., `sprk_MatterId`) instead of lookup field name (e.g., `sprk_matter`) in `@odata.bind`.
 
-**Solution:**
-Use the certificate-based PowerShell script above (Phase 3).
-
-**Detection:**
-If you see this in your registration attempt:
-```powershell
-$tokenBody = @{
-    client_secret = $secret  # ❌ THIS CAUSES 403
-}
-```
-
-**Fix:**
-Replace with certificate-based JWT assertion (see Phase 3 script).
-
----
-
-### Pitfall #2: Incorrect @odata.bind Syntax for Lookups
-
-**Symptom:**
-- First Document record has Matter lookup set but Document Name is NULL
-- Subsequent records have Document Name set but Matter lookup is NULL
-
-**Root Cause:**
-Using navigation property name (e.g., `sprk_MatterId`) instead of lookup field name (e.g., `sprk_matter`) in `@odata.bind`.
-
-**Wrong Code:**
 ```typescript
-// ❌ WRONG - Uses navigation property
+// WRONG - Uses navigation property
 recordData[`sprk_MatterId@odata.bind`] = `/sprk_matters(${matterId})`;
-```
 
-**Correct Code:**
-```typescript
-// ✅ CORRECT - Uses actual lookup field name
+// CORRECT - Uses actual lookup field name
 recordData[`sprk_matter@odata.bind`] = `/sprk_matters(${matterId})`;
 ```
 
-**Files to Check:**
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/services/DataverseRecordService.ts`
-- Method: `getLookupFieldName(parentEntityName: string)`
+### Pitfall #2: Document Name NULL on First Record
 
----
+**Root Cause:** Combination of wrong `@odata.bind` field name and Dataverse API quirk where required fields may not be set when `@odata.bind` is malformed.
 
-### Pitfall #3: Document Name NULL on First Record
+**Solution:** Set `sprk_documentname` explicitly BEFORE adding parent relationship:
 
-**Symptom:**
-When uploading multiple files, the first Document record has NULL `sprk_documentname`, but others are correct.
-
-**Root Cause:**
-Combination of:
-1. Using wrong field name in `@odata.bind` (navigation property vs lookup field)
-2. `sprk_documentname` is a required field
-3. Dataverse API quirk where required fields may not be set correctly when `@odata.bind` is malformed
-
-**Solution:**
-1. Use correct lookup field name in `@odata.bind` (see Pitfall #2)
-2. Ensure `sprk_documentname` is explicitly set in `recordData` BEFORE adding parent relationship
-3. Log the full `recordData` object before calling `createRecord` to verify
-
-**Code Pattern:**
 ```typescript
-// Build record data FIRST
 const recordData: Record<string, unknown> = {
     ...request.formData,
-    sprk_documentname: uniqueFileName,  // Set explicitly
+    sprk_documentname: uniqueFileName,  // Set explicitly first
     sprk_filename: uniqueFileName,
     sprk_graphitemid: itemId,
     sprk_graphdriveid: driveId
@@ -526,63 +303,35 @@ const recordData: Record<string, unknown> = {
 
 // THEN add parent relationship
 if (parentEntityName && parentRecordId) {
-    const lookupField = getLookupFieldName(parentEntityName);  // sprk_matter
+    const lookupField = getLookupFieldName(parentEntityName);
     recordData[`${lookupField}@odata.bind`] = `/${entitySetName}(${parentRecordId})`;
 }
-
-// Log before creating
-console.log('Record data:', recordData);
-await context.webAPI.createRecord('sprk_document', recordData);
 ```
 
----
+### Pitfall #3: Container Type Not Found (404)
 
-### Pitfall #4: Container Type Not Found
-
-**Symptom:**
-```
-404 Not Found when trying to access /storage/fileStorage/containerTypes/{id}
-```
-
-**Root Cause:**
-Container Type was not created through proper channel (should be via Dataverse, not direct Graph API call).
+**Symptom:** `404 Not Found` when accessing `/storage/fileStorage/containerTypes/{id}`
 
 **Solution:**
-1. Create Container entity in Dataverse first
-2. Container Type is auto-created when first Container record is created
-3. Retrieve Container Type ID from Dataverse or Graph API:
+1. Verify container type exists: `.\scripts\Find-ContainerTypeOwner.ps1 -ContainerTypeId <id> -SharePointDomain <domain>`
+2. Check the BFF API app has `FileStorageContainer.Selected` permission
+3. If creating via Graph API, use the beta endpoint: `https://graph.microsoft.com/beta/storage/fileStorage/containerTypes`
 
-```http
-GET https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes
-Authorization: Bearer {token}
-```
+### Pitfall #4: Lookup Fields in formData
 
----
+**Symptom:** `Invalid property 'sprk_matter' was found in entity 'Microsoft.Dynamics.CRM.sprk_document'`
 
-### Pitfall #5: Lookup Fields in formData
-
-**Symptom:**
-```
-Invalid property 'sprk_matter' was found in entity 'Microsoft.Dynamics.CRM.sprk_document'
-```
-
-**Root Cause:**
-Lookup fields are being included in `formData` spread, conflicting with `@odata.bind` syntax.
-
-**Solution:**
-Filter lookup fields when extracting form data:
+**Solution:** Filter lookup fields when extracting form data:
 
 ```typescript
-// In UniversalQuickCreatePCF.ts
 attributes.forEach((attr: any) => {
     const name = attr.getName();
     const value = attr.getValue();
     const attributeType = attr.getAttributeType();
 
-    // Skip lookup fields - they're handled via @odata.bind
     if (name !== 'sprk_fileuploadmetadata' &&
         value !== null &&
-        attributeType !== 'lookup') {  // ✅ Filter lookups
+        attributeType !== 'lookup') {  // Filter lookups — handled via @odata.bind
         formData[name] = value;
     }
 });
@@ -590,107 +339,32 @@ attributes.forEach((attr: any) => {
 
 ---
 
-## Registration Scripts
+## Scripts Reference
 
-### Complete Registration Script
+### Active Scripts
 
-Save as: `scripts/Register-ContainerType-Complete.ps1`
+| Script | Purpose | Key Parameters |
+|--------|---------|----------------|
+| `Create-ContainerType-PowerShell.ps1` | Create container type via SPO Management Shell | `-OwningAppId`, `-SharePointDomain` |
+| `Create-NewContainerType.ps1` | Create container type + register app via Graph/SP API | `-OwningAppId`, `-OwningAppSecret`, `-TenantId`, `-SharePointDomain` |
+| `Register-BffApiWithContainerType.ps1` | Register owning app with container type | `-ContainerTypeId`, `-OwningAppId`, `-OwningAppSecret`, `-TenantId`, `-SharePointDomain` |
+| `Check-ContainerType-Registration.ps1` | Verify container type registration status | `-ContainerTypeId`, `-SharePointDomain` |
+| `Find-ContainerTypeOwner.ps1` | Discover which app owns a container type (PnP) | `-ContainerTypeId`, `-SharePointDomain` |
+| `Find-ContainerTypeOwner-AzCli.ps1` | Same as above, using Azure CLI | `-ContainerTypeId`, `-TenantId`, `-SharePointDomain` |
+| `Get-ContainerMetadata.ps1` | Get metadata for a specific container | `-ContainerId`, `-SharePointDomain` |
+| `Set-ContainerId.ps1` | Set DefaultContainerId app setting | `-ContainerId`, `-AppServiceName`, `-ResourceGroup` |
+| `Test-SharePointToken.ps1` | Test token validity and API access | `-ClientId`, `-ClientSecret`, `-TenantId`, `-ContainerTypeId`, `-SharePointDomain` |
+| `New-BusinessUnitContainer.ps1` | Create container for a business unit | `-BusinessUnitId`, `-BusinessUnitName`, `-ContainerTypeId`, `-DataverseUrl` |
+
+All scripts use **mandatory parameters** — no hardcoded IDs, secrets, or domains. Secrets should be retrieved from Key Vault:
 
 ```powershell
-<#
-.SYNOPSIS
-    Complete Container Type setup and registration
-.DESCRIPTION
-    1. Verifies certificate exists
-    2. Registers BFF API as guest application
-    3. Creates test container
-    4. Verifies access
-#>
-
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$ContainerTypeId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$BffApiAppId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$OwningAppId,
-
-    [Parameter(Mandatory=$true)]
-    [string]$CertificateThumbprint,
-
-    [Parameter(Mandatory=$true)]
-    [string]$TenantId,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$CreateTestContainer
-)
-
-$ErrorActionPreference = "Stop"
-
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Container Type Registration Process" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-
-# Step 1: Verify certificate
-Write-Host "`n[1/4] Verifying certificate..." -ForegroundColor Yellow
-$cert = Get-ChildItem -Path "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction SilentlyContinue
-if (-not $cert) {
-    Write-Error "❌ Certificate not found with thumbprint: $CertificateThumbprint"
-    exit 1
-}
-Write-Host "✅ Certificate found: $($cert.Subject)" -ForegroundColor Green
-
-# Step 2: Register applications (using script from Phase 3)
-Write-Host "`n[2/4] Registering applications with Container Type..." -ForegroundColor Yellow
-& "$PSScriptRoot\Register-BffApi-WithCertificate.ps1" `
-    -ContainerTypeId $ContainerTypeId `
-    -BffApiAppId $BffApiAppId `
-    -OwningAppId $OwningAppId `
-    -CertificateThumbprint $CertificateThumbprint `
-    -TenantId $TenantId
-
-# Step 3: Create test container (optional)
-if ($CreateTestContainer) {
-    Write-Host "`n[3/4] Creating test container..." -ForegroundColor Yellow
-
-    # Get token using certificate
-    $jwt = # ... (JWT creation code from Phase 3)
-    $tokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body @{
-        client_id = $OwningAppId
-        client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-        client_assertion = $jwt
-        scope = "https://graph.microsoft.com/.default"
-        grant_type = "client_credentials"
-    }
-
-    $createContainerBody = @{
-        containerTypeId = $ContainerTypeId
-        displayName = "Test Container $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        description = "Test container created during registration"
-    } | ConvertTo-Json
-
-    $container = Invoke-RestMethod -Method Post `
-        -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" `
-        -Headers @{ Authorization = "Bearer $($tokenResponse.access_token)"; "Content-Type" = "application/json" } `
-        -Body $createContainerBody
-
-    Write-Host "✅ Test container created: $($container.id)" -ForegroundColor Green
-    Write-Host "   Display Name: $($container.displayName)" -ForegroundColor Gray
-    Write-Host "   Container ID (Drive ID): $($container.id)" -ForegroundColor Gray
-} else {
-    Write-Host "`n[3/4] Skipping test container creation" -ForegroundColor Gray
-}
-
-# Step 4: Verify access
-Write-Host "`n[4/4] Verifying BFF API can access Container Type..." -ForegroundColor Yellow
-# ... (verification code)
-
-Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "✅ Container Type setup complete!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
+$secret = az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
 ```
+
+### Archived Scripts (`scripts/_archive/`)
+
+Scripts that used the retired PCF app (`170c98e1`) or hardcoded secrets have been archived. They are preserved for reference but should not be used.
 
 ---
 
@@ -698,196 +372,63 @@ Write-Host "========================================" -ForegroundColor Green
 
 ### Test 1: Verify Container Type Registration
 
-```http
-GET https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{containerTypeId}/applications
-Authorization: Bearer {token}
+```powershell
+.\scripts\Check-ContainerType-Registration.ps1 `
+    -ContainerTypeId "<id>" `
+    -SharePointDomain "<tenant>.sharepoint.com" `
+    -OwningAppId "<bff-api-client-id>"
 ```
 
-**Expected Response:**
-```json
-{
-  "value": [
-    {
-      "appId": "pcf-app-id",
-      "delegated": ["full"],
-      "appOnly": ["full"]
-    },
-    {
-      "appId": "bff-api-app-id",
-      "delegated": ["ReadContent", "WriteContent"],
-      "appOnly": ["none"]
-    }
-  ]
-}
-```
+**Expected:** BFF API app listed with `full` delegated and `full` appOnly permissions.
 
 ### Test 2: Upload File via BFF API (OBO Flow)
 
 ```http
-PUT https://your-bff-api.azurewebsites.net/api/obo/containers/{driveId}/files/{fileName}
+PUT https://<bff-api>/api/containers/{containerId}/files/{fileName}
 Authorization: Bearer {user-token}
 Content-Type: application/octet-stream
 
 [file binary data]
 ```
 
-**Success Response:**
-```json
-{
-  "id": "01LBYCMX...",
-  "name": "test.pdf",
-  "size": 12345,
-  "createdDateTime": "2025-10-09T12:00:00Z"
-}
+**Success:** HTTP 200 with file metadata (id, name, size, createdDateTime).
+
+### Test 3: Verify Business Unit Container
+
+```powershell
+# Check BU has sprk_containerid set
+$dvToken = az account get-access-token --resource <dataverse-url> --query accessToken -o tsv
+Invoke-RestMethod `
+    -Uri "<dataverse-url>/api/data/v9.2/businessunits(<bu-id>)?`$select=name,sprk_containerid" `
+    -Headers @{ Authorization = "Bearer $dvToken" }
 ```
-
-### Test 3: Verify Multiple Documents Created
-
-1. Upload 3 files via Quick Create form
-2. Check browser console for logs:
-   - "Processing file 1/3", "2/3", "3/3"
-   - "Document record created successfully" (should appear 3 times)
-3. Verify in Dataverse:
-   - All 3 Document records exist
-   - Each has unique `sprk_documentname` (filename)
-   - All have `sprk_matter` lookup set
-   - All have `sprk_graphdriveid` and `sprk_graphitemid`
 
 ---
 
 ## Troubleshooting
 
-### Issue: 403 Forbidden during registration
+### 403 Forbidden during registration
 
-**Check:**
-1. Are you using certificate authentication? (not client secret)
-2. Is certificate uploaded to Azure AD application?
-3. Does certificate have correct permissions?
+1. Verify BFF API app has `Container.Selected` (SharePoint) and `FileStorageContainer.Selected` (Graph) permissions
+2. Verify admin consent has been granted
+3. Check the app is the actual owning app of the container type: `.\scripts\Find-ContainerTypeOwner.ps1`
 
-**Verify:**
-```powershell
-# Check certificate
-$cert = Get-ChildItem "Cert:\CurrentUser\My\$thumbprint"
-$cert | Format-List Subject, Thumbprint, NotBefore, NotAfter
+### Container Type Not Found (404)
 
-# Check app registration
-az ad app show --id $BFF_APP_ID --query "keyCredentials"
-```
+1. Verify container type ID is correct
+2. Check if it was created in the correct tenant
+3. List all container types: `.\scripts\Find-ContainerTypeOwner-AzCli.ps1`
 
-### Issue: Container Type Not Found (404)
+### BU has no sprk_containerid
 
-**Check:**
-1. Was Container Type created via Dataverse?
-2. Does Container Type ID exist?
+1. Run `New-BusinessUnitContainer.ps1` to create a container and assign it
+2. If `Provision-Customer.ps1` Step 8 failed partially, check the provisioning log for the container ID and assign manually
 
-**Verify:**
-```http
-GET https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes
-Authorization: Bearer {token}
-```
+### Files upload but no Document records created
 
-### Issue: Files upload but no Document records created
-
-**Check:**
-1. Browser console for JavaScript errors
-2. Network tab for failed API calls
-3. PCF logs for "Failed to create document record"
-
-**Debug:**
-- Add logging in `DataverseRecordService.createDocument()`
-- Check if `context.webAPI.createRecord()` is throwing errors
-- Verify field names match Entity.xml
-
-### Issue: First Document has NULL name, others OK
-
-**Solution:**
-See [Pitfall #2](#pitfall-2-incorrect-odatabind-syntax-for-lookups) and [Pitfall #3](#pitfall-3-document-name-null-on-first-record).
-
-**Quick Fix:**
-1. Use `sprk_matter@odata.bind` (not `sprk_MatterId@odata.bind`)
-2. Set `sprk_documentname` before adding `@odata.bind`
-3. Deploy updated PCF control
-
----
-
-## AI Assistant Prompts
-
-### Prompt 1: Setup New Container Type
-
-```
-I need to set up a new SharePoint Embedded Container Type for a new Dataverse entity.
-
-Context:
-- Entity name: [entity_name]
-- PCF App ID: [pcf_app_id]
-- BFF API App ID: [bff_api_app_id]
-- BFF Certificate Thumbprint: [cert_thumbprint]
-- Tenant ID: [tenant_id]
-
-Please:
-1. Guide me through creating the Container Type
-2. Generate the PowerShell registration script
-3. Verify the registration was successful
-4. Create a test container instance
-
-Refer to: docs/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md
-```
-
-### Prompt 2: Troubleshoot 403 Error
-
-```
-I'm getting a 403 Forbidden error when trying to register my BFF API with a Container Type.
-
-Error details:
-[paste error message]
-
-Current authentication method:
-[client secret / certificate]
-
-Please:
-1. Identify the root cause
-2. Provide the correct authentication approach
-3. Generate the fix (PowerShell script)
-
-Refer to: docs/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md - Pitfall #1
-```
-
-### Prompt 3: Fix Multi-File Upload Issues
-
-```
-When uploading multiple files via Quick Create, I'm seeing:
-- First Document: Matter set ✓, Document Name NULL ✗
-- Other Documents: Matter NULL ✗, Document Name set ✓
-
-Please:
-1. Identify which pitfall this matches
-2. Show me the exact code fix
-3. Explain why this happens
-4. Deploy the updated PCF control
-
-Refer to: docs/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md - Pitfalls #2 and #3
-```
-
-### Prompt 4: Complete New Environment Setup
-
-```
-I need to set up SharePoint Embedded in a new environment from scratch.
-
-Environment details:
-- Tenant: [tenant_name]
-- Admin: [admin_upn]
-- Dataverse Org: [org_url]
-- Container Type Name: [type_name]
-
-Please:
-1. Walk me through the complete setup process
-2. Generate all required scripts
-3. Verify each step before moving to the next
-4. Create test container and upload test file
-5. Document any deviations or issues encountered
-
-Refer to: docs/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md - Complete guide
-```
+1. Check browser console for JavaScript errors
+2. Verify PCF control version is current
+3. Check if `sprk_containerid` is set on the user's business unit
 
 ---
 
@@ -896,41 +437,17 @@ Refer to: docs/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md - Complete guide
 | Date | Version | Changes |
 |------|---------|---------|
 | 2025-10-09 | 1.0 | Initial documentation from Sprint 4 lessons learned |
+| 2026-03-14 | 2.0 | Major rewrite: BFF API as owning app (removed PCF app model), parameterized all scripts, added business unit container provisioning, removed certificate auth section (uses client secret via Key Vault), removed AI assistant prompts section |
 
 ---
 
 ## Related Documentation
 
-- [KM-HOW-TO-DEPLOY-TO-DATAVERSE.md](./KM-HOW-TO-DEPLOY-TO-DATAVERSE.md) - PCF deployment guide
-- [SPE-1-TO-N-FILE-DOCUMENT-RELATIONSHIP.md](../dev/projects/future-features/SPE-1-TO-N-FILE-DOCUMENT-RELATIONSHIP.md) - Future feature architecture
-- [QUICK-CREATE-FILE-UPLOAD-ONLY.md](./QUICK-CREATE-FILE-UPLOAD-ONLY.md) - Quick Create implementation
+- [PRODUCTION-DEPLOYMENT-GUIDE.md Section 19](./PRODUCTION-DEPLOYMENT-GUIDE.md#19-sharepoint-embedded-spe-setup) — Production SPE setup steps
+- [KM-HOW-TO-DEPLOY-TO-DATAVERSE.md](./KM-HOW-TO-DEPLOY-TO-DATAVERSE.md) — PCF deployment guide
 
 ---
 
-## Summary
-
-**Key Takeaways:**
-
-1. ✅ **Always use certificate authentication** for Container Type management
-2. ✅ **Use lookup field names** (e.g., `sprk_matter`) not navigation properties (e.g., `sprk_MatterId`) in `@odata.bind`
-3. ✅ **Filter lookup fields** from formData to avoid conflicts
-4. ✅ **Set required fields explicitly** before adding `@odata.bind`
-5. ✅ **Register both owning and guest applications** with Container Type
-6. ✅ **Create Container Types via Dataverse**, not direct Graph API
-7. ✅ **Test with multiple files** to catch subtle ordering bugs
-
-**Success Criteria:**
-
-- [ ] Container Type created and visible in Graph API
-- [ ] BFF API registered as guest application with correct permissions
-- [ ] Certificate authentication working for Container Type APIs
-- [ ] File upload via OBO flow successful
-- [ ] Multiple Document records created with correct field values
-- [ ] Matter lookup set on all records
-- [ ] Document Name set to unique filename on all records
-
----
-
-**Document Version:** 1.0
-**Status:** ✅ Production Ready
-**Last Validated:** 2025-10-09
+**Document Version:** 2.0
+**Status:** Production Ready
+**Last Validated:** 2026-03-14

@@ -1,18 +1,26 @@
-# Set the DefaultContainerId in Azure App Service
-$containerId = "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
-Write-Host "Setting EmailProcessing__DefaultContainerId to: $containerId"
+# Set the DefaultContainerId in Azure App Service app settings
+
+param(
+    [Parameter(Mandatory)][string]$ContainerId,
+    [Parameter(Mandatory)][string]$AppServiceName,
+    [Parameter(Mandatory)][string]$ResourceGroup,
+    [string]$SettingName = "EmailProcessing__DefaultContainerId"
+)
+
+Write-Host "Setting $SettingName to: $ContainerId"
+Write-Host "App Service: $AppServiceName  Resource Group: $ResourceGroup"
 
 az webapp config appsettings set `
-    --name spe-api-dev-67e2xz `
-    --resource-group spe-infrastructure-westus2 `
-    --settings "EmailProcessing__DefaultContainerId=$containerId" `
+    --name $AppServiceName `
+    --resource-group $ResourceGroup `
+    --settings "$SettingName=$ContainerId" `
     --output none
 
 # Verify
 $result = az webapp config appsettings list `
-    --name spe-api-dev-67e2xz `
-    --resource-group spe-infrastructure-westus2 `
-    --query "[?name=='EmailProcessing__DefaultContainerId'].value" `
+    --name $AppServiceName `
+    --resource-group $ResourceGroup `
+    --query "[?name=='$SettingName'].value" `
     --output tsv
 
 Write-Host "Verified value: $result"

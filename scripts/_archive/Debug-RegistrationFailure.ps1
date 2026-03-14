@@ -1,16 +1,20 @@
-# Debug why registration failed when PCF app IS the owner
+# ARCHIVED 2026-03-14: Used retired PCF app (170c98e1). Debug scripts should use parameterized values.
+# Debug why registration failed when owning app IS the owner
 
-$containerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06"
-$OwningAppId = "170c98e1-d486-4355-bcbe-170454e0207c"
-$OwningAppSecret = "~Ac8Q~JGnsrvNEODvFo8qmtKbgj1PmwmJ6GVUaJj"
-$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"
+param(
+    [Parameter(Mandatory)][string]$ContainerTypeId,
+    [Parameter(Mandatory)][string]$OwningAppId,
+    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+    [Parameter(Mandatory)][string]$OwningAppSecret,
+    [Parameter(Mandatory)][string]$TenantId
+)
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "DEBUGGING REGISTRATION FAILURE" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Container Type: $containerTypeId" -ForegroundColor White
-Write-Host "Owner (PCF app): $OwningAppId" -ForegroundColor Green
+Write-Host "Container Type: $ContainerTypeId" -ForegroundColor White
+Write-Host "Owner: $OwningAppId" -ForegroundColor Green
 Write-Host ""
 
 # Step 1: Get SharePoint token

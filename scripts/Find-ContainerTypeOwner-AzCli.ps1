@@ -2,9 +2,12 @@
 # Purpose: Identify which Azure AD app owns the container type
 
 param(
-    [string]$ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"
+    [Parameter(Mandatory)][string]$ContainerTypeId,
+    [Parameter(Mandatory)][string]$TenantId,
+    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
 )
+
+$SharePointAdminUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"
 
 Write-Host "=== Finding Container Type Owner ===" -ForegroundColor Cyan
 Write-Host "Container Type ID: $ContainerTypeId" -ForegroundColor Gray
@@ -33,7 +36,7 @@ Write-Host ""
 Write-Host "Step 2: Querying SharePoint for container types..." -ForegroundColor Yellow
 Write-Host "Getting access token for SharePoint..." -ForegroundColor Gray
 
-$spToken = az account get-access-token --resource "https://spaarke.sharepoint.com" --query accessToken -o tsv
+$spToken = az account get-access-token --resource "https://$SharePointDomain" --query accessToken -o tsv
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to get SharePoint token" -ForegroundColor Red
@@ -47,7 +50,7 @@ Write-Host ""
 # Try to list container types via SharePoint REST API
 Write-Host "Step 3: Listing container types..." -ForegroundColor Yellow
 
-$listUrl = "https://spaarke-admin.sharepoint.com/_api/v2.1/storageContainerTypes"
+$listUrl = "$SharePointAdminUrl/_api/v2.1/storageContainerTypes"
 
 try {
     $response = Invoke-RestMethod -Uri $listUrl `

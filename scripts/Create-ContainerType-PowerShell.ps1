@@ -3,12 +3,15 @@
 # Uses: SharePoint Online Management Shell
 
 param(
-    [string]$ContainerTypeName = "Spaarke Document Storage OBO",
-    [string]$OwningAppId = "170c98e1-d486-4355-bcbe-170454e0207c",  # PCF app
-    [string]$ApplicationRedirectUrl = "https://localhost",  # Redirect URL for app
-    [string]$AdminCenterUrl = "https://spaarke-admin.sharepoint.com",
+    [string]$ContainerTypeName = "Spaarke Document Storage",
+    [Parameter(Mandatory)][string]$OwningAppId,
+    [string]$ApplicationRedirectUrl = "https://localhost",
+    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
     [switch]$Trial = $false  # Use trial container type (no billing)
 )
+
+# Derive admin URL from SharePoint domain
+$AdminCenterUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE SHAREPOINT EMBEDDED CONTAINER TYPE" -ForegroundColor Cyan
@@ -123,7 +126,7 @@ try {
         IsTrial = $Trial
     }
 
-    $configPath = "c:\code_files\spaarke\scripts\new-container-type-config.json"
+    $configPath = Join-Path $PSScriptRoot "new-container-type-config.json"
     $config | ConvertTo-Json -Depth 3 | Out-File -FilePath $configPath -Encoding UTF8
 
     Write-Host "Configuration saved to: $configPath" -ForegroundColor Gray

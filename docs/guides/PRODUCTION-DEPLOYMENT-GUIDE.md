@@ -1276,9 +1276,9 @@ Claude Code can automate steps 1, 2, and 4. Step 3 (export) requires the dev env
 
 ## 19. SharePoint Embedded (SPE) Setup
 
-SPE provides document storage for Spaarke. Each production environment needs a **Container Type** (the blueprint) and the BFF API registered as a **guest application** to access it.
+SPE provides document storage for Spaarke. Each production environment needs a **Container Type** (the blueprint) and the BFF API registered as the **owning application**.
 
-> **Reference**: See [HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md](./HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) for the full SPE setup guide.
+> **Reference**: See [HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md](./HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) for the full SPE setup guide with troubleshooting.
 
 ### Architecture
 
@@ -1287,122 +1287,131 @@ SPE provides document storage for Spaarke. Each production environment needs a *
 │ Container Type (one per production environment)            │
 │   - Owned by: spaarke-bff-api-prod app registration       │
 │   - Container Type ID: stored in Key Vault                │
+│   - Registration: full delegated + full appOnly           │
 │                                                           │
-│   Registered Applications:                                 │
-│   ├── Owning App: spaarke-bff-api-prod (full permissions) │
-│   └── Guest Apps: (additional apps if needed)             │
-│                                                           │
-│   Containers (created on-demand per customer):             │
-│   ├── demo → Container (Drive ID)                         │
-│   ├── acme → Container (Drive ID)                         │
+│   Containers (one per Business Unit):                      │
+│   ├── Root BU → Container (sprk_containerid on BU record) │
+│   ├── Child BU → Container (sprk_containerid on BU record)│
 │   └── ...                                                 │
 └───────────────────────────────────────────────────────────┘
 ```
 
-### Current State
+### Ownership Model
 
-| Component | Dev | Production |
-|-----------|-----|------------|
-| Container Type | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` (owned by PCF app `170c98e1`) | **NOT CREATED** |
-| BFF API registered | Yes (as guest app `1e40baad`) | **NOT REGISTERED** |
-| Containers | Exist (on-demand) | **NONE** (no container type) |
+The **BFF API app** is the owning application for the container type. It has full permissions to create containers, manage files, and perform all SPE operations server-side using client credentials (client secret via Key Vault).
 
 ### Step 1: Create Production Container Type
 
-**[HUMAN]** Requires SharePoint Administrator or Global Administrator. This is a one-time operation per production environment.
+**[HUMAN]** Requires SharePoint Administrator or Global Administrator. One-time operation per environment.
 
 ```powershell
-# Option A: Use existing script (update parameters for production)
+# Option A: PowerShell (recommended)
 .\scripts\Create-ContainerType-PowerShell.ps1 `
-    -ContainerTypeName "Spaarke Document Storage Prod" `
+    -ContainerTypeName "Spaarke Document Storage" `
     -OwningAppId "<spaarke-bff-api-prod-client-id>" `
-    -AdminCenterUrl "https://spaarke-admin.sharepoint.com"
+    -SharePointDomain "<tenant>.sharepoint.com"
 
-# Option B: Manual via SharePoint Online Management Shell
-Connect-SPOService -Url "https://spaarke-admin.sharepoint.com"
-New-SPOContainerType `
-    -ContainerTypeName "Spaarke Document Storage Prod" `
-    -OwningApplicationId "<spaarke-bff-api-prod-client-id>" `
-    -AzureSubscriptionId "<subscription-id>"
+# Option B: Graph API + registration in one step
+.\scripts\Create-NewContainerType.ps1 `
+    -OwningAppId "<spaarke-bff-api-prod-client-id>" `
+    -OwningAppSecret "<secret-from-key-vault>" `
+    -TenantId "<tenant-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
 ```
 
 **Output**: A new `ContainerTypeId` (GUID). Save this — it's needed for all subsequent steps.
 
-> **Decision**: In dev, the PCF app (`170c98e1`) owns the container type and the BFF API (`1e40baad`) is a guest. For production, the **BFF API app** (`spaarke-bff-api-prod`) should be the owning application since it performs all SPE operations server-side.
+### Step 2: Register Owning App with Container Type
 
-### Step 2: Register Applications with Container Type
-
-**[AI]** After container type is created, register the BFF API:
+**[AI]** Register the BFF API as owning app with full permissions:
 
 ```powershell
 .\scripts\Register-BffApiWithContainerType.ps1 `
-    -ContainerTypeId "<new-prod-container-type-id>" `
-    -BffApiAppId "<spaarke-bff-api-prod-client-id>" `
+    -ContainerTypeId "<container-type-id>" `
     -OwningAppId "<spaarke-bff-api-prod-client-id>" `
-    -OwningAppSecret "<secret>" `
-    -TenantId "a221a95e-6abc-4434-aecc-e48338a1b2f2"
+    -OwningAppSecret "<secret-from-key-vault>" `
+    -TenantId "<tenant-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
 ```
 
-This registers the app with `full` delegated and appOnly permissions on the container type via the Graph API (`/storage/fileStorage/containerTypes/{id}/applications`).
+This calls `PUT /_api/v2.1/storageContainerTypes/{id}/applicationPermissions` with `full` delegated and `full` appOnly permissions.
 
 ### Step 3: Store ContainerTypeId in Key Vault
 
-**[AI]** Claude Code runs:
+**[AI]**
 
 ```powershell
 az keyvault secret set `
-    --vault-name sprk-platform-prod-kv `
+    --vault-name <platform-key-vault> `
     --name "Spe--ContainerTypeId" `
-    --value "<new-prod-container-type-id>"
+    --value "<container-type-id>"
 ```
 
 ### Step 4: Configure BFF API App Setting
 
-**[AI]** Add the Key Vault reference to App Service:
+**[AI]** Add Key Vault reference to App Service:
 
 ```powershell
 az webapp config appsettings set `
-    -g rg-spaarke-platform-prod `
-    -n spaarke-bff-prod `
-    --settings "Spe__ContainerTypeId=@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Spe--ContainerTypeId)"
+    -g <resource-group> `
+    -n <app-service-name> `
+    --settings "Spe__ContainerTypeId=@Microsoft.KeyVault(VaultName=<vault>;SecretName=Spe--ContainerTypeId)"
 ```
 
 ### Step 5: Verify SPE Setup
 
-**[AI]** After restarting the BFF API, verify:
+**[AI]**
 
 ```powershell
-# Health check should still pass
-curl https://api.spaarke.com/healthz
+# Check container type registration
+.\scripts\Check-ContainerType-Registration.ps1 `
+    -ContainerTypeId "<container-type-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com" `
+    -OwningAppId "<bff-api-client-id>"
 
-# SPE-specific verification (requires auth token):
-# The BFF API creates containers on-demand when a customer first accesses document storage.
-# Verify by checking the container type exists via Graph API:
-az rest --method GET `
-    --url "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/<container-type-id>" `
-    --headers "Content-Type=application/json"
+# Test token and API access
+.\scripts\Test-SharePointToken.ps1 `
+    -ClientId "<bff-api-client-id>" `
+    -ClientSecret "<secret>" `
+    -TenantId "<tenant-id>" `
+    -ContainerTypeId "<container-type-id>" `
+    -SharePointDomain "<tenant>.sharepoint.com"
+
+# Restart BFF API to pick up config
+az webapp restart --name <app-service-name> --resource-group <resource-group>
 ```
 
 ### Entra ID Permissions for SPE
 
-The BFF API app registration (`spaarke-bff-api-prod`) needs these Graph API permissions for SPE:
+The BFF API app registration needs these permissions:
 
 | Permission | Type | Purpose |
 |-----------|------|---------|
-| `FileStorageContainer.Selected` | Application | Access selected SPE containers |
-| `Files.Read.All` | Application | Read files in containers |
+| `FileStorageContainer.Selected` | Application | Create/access SPE containers |
+| `Container.Selected` | Application (SharePoint) | Register with container types |
 
-These should already be configured by `Register-EntraAppRegistrations.ps1` (Phase 2). Verify with:
+These should already be configured by `Register-EntraAppRegistrations.ps1` (Phase 2). Verify with `.\scripts\Test-EntraAppRegistrations.ps1`.
+
+### Container Provisioning
+
+Containers are created **per business unit** — each BU gets one SPE container stored in `businessunit.sprk_containerid`.
+
+**During initial provisioning:** `Provision-Customer.ps1` Step 8 creates the SPE container for the root business unit via Graph API and sets `sprk_containerid` on the BU record.
+
+**When adding new business units:** Run the standalone script:
 
 ```powershell
-.\scripts\Test-EntraAppRegistrations.ps1
+.\scripts\New-BusinessUnitContainer.ps1 `
+    -BusinessUnitId "<bu-guid>" `
+    -BusinessUnitName "New Business Unit" `
+    -ContainerTypeId "<container-type-id>" `
+    -DataverseUrl "https://<env>.crm.dynamics.com"
 ```
 
-### Container Creation
-
-Containers are created **on-demand** by the BFF API when a customer first accesses document storage. The `Provision-Customer.ps1` step 8 validates that the BFF API is healthy but does NOT pre-create containers — they are created when the application needs them.
-
-Each customer gets their own container, identified by the customer's tenant registry entry. Container IDs (Drive IDs) are stored in the BFF API's tenant registry.
+**Automation options** (ADR-002 prohibits Dataverse plugins):
+- Power Automate flow triggered on BU creation
+- BFF API endpoint called from ribbon button
+- Manual script execution during onboarding
 
 ---
 

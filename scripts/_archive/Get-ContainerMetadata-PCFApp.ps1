@@ -1,11 +1,12 @@
-# Get container metadata using PCF app credentials
-# The PCF app has FileStorageContainer.Selected permission and user has granted consent
+# ARCHIVED 2026-03-14: Used retired PCF app (170c98e1). Use Get-ContainerMetadata.ps1 instead.
+# Get container metadata using app credentials
 
 param(
-    [string]$ContainerId = "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50",
-    [string]$ClientId = "170c98e1-d486-4355-bcbe-170454e0207c",
-    [string]$ClientSecret = "~Ac8Q~JGnsrvNEODvFo8qmtKbgj1PmwmJ6GVUaJj",
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"
+    [Parameter(Mandatory)][string]$ContainerId,
+    [Parameter(Mandatory)][string]$ClientId,
+    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+    [Parameter(Mandatory)][string]$ClientSecret,
+    [Parameter(Mandatory)][string]$TenantId
 )
 
 Write-Host "=== Getting Container Metadata ===" -ForegroundColor Cyan

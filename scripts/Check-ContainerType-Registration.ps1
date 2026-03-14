@@ -1,10 +1,14 @@
-# Check what apps are registered with the ContainerType
+# Check what apps are registered with a SharePoint Embedded Container Type
 
-$ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06"
-$SharePointDomain = "spaarke.sharepoint.com"
+param(
+    [Parameter(Mandatory)][string]$ContainerTypeId,
+    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
+    [string]$OwningAppId  # Optional: verify this app is registered as owner
+)
 
 Write-Host "Checking ContainerType registration..." -ForegroundColor Yellow
-Write-Host "Container Type ID: $ContainerTypeId" -ForegroundColor Gray
+Write-Host "Container Type ID:  $ContainerTypeId" -ForegroundColor Gray
+Write-Host "SharePoint Domain:  $SharePointDomain" -ForegroundColor Gray
 Write-Host ""
 
 try {
@@ -17,7 +21,7 @@ try {
         'Authorization' = "Bearer $token"
     } -Method Get
 
-    Write-Host "✅ Successfully retrieved registrations" -ForegroundColor Green
+    Write-Host "Successfully retrieved registrations" -ForegroundColor Green
     Write-Host ""
     Write-Host "Registered Applications:" -ForegroundColor Cyan
     Write-Host ""
@@ -25,33 +29,29 @@ try {
     foreach ($app in $response.value) {
         Write-Host "App ID: $($app.appId)" -ForegroundColor White
         Write-Host "  Delegated: $($app.delegated -join ', ')" -ForegroundColor Gray
-        Write-Host "  App-Only: $($app.appOnly -join ', ')" -ForegroundColor Gray
+        Write-Host "  App-Only:  $($app.appOnly -join ', ')" -ForegroundColor Gray
         Write-Host ""
     }
 
-    # Check for our specific apps
-    $owningApp = $response.value | Where-Object { $_.appId -eq "170c98e1-d486-4355-bcbe-170454e0207c" }
-    $bffApp = $response.value | Where-Object { $_.appId -eq "1e40baad-e065-4aea-a8d4-4b7ab273458c" }
+    # Optional: verify specific owning app
+    if ($OwningAppId) {
+        Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host "VERIFICATION" -ForegroundColor Cyan
+        Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host ""
 
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host "VERIFICATION" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host ""
-
-    if ($owningApp) {
-        Write-Host "✅ Owning App (170c98e1) registered" -ForegroundColor Green
-    } else {
-        Write-Host "❌ Owning App (170c98e1) NOT FOUND" -ForegroundColor Red
-    }
-
-    if ($bffApp) {
-        Write-Host "✅ BFF API (1e40baad) registered" -ForegroundColor Green
-    } else {
-        Write-Host "❌ BFF API (1e40baad) NOT FOUND" -ForegroundColor Red
+        $owningApp = $response.value | Where-Object { $_.appId -eq $OwningAppId }
+        if ($owningApp) {
+            Write-Host "Owning App ($OwningAppId) registered" -ForegroundColor Green
+            Write-Host "  Delegated: $($owningApp.delegated -join ', ')" -ForegroundColor Gray
+            Write-Host "  App-Only:  $($owningApp.appOnly -join ', ')" -ForegroundColor Gray
+        } else {
+            Write-Host "Owning App ($OwningAppId) NOT FOUND in registrations" -ForegroundColor Red
+        }
     }
 
 } catch {
-    Write-Host "❌ Failed to retrieve registrations" -ForegroundColor Red
+    Write-Host "Failed to retrieve registrations" -ForegroundColor Red
     Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Gray
 
     if ($_.ErrorDetails.Message) {
