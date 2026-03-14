@@ -91,6 +91,7 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({
 
     // Configure markdown-specific settings
     monaco.languages.setLanguageConfiguration('markdown', {
+      // eslint-disable-next-line no-useless-escape
       wordPattern: /(-?\d*\.\d\w*)|([^\`\~\!\@\#\%\^\&\*\(\)\-\=\+\[\{\]\}\\\|\;\:\'\"\,\.\<\>\/\?\s]+)/g,
     });
 

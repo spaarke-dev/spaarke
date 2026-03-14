@@ -69,6 +69,9 @@ public static class AnalysisServicesModule
     {
         services.Configure<AnalysisOptions>(configuration.GetSection(AnalysisOptions.SectionName));
         services.AddHttpClient<AnalysisActionService>();
+        services.AddHttpClient<AnalysisSkillService>();
+        services.AddHttpClient<AnalysisKnowledgeService>();
+        services.AddHttpClient<AnalysisToolService>();
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
