@@ -1,0 +1,221 @@
+# ============================================================================
+# deploy-platform.yml — Deploy Shared Platform Infrastructure
+# ============================================================================
+#
+# Deploys shared Spaarke platform infrastructure using platform.bicep via
+# the Deploy-Platform.ps1 script. Manual dispatch only (FR-09).
+#
+# Modes:
+#   what-if  — Preview changes without deploying (no approval required)
+#   deploy   — Apply changes to target environment (requires approval)
+#
+# Audit trail: All runs are logged in GitHub Actions history (NFR-05).
+# ============================================================================
+
+name: Deploy Platform Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Deployment mode'
+        required: true
+        type: choice
+        options:
+          - what-if
+          - deploy
+        default: 'what-if'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: 'prod'
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC-based Azure login
+
+concurrency:
+  group: deploy-platform-${{ github.event.inputs.environment }}
+  cancel-in-progress: false  # Never cancel in-progress deployments
+
+env:
+  AZURE_LOCATION: westus2
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: What-If Preview (runs for both modes)
+  # ──────────────────────────────────────────────────────────────────────────
+  what-if:
+    name: What-If Preview (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run What-If Preview
+        shell: pwsh
+        run: |
+          ./scripts/Deploy-Platform.ps1 `
+            -EnvironmentName ${{ github.event.inputs.environment }} `
+            -Location ${{ env.AZURE_LOCATION }} `
+            -WhatIf
+
+      - name: Write Summary
+        if: always()
+        run: |
+          echo "## Platform What-If Preview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Mode** | what-if |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Deploy (only when mode == deploy)
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy Platform (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: what-if
+    if: github.event.inputs.mode == 'deploy'
+    environment: ${{ github.event.inputs.environment }}  # FR-09: environment protection rules
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Platform Infrastructure
+        shell: pwsh
+        run: |
+          ./scripts/Deploy-Platform.ps1 `
+            -EnvironmentName ${{ github.event.inputs.environment }} `
+            -Location ${{ env.AZURE_LOCATION }}
+
+      - name: Upload Deployment Log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: deploy-platform-log-${{ github.event.inputs.environment }}-${{ github.run_number }}
+          path: logs/deploy-platform-*.log
+          retention-days: 90
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Post-Deployment Verification (only after deploy)
+  # ──────────────────────────────────────────────────────────────────────────
+  verify:
+    name: Verify Deployment (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event.inputs.mode == 'deploy'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Resource Group Exists
+        shell: pwsh
+        run: |
+          $rgName = "rg-spaarke-platform-${{ github.event.inputs.environment }}"
+          $exists = az group exists --name $rgName
+          if ($exists -ne 'true') {
+            Write-Error "Resource group '$rgName' does not exist after deployment"
+            exit 1
+          }
+          Write-Host "Resource group '$rgName' exists"
+
+      - name: Verify App Service Health
+        shell: pwsh
+        run: |
+          $env = "${{ github.event.inputs.environment }}"
+
+          # Determine API URL based on environment
+          switch ($env) {
+            'prod' { $apiUrl = "https://api.spaarke.com" }
+            default { $apiUrl = "https://spaarke-bff-$env.azurewebsites.net" }
+          }
+
+          $healthUrl = "$apiUrl/healthz"
+          Write-Host "Checking health endpoint: $healthUrl"
+
+          $maxRetries = 6
+          $healthy = $false
+
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              $response = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 10
+              if ($response -eq "Healthy" -or $response.status -eq "Healthy") {
+                $healthy = $true
+                Write-Host "Health check passed on attempt $i"
+                break
+              }
+            }
+            catch {
+              Write-Host "Attempt $i/$maxRetries failed: $($_.Exception.Message)"
+              if ($i -lt $maxRetries) { Start-Sleep -Seconds 10 }
+            }
+          }
+
+          if (-not $healthy) {
+            Write-Warning "Health check did not pass after $maxRetries attempts"
+            Write-Warning "This may be expected if no API code is deployed yet"
+          }
+
+      - name: Verify Key Vault Accessible
+        shell: pwsh
+        run: |
+          $kvName = "sprk-platform-${{ github.event.inputs.environment }}-kv"
+          $result = az keyvault show --name $kvName 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Key Vault '$kvName' is accessible"
+          } else {
+            Write-Warning "Key Vault '$kvName' is not accessible (may need RBAC configuration)"
+          }
+
+      - name: Write Deployment Summary
+        if: always()
+        run: |
+          echo "## Platform Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Mode** | deploy |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource Group: \`rg-spaarke-platform-${{ github.event.inputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Key Vault: \`sprk-platform-${{ github.event.inputs.environment }}-kv\`" >> $GITHUB_STEP_SUMMARY
+          echo "- App Service, Azure OpenAI, AI Search, Document Intelligence" >> $GITHUB_STEP_SUMMARY

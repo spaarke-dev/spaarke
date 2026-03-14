@@ -1,0 +1,71 @@
+<task id="PRODENV-042" project="Production Environment Setup R1">
+  <metadata>
+    <title>Write incident response procedures</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5</phase>
+    <parallel-group>P5-A</parallel-group>
+    <tags>documentation, incident-response, operations</tags>
+  </metadata>
+
+  <prompt>
+    Write incident response procedures for production Spaarke environments covering
+    common failure scenarios, escalation paths, rollback procedures, and communication templates.
+  </prompt>
+
+  <role>Technical writer creating operational procedures for incident management.</role>
+
+  <goal>
+    Incident response procedures that enable operations to quickly diagnose and
+    resolve common production issues with clear escalation paths.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-06">Rollback procedures must be documented</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Incident response documentation</topic>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Test-Deployment.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Production environments need documented incident response before go-live.</background>
+    <dependencies>
+      <dependency task="PRODENV-027" status="complete">Smoke test results inform failure scenarios</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Write incident response doc">
+      Create docs/guides/INCIDENT-RESPONSE.md covering:
+      - Severity levels and response times
+      - Common failure scenarios (API down, Dataverse unavailable, AI service errors, etc.)
+      - Diagnostic steps for each scenario
+      - Rollback procedures (BFF API slot swap, solution rollback)
+      - Escalation paths and contacts
+      - Communication templates
+      - Post-incident review process
+    </step>
+  </steps>
+
+  <tools><tool name="git">Version control</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/guides/INCIDENT-RESPONSE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Severity levels defined with response times</criterion>
+    <criterion testable="true">Common failure scenarios documented with diagnosis steps</criterion>
+    <criterion testable="true">BFF API rollback procedure via slot swap documented</criterion>
+    <criterion testable="true">Escalation paths defined</criterion>
+  </acceptance-criteria>
+</task>

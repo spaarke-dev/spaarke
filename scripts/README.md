@@ -123,6 +123,294 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+## Demo & Sample Data Scripts
+
+### `Load-DemoSampleData.ps1`
+**Purpose:** Load non-confidential sample data into a Spaarke demo environment — contacts, matters, projects, events, documents, chart definitions, and AI seed data. Orchestrates all data loading steps including optional SPE document upload and AI Search indexing.
+**Usage:** 🟡 Occasional - Demo environment setup or refresh
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse access, Spaarke managed solutions imported
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After provisioning a new demo environment (task 024)
+- After importing managed solutions into Dataverse
+- Refreshing demo data after a reset
+- Setting up demo environments for sales presentations
+
+**Command:**
+```powershell
+# Preview what would be created (recommended first)
+.\Load-DemoSampleData.ps1 -DryRun
+
+# Load all sample data
+.\Load-DemoSampleData.ps1
+
+# Load into a different environment
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
+
+# Skip optional steps
+.\Load-DemoSampleData.ps1 -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
+
+# Force recreate existing records
+.\Load-DemoSampleData.ps1 -Force
+```
+
+**Data Sources:**
+- `scripts/demo-data/demo-records.json` — Record definitions (contacts, matters, projects, events, documents, charts)
+- `scripts/demo-data/sample-documents/` — 8 sample text documents for SPE upload
+- `scripts/seed-data/` — AI seed data (actions, tools, skills, knowledge, playbooks)
+
+**Features:**
+- Idempotent: Existing records skipped (matched by name)
+- Graceful degradation: If solutions not imported, creates only contacts (standard entity)
+- Modular: Each data type can be skipped independently
+- DryRun mode for safe preview
+
+---
+
+## Customer Lifecycle Scripts
+
+### `Decommission-Customer.ps1`
+**Purpose:** Safely decommission a customer by removing all per-customer resources — BFF tenant registration, SPE containers, Dataverse environment, Azure resource group (Storage, Key Vault, Service Bus, Redis)
+**Usage:** 🟡 Occasional - Customer offboarding or test environment teardown
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), PAC CLI (`pac auth`), Contributor role on customer resource group
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- Offboarding a customer
+- Cleaning up test/demo environments after validation (task 045)
+- Tearing down resources after provisioning failure (partial cleanup)
+
+**Command:**
+```powershell
+# Preview what would be deleted (recommended first)
+.\Decommission-Customer.ps1 -CustomerId demo -DryRun
+
+# Decommission with confirmation prompt
+.\Decommission-Customer.ps1 -CustomerId demo
+
+# Decommission without prompts (CI/CD)
+.\Decommission-Customer.ps1 -CustomerId demo -Force
+
+# Azure resources only (skip Dataverse and SPE)
+.\Decommission-Customer.ps1 -CustomerId testcust -SkipDataverse -SkipSpe
+```
+
+**Safety Features:**
+- DryRun mode lists resources without deleting
+- Confirmation prompt requires typing "YES" (unless -Force)
+- Platform resource groups are explicitly blocked
+- Resource group name must match `rg-spaarke-{id}-{env}` pattern
+- Key Vault soft-delete purge to prevent name collisions
+
+---
+
+## Entra ID & Identity Scripts
+
+### `Register-EntraAppRegistrations.ps1`
+**Purpose:** Create production Entra ID app registrations (BFF API + Dataverse S2S) and store credentials in Key Vault
+**Usage:** 🔴 One-time - Production environment setup
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Entra ID admin permissions, Key Vault access
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- Setting up production Entra ID app registrations
+- Recreating registrations in a new tenant
+- After tenant migration
+
+**Command:**
+```powershell
+# Preview what will be created
+.\Register-EntraAppRegistrations.ps1 -DryRun
+
+# Create both registrations
+.\Register-EntraAppRegistrations.ps1
+
+# Create only Dataverse S2S (BFF already done)
+.\Register-EntraAppRegistrations.ps1 -SkipBffApi
+```
+
+**Creates:**
+- `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions
+- `spaarke-dataverse-s2s-prod` — Dataverse server-to-server authentication
+- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience, Dataverse-S2S-ClientId, Dataverse-S2S-ClientSecret
+
+---
+
+### `Test-EntraAppRegistrations.ps1`
+**Purpose:** Verify production Entra ID app registrations — checks app existence, permissions, naming convention, Key Vault secrets, and token acquisition
+**Usage:** 🟡 Occasional - After registration or rotation
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Key Vault access
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After running `Register-EntraAppRegistrations.ps1`
+- After secret rotation
+- Troubleshooting authentication failures in production
+
+**Command:**
+```powershell
+# Test using Key Vault secrets
+.\Test-EntraAppRegistrations.ps1
+
+# Test with explicit credentials
+.\Test-EntraAppRegistrations.ps1 -BffApiClientId "abc123" -BffApiClientSecret "secret"
+
+# Test with Dataverse token acquisition
+.\Test-EntraAppRegistrations.ps1 -DataverseOrgUrl "https://spaarke-demo.crm.dynamics.com"
+```
+
+---
+
+### `Invite-DemoUsers.ps1`
+**Purpose:** Configure B2B guest access for demo users — sends Entra ID B2B invitations, guides Dataverse security role assignment, verifies user access end-to-end
+**Usage:** 🟡 Occasional - Demo user onboarding, new demo accounts
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Graph API permissions (User.Invite.All), PAC CLI (optional)
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- Onboarding new demo users for sales presentations
+- Re-inviting users whose invitations expired
+- Verifying existing demo user access (`-VerifyOnly`)
+
+**Command:**
+```powershell
+# Full flow: invite users, assign roles, verify
+.\Invite-DemoUsers.ps1
+
+# Preview only (no changes)
+.\Invite-DemoUsers.ps1 -WhatIf
+
+# Verify existing access only
+.\Invite-DemoUsers.ps1 -VerifyOnly
+
+# Skip invitations (already accepted), just verify roles
+.\Invite-DemoUsers.ps1 -SkipInvitations
+```
+
+**Configuration:**
+- Users defined in `demo-users.json` (same directory)
+- Add/remove users by editing the JSON file and re-running
+
+---
+
+## Custom Domain & SSL Scripts
+
+### `Configure-CustomDomain.ps1`
+**Purpose:** Configure custom domain (api.spaarke.com), Azure-managed SSL certificate, HTTPS enforcement, and CORS on the production App Service
+**Usage:** 🔴 One-time - Production domain setup
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Contributor on resource group, DNS records pre-configured
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- Initial production custom domain setup
+- Adding custom domain to a new App Service
+- Reconfiguring SSL or CORS settings
+
+**Command:**
+```powershell
+# Show DNS instructions first
+.\Configure-CustomDomain.ps1 -ShowDnsInstructions
+
+# Preview what will be configured
+.\Configure-CustomDomain.ps1 -DryRun
+
+# Full configuration
+.\Configure-CustomDomain.ps1
+
+# Skip DNS check if propagation is slow
+.\Configure-CustomDomain.ps1 -SkipDnsCheck
+```
+
+---
+
+### `Test-CustomDomain.ps1`
+**Purpose:** Verify custom domain, SSL certificate, HTTPS enforcement, and CORS configuration — comprehensive post-setup validation
+**Usage:** 🟡 Occasional - After domain setup or troubleshooting
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), network access to custom domain
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After running `Configure-CustomDomain.ps1`
+- Troubleshooting domain or SSL issues
+- Periodic SSL certificate health checks
+
+**Command:**
+```powershell
+# Run full verification
+.\Test-CustomDomain.ps1
+
+# Test with specific CORS origin
+.\Test-CustomDomain.ps1 -TestCorsOrigin "https://my-org.crm.dynamics.com"
+```
+
+**Tests:**
+- DNS resolution (CNAME and A records)
+- App Service hostname binding and SSL state
+- HTTPS-only enforcement
+- SSL certificate validity and expiry
+- HTTPS connectivity
+- HTTP to HTTPS redirect
+- CORS configuration
+
+---
+
+## Operations & Security Scripts
+
+### `Rotate-Secrets.ps1`
+**Purpose:** Rotate secrets in Azure Key Vault for platform and customer vaults — handles Storage keys, Service Bus keys, Redis keys, and Entra ID client secrets with zero-downtime rotation
+**Usage:** 🟡 Occasional - Quarterly secret rotation or on-demand
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Key Vault Secrets Officer role, Contributor on target resources
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- Scheduled quarterly secret rotation
+- After a security incident requiring immediate credential rotation
+- When onboarding/offboarding team members with secret access
+- Compliance audits requiring rotation evidence
+
+**Command:**
+```powershell
+# Preview what would be rotated (recommended first)
+.\Rotate-Secrets.ps1 -Scope Platform -SecretType All -DryRun
+
+# Rotate all platform secrets
+.\Rotate-Secrets.ps1 -Scope Platform -SecretType All
+
+# Rotate customer storage keys
+.\Rotate-Secrets.ps1 -Scope Customer -CustomerId demo -SecretType StorageKey
+
+# Rotate everything (platform + all customers)
+.\Rotate-Secrets.ps1 -Scope All -SecretType All -Force
+```
+
+**Supported Secret Types:**
+- `StorageKey` — Storage account key regeneration (customer-level)
+- `ServiceBus` — Service Bus access key regeneration
+- `Redis` — Redis cache access key regeneration
+- `EntraId` — Entra ID app registration client secret rotation (platform-level)
+- `All` — All of the above
+
+**Audit:** Produces timestamped JSON audit log in `scripts/logs/secret-rotation-*.log`
+
+---
+
 ## Active Development Scripts
 
 ### PCF & Custom Page Deployment

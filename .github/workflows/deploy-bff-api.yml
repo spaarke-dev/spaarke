@@ -1,0 +1,454 @@
+# ============================================================================
+# deploy-bff-api.yml — Build, Test & Deploy BFF API via Staging Slot Swap
+# ============================================================================
+#
+# Triggers on push to master when API code changes (FR-09).
+# Also supports manual dispatch for on-demand deployments.
+#
+# Pipeline: build → test → deploy staging → verify staging → swap →
+#           verify production → (rollback on failure)
+#
+# Zero-downtime: Uses staging slot + swap pattern (NFR-02).
+# Rollback:      Auto swap-back if production health check fails (NFR-06).
+# Health check:  /healthz endpoint (ADR-001).
+#
+# Audit trail: All runs logged in GitHub Actions history (NFR-05).
+# ============================================================================
+
+name: Deploy BFF API
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/server/api/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - production
+        default: 'production'
+      skip-tests:
+        description: 'Skip test execution (emergency deploys only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC-based Azure login
+
+concurrency:
+  group: deploy-bff-api-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false  # Never cancel in-progress deployments
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_VERSION: '8.x'
+  API_PROJECT: src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Build & Publish
+  # ──────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.API_PROJECT }}
+
+      - name: Build
+        run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
+
+      - name: Publish
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ./publish --no-build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: bff-api-build
+          path: ./publish
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Test
+  # ──────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test API
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip-tests != 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run unit tests
+        run: |
+          dotnet test tests/unit/Sprk.Bff.Api.Tests/ \
+            -c Release \
+            --no-restore \
+            --logger trx \
+            --results-directory ./TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: test-results
+          path: ./TestResults/
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Deploy to Staging Slot
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging Slot
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    if: |
+      always() &&
+      needs.build.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    environment: staging  # Auto-approve for staging
+
+    env:
+      RESOURCE_GROUP: rg-spaarke-platform-prod
+      APP_SERVICE: spaarke-bff-prod
+      SLOT_NAME: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: bff-api-build
+          path: ./publish
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create deployment package
+        run: |
+          cd ./publish
+          zip -r ../bff-api.zip .
+
+      - name: Deploy to staging slot
+        run: |
+          az webapp deploy \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.APP_SERVICE }} \
+            --slot ${{ env.SLOT_NAME }} \
+            --src-path ./bff-api.zip \
+            --type zip \
+            --async false
+
+      - name: Wait for staging slot startup
+        run: sleep 15
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 4: Verify Staging Health
+  # ──────────────────────────────────────────────────────────────────────────
+  verify-staging:
+    name: Verify Staging Health
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    env:
+      STAGING_URL: https://spaarke-bff-prod-staging.azurewebsites.net
+
+    steps:
+      - name: Health check — staging /healthz
+        run: |
+          echo "Verifying staging health at ${{ env.STAGING_URL }}/healthz"
+
+          MAX_RETRIES=12
+          INTERVAL=5
+          HEALTHY=false
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 \
+              "${{ env.STAGING_URL }}/healthz" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Staging health check passed on attempt $i"
+              HEALTHY=true
+              break
+            fi
+
+            echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_CODE — retrying in ${INTERVAL}s..."
+            sleep $INTERVAL
+          done
+
+          if [ "$HEALTHY" != "true" ]; then
+            echo "::error::Staging health check failed after $MAX_RETRIES attempts"
+            echo "Staging slot is unhealthy. Aborting deployment — production is UNCHANGED."
+            exit 1
+          fi
+
+      - name: Smoke test — staging /ping
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            "${{ env.STAGING_URL }}/ping" || echo "000")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Staging /ping check passed"
+          else
+            echo "::warning::Staging /ping returned HTTP $HTTP_CODE (non-blocking)"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 5: Swap Staging → Production (requires approval)
+  # ──────────────────────────────────────────────────────────────────────────
+  swap-production:
+    name: Swap to Production
+    runs-on: ubuntu-latest
+    needs: verify-staging
+    environment: production  # FR-09: requires reviewer approval
+
+    env:
+      RESOURCE_GROUP: rg-spaarke-platform-prod
+      APP_SERVICE: spaarke-bff-prod
+      SLOT_NAME: staging
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Swap staging → production
+        run: |
+          echo "Swapping staging slot to production (zero-downtime)..."
+          az webapp deployment slot swap \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.APP_SERVICE }} \
+            --slot ${{ env.SLOT_NAME }} \
+            --target-slot production
+
+          echo "Slot swap completed successfully"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 6: Verify Production Health
+  # ──────────────────────────────────────────────────────────────────────────
+  verify-production:
+    name: Verify Production Health
+    runs-on: ubuntu-latest
+    needs: swap-production
+
+    env:
+      PRODUCTION_URL: https://api.spaarke.com
+
+    steps:
+      - name: Wait for DNS/routing stabilization
+        run: sleep 10
+
+      - name: Health check — production /healthz
+        id: health-check
+        run: |
+          echo "Verifying production health at ${{ env.PRODUCTION_URL }}/healthz"
+
+          MAX_RETRIES=12
+          INTERVAL=5
+          HEALTHY=false
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 \
+              "${{ env.PRODUCTION_URL }}/healthz" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Production health check passed on attempt $i"
+              HEALTHY=true
+              break
+            fi
+
+            echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_CODE — retrying in ${INTERVAL}s..."
+            sleep $INTERVAL
+          done
+
+          if [ "$HEALTHY" != "true" ]; then
+            echo "::error::Production health check failed after $MAX_RETRIES attempts"
+            echo "healthy=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "healthy=true" >> $GITHUB_OUTPUT
+
+      - name: Smoke test — production /ping
+        if: success()
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            "${{ env.PRODUCTION_URL }}/ping" || echo "000")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Production /ping check passed"
+          else
+            echo "::warning::Production /ping returned HTTP $HTTP_CODE (non-blocking)"
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 7: Rollback (on production health check failure)
+  # ──────────────────────────────────────────────────────────────────────────
+  rollback:
+    name: Rollback (Swap Back)
+    runs-on: ubuntu-latest
+    needs: verify-production
+    if: failure()
+
+    env:
+      RESOURCE_GROUP: rg-spaarke-platform-prod
+      APP_SERVICE: spaarke-bff-prod
+      SLOT_NAME: staging
+      PRODUCTION_URL: https://api.spaarke.com
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Swap back — rollback to previous version
+        run: |
+          echo "::warning::ROLLING BACK: Swapping production back to previous version"
+
+          az webapp deployment slot swap \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.APP_SERVICE }} \
+            --slot ${{ env.SLOT_NAME }} \
+            --target-slot production
+
+          echo "Rollback swap completed"
+
+      - name: Verify rollback health
+        run: |
+          echo "Verifying production health after rollback..."
+          sleep 10
+
+          MAX_RETRIES=12
+          INTERVAL=5
+          HEALTHY=false
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 \
+              "${{ env.PRODUCTION_URL }}/healthz" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Rollback health check passed on attempt $i"
+              HEALTHY=true
+              break
+            fi
+
+            echo "Attempt $i/$MAX_RETRIES: HTTP $HTTP_CODE — retrying in ${INTERVAL}s..."
+            sleep $INTERVAL
+          done
+
+          if [ "$HEALTHY" = "true" ]; then
+            echo "::warning::Rollback successful — previous version restored"
+          else
+            echo "::error::CRITICAL: Rollback health check also failed! Manual intervention required."
+            echo "Manual rollback command:"
+            echo "  az webapp deployment slot swap --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.APP_SERVICE }} --slot ${{ env.SLOT_NAME }} --target-slot production"
+            exit 1
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Summary (always runs)
+  # ──────────────────────────────────────────────────────────────────────────
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [build, test, deploy-staging, verify-staging, swap-production, verify-production, rollback]
+    if: always()
+
+    steps:
+      - name: Write Summary
+        run: |
+          echo "## BFF API Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trigger** | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Verify Staging | ${{ needs.verify-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Swap Production | ${{ needs.swap-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Verify Production | ${{ needs.verify-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rollback | ${{ needs.rollback.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.rollback.result }}" = "success" ]; then
+            echo "### :warning: Deployment was ROLLED BACK" >> $GITHUB_STEP_SUMMARY
+            echo "Production health check failed after swap. Previous version has been restored." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.verify-production.result }}" = "success" ]; then
+            echo "### :white_check_mark: Deployment Successful" >> $GITHUB_STEP_SUMMARY
+            echo "Production API: https://api.spaarke.com" >> $GITHUB_STEP_SUMMARY
+            echo "Health check: https://api.spaarke.com/healthz" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.verify-staging.result }}" = "failure" ]; then
+            echo "### :x: Staging Verification Failed" >> $GITHUB_STEP_SUMMARY
+            echo "Staging health check failed. Production was NOT modified." >> $GITHUB_STEP_SUMMARY
+          fi

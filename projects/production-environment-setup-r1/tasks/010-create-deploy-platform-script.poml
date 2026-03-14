@@ -1,0 +1,96 @@
+<task id="PRODENV-010" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Deploy-Platform.ps1 (shared infrastructure deployment)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-A</parallel-group>
+    <tags>powershell, deployment, infrastructure</tags>
+  </metadata>
+
+  <prompt>
+    Create Deploy-Platform.ps1 that deploys the shared platform infrastructure using
+    platform.bicep. The script handles resource group creation, Bicep deployment,
+    post-deployment configuration, and validation.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with Azure PowerShell automation and Bicep deployments.
+  </role>
+
+  <goal>
+    A production-ready PowerShell script that deploys or updates all shared platform
+    resources with proper error handling, logging, idempotency, and post-deployment validation.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="bicep-template">infrastructure/bicep/platform.bicep</file>
+    <file purpose="existing-script">scripts/Deploy-BffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-10">Script must be idempotent — safe to run multiple times</constraint>
+    <constraint source="FR-08">No secrets in script parameters — use Key Vault</constraint>
+    <constraint source="NFR-05">Log all operations (who, what, when, which environment)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure PowerShell deployment automation</topic>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>infrastructure/bicep/platform.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This script is the entry point for deploying or updating the shared platform.
+      It will be called by the deploy-platform.yml GitHub Actions workflow and can
+      also be run manually. Follow patterns from existing Deploy-BffApi.ps1.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-001" status="complete">platform.bicep must exist</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing deployment scripts">
+      Read Deploy-BffApi.ps1 for patterns, error handling, and logging conventions.
+    </step>
+    <step order="2" name="Create Deploy-Platform.ps1">
+      Create scripts/Deploy-Platform.ps1 with:
+      - Parameters: EnvironmentName, Location, ParameterFile, WhatIf switch
+      - Resource group creation (rg-spaarke-platform-{env})
+      - Bicep deployment with parameter file
+      - Post-deployment: configure App Service settings, enable autoscaling
+      - Validation: verify all resources created and healthy
+      - Comprehensive error handling with try/catch
+      - Transcript logging
+    </step>
+    <step order="3" name="Add WhatIf support">
+      WhatIf parameter runs az deployment group what-if instead of create.
+    </step>
+    <step order="4" name="Test locally">
+      Validate script syntax with PowerShell parser. Test with -WhatIf if possible.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-Platform.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-Platform.ps1 exists and parses without syntax errors</criterion>
+    <criterion testable="true">Script accepts EnvironmentName, Location, ParameterFile, and WhatIf parameters</criterion>
+    <criterion testable="true">Script creates resource group if it doesn't exist</criterion>
+    <criterion testable="true">Script uses Bicep deployment with parameter file</criterion>
+    <criterion testable="true">WhatIf mode runs what-if instead of actual deployment</criterion>
+    <criterion testable="true">Error handling with try/catch and meaningful error messages</criterion>
+  </acceptance-criteria>
+</task>

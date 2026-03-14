@@ -40,6 +40,7 @@ This directory will contain AI-optimized versions of Architecture Decision Recor
 | ADR-021 | Fluent UI v9 Design System | All UI uses Fluent v9; dark mode required |
 | ADR-023 | Choice Dialog Pattern | Rich option buttons for 2-4 choices |
 | ADR-026 | Full-Page Custom Page Standard | Standalone HTML + Vite + React 18 for full pages; no PCF |
+| ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions |
 
 ---
 
@@ -55,6 +56,8 @@ Load concise ADRs proactively when creating new components:
 - Working with UI/UX → Load ADR-021, ADR-022
 
 - Creating dialogs → Load ADR-021, ADR-023
+- Deploying to production → Load ADR-027 (subscription isolation, Dataverse solution management)
+- Working with Dataverse solutions → Load ADR-027 (managed vs unmanaged, import order)
 
 
 

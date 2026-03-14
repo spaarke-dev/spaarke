@@ -1,0 +1,56 @@
+MASTER SUPPLY AGREEMENT
+Version 3.2 - Effective January 1, 2026
+
+BETWEEN:
+  Spaarke Legal Services ("Buyer")
+  AND
+  Contoso Ltd. ("Supplier")
+
+1. SCOPE OF AGREEMENT
+This Master Supply Agreement ("Agreement") governs the supply of raw materials,
+components, and finished goods from Supplier to Buyer for the fiscal year 2026.
+
+2. PRICING AND PAYMENT TERMS
+2.1 Pricing shall be as set forth in Schedule A (Pricing Schedule).
+2.2 Payment terms: Net 30 from date of invoice.
+2.3 Early payment discount: 2% if paid within 10 days.
+
+3. DELIVERY
+3.1 Supplier shall deliver goods FOB Destination to Buyer's designated facilities.
+3.2 Standard delivery lead time: 14 business days from purchase order date.
+3.3 Expedited delivery available at 15% surcharge with 5 business day lead time.
+
+4. QUALITY STANDARDS
+4.1 All goods shall conform to specifications in Schedule B.
+4.2 Supplier shall maintain ISO 9001:2015 certification throughout the term.
+4.3 Buyer reserves the right to conduct quality audits with 48 hours notice.
+
+5. FORCE MAJEURE (Amended v3.2)
+5.1 Neither party shall be liable for delays caused by events beyond reasonable control.
+5.2 Force majeure events include but are not limited to: natural disasters, pandemics,
+    government actions, supply chain disruptions, and cyber incidents.
+5.3 Affected party must provide written notice within 72 hours of the event.
+
+6. TERM AND TERMINATION
+6.1 Initial term: January 1, 2026 through December 31, 2026.
+6.2 Auto-renewal for successive one-year terms unless terminated with 90 days notice.
+6.3 Either party may terminate for cause with 30 days written notice and cure period.
+
+7. LIABILITY
+7.1 Supplier's total liability shall not exceed the value of goods delivered in the
+    preceding 12 months.
+7.2 Neither party shall be liable for consequential, incidental, or punitive damages.
+
+8. CONFIDENTIALITY
+8.1 Both parties shall maintain the confidentiality of all proprietary information.
+8.2 Confidentiality obligations survive termination for a period of 3 years.
+
+SCHEDULE A - PRICING SCHEDULE
+[See attached pricing matrix - 47 line items]
+
+SCHEDULE B - QUALITY SPECIFICATIONS
+[See attached technical specifications document]
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All company names, persons, and details are fictitious.
