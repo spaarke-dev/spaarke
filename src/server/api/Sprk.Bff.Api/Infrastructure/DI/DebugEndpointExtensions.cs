@@ -15,9 +15,18 @@ public static class DebugEndpointExtensions
             {
                 var doc = await dv.GetDocumentAsync(id.ToString());
                 if (doc == null) return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString() });
-                return Results.Ok(new { status = "FOUND", documentId = doc.Id, name = doc.Name, fileName = doc.FileName,
-                    isEmailArchive = doc.IsEmailArchive, parentDocumentId = doc.ParentDocumentId,
-                    matterId = doc.MatterId, projectId = doc.ProjectId, invoiceId = doc.InvoiceId });
+                return Results.Ok(new
+                {
+                    status = "FOUND",
+                    documentId = doc.Id,
+                    name = doc.Name,
+                    fileName = doc.FileName,
+                    isEmailArchive = doc.IsEmailArchive,
+                    parentDocumentId = doc.ParentDocumentId,
+                    matterId = doc.MatterId,
+                    projectId = doc.ProjectId,
+                    invoiceId = doc.InvoiceId
+                });
             }
             catch (Exception ex) { log.LogError(ex, "Error {Id}", id); return Results.Ok(new { status = "ERROR", error = ex.Message }); }
         }).AllowAnonymous();
@@ -27,9 +36,21 @@ public static class DebugEndpointExtensions
             try
             {
                 var children = (await dv.GetDocumentsByParentAsync(parentId)).ToList();
-                return Results.Ok(new { status = "OK", parentDocumentId = parentId.ToString(), childCount = children.Count,
-                    children = children.Select(c => new { documentId = c.Id, name = c.Name, fileName = c.FileName,
-                        isEmailArchive = c.IsEmailArchive, parentDocumentId = c.ParentDocumentId, createdOn = c.CreatedOn }) });
+                return Results.Ok(new
+                {
+                    status = "OK",
+                    parentDocumentId = parentId.ToString(),
+                    childCount = children.Count,
+                    children = children.Select(c => new
+                    {
+                        documentId = c.Id,
+                        name = c.Name,
+                        fileName = c.FileName,
+                        isEmailArchive = c.IsEmailArchive,
+                        parentDocumentId = c.ParentDocumentId,
+                        createdOn = c.CreatedOn
+                    })
+                });
             }
             catch (Exception ex) { log.LogError(ex, "Error parent {Id}", parentId); return Results.Ok(new { status = "ERROR", error = ex.Message }); }
         }).AllowAnonymous();
@@ -80,9 +101,14 @@ public static class DebugEndpointExtensions
                 var info = handlers.Select(h => new { jobType = h.JobType, handlerType = h.GetType().FullName }).ToList();
                 string? err1 = TryResolve<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>(scope);
                 string? err2 = TryResolve<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>(scope);
-                return Results.Ok(new { totalHandlers = handlers.Count, handlers = info,
+                return Results.Ok(new
+                {
+                    totalHandlers = handlers.Count,
+                    handlers = info,
                     hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
-                    directHandlerResolution = err1 ?? "OK", analysisServiceResolution = err2 ?? "OK" });
+                    directHandlerResolution = err1 ?? "OK",
+                    analysisServiceResolution = err2 ?? "OK"
+                });
             }
             catch (Exception ex) { log.LogError(ex, "Error"); return Results.Ok(new { error = ex.Message }); }
         }).AllowAnonymous();
@@ -94,8 +120,11 @@ public static class DebugEndpointExtensions
             {
                 var svc = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
                 results["CommunicationAccountService"] = "OK";
-                try { var accts = await svc.QueryReceiveEnabledAccountsAsync(); results["ReceiveEnabledAccounts"] = $"{accts.Length} found";
-                    foreach (var a in accts) results[$"Account:{a.EmailAddress}"] = $"SubId={a.SubscriptionId ?? "none"}, AutoCreate={a.AutoCreateRecords}"; }
+                try
+                {
+                    var accts = await svc.QueryReceiveEnabledAccountsAsync(); results["ReceiveEnabledAccounts"] = $"{accts.Length} found";
+                    foreach (var a in accts) results[$"Account:{a.EmailAddress}"] = $"SubId={a.SubscriptionId ?? "none"}, AutoCreate={a.AutoCreateRecords}";
+                }
                 catch (Exception ex) { results["ReceiveEnabledAccounts"] = $"FAILED: {ex.Message}"; }
             }
             catch (Exception ex) { results["CommunicationAccountService"] = $"FAILED: {ex.Message}"; }
@@ -129,17 +158,36 @@ public static class DebugEndpointExtensions
             ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
         });
         var messages = await receiver.PeekMessagesAsync(10);
-        return new { queue = $"{queueName}/$DeadLetterQueue", count = messages.Count,
-            messages = messages.Select(m => new { m.SequenceNumber, m.DeadLetterReason, m.EnqueuedTime, m.MessageId,
-                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString() }) };
+        return new
+        {
+            queue = $"{queueName}/$DeadLetterQueue",
+            count = messages.Count,
+            messages = messages.Select(m => new
+            {
+                m.SequenceNumber,
+                m.DeadLetterReason,
+                m.EnqueuedTime,
+                m.MessageId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            })
+        };
     }
 
     private static async Task<object> PeekQueue(Azure.Messaging.ServiceBus.ServiceBusClient sbc, string queueName)
     {
         await using var receiver = sbc.CreateReceiver(queueName);
         var messages = await receiver.PeekMessagesAsync(10);
-        return new { queue = queueName, count = messages.Count,
-            messages = messages.Select(m => new { m.SequenceNumber, m.EnqueuedTime, m.MessageId,
-                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString() }) };
+        return new
+        {
+            queue = queueName,
+            count = messages.Count,
+            messages = messages.Select(m => new
+            {
+                m.SequenceNumber,
+                m.EnqueuedTime,
+                m.MessageId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            })
+        };
     }
 }

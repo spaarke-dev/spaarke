@@ -44,9 +44,15 @@ public static class EndpointMappingExtensions
 
                 return Results.Ok(new
                 {
-                    status = "FOUND", documentId = doc.Id, name = doc.Name, fileName = doc.FileName,
-                    isEmailArchive = doc.IsEmailArchive, parentDocumentId = doc.ParentDocumentId,
-                    matterId = doc.MatterId, projectId = doc.ProjectId, invoiceId = doc.InvoiceId,
+                    status = "FOUND",
+                    documentId = doc.Id,
+                    name = doc.Name,
+                    fileName = doc.FileName,
+                    isEmailArchive = doc.IsEmailArchive,
+                    parentDocumentId = doc.ParentDocumentId,
+                    matterId = doc.MatterId,
+                    projectId = doc.ProjectId,
+                    invoiceId = doc.InvoiceId,
                     emailConversationIndex = doc.EmailConversationIndex
                 });
             }
