@@ -132,7 +132,7 @@
 | 043 | Deploy BFF API with SPE endpoints | ✅ | 010-023 | 2h |
 | 044 | Deploy Code Page to Dataverse | ✅ | 042 | 2h |
 | 045 | Create Dataverse tables in environment | ✅ | 001-003 | 2h |
-| 046 | Phase 1 end-to-end integration testing | 🔲 | 042-045 | 4h |
+| 046 | Phase 1 end-to-end integration testing | ✅ | 042-045 | 4h |
 
 ---
 
@@ -142,7 +142,7 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 050 | List/Get container types endpoints | 🔲 | 006, 009 | 2h |
+| 050 | List/Get container types endpoints | ✅ | 006, 009 | 2h |
 | 051 | Create container type endpoint | 🔲 | 050, 007 | 2h |
 | 052 | Update container type settings endpoint | 🔲 | 050 | 2h |
 | 053 | Register container type endpoint | 🔲 | 050 | 3h |
