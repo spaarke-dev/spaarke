@@ -105,6 +105,9 @@ jobs:
     name: Client Quality (Prettier + ESLint)
     runs-on: ubuntu-latest
     steps:
+      - name: Configure git line endings
+        run: git config --global core.autocrlf true
+
       - name: Checkout
         uses: actions/checkout@v6
 

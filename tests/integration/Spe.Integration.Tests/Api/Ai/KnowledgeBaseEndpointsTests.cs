@@ -13,6 +13,7 @@ using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
@@ -376,7 +377,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("DocumentIntelligence:RecordMatchingEnabled", "false");
         builder.UseSetting("Analysis:Enabled", "false");
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureTestServices(services =>
         {
             // Replace IRagService with a controllable mock
             services.RemoveAll<IRagService>();
@@ -427,6 +428,14 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(Moq.MockBehavior.Loose).Object);
+
+            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
+            // Register its missing dependency stubs so DI can construct it.
+            services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(Moq.MockBehavior.Loose).Object);
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
+
+            // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
+            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(Moq.MockBehavior.Loose).Object);
 
             // IOpenAiClient is conditionally registered (DocumentIntelligence:Enabled=true only),
             // but FinanceModule services (InvoiceAnalysisService, InvoiceSearchService, etc.) always
