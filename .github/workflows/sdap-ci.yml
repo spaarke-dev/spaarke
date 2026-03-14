@@ -183,6 +183,7 @@ jobs:
           name: adr-test-results
           if-no-files-found: warn
           path: ./TestResults/adr-results.trx
+          if-no-files-found: warn
 
       - name: Plugin size validation
         shell: pwsh

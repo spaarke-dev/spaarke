@@ -25,6 +25,19 @@ import type { AnalysisRecord, AnalysisError } from '../types';
 
 const LOG_PREFIX = '[AnalysisWorkspace:useAnalysisExecution]';
 
+/**
+ * Maps backend `step` field values to frontend AiProgressStepper step IDs.
+ * `text_extracted` maps to `context_ready` because both represent the same
+ * user-visible step (doc intel done → context loading begins).
+ */
+const BACKEND_STEP_TO_FRONTEND: Record<string, string> = {
+  document_loaded: 'document_loaded',
+  extracting_text: 'extracting_text',
+  text_extracted: 'context_ready',
+  context_ready: 'context_ready',
+  analyzing: 'analyzing',
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -51,8 +64,14 @@ export interface UseAnalysisExecutionResult {
   progressMessage: string;
   /** Number of content chunks received */
   chunkCount: number;
+  /** Currently active pipeline step ID for AiProgressStepper */
+  activeStepId: string | null;
+  /** Pipeline step IDs that have completed for AiProgressStepper */
+  completedStepIds: string[];
   /** Manually trigger execution (bypasses shouldAutoExecute guard). Used by Run Analysis button. */
   triggerExecute: () => void;
+  /** Abort an in-progress execution (cancel button). */
+  cancelExecution: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,10 +85,16 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
   const [executionError, setExecutionError] = useState<AnalysisError | null>(null);
   const [progressMessage, setProgressMessage] = useState('');
   const [chunkCount, setChunkCount] = useState(0);
+  const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
 
   // Track whether we've already triggered execution for this analysis
   const executedRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Ref tracks current active step for step transitions (avoids stale closure)
+  const activeStepRef = useRef<string | null>(null);
+  // Ref tracks whether the first content chunk has been received (for delivering step)
+  const firstContentChunkRef = useRef(false);
 
   /**
    * Check if the analysis should auto-execute.
@@ -112,6 +137,10 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
     setExecutionError(null);
     setProgressMessage('Starting analysis...');
     setChunkCount(0);
+    setActiveStepId(null);
+    setCompletedStepIds([]);
+    activeStepRef.current = null;
+    firstContentChunkRef.current = false;
 
     const abortController = new AbortController();
     abortRef.current = abortController;
@@ -131,10 +160,36 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
         onChunk: (chunk: AnalysisStreamChunk) => {
           if (chunk.type === 'metadata') {
             setProgressMessage('Processing document...');
+            // Activate the first step as soon as stream opens
+            activeStepRef.current = 'document_loaded';
+            setActiveStepId('document_loaded');
+          } else if (chunk.type === 'progress' && chunk.step) {
+            // Map backend step to frontend step ID
+            const frontendStepId = BACKEND_STEP_TO_FRONTEND[chunk.step];
+            if (frontendStepId && frontendStepId !== activeStepRef.current) {
+              // Mark previous step as completed before advancing
+              const prevStep = activeStepRef.current;
+              if (prevStep) {
+                setCompletedStepIds(prev => prev.includes(prevStep) ? prev : [...prev, prevStep]);
+              }
+              activeStepRef.current = frontendStepId;
+              setActiveStepId(frontendStepId);
+            }
           } else if (chunk.type === 'chunk' && chunk.content) {
             contentBuffer += chunk.content;
             setChunkCount(prev => prev + 1);
             setProgressMessage('Generating analysis...');
+
+            // On first content token, advance to the "delivering" step
+            if (!firstContentChunkRef.current) {
+              firstContentChunkRef.current = true;
+              const prevStep = activeStepRef.current;
+              if (prevStep && prevStep !== 'delivering') {
+                setCompletedStepIds(prev => prev.includes(prevStep) ? prev : [...prev, prevStep]);
+              }
+              activeStepRef.current = 'delivering';
+              setActiveStepId('delivering');
+            }
 
             // Throttle render updates for per-token streaming
             const now = Date.now();
@@ -146,6 +201,10 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
             // Final flush — always render complete content
             onStreamContent?.(contentBuffer);
             setProgressMessage('Analysis complete');
+            // Mark all steps complete
+            setCompletedStepIds(['document_loaded', 'extracting_text', 'context_ready', 'analyzing', 'delivering']);
+            setActiveStepId(null);
+            activeStepRef.current = null;
           }
         },
       });
@@ -200,6 +259,13 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
   }, [analysis, token, isExecuting, doExecute]);
 
   /**
+   * Abort in-progress execution. Used by the AiProgressStepper cancel button.
+   */
+  const cancelExecution = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  /**
    * Cleanup: abort on unmount.
    */
   useEffect(() => {
@@ -213,6 +279,9 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
     executionError,
     progressMessage,
     chunkCount,
+    activeStepId,
+    completedStepIds,
     triggerExecute,
+    cancelExecution,
   };
 }

@@ -63,3 +63,6 @@ export * from './CreateRecordWizard';
 
 // AiFieldTag - "AI" badge pill for pre-filled form fields
 export * from './AiFieldTag';
+
+// AiProgressStepper - Multi-step progress indicator for AI analysis operations
+export * from './AiProgressStepper';

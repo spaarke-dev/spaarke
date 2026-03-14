@@ -498,16 +498,23 @@ export interface IAiDraftSummaryResponse {
   summary: string;
 }
 
+export interface StreamAiSummaryCallbacks {
+  onProgress?: (stepId: string) => void;
+}
+
 /**
- * Calls the BFF AI endpoint to generate a draft matter summary.
- * Uses authenticated fetch with Bearer token for BFF API.
+ * Streams the BFF AI endpoint to generate a draft matter summary (SSE).
+ * Fires onProgress callbacks as the backend emits progress events.
  * Returns a fallback response if the endpoint is unavailable (graceful degradation).
  */
-export async function fetchAiDraftSummary(
+export async function streamAiDraftSummary(
   matterName: string,
   matterType: string,
-  practiceArea: string
+  practiceArea: string,
+  callbacks: StreamAiSummaryCallbacks = {},
+  signal?: AbortSignal,
 ): Promise<IAiDraftSummaryResponse> {
+  const { onProgress } = callbacks;
   try {
     const bffBaseUrl = getBffBaseUrl();
     const response = await authenticatedFetch(
@@ -516,18 +523,69 @@ export async function fetchAiDraftSummary(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ matterName, matterType, practiceArea }),
+        signal,
       }
     );
 
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       return buildFallbackSummary(matterName, matterType, practiceArea);
     }
 
-    const data: IAiDraftSummaryResponse = await response.json();
-    return data;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let resultSummary: string | null = null;
+    let streamDone = false;
+
+    while (!streamDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (raw === '[DONE]') { streamDone = true; break; }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let chunk: any;
+        try { chunk = JSON.parse(raw); } catch { continue; }
+
+        if (chunk.type === 'progress' && chunk.step && onProgress) {
+          onProgress(chunk.step as string);
+        } else if (chunk.type === 'result' && chunk.content) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const parsed = JSON.parse(chunk.content as string) as any;
+            if (parsed?.summary) resultSummary = String(parsed.summary);
+          } catch { /* skip malformed result */ }
+        } else if (chunk.type === 'error') {
+          throw new Error((chunk.content as string) ?? 'Summary generation failed');
+        }
+      }
+    }
+
+    return resultSummary ? { summary: resultSummary } : buildFallbackSummary(matterName, matterType, practiceArea);
   } catch {
     return buildFallbackSummary(matterName, matterType, practiceArea);
   }
+
+}
+
+/**
+ * @deprecated Use streamAiDraftSummary for SSE-based progress feedback.
+ * Calls the BFF AI endpoint to generate a draft matter summary (REST, no progress).
+ */
+export async function fetchAiDraftSummary(
+  matterName: string,
+  matterType: string,
+  practiceArea: string
+): Promise<IAiDraftSummaryResponse> {
+  return streamAiDraftSummary(matterName, matterType, practiceArea);
 }
 
 // ---------------------------------------------------------------------------
