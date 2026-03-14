@@ -1,7 +1,7 @@
 <task id="SPE-072" project="SDAP SPE Admin App">
   <metadata>
     <title>Deploy Updated BFF and Code Page (Phase 2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>deploy, phase-2</tags>
     <phase>phase-2</phase>

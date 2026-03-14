@@ -6,11 +6,12 @@
 ## Active Task
 
 - **Task ID**: 090
-- **Task File**: tasks/090-project-wrapup.poml
+- **Task File**: tasks/090-project-wrap-up.poml
 - **Title**: Project Wrap-Up
 - **Phase**: phase-3
-- **Status**: not-started
-- **Started**: —
+- **Status**: in-progress
+- **Started**: 2026-03-14
+- **Rigor Level**: MINIMAL (documentation/wrap-up task — no code modifications)
 
 ## Quick Recovery
 
@@ -22,23 +23,25 @@ If resuming after compaction or new session:
 
 ## Current Step
 
-Not started. Task 085 (Phase 3 Integration Testing and Deployment) completed 2026-03-14.
+Step 1 — Update README.md status to Complete
 
 ## Completed Steps
 
-(none — task not yet started)
+- [x] Step 0.5: Determined rigor level (MINIMAL — documentation task)
+- [x] Step 1: Load Task File (090-project-wrap-up.poml)
+- [x] Step 2: Initialize current-task.md
 
 ## Files Modified This Session
 
-(none)
+(in progress)
 
 ## Key Decisions
 
-(none yet)
+- Rigor level: MINIMAL — no code files to modify; all steps are documentation and lifecycle closure
 
 ## Quality Gates
 
-(pending)
+N/A — documentation task, quality gates skipped per MINIMAL protocol
 
 ## Next Action
 

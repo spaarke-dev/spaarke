@@ -96,15 +96,15 @@
       "tools": [
         {
           "id": "SYS-TL-001",
-          "name": "Entity Extractor Handler",
-          "description": "Structured entity extraction with validation",
-          "handlerType": "EntityExtractorHandler"
+          "name": "Entity Extraction",
+          "description": "Structured entity extraction with validation (JPS-based)",
+          "handlerType": "GenericAnalysisHandler"
         },
         {
           "id": "SYS-TL-002",
-          "name": "Clause Analyzer Handler",
-          "description": "Clause detection and classification",
-          "handlerType": "ClauseAnalyzerHandler"
+          "name": "Clause Analysis",
+          "description": "Clause detection and classification (JPS-based)",
+          "handlerType": "GenericAnalysisHandler"
         },
         {
           "id": "SYS-TL-003",
@@ -120,9 +120,9 @@
         },
         {
           "id": "SYS-TL-005",
-          "name": "Risk Detector Handler",
-          "description": "Risk scoring and categorization",
-          "handlerType": "RiskDetectorHandler"
+          "name": "Risk Detection",
+          "description": "Risk scoring and categorization (JPS-based)",
+          "handlerType": "GenericAnalysisHandler"
         },
         {
           "id": "SYS-TL-009",

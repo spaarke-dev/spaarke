@@ -31,25 +31,25 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 005 | Create SpeAdminModule DI feature module | 🔲 | — | 2h |
-| 006 | Create SpeAdminGraphService (multi-config Graph client) | 🔲 | 005 | 4h |
-| 007 | Create SpeAuditService (audit logging) | 🔲 | 005 | 2h |
-| 008 | Create SpeAdminAuthorizationFilter | 🔲 | 005 | 2h |
-| 009 | Create SpeAdminEndpoints route group registration | 🔲 | 005, 008 | 1h |
+| 005 | Create SpeAdminModule DI feature module | ✅ | — | 2h |
+| 006 | Create SpeAdminGraphService (multi-config Graph client) | ✅ | 005 | 4h |
+| 007 | Create SpeAuditService (audit logging) | ✅ | 005 | 2h |
+| 008 | Create SpeAdminAuthorizationFilter | ✅ | 005 | 2h |
+| 009 | Create SpeAdminEndpoints route group registration | ✅ | 005, 008 | 1h |
 
 ### 1.3 BFF API — Configuration Endpoints
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 010 | Environment CRUD endpoints | 🔲 | 009, 007 | 3h |
-| 011 | Container type config CRUD endpoints | 🔲 | 009, 007 | 3h |
-| 012 | Business Unit list endpoint | 🔲 | 009 | 1h |
+| 010 | Environment CRUD endpoints | ✅ | 009, 007 | 3h |
+| 011 | Container type config CRUD endpoints | ✅ | 009, 007 | 3h |
+| 012 | Business Unit list endpoint | ✅ | 009 | 1h |
 
 ### 1.4 BFF API — Container Endpoints
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 013 | List/Get containers endpoints | 🔲 | 006, 009 | 2h |
+| 013 | List/Get containers endpoints | ✅ | 006, 009 | 2h |
 | 014 | Create container endpoint | ✅ | 013, 007 | 2h |
 | 015 | Update/Activate/Lock/Unlock container endpoints | ✅ | 013, 007 | 3h |
 | 016 | Container permission CRUD endpoints | ✅ | 013, 007 | 3h |
@@ -58,7 +58,7 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 017 | List items in container endpoint | 🔲 | 006, 009 | 2h |
+| 017 | List items in container endpoint | ✅ | 006, 009 | 2h |
 | 018 | Upload file endpoint | ✅ | 017, 007 | 3h |
 | 019 | Download/Preview/Delete file endpoints | ✅ | 017, 007 | 2h |
 | 020 | File versions/thumbnails/sharing endpoints | ✅ | 017 | 2h |
@@ -68,26 +68,26 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 022 | Dashboard metrics + SpeDashboardSyncService | 🔲 | 006, 009 | 3h |
-| 023 | Audit log query endpoint | 🔲 | 009, 007 | 2h |
+| 022 | Dashboard metrics + SpeDashboardSyncService | ✅ | 006, 009 | 3h |
+| 023 | Audit log query endpoint | ✅ | 009, 007 | 2h |
 
 ### 1.7 Code Page — Project Scaffolding
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 024 | Scaffold SpeAdminApp Code Page project | 🔲 | — | 2h |
-| 025 | Create main.tsx entry point | 🔲 | 024 | 1h |
-| 026 | Create TypeScript types (spe.ts) | 🔲 | 024 | 2h |
-| 027 | Create speApiClient service | 🔲 | 024 | 2h |
-| 028 | Create BuContext state management | 🔲 | 024, 026 | 2h |
+| 024 | Scaffold SpeAdminApp Code Page project | ✅ | — | 2h |
+| 025 | Create main.tsx entry point | ✅ | 024 | 1h |
+| 026 | Create TypeScript types (spe.ts) | ✅ | 024 | 2h |
+| 027 | Create speApiClient service | ✅ | 024 | 2h |
+| 028 | Create BuContext state management | ✅ | 024, 026 | 2h |
 
 ### 1.8 Code Page — Layout & Navigation
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 029 | Create AppShell layout component | 🔲 | 025, 028 | 3h |
+| 029 | Create AppShell layout component | ✅ | 025, 028 | 3h |
 | 030 | Create BuContextPicker cascade component | ✅ | 029, 027 | 3h |
-| 031 | Create NavigationPanel component | 🔲 | 029 | 2h |
+| 031 | Create NavigationPanel component | ✅ | 029 | 2h |
 
 ### 1.9 Code Page — Dashboard
 
@@ -114,7 +114,7 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 038 | Create SettingsPage | 🔲 | 029, 027 | 3h |
+| 038 | Create SettingsPage | ✅ | 029, 027 | 3h |
 | 039 | Create EnvironmentConfig component | ✅ | 038 | 2h |
 | 040 | Create ContainerTypeConfig component | ✅ | 038 | 3h |
 
@@ -208,7 +208,7 @@
 | 083 | Bulk operations | ✅ | 072 | 4h |
 | 084 | Multi-app registration support | ✅ | 072 | 4h |
 | 085 | Phase 3 integration testing and deployment | ✅ | 080-084 | 3h |
-| 090 | Project wrap-up | 🔲 | 085 | 2h |
+| 090 | Project wrap-up | ✅ | 085 | 2h |
 
 ---
 

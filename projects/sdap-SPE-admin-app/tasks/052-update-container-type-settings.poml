@@ -1,7 +1,7 @@
 <task id="SPE-052" project="SDAP SPE Admin App">
   <metadata>
     <title>Update Container Type Settings Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>bff-api, api, graph, phase-2</tags>
     <phase>phase-2</phase>

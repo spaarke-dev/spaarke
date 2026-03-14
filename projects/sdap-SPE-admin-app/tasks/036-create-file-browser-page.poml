@@ -1,7 +1,7 @@
 <task id="SPE-036" project="SDAP SPE Admin App">
   <metadata>
     <title>Create FileBrowserPage</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <tags>code-page, frontend, fluent-ui, phase-1</tags>
     <phase>1</phase>

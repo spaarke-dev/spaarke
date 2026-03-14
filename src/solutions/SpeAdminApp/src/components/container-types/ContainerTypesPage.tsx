@@ -49,6 +49,7 @@ import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, ApiError } from "../../services/speApiClient";
 import type { ContainerType } from "../../types/spe";
 import { CreateContainerTypeDialog } from "./CreateContainerTypeDialog";
+import { RegisterWizard } from "./RegisterWizard";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -318,6 +319,11 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createSaving, setCreateSaving] = React.useState(false);
 
+  // ── Register Wizard State ───────────────────────────────────────────────────
+
+  /** Whether the RegisterWizard is open. */
+  const [registerOpen, setRegisterOpen] = React.useState(false);
+
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   const columns = React.useMemo(() => buildColumns(), []);
@@ -366,44 +372,6 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
     },
     [onOpenDetail]
   );
-
-  // ── Register Action Handler ─────────────────────────────────────────────────
-
-  /**
-   * Register the selected container type on the consuming tenant.
-   * Uses delegated/application permissions from the selectedConfig.
-   */
-  const handleRegister = React.useCallback(async () => {
-    if (!selectedConfig || !selectedTypeId) return;
-    setActionError(null);
-    setActionStatus(null);
-
-    const ct = containerTypes.find((t) => t.containerTypeId === selectedTypeId);
-    if (!ct) return;
-
-    // Parse permissions from the config (comma-separated strings → string[])
-    const delegated = selectedConfig.delegatedPermissions
-      ? selectedConfig.delegatedPermissions.split(",").map((p) => p.trim()).filter(Boolean)
-      : [];
-    const application = selectedConfig.applicationPermissions
-      ? selectedConfig.applicationPermissions.split(",").map((p) => p.trim()).filter(Boolean)
-      : [];
-
-    try {
-      await speApiClient.containerTypes.register(selectedTypeId, selectedConfig.id, {
-        delegatedPermissions: delegated,
-        applicationPermissions: application,
-      });
-      setActionStatus(`Container type "${ct.displayName}" registered successfully.`);
-      await loadContainerTypes();
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to register container type. Please try again.";
-      setActionError(message);
-    }
-  }, [selectedConfig, selectedTypeId, containerTypes, loadContainerTypes]);
 
   // ── Create Container Type ───────────────────────────────────────────────────
 
@@ -511,8 +479,8 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
         >
           <ToolbarButton
             icon={<CloudLink20Regular />}
-            onClick={() => { void handleRegister(); }}
-            disabled={!hasSelectedType || loading}
+            onClick={() => setRegisterOpen(true)}
+            disabled={loading}
             aria-label="Register container type"
           >
             <span className={styles.buttonLabel}>Register</span>
@@ -629,6 +597,14 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
         isSaving={createSaving}
         onClose={() => setCreateOpen(false)}
         onSubmit={(name, billing) => { void handleCreateSubmit(name, billing); }}
+      />
+
+      {/* ── Register Wizard ── */}
+      <RegisterWizard
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        onRegistered={() => { void loadContainerTypes(); }}
+        initialTypeId={selectedTypeId}
       />
     </div>
   );

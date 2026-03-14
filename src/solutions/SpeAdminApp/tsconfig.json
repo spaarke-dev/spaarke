@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"],
+      "@spaarke/auth/*": ["../../client/shared/Spaarke.Auth/src/*"],
+      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
+      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"],
+      "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
+      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]
+    },
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

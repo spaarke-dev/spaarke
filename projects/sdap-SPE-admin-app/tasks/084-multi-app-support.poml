@@ -1,7 +1,7 @@
 <task id="SPE-084" project="SDAP SPE Admin App">
   <metadata>
     <title>Multi-App Registration Support</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <tags>bff-api, auth, phase-3</tags>
     <phase>phase-3</phase>

@@ -1,7 +1,7 @@
 <task id="SPE-057" project="SDAP SPE Admin App">
   <metadata>
     <title>Search Containers Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <tags>bff-api, api, graph, phase-2</tags>
     <phase>phase-2</phase>

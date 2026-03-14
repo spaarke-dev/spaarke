@@ -1,7 +1,7 @@
 <task id="SPE-082" project="SDAP SPE Admin App">
   <metadata>
     <title>Multi-Tenant Consuming Tenant Management</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <tags>bff-api, frontend, auth, phase-3</tags>
     <phase>phase-3</phase>

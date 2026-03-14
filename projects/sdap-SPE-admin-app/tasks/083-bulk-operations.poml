@@ -1,7 +1,7 @@
 <task id="SPE-083" project="SDAP SPE Admin App">
   <metadata>
     <title>Bulk Operations</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4h</estimated-effort>
     <tags>bff-api, frontend, phase-3</tags>
     <phase>phase-3</phase>
@@ -56,4 +56,26 @@
     <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
     <criterion testable="true">Unit tests pass</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-03-14. All 9 acceptance criteria verified.
+
+    Implementation:
+    - BulkOperationModels.cs: 6 domain types (enum, 4 request/status records, error record)
+    - BulkOperationService.cs: BackgroundService with Channel[T] queue + ConcurrentDictionary status tracking
+    - BulkOperationEndpoints.cs: 3 endpoints (POST bulk/delete, POST bulk/permissions, GET bulk/{id}/status)
+    - BulkOperationProgress.tsx: React polling component (2s interval, Fluent v9, dark-mode compliant)
+    - SpeAdminGraphService.cs: Added SoftDeleteContainerAsync method
+    - ContainerResultsGrid.tsx: Integrated bulk delete with progress panel
+    - BulkOperationTests.cs: 30 unit tests, all passing
+
+    Key design decisions:
+    - In-memory Channel + ConcurrentDictionary (not Redis/Service Bus) — SPE admin is infrequent
+    - BulkDelete = soft-delete to recycle bin (not permanent delete)
+    - BulkPermissions uses UserId/GroupId not email (matches ContainerPermissionEndpoints pattern)
+    - 30-minute status retention window after completion
+    - Max 500 containers per request
+
+    Code quality: Zero ADR violations. Handler methods renamed (dropped spurious Async suffix).
+    No-op useEffect removed from BulkOperationProgress. Build: 0 errors 0 warnings. Tests: 30/30.
+  </notes>
 </task>

@@ -1,7 +1,7 @@
 <task id="SPE-043" project="SDAP SPE Admin App">
   <metadata>
     <title>Deploy BFF API with SPE Endpoints</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>deploy, bff-api, phase-1</tags>
     <phase>1</phase>

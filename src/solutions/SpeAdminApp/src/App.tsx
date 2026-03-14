@@ -15,6 +15,7 @@ import { SearchPage } from "./components/search/SearchPage";
 import { SecurityPage } from "./components/security/SecurityPage";
 import { RecycleBinPage } from "./components/recycle-bin/RecycleBinPage";
 import { ContainerTypesPage } from "./components/container-types/ContainerTypesPage";
+import { ContainerTypeDetail } from "./components/container-types/ContainerTypeDetail";
 
 // SPE Admin App — root application component
 // Wraps the app in FluentProvider with dynamic theme resolution (ADR-021)
@@ -112,6 +113,9 @@ const AppContent: React.FC<AppContentProps> = ({
   const [fileBrowserContainerName, setFileBrowserContainerName] =
     React.useState<string | undefined>(undefined);
 
+  // Container type selected for detail panel — set when user clicks a row in ContainerTypesPage.
+  const [detailContainerTypeId, setDetailContainerTypeId] = React.useState<string | null>(null);
+
   /** Called by ContainersPage when the user opens a container for browsing. */
   const handleOpenContainerInBrowser = React.useCallback(
     (containerId: string, containerName?: string) => {
@@ -160,7 +164,13 @@ const AppContent: React.FC<AppContentProps> = ({
       ) : activePage === "recycle-bin" ? (
         <RecycleBinPage />
       ) : activePage === "container-types" ? (
-        <ContainerTypesPage />
+        <>
+          <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
+          <ContainerTypeDetail
+            containerTypeId={detailContainerTypeId}
+            onClose={() => setDetailContainerTypeId(null)}
+          />
+        </>
       ) : (
         // Placeholder for pages not yet implemented (e.g. containers)
         // The onOpenContainerInBrowser callback is available for ContainersPage (task SPE-033)

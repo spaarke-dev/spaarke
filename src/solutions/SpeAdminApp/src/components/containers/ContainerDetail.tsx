@@ -34,12 +34,6 @@ import {
   type SelectTabData,
   type SelectTabEvent,
   Button,
-  Table,
-  TableHeader,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
   MessageBar,
   MessageBarBody,
   Divider,
@@ -57,10 +51,11 @@ import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, ApiError } from "../../services/speApiClient";
 import { PermissionPanel } from "./PermissionPanel";
+import { ColumnEditor } from "./ColumnEditor";
+import { CustomPropertyEditor } from "./CustomPropertyEditor";
 import type {
   Container,
   ColumnDefinition,
-  ContainerCustomProperty,
   ContainerStatus,
 } from "../../types/spe";
 
@@ -368,201 +363,6 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Columns Tab
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface ColumnsTabProps {
-  columns: ColumnDefinition[] | null;
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-}
-
-const ColumnsTab: React.FC<ColumnsTabProps> = ({
-  columns,
-  loading,
-  error,
-  onRetry,
-}) => {
-  const styles = useStyles();
-
-  if (loading) {
-    return (
-      <div className={styles.feedback}>
-        <Spinner size="small" label="Loading columns…" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className={styles.feedback}>
-        <MessageBar intent="error">
-          <MessageBarBody>{error}</MessageBarBody>
-        </MessageBar>
-        <Button
-          size="small"
-          appearance="secondary"
-          icon={<ArrowClockwise20Regular />}
-          onClick={onRetry}
-        >
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
-  if (!columns || columns.length === 0) {
-    return (
-      <div className={styles.emptyTabState}>
-        <ColumnTriple20Regular style={{ fontSize: "32px", opacity: 0.4 }} />
-        <Text size={300}>No custom columns defined</Text>
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.tabContent}>
-      <Table className={styles.table} size="small">
-        <TableHeader>
-          <TableRow>
-            <TableHeaderCell>Name</TableHeaderCell>
-            <TableHeaderCell>Type</TableHeaderCell>
-            <TableHeaderCell>Required</TableHeaderCell>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {columns.map((col) => {
-            // Determine type label from column definition shape
-            const typeLabel = col.text
-              ? "Text"
-              : col.number
-              ? "Number"
-              : col.boolean
-              ? "Boolean"
-              : col.dateTime
-              ? "DateTime"
-              : col.choice
-              ? "Choice"
-              : "—";
-
-            return (
-              <TableRow key={col.id}>
-                <TableCell>
-                  <Text size={200} weight="semibold">
-                    {col.displayName}
-                  </Text>
-                  <Text
-                    size={100}
-                    style={{ display: "block", color: tokens.colorNeutralForeground3 }}
-                  >
-                    {col.name}
-                  </Text>
-                </TableCell>
-                <TableCell>
-                  <Text size={200}>{typeLabel}</Text>
-                </TableCell>
-                <TableCell>
-                  <Text size={200}>{col.required ? "Yes" : "No"}</Text>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom Properties Tab
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface CustomPropertiesTabProps {
-  customProperties: Record<string, ContainerCustomProperty> | null;
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-}
-
-const CustomPropertiesTab: React.FC<CustomPropertiesTabProps> = ({
-  customProperties,
-  loading,
-  error,
-  onRetry,
-}) => {
-  const styles = useStyles();
-
-  if (loading) {
-    return (
-      <div className={styles.feedback}>
-        <Spinner size="small" label="Loading custom properties…" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className={styles.feedback}>
-        <MessageBar intent="error">
-          <MessageBarBody>{error}</MessageBarBody>
-        </MessageBar>
-        <Button
-          size="small"
-          appearance="secondary"
-          icon={<ArrowClockwise20Regular />}
-          onClick={onRetry}
-        >
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
-  const entries = customProperties ? Object.entries(customProperties) : [];
-
-  if (entries.length === 0) {
-    return (
-      <div className={styles.emptyTabState}>
-        <Settings20Regular style={{ fontSize: "32px", opacity: 0.4 }} />
-        <Text size={300}>No custom properties defined</Text>
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.tabContent}>
-      <Table className={styles.table} size="small">
-        <TableHeader>
-          <TableRow>
-            <TableHeaderCell>Key</TableHeaderCell>
-            <TableHeaderCell>Value</TableHeaderCell>
-            <TableHeaderCell>Searchable</TableHeaderCell>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map(([key, prop]) => (
-            <TableRow key={key}>
-              <TableCell>
-                <Text size={200} weight="semibold" style={{ fontFamily: tokens.fontFamilyMonospace }}>
-                  {key}
-                </Text>
-              </TableCell>
-              <TableCell>
-                <Text size={200}>{prop.value}</Text>
-              </TableCell>
-              <TableCell>
-                <Text size={200}>{prop.isSearchable ? "Yes" : "No"}</Text>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // ContainerDetail (main component)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -597,11 +397,6 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
   const [columnsError, setColumnsError] = React.useState<string | null>(null);
   const [columnsLoaded, setColumnsLoaded] = React.useState(false);
 
-  const [customProperties, setCustomProperties] = React.useState<Record<string, ContainerCustomProperty> | null>(null);
-  const [customPropsLoading, setCustomPropsLoading] = React.useState(false);
-  const [customPropsError, setCustomPropsError] = React.useState<string | null>(null);
-  const [customPropsLoaded, setCustomPropsLoaded] = React.useState(false);
-
   // ── Load Container Detail on Open ────────────────────────────────────────
 
   const loadContainer = React.useCallback(async (id: string) => {
@@ -630,9 +425,6 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
       setColumns(null);
       setColumnsLoaded(false);
       setColumnsError(null);
-      setCustomProperties(null);
-      setCustomPropsLoaded(false);
-      setCustomPropsError(null);
       return;
     }
     // New container — load detail immediately
@@ -640,8 +432,6 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
     setActiveTab("details");
     setColumns(null);
     setColumnsLoaded(false);
-    setCustomProperties(null);
-    setCustomPropsLoaded(false);
   }, [containerId, loadContainer]);
 
   // ── Lazy Load: Columns ────────────────────────────────────────────────────
@@ -663,45 +453,20 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
     }
   }, [containerId, selectedConfig, columnsLoaded]);
 
-  // ── Lazy Load: Custom Properties ─────────────────────────────────────────
-
-  const loadCustomProperties = React.useCallback(async () => {
-    if (!containerId || !selectedConfig || customPropsLoaded) return;
-    setCustomPropsLoading(true);
-    setCustomPropsError(null);
-    try {
-      const data = await speApiClient.containers.listCustomProperties(containerId, selectedConfig.id);
-      setCustomProperties(data);
-      setCustomPropsLoaded(true);
-    } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Failed to load custom properties.";
-      setCustomPropsError(message);
-    } finally {
-      setCustomPropsLoading(false);
-    }
-  }, [containerId, selectedConfig, customPropsLoaded]);
-
   // ── Tab Change Handler ────────────────────────────────────────────────────
 
   const handleTabSelect = React.useCallback(
     (_e: SelectTabEvent, data: SelectTabData) => {
       const tab = data.value as TabId;
       setActiveTab(tab);
-      // Trigger lazy load for the selected tab
+      // Trigger lazy load for the columns tab.
       // Permissions tab uses PermissionPanel which loads its own data.
+      // Custom Properties tab uses CustomPropertyEditor which loads its own data.
       if (tab === "columns" && !columnsLoaded) {
         void loadColumns();
-      } else if (tab === "customProperties" && !customPropsLoaded) {
-        void loadCustomProperties();
       }
     },
-    [
-      columnsLoaded,
-      customPropsLoaded,
-      loadColumns,
-      loadCustomProperties,
-    ]
+    [columnsLoaded, loadColumns],
   );
 
   // ── Retry handlers for each tab ───────────────────────────────────────────
@@ -711,10 +476,11 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
     void loadColumns();
   }, [loadColumns]);
 
-  const handleRetryCustomProperties = React.useCallback(() => {
-    setCustomPropsLoaded(false);
-    void loadCustomProperties();
-  }, [loadCustomProperties]);
+  // ── Column change handler (from ColumnEditor CRUD operations) ─────────────
+
+  const handleColumnsChange = React.useCallback((updated: ColumnDefinition[]) => {
+    setColumns(updated);
+  }, []);
 
   // ── Keyboard close on Escape ──────────────────────────────────────────────
 
@@ -832,20 +598,23 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
                   />
                 </div>
               )}
-              {activeTab === "columns" && (
-                <ColumnsTab
-                  columns={columns}
-                  loading={columnsLoading}
-                  error={columnsError}
-                  onRetry={handleRetryColumns}
-                />
+              {activeTab === "columns" && selectedConfig && (
+                <div style={{ padding: tokens.spacingVerticalM, paddingLeft: tokens.spacingHorizontalL, paddingRight: tokens.spacingHorizontalL }}>
+                  <ColumnEditor
+                    containerId={container.id}
+                    configId={selectedConfig.id}
+                    columns={columns}
+                    loading={columnsLoading}
+                    error={columnsError}
+                    onColumnsChange={handleColumnsChange}
+                    onRetry={handleRetryColumns}
+                  />
+                </div>
               )}
               {activeTab === "customProperties" && (
-                <CustomPropertiesTab
-                  customProperties={customProperties}
-                  loading={customPropsLoading}
-                  error={customPropsError}
-                  onRetry={handleRetryCustomProperties}
+                <CustomPropertyEditor
+                  containerId={container.id}
+                  isActive={activeTab === "customProperties"}
                 />
               )}
             </>

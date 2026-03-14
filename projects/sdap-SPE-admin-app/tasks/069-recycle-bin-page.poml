@@ -1,7 +1,7 @@
 <task id="SPE-069" project="SDAP SPE Admin App">
   <metadata>
     <title>Create RecycleBinPage</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>code-page, frontend, fluent-ui, phase-2</tags>
     <phase>phase-2</phase>

@@ -1,7 +1,7 @@
 <task id="SPE-042" project="SDAP SPE Admin App">
   <metadata>
     <title>Build Code Page and Verify</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>code-page, build, phase-1</tags>
     <phase>1</phase>

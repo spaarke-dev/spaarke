@@ -1,7 +1,7 @@
 <task id="SPE-055" project="SDAP SPE Admin App">
   <metadata>
     <title>Container Column CRUD Endpoints</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>bff-api, api, graph, phase-2</tags>
     <phase>phase-2</phase>
@@ -49,4 +49,14 @@
     <criterion testable="true">SpeAdminAuthFilter is applied to all endpoints</criterion>
     <criterion testable="true">Unit tests pass for all CRUD operations</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-03-14. All 4 CRUD endpoints implemented.
+    Files created/modified:
+    - src/server/api/Sprk.Bff.Api/Models/SpeAdmin/ContainerColumnDto.cs (NEW)
+    - src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs (domain record + 4 methods + 2 helpers)
+    - src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerColumnEndpoints.cs (NEW)
+    - src/server/api/Sprk.Bff.Api/Api/SpeAdminEndpoints.cs (registered ContainerColumnEndpoints)
+    - tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ContainerColumnTests.cs (NEW — 30+ unit tests)
+    All acceptance criteria met. SpeAdminAuthorizationFilter inherited from /api/spe group (ADR-008).
+  </notes>
 </task>

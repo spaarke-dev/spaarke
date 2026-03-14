@@ -1,0 +1,46 @@
+{
+  "name": "spe-admin-app",
+  "version": "1.0.0",
+  "description": "SPE Administration App — Dataverse Code Page for SharePoint Embedded container management",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/speadmin.html');\"",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^3.30.0",
+    "@fluentui/react-components": "^9.46.2",
+    "@fluentui/react-icons": "^2.0.225",
+    "@lexical/html": "^0.41.0",
+    "@lexical/list": "^0.41.0",
+    "@lexical/react": "^0.41.0",
+    "@lexical/rich-text": "^0.41.0",
+    "@lexical/selection": "^0.41.0",
+    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
+    "@types/d3-force": "^3.0.10",
+    "@types/diff": "^7.0.2",
+    "@types/react-window": "^1.8.8",
+    "d3-force": "^3.0.0",
+    "diff": "^8.0.3",
+    "lexical": "^0.41.0",
+    "react-window": "^1.8.11"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  "peerDependencies": {
+    "react": "^16.14.0 || ^17.0.0 || ^18.0.0",
+    "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0"
+  }
+}

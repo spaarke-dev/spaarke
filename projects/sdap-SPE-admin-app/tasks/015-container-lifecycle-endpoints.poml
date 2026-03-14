@@ -1,7 +1,7 @@
 <task id="SPE-015" project="SDAP SPE Admin App">
   <metadata>
     <title>Update/Activate/Lock/Unlock Container Endpoints</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <tags>bff-api, api, graph, phase-1</tags>
     <phase>1</phase>

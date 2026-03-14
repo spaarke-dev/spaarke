@@ -1,7 +1,7 @@
 <task id="SPE-021" project="SDAP SPE Admin App">
   <metadata>
     <title>Create Folder Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <tags>bff-api, api, graph, phase-1</tags>
     <phase>1</phase>
