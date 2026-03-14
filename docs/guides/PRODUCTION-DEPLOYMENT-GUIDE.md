@@ -1,8 +1,41 @@
 # Production Deployment Guide
 
 > **Last Updated**: March 2026
-> **Audience**: Operators deploying Spaarke to production environments
+> **Audience**: Claude Code AI (primary executor) + Human developers (assistant/approver)
 > **Estimated Time**: 2-4 hours (first deployment), 30-60 minutes (subsequent)
+> **Related Guides**: [Customer Onboarding Runbook](./CUSTOMER-ONBOARDING-RUNBOOK.md) | [Incident Response](./INCIDENT-RESPONSE.md) | [Secret Rotation](./SECRET-ROTATION-PROCEDURES.md) | [Monitoring](./MONITORING-AND-ALERTING-GUIDE.md)
+
+---
+
+## How to Use This Guide
+
+This guide is written for **dual execution**: Claude Code handles automated steps, human developers handle manual steps (portal actions, DNS, approvals).
+
+### Legend
+
+| Icon | Meaning |
+|------|---------|
+| **[AI]** | Claude Code executes this step autonomously via script/CLI |
+| **[HUMAN]** | Human developer must perform this step (portal, DNS, approval) |
+| **[AI+HUMAN]** | Claude Code runs the script; human verifies/approves output |
+| **[DECISION]** | Decision point — Claude Code presents options, human chooses |
+
+### Claude Code Execution Pattern
+
+When Claude Code is asked to "deploy to production" or "set up production environment", it should:
+
+1. Read this guide to determine which phase to execute
+2. Check prerequisites (tools, access, quotas)
+3. Execute **[AI]** steps using the scripts in `scripts/`
+4. Pause at **[HUMAN]** steps and clearly tell the developer what to do
+5. Resume after human confirmation
+
+**Trigger phrases** that invoke this guide:
+- "deploy to production"
+- "set up production environment"
+- "fresh production deployment"
+- "deploy platform infrastructure"
+- "provision customer for production"
 
 ---
 
@@ -11,15 +44,18 @@
 1. [Prerequisites](#1-prerequisites)
 2. [Architecture Overview](#2-architecture-overview)
 3. [Phase 1: Deploy Shared Platform](#3-phase-1-deploy-shared-platform)
-4. [Phase 2: Configure Entra ID App Registrations](#4-phase-2-configure-entra-id-app-registrations)
-5. [Phase 3: Deploy BFF API](#5-phase-3-deploy-bff-api)
-6. [Phase 4: Configure Custom Domain and SSL](#6-phase-4-configure-custom-domain-and-ssl)
-7. [Phase 5: Provision First Customer](#7-phase-5-provision-first-customer)
-8. [Phase 6: Verify Deployment](#8-phase-6-verify-deployment)
-9. [Rollback Procedures](#9-rollback-procedures)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Maintenance Operations](#11-maintenance-operations)
-12. [Reference: Resource Inventory](#12-reference-resource-inventory)
+4. [Phase 2: Entra ID App Registrations](#4-phase-2-entra-id-app-registrations)
+5. [Phase 3: Configure Secrets and App Settings](#5-phase-3-configure-secrets-and-app-settings)
+6. [Phase 4: Deploy BFF API](#6-phase-4-deploy-bff-api)
+7. [Phase 5: Custom Domain and SSL](#7-phase-5-custom-domain-and-ssl)
+8. [Phase 6: Provision First Customer](#8-phase-6-provision-first-customer)
+9. [Phase 7: Verify Deployment](#9-phase-7-verify-deployment)
+10. [Day-2 Operations](#10-day-2-operations)
+11. [Rollback Procedures](#11-rollback-procedures)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Known Issues and Lessons Learned](#13-known-issues-and-lessons-learned)
+14. [Reference: Resource Inventory](#14-reference-resource-inventory)
+15. [CI/CD Pipelines](#15-cicd-pipelines)
 
 ---
 
@@ -27,38 +63,55 @@
 
 ### Required Tools
 
+**[AI]** Claude Code verifies these automatically before any deployment step:
+
+```powershell
+# Claude Code runs these checks — no human action needed
+az --version          # Azure CLI 2.60+
+pwsh --version        # PowerShell 7.4+
+dotnet --version      # .NET SDK 8.0+
+pac --version         # PAC CLI (latest)
+gh --version          # GitHub CLI 2.40+
+```
+
 | Tool | Minimum Version | Install Command |
 |------|----------------|-----------------|
 | Azure CLI | 2.60+ | `winget install Microsoft.AzureCLI` |
 | PowerShell | 7.4+ | `winget install Microsoft.PowerShell` |
 | .NET SDK | 8.0+ | `winget install Microsoft.DotNet.SDK.8` |
 | PAC CLI | Latest | `dotnet tool install --global Microsoft.PowerApps.CLI.Tool` |
-| Git | 2.40+ | `winget install Git.Git` |
+| GitHub CLI | 2.40+ | `winget install GitHub.cli` |
+
+> **PAC CLI on Windows**: `pac` is a `.cmd` wrapper. Scripts use `cmd /c pac` for output capture. Claude Code handles this automatically.
 
 ### Required Access
 
+**[HUMAN]** Verify these before starting. Claude Code cannot check portal-level roles:
+
 | Resource | Access Level | How to Verify |
 |----------|-------------|---------------|
-| Azure Subscription | Contributor + User Access Admin | `az account show` |
-| Entra ID Tenant | Application Administrator | Azure Portal > Entra ID > Roles |
-| Power Platform | Global Admin or Dynamics 365 Admin | Power Platform Admin Center |
-| GitHub Repository | Write access | `gh auth status` |
-| DNS Management | Record creation for `api.spaarke.com` | Varies by provider |
+| Azure Subscription | Contributor + User Access Admin | `az account show` **[AI]** |
+| Entra ID Tenant | Application Administrator | Azure Portal > Entra ID > Roles **[HUMAN]** |
+| Power Platform | Global Admin or Dynamics 365 Admin | Power Platform Admin Center **[HUMAN]** |
+| GitHub Repository | Write access | `gh auth status` **[AI]** |
+| DNS Management | Record creation for `api.spaarke.com` | Varies by provider **[HUMAN]** |
 
 ### Required Azure Quotas
 
-Verify quotas in the target region before starting:
+**[DECISION]** Before deploying, verify quotas. If quotas are insufficient, request increases (1-3 business days).
 
-| Resource | Required | Check Command |
-|----------|----------|---------------|
-| App Service Plan (P1v3) | 1 | `az appservice plan list` |
-| Azure OpenAI (GPT-4o) | 80K TPM | Azure Portal > OpenAI > Quotas |
-| AI Search (Standard2) | 1 service, 2 replicas | Azure Portal > AI Search |
-| Document Intelligence (S0) | 1 | Azure Portal > Cognitive Services |
+| Resource | Required | Region | Notes |
+|----------|----------|--------|-------|
+| App Service Plan (P1v3) | 1 | westus2 | Production workload |
+| Azure OpenAI (GPT-4o) | 50K+ TPM | **westus3** | Not available in westus2 — see [Known Issues](#13-known-issues-and-lessons-learned) |
+| Azure OpenAI (GPT-4o-mini) | 100K TPM | **westus3** | Same region as GPT-4o |
+| Azure OpenAI (text-embedding-3-large) | 100K TPM | **westus3** | Same region |
+| AI Search (Standard) | 1 service | westus2 | Standard SKU (not Standard2 — see Known Issues) |
+| Document Intelligence (S0) | 1 | westus2 | |
 
 ### Authentication Setup
 
-Log in to all required services before starting:
+**[AI]** Claude Code runs these commands. Human provides credentials if not already cached:
 
 ```powershell
 # Azure CLI
@@ -75,203 +128,254 @@ pac auth list   # Verify connection
 
 ## 2. Architecture Overview
 
-Spaarke uses a hybrid architecture with shared platform resources and per-customer isolated resources.
-
 ```
-Shared Platform (rg-spaarke-platform-{env})
-  ├── App Service Plan (P1v3)
-  │   └── App Service: spaarke-bff-{env}
-  │       └── Staging Slot (zero-downtime deploy)
-  ├── Azure OpenAI (GPT-4o, GPT-4o-mini, text-embedding-3-large)
-  ├── AI Search (Standard2, 2 replicas)
-  ├── Document Intelligence (S0)
-  ├── App Insights + Log Analytics
-  └── Platform Key Vault (sprk-platform-{env}-kv)
+┌─────────────────────────────────────────────────────────────────┐
+│ Shared Platform  (rg-spaarke-platform-prod)                     │
+│                                                                 │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
+│  │ App Service Plan │  │ Azure OpenAI     │  │ AI Search     │  │
+│  │ (P1v3)          │  │ (westus3)        │  │ (Standard)    │  │
+│  │  ├─ BFF API      │  │  ├─ gpt-4o       │  │ (westus2)     │  │
+│  │  └─ Staging Slot │  │  ├─ gpt-4o-mini  │  │               │  │
+│  └─────────────────┘  │  └─ embed-3-large │  └───────────────┘  │
+│                        └──────────────────┘                     │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
+│  │ Doc Intelligence│  │ App Insights +   │  │ Platform      │  │
+│  │ (S0, westus2)   │  │ Log Analytics    │  │ Key Vault     │  │
+│  └─────────────────┘  └──────────────────┘  └───────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 
-Per-Customer (rg-spaarke-{customerId}-{env})
-  ├── Storage Account (SPE containers)
-  ├── Customer Key Vault (sprk-{customerId}-{env}-kv)
-  ├── Service Bus Namespace
-  ├── Redis Cache
-  └── Dataverse Environment (with managed solutions)
+┌─────────────────────────────────────────────────────────────────┐
+│ Per-Customer  (rg-spaarke-{customerId}-prod)                    │
+│                                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌────────────┐  │
+│  │ Storage  │  │ Customer │  │ Service Bus  │  │ Redis      │  │
+│  │ Account  │  │ Key Vault│  │ Namespace    │  │ Cache      │  │
+│  └──────────┘  └──────────┘  └──────────────┘  └────────────┘  │
+│                                                                 │
+│  + Dataverse Environment (Power Platform)                       │
+│  + SPE Containers (SharePoint Embedded)                         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Naming Convention
 
-All resources follow the adopted naming standard:
+All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (Adopted v2.0):
 
 | Pattern | Example |
 |---------|---------|
+| `rg-spaarke-{scope}-{env}` | `rg-spaarke-platform-prod` |
 | `spaarke-{purpose}-{env}` | `spaarke-bff-prod` |
 | `sprk-{purpose}-{env}-kv` | `sprk-platform-prod-kv` |
-| `rg-spaarke-{scope}-{env}` | `rg-spaarke-platform-prod` |
 | `sprk-{customer}-{env}-kv` | `sprk-demo-prod-kv` |
 | `sprk{customer}{env}sa` | `sprkdemoprodsa` |
+| `sprk-{customer}-{env}-sbus` | `sprk-demo-prod-sbus` |
 
-See `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` for the full naming matrix.
+> **Note**: Service Bus uses `-sbus` suffix, NOT `-sb` (reserved by Azure).
 
 ---
 
 ## 3. Phase 1: Deploy Shared Platform
 
-The shared platform provides infrastructure used by all customers. Deploy this first.
-
 ### 3.1 Review Parameter File
 
-Before deploying, review the Bicep parameter file for your environment:
+**[AI]** Claude Code reads and validates the parameter file:
 
 ```powershell
-# File: infrastructure/bicep/platform-prod.bicepparam
-# Verify: environment name, region, SKUs, model deployments
-```
+# Parameter file location
+infrastructure/bicep/parameters/platform-prod.bicepparam
 
-Key parameters to verify:
-- `environmentName`: Must be `prod` for production
-- `location`: Region for all resources (default: `westus2`)
-- App Service Plan SKU: `P1v3` for production
-- AI Search: `standard2` with 2 replicas
-- OpenAI model deployments: GPT-4o, GPT-4o-mini, text-embedding-3-large
+# Key parameters to verify:
+# - environmentName = 'prod'
+# - location = 'westus2'
+# - openAiLocation = 'westus3'           ← CRITICAL: OpenAI not available in westus2
+# - appServicePlanSku = 'P1v3'
+# - aiSearchSku = 'standard'             ← NOT standard2 (see Known Issues)
+# - aiSearchReplicaCount = 2
+```
 
 ### 3.2 Preview Deployment (What-If)
 
-Always run a what-if preview before deploying:
+**[AI+HUMAN]** Claude Code runs the preview; human reviews output:
 
 ```powershell
 .\scripts\Deploy-Platform.ps1 -EnvironmentName prod -WhatIf
 ```
 
-Review the output. Verify:
-- Resource group `rg-spaarke-platform-prod` will be created
-- All expected resources are listed (App Service, OpenAI, AI Search, Doc Intel, Key Vault, App Insights)
-- No unexpected deletions
+The script performs:
+1. Pre-flight checks (Azure CLI logged in, Bicep template exists, parameter file exists)
+2. Subscription-scoped `az deployment sub what-if`
+3. Outputs expected resource changes
+
+**Human reviews**: Verify no unexpected deletions, all expected resources listed.
 
 ### 3.3 Deploy Platform
+
+**[AI]** Claude Code executes:
 
 ```powershell
 .\scripts\Deploy-Platform.ps1 -EnvironmentName prod
 ```
 
-The script performs:
-1. Pre-flight checks (Azure CLI logged in, Bicep template exists, parameter file exists)
-2. Subscription-scoped Bicep deployment (10-20 minutes)
-3. Validates deployment outputs (resource group, API URL, Key Vault, AI endpoints)
-4. Checks resource health (App Service, Key Vault, OpenAI, AI Search)
+**What happens** (10-20 minutes):
+1. Pre-flight checks pass
+2. Subscription-scoped Bicep deployment creates `rg-spaarke-platform-prod`
+3. Deploys: App Service Plan, App Service + staging slot, Azure OpenAI (westus3), AI Search (westus2), Document Intelligence, App Insights, Log Analytics, Platform Key Vault
+4. Post-deployment validation checks resource health
 
-**Expected duration**: 10-20 minutes for a full deployment.
+**Expected outputs**: Resource group name, API URL, Key Vault name, AI endpoints.
 
-### 3.4 Verify Platform Deployment
+### 3.4 Verify Platform
 
-After the script completes, verify manually:
+**[AI]** Claude Code runs verification:
 
 ```powershell
 # Resource group exists
 az group show --name rg-spaarke-platform-prod --query "{name:name, location:location}" -o table
 
+# App Service running
+az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query "{state:state, defaultHostName:defaultHostName}" -o table
+
 # Key Vault accessible
 az keyvault show --name sprk-platform-prod-kv --query "{name:name, location:location}" -o table
-
-# App Service running
-az webapp show --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --query "{state:state, defaultHostName:defaultHostName}" -o table
-
-# OpenAI provisioned
-az cognitiveservices account show --name spaarke-openai-prod --resource-group rg-spaarke-platform-prod --query "{name:name, provisioningState:properties.provisioningState}" -o table
 ```
 
 ---
 
-## 4. Phase 2: Configure Entra ID App Registrations
+## 4. Phase 2: Entra ID App Registrations
 
-Create app registrations for the BFF API to authenticate with Microsoft Graph, SharePoint Embedded, and Dataverse.
+### 4.1 Create App Registrations (Automated)
 
-### 4.1 Create BFF API App Registration
-
-In Azure Portal > Entra ID > App registrations:
-
-1. **New registration**:
-   - Name: `spaarke-bff-api-prod`
-   - Supported account types: Single tenant
-   - Redirect URI: (none needed for API)
-
-2. **API permissions** (add and grant admin consent):
-   - Microsoft Graph:
-     - `Files.Read.All` (Application)
-     - `FileStorageContainer.Selected` (Application)
-     - `Sites.Read.All` (Application)
-   - Dynamics CRM:
-     - `user_impersonation` (Delegated)
-
-3. **Certificates & secrets**:
-   - Create a client secret (recommended: 24-month expiry)
-   - Record the secret value immediately (shown only once)
-
-4. **Expose an API**:
-   - Application ID URI: `api://{client-id}`
-   - Add scope: `user_impersonation` (Admins and users)
-
-5. **Store credentials in Key Vault**:
+**[AI]** Claude Code runs the registration script:
 
 ```powershell
-# Store the client secret
-az keyvault secret set --vault-name sprk-platform-prod-kv --name "AzureAd--ClientSecret" --value "<client-secret>"
+# Preview first
+.\scripts\Register-EntraAppRegistrations.ps1 -DryRun
 
-# Store the client ID (for reference)
-az keyvault secret set --vault-name sprk-platform-prod-kv --name "AzureAd--ClientId" --value "<client-id>"
-
-# Store the tenant ID
-az keyvault secret set --vault-name sprk-platform-prod-kv --name "AzureAd--TenantId" --value "<tenant-id>"
+# Create registrations
+.\scripts\Register-EntraAppRegistrations.ps1
 ```
 
-### 4.2 Create Dataverse S2S App Registration
+This creates two registrations in tenant `a221a95e-6abc-4434-aecc-e48338a1b2f2`:
 
-For server-to-server Dataverse communication:
+| App Name | Purpose | API Permissions |
+|----------|---------|-----------------|
+| `spaarke-bff-api-prod` | BFF API identity | Graph: Files.Read.All, FileStorageContainer.Selected, Sites.Read.All; Dynamics CRM: user_impersonation |
+| `spaarke-dataverse-s2s-prod` | Dataverse S2S | Dynamics CRM: user_impersonation |
 
-1. **New registration**:
-   - Name: `spaarke-dataverse-s2s-prod`
-   - Supported account types: Single tenant
+The script:
+- Creates app registrations with correct permissions
+- Generates 24-month client secrets
+- Stores secrets in `sprk-platform-prod-kv` (Key Vault)
+- Configures redirect URIs and exposed API scopes
 
-2. **API permissions**:
-   - Dynamics CRM:
-     - `user_impersonation` (Delegated)
+### 4.2 Grant Admin Consent
 
-3. **Register as Dataverse application user**:
-   - In Power Platform Admin Center > Environments > (your env) > Settings > Users
-   - Add Application User with the app's client ID
-   - Assign System Administrator security role
+**[HUMAN]** Admin consent must be granted in the Azure Portal:
 
-4. **Store credentials in Key Vault**:
+1. Navigate to **Azure Portal > Entra ID > App registrations**
+2. Select `spaarke-bff-api-prod`
+3. Go to **API permissions** > Click **Grant admin consent for [tenant]**
+4. Repeat for `spaarke-dataverse-s2s-prod`
+
+### 4.3 Register Dataverse Application User
+
+**[HUMAN]** Must be done in Power Platform Admin Center:
+
+1. Navigate to **Power Platform Admin Center > Environments > [prod env] > Settings > Users**
+2. Click **+ New app user**
+3. Select the `spaarke-dataverse-s2s-prod` app registration
+4. Assign **System Administrator** security role
+
+### 4.4 Verify Registrations
+
+**[AI]** Claude Code verifies:
 
 ```powershell
-az keyvault secret set --vault-name sprk-platform-prod-kv --name "Dataverse--ClientId" --value "<client-id>"
-az keyvault secret set --vault-name sprk-platform-prod-kv --name "Dataverse--ClientSecret" --value "<client-secret>"
+.\scripts\Test-EntraAppRegistrations.ps1
 ```
 
-### 4.3 Grant App Service Managed Identity Access
+This checks:
+- Both app registrations exist with correct permissions
+- Secrets are stored in Key Vault
+- Token acquisition succeeds for both apps
 
-The App Service uses a system-assigned managed identity to read Key Vault secrets:
+### 4.5 Grant Managed Identity Key Vault Access
+
+**[AI]** Claude Code runs:
 
 ```powershell
-# Get the App Service managed identity principal ID
-$principalId = az webapp identity show --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --query principalId -o tsv
+# Get App Service managed identity
+$principalId = az webapp identity show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query principalId -o tsv
 
-# Grant Key Vault Secrets User role
-az role assignment create --role "Key Vault Secrets User" --assignee-object-id $principalId --scope "/subscriptions/<sub-id>/resourceGroups/rg-spaarke-platform-prod/providers/Microsoft.KeyVault/vaults/sprk-platform-prod-kv"
+# Grant Key Vault Secrets User role (production slot)
+az role assignment create `
+    --role "Key Vault Secrets User" `
+    --assignee-object-id $principalId `
+    --scope "/subscriptions/<sub-id>/resourceGroups/rg-spaarke-platform-prod/providers/Microsoft.KeyVault/vaults/sprk-platform-prod-kv"
 
-# Also grant to staging slot (different managed identity)
-$stagingPrincipalId = az webapp identity show --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --slot staging --query principalId -o tsv
+# CRITICAL: Also grant to staging slot (different managed identity!)
+$stagingPrincipalId = az webapp identity show -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging --query principalId -o tsv
 
-az role assignment create --role "Key Vault Secrets User" --assignee-object-id $stagingPrincipalId --scope "/subscriptions/<sub-id>/resourceGroups/rg-spaarke-platform-prod/providers/Microsoft.KeyVault/vaults/sprk-platform-prod-kv"
+az role assignment create `
+    --role "Key Vault Secrets User" `
+    --assignee-object-id $stagingPrincipalId `
+    --scope "/subscriptions/<sub-id>/resourceGroups/rg-spaarke-platform-prod/providers/Microsoft.KeyVault/vaults/sprk-platform-prod-kv"
 ```
+
+> **CRITICAL**: The staging slot has a **different managed identity** than production. Both need Key Vault access or deployments to the staging slot will fail with 503.
 
 ---
 
-## 5. Phase 3: Deploy BFF API
+## 5. Phase 3: Configure Secrets and App Settings
 
-### 5.1 Configure App Settings
+### 5.1 Seed Key Vault Secrets
 
-App settings use Key Vault references so no secrets appear in plaintext. Ensure these are configured in the App Service:
+**[AI]** Claude Code runs the seeding script (if available):
 
-| Setting | Value Pattern |
-|---------|--------------|
+```powershell
+.\scripts\Seed-ProductionKeyVault.ps1
+```
+
+Or manually set critical secrets:
+
+```powershell
+$kvName = "sprk-platform-prod-kv"
+
+# Azure AD (from Register-EntraAppRegistrations.ps1 — already stored if script ran)
+az keyvault secret set --vault-name $kvName --name "AzureAd--TenantId" --value "<tenant-id>"
+az keyvault secret set --vault-name $kvName --name "AzureAd--ClientId" --value "<bff-api-client-id>"
+az keyvault secret set --vault-name $kvName --name "AzureAd--ClientSecret" --value "<bff-api-secret>"
+
+# Dataverse S2S
+az keyvault secret set --vault-name $kvName --name "Dataverse--ClientId" --value "<s2s-client-id>"
+az keyvault secret set --vault-name $kvName --name "Dataverse--ClientSecret" --value "<s2s-secret>"
+
+# Azure OpenAI (from deployment outputs)
+$openaiKey = az cognitiveservices account keys list -g rg-spaarke-platform-prod -n spaarke-openai-prod --query "key1" -o tsv
+az keyvault secret set --vault-name $kvName --name "AzureOpenAI--ApiKey" --value "$openaiKey"
+
+# AI Search
+$searchKey = az search admin-key show -g rg-spaarke-platform-prod --service-name spaarke-search-prod --query "primaryKey" -o tsv
+az keyvault secret set --vault-name $kvName --name "AiSearch--ApiKey" --value "$searchKey"
+
+# Document Intelligence
+$docIntelKey = az cognitiveservices account keys list -g rg-spaarke-platform-prod -n spaarke-docintel-prod --query "key1" -o tsv
+az keyvault secret set --vault-name $kvName --name "DocumentIntelligence--ApiKey" --value "$docIntelKey"
+```
+
+### 5.2 Configure App Settings with Key Vault References
+
+**[AI]** Claude Code runs:
+
+```powershell
+.\scripts\Configure-ProductionAppSettings.ps1
+```
+
+Or set individually. App settings use the `@Microsoft.KeyVault(...)` pattern — **no plaintext secrets in app settings**:
+
+| Setting | Value |
+|---------|-------|
 | `AzureAd__TenantId` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=AzureAd--TenantId)` |
 | `AzureAd__ClientId` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=AzureAd--ClientId)` |
 | `AzureAd__ClientSecret` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=AzureAd--ClientSecret)` |
@@ -279,14 +383,22 @@ App settings use Key Vault references so no secrets appear in plaintext. Ensure 
 | `AzureOpenAI__ApiKey` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=AzureOpenAI--ApiKey)` |
 | `AiSearch__Endpoint` | `https://spaarke-search-prod.search.windows.net/` |
 | `AiSearch__ApiKey` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=AiSearch--ApiKey)` |
-| `DocumentIntelligence__Endpoint` | Cognitive Services endpoint |
-| `DocumentIntelligence__ApiKey` | `@Microsoft.KeyVault(...)` |
+| `DocumentIntelligence__Endpoint` | `https://westus2.api.cognitive.microsoft.com/` |
+| `DocumentIntelligence__ApiKey` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=DocumentIntelligence--ApiKey)` |
+| `Dataverse__OrgUrl` | `https://<prod-org>.crm.dynamics.com` |
+| `Dataverse__ClientId` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Dataverse--ClientId)` |
+| `Dataverse__ClientSecret` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Dataverse--ClientSecret)` |
+| `Redis__Enabled` | `false` (until per-customer Redis provisioned) |
 
-For the full list, see `src/server/api/Sprk.Bff.Api/appsettings.Production.json` for all configuration keys (non-secret values are in the JSON; secret values are injected via app settings with Key Vault references).
+Full non-secret configuration is in `src/server/api/Sprk.Bff.Api/appsettings.Production.json` (30 Key Vault references, zero plaintext secrets).
 
-### 5.2 Build and Deploy
+---
 
-**Production deployment** uses staging slot with zero-downtime swap:
+## 6. Phase 4: Deploy BFF API
+
+### 6.1 Build and Deploy with Zero-Downtime
+
+**[AI]** Claude Code executes the production deployment:
 
 ```powershell
 .\scripts\Deploy-BffApi.ps1 `
@@ -296,20 +408,17 @@ For the full list, see `src/server/api/Sprk.Bff.Api/appsettings.Production.json`
     -UseSlotDeploy
 ```
 
-The script performs:
-1. Builds the API (`dotnet publish -c Release`)
-2. Creates a zip package (~65 MB)
-3. Deploys to the `staging` slot
-4. Verifies health check on staging (`/healthz`)
-5. Swaps staging to production (zero-downtime)
-6. Verifies health check on production
-7. Rolls back automatically if production health check fails
+**What happens** (3-5 minutes):
+1. `dotnet publish -c Release` builds the API (~65 MB zip)
+2. Deploys zip to `staging` slot
+3. Waits for staging health check (`/healthz` → 200)
+4. Swaps staging → production (zero-downtime)
+5. Verifies production health check
+6. **Auto-rollback** if production health check fails after swap
 
-**Expected duration**: 3-5 minutes.
+### 6.2 Skip Build (Redeploy Existing)
 
-### 5.3 Skip Build (Redeploy Existing Package)
-
-If you need to redeploy without rebuilding:
+**[AI]** For redeployments without code changes:
 
 ```powershell
 .\scripts\Deploy-BffApi.ps1 `
@@ -320,75 +429,99 @@ If you need to redeploy without rebuilding:
     -SkipBuild
 ```
 
-### 5.4 Verify BFF API
+### 6.3 Verify
+
+**[AI]** Claude Code checks:
 
 ```powershell
-# Health check
+# Direct URL
 curl https://spaarke-bff-prod.azurewebsites.net/healthz
-
-# If custom domain is configured:
-curl https://api.spaarke.com/healthz
-
-# Detailed health (includes Dataverse, AI services):
-curl https://api.spaarke.com/healthz/dataverse
+# Expected: Healthy (200)
 ```
-
-Expected response: `Healthy` (HTTP 200).
 
 ---
 
-## 6. Phase 4: Configure Custom Domain and SSL
+## 7. Phase 5: Custom Domain and SSL
 
-### 6.1 Create DNS Record
+### 7.1 Get DNS Configuration Instructions
 
-In your DNS provider, create the record:
+**[AI]** Claude Code runs:
+
+```powershell
+.\scripts\Configure-CustomDomain.ps1 -ShowDnsInstructions
+```
+
+This outputs the **two required DNS records**.
+
+### 7.2 Create DNS Records
+
+**[HUMAN]** In your DNS provider, create **BOTH** records:
 
 | Type | Name | Value | TTL |
 |------|------|-------|-----|
-| CNAME | `api.spaarke.com` | `spaarke-bff-prod.azurewebsites.net` | 3600 |
+| **CNAME** | `api.spaarke.com` | `spaarke-bff-prod.azurewebsites.net` | 3600 |
+| **TXT** | `asuid.api.spaarke.com` | `<verification-id from Step 7.1>` | 3600 |
 
-Alternatively, for apex domains, use an A record pointing to the App Service IP:
+> **CRITICAL**: Both CNAME and TXT records are **required** by Azure App Service. The TXT record is the domain verification token. Without it, the custom domain binding will fail.
+
+To get the verification ID manually:
 
 ```powershell
-# Get the App Service IP
-az webapp show --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --query "inboundIpAddress" -o tsv
+az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query "customDomainVerificationId" -o tsv
 ```
 
-### 6.2 Add Custom Domain to App Service
+### 7.3 Wait for DNS Propagation
+
+**[HUMAN]** Verify DNS propagation before proceeding:
 
 ```powershell
-az webapp config hostname add --resource-group rg-spaarke-platform-prod --webapp-name spaarke-bff-prod --hostname api.spaarke.com
+nslookup api.spaarke.com
+# Should resolve to spaarke-bff-prod.azurewebsites.net
+
+nslookup -type=TXT asuid.api.spaarke.com
+# Should return the verification ID
 ```
 
-### 6.3 Configure SSL Certificate
+Propagation typically takes 5-30 minutes, but can take up to 24 hours.
 
-Use Azure-managed free certificate (auto-renewing):
+### 7.4 Configure Custom Domain and SSL
+
+**[AI]** Once DNS is confirmed, Claude Code runs:
 
 ```powershell
-# Create managed certificate
-az webapp config ssl create --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --hostname api.spaarke.com
-
-# Bind the certificate (get the thumbprint from the previous command output)
-az webapp config ssl bind --resource-group rg-spaarke-platform-prod --name spaarke-bff-prod --certificate-thumbprint "<thumbprint>" --ssl-type SNI
+.\scripts\Configure-CustomDomain.ps1
 ```
 
-### 6.4 Verify Custom Domain
+The script performs:
+1. Validates DNS records (CNAME + TXT) resolve correctly
+2. Adds custom domain hostname binding to App Service
+3. Creates Azure-managed SSL certificate (auto-renewal)
+4. Binds SSL with SNI
+5. Enforces HTTPS-only (HTTP → HTTPS redirect)
+6. Configures CORS for production origins
+
+### 7.5 Verify Custom Domain
+
+**[AI]** Claude Code verifies:
 
 ```powershell
-# Should return Healthy over HTTPS
+.\scripts\Test-CustomDomain.ps1
+```
+
+Or manually:
+
+```powershell
 curl https://api.spaarke.com/healthz
-
-# Verify SSL certificate
-openssl s_client -connect api.spaarke.com:443 -servername api.spaarke.com < /dev/null 2>/dev/null | openssl x509 -noout -subject -dates
+# Expected: Healthy (200)
 ```
 
 ---
 
-## 7. Phase 5: Provision First Customer
+## 8. Phase 6: Provision First Customer
 
-The demo customer validates the entire provisioning pipeline. It uses the same scripts as real customers (FR-06).
+### 8.1 Preview Provisioning
 
-### 7.1 Provision Demo Customer
+**[AI+HUMAN]** Preview what will be created:
 
 ```powershell
 .\scripts\Provision-Customer.ps1 `
@@ -396,29 +529,42 @@ The demo customer validates the entire provisioning pipeline. It uses the same s
     -DisplayName "Spaarke Demo" `
     -TenantId "<tenant-id>" `
     -ClientId "<service-principal-client-id>" `
-    -ClientSecret "<service-principal-secret>"
+    -ClientSecret "<service-principal-secret>" `
+    -WhatIf
 ```
 
-The script executes these 10 steps:
-1. Validates inputs and prerequisites (Azure CLI, PAC CLI, Bicep template)
-2. Creates resource group `rg-spaarke-demo-prod`
-3. Deploys `customer.bicep` (Storage, Key Vault, Service Bus, Redis)
-4. Populates customer Key Vault with secrets
-5. Creates Dataverse environment via Power Platform Admin API
-6. Waits for Dataverse environment provisioning (5-15 minutes)
-7. Imports managed solutions via `Deploy-DataverseSolutions.ps1`
-8. Provisions SPE containers
-9. Registers customer in BFF API tenant registry
-10. Runs smoke tests via `Test-Deployment.ps1`
+### 8.2 Execute Provisioning
 
-**Expected duration**: 20-30 minutes (Dataverse provisioning is the longest step).
-
-### 7.2 Resume from a Specific Step
-
-If provisioning fails partway through, resume from the last successful step:
+**[AI]** Claude Code runs:
 
 ```powershell
-# Example: resume from step 5 (Dataverse creation)
+.\scripts\Provision-Customer.ps1 `
+    -CustomerId "demo" `
+    -DisplayName "Spaarke Demo" `
+    -TenantId "<tenant-id>" `
+    -ClientId "<client-id>" `
+    -ClientSecret "<secret>"
+```
+
+**10-step pipeline** (20-30 minutes):
+
+| Step | Description | Duration | Can Claude Execute? |
+|------|-------------|----------|---------------------|
+| 1 | Validate inputs and prerequisites | 10s | Yes |
+| 2 | Create resource group `rg-spaarke-demo-prod` | 15s | Yes |
+| 3 | Deploy customer.bicep (Storage, Key Vault, Service Bus, Redis) | 5-8 min | Yes |
+| 4 | Populate customer Key Vault with secrets | 30s | Yes |
+| 5 | Create Dataverse environment via Admin API | 30s | Yes |
+| 6 | Wait for Dataverse provisioning | 5-15 min | Yes (waits) |
+| 7 | Import managed solutions (10 solutions in dependency order) | 5-10 min | Yes |
+| 8 | Provision SPE containers | 1-2 min | Yes |
+| 9 | Register in BFF API tenant registry | 15s | Yes |
+| 10 | Run smoke tests | 1-2 min | Yes |
+
+The script is **idempotent and resumable**. If it fails at any step, re-run with `-ResumeFromStep`:
+
+```powershell
+# Resume from step 5 (Dataverse creation)
 .\scripts\Provision-Customer.ps1 `
     -CustomerId "demo" `
     -DisplayName "Spaarke Demo" `
@@ -428,245 +574,66 @@ If provisioning fails partway through, resume from the last successful step:
     -ResumeFromStep 5
 ```
 
-### 7.3 Skip Dataverse (If Already Created)
+### 8.3 Load Sample Data (Demo Only)
 
-If the Dataverse environment was created manually:
+**[AI]** For the demo customer:
 
 ```powershell
-.\scripts\Provision-Customer.ps1 `
-    -CustomerId "demo" `
-    -DisplayName "Spaarke Demo" `
-    -TenantId "<tenant-id>" `
-    -ClientId "<client-id>" `
-    -ClientSecret "<secret>" `
-    -SkipDataverse
+.\scripts\Load-DemoSampleData.ps1
 ```
 
-### 7.4 Preview Without Executing
+### 8.4 Configure Demo User Access (Demo Only)
+
+**[AI]** Invite demo users via B2B guest invitations:
 
 ```powershell
-.\scripts\Provision-Customer.ps1 `
-    -CustomerId "demo" `
-    -DisplayName "Spaarke Demo" `
-    -TenantId "<tenant-id>" `
-    -ClientId "<client-id>" `
-    -ClientSecret "<secret>" `
-    -WhatIf
+.\scripts\Invite-DemoUsers.ps1
 ```
 
 ---
 
-## 8. Phase 6: Verify Deployment
+## 9. Phase 7: Verify Deployment
 
-### 8.1 Run Smoke Tests
+### 9.1 Run Smoke Test Suite
+
+**[AI]** Claude Code runs:
 
 ```powershell
 .\scripts\Test-Deployment.ps1 -EnvironmentName prod
 ```
 
-The smoke test suite validates:
-- BFF API health (`/healthz` returns 200)
-- Dataverse connectivity
-- SPE container operations
-- AI services (OpenAI, AI Search, Document Intelligence)
-- Service Bus connectivity
-- Redis connectivity
+**17 tests across 6 groups**:
 
-### 8.2 Manual Verification Checklist
+| Group | Tests | What It Checks |
+|-------|-------|----------------|
+| BFF API Health | 3 | `/healthz`, `/ping`, response headers |
+| Dataverse | 3 | Connection, solution presence, WhoAmI |
+| SPE | 2 | Container exists, file operations |
+| AI Services | 4 | OpenAI chat, embeddings, AI Search query, Doc Intelligence |
+| Service Bus | 2 | Connection, send/receive |
+| Redis | 3 | Connection, set/get, TTL |
 
-| Check | Command | Expected Result |
-|-------|---------|-----------------|
+### 9.2 Manual Verification Checklist
+
+**[AI+HUMAN]** Claude Code runs the commands; human confirms expectations:
+
+| Check | Command | Expected |
+|-------|---------|----------|
 | API health | `curl https://api.spaarke.com/healthz` | `Healthy` (200) |
-| Dataverse health | `curl https://api.spaarke.com/healthz/dataverse` | `healthy` (200) |
-| SSL certificate | `curl -vI https://api.spaarke.com 2>&1 \| grep "subject"` | Valid cert for `api.spaarke.com` |
-| App Service running | `az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query state` | `Running` |
-| Key Vault accessible | `az keyvault secret list --vault-name sprk-platform-prod-kv --query "[].name"` | List of secrets |
-| Resource group (platform) | `az group show -n rg-spaarke-platform-prod` | Exists |
-| Resource group (customer) | `az group show -n rg-spaarke-demo-prod` | Exists |
-
-### 8.3 Verify Dataverse Solutions
-
-```powershell
-# Authenticate PAC CLI
-pac auth create --environment "https://<demo-org>.crm.dynamics.com"
-
-# List installed solutions
-pac solution list
-```
-
-Verify all 10 Spaarke managed solutions are present and in a healthy state.
+| SSL cert valid | `curl -vI https://api.spaarke.com 2>&1 \| grep "subject"` | Valid cert |
+| App running | `az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query state` | `Running` |
+| Key Vault | `az keyvault secret list --vault-name sprk-platform-prod-kv --query "[].name"` | 10+ secrets |
+| Platform RG | `az group show -n rg-spaarke-platform-prod` | Exists |
+| Customer RG | `az group show -n rg-spaarke-demo-prod` | Exists |
+| Solutions | `pac solution list` (after `pac auth create`) | 10 managed solutions |
 
 ---
 
-## 9. Rollback Procedures
-
-### 9.1 BFF API Rollback
-
-The `Deploy-BffApi.ps1` script includes automatic rollback when `-UseSlotDeploy` is used. If a swap has already completed and issues are found later:
-
-```powershell
-# Swap back to previous version (previous version is in the staging slot after a swap)
-az webapp deployment slot swap `
-    --resource-group rg-spaarke-platform-prod `
-    --name spaarke-bff-prod `
-    --slot staging `
-    --target-slot production
-```
-
-Verify after rollback:
-
-```powershell
-curl https://api.spaarke.com/healthz
-```
-
-### 9.2 Platform Infrastructure Rollback
-
-Bicep deployments are idempotent. To rollback:
-
-1. Check the Git log for the previous working Bicep version
-2. Check out that version
-3. Redeploy:
-
-```powershell
-git checkout <previous-commit> -- infrastructure/bicep/
-.\scripts\Deploy-Platform.ps1 -EnvironmentName prod
-```
-
-### 9.3 Dataverse Solution Rollback
-
-Managed solutions support version rollback in the Power Platform Admin Center:
-
-1. Navigate to the Dataverse environment > Solutions
-2. Select the solution to rollback
-3. Use "Solution history" to find the previous version
-4. Import the previous managed solution version
-
----
-
-## 10. Troubleshooting
-
-### Common Issues
-
-#### App Service returns 503 after deployment
-
-**Symptoms**: `/healthz` returns 503 or times out after deployment.
-
-**Causes and fixes**:
-1. **Key Vault references not resolving**: Verify managed identity has `Key Vault Secrets User` role
-   ```powershell
-   az role assignment list --assignee <principal-id> --scope <keyvault-resource-id> -o table
-   ```
-2. **Missing app settings**: Compare required settings against configured settings
-   ```powershell
-   az webapp config appsettings list -g rg-spaarke-platform-prod -n spaarke-bff-prod --query "[].name" -o tsv | sort
-   ```
-3. **App not started**: Restart the App Service
-   ```powershell
-   az webapp restart -g rg-spaarke-platform-prod -n spaarke-bff-prod
-   ```
-
-#### Staging slot health check fails
-
-**Symptoms**: Deployment to staging succeeds but health check fails.
-
-**Cause**: Staging slot uses a different managed identity than production. It needs its own Key Vault access.
-
-**Fix**:
-```powershell
-$stagingPrincipalId = az webapp identity show -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging --query principalId -o tsv
-
-az role assignment create --role "Key Vault Secrets User" --assignee-object-id $stagingPrincipalId --scope "<keyvault-resource-id>"
-```
-
-#### Bicep deployment fails with quota error
-
-**Symptoms**: `Deploy-Platform.ps1` fails with "QuotaExceeded" or "SkuNotAvailable".
-
-**Fix**: Request quota increases in the Azure Portal under Subscription > Usage + quotas. Common quotas to check:
-- App Service Plan cores
-- Azure OpenAI TPM (tokens per minute)
-- AI Search service units
-
-#### Dataverse environment creation times out
-
-**Symptoms**: `Provision-Customer.ps1` hangs at step 5/6 (Dataverse provisioning).
-
-**Cause**: Power Platform Admin API environment creation can take 5-15 minutes.
-
-**Fix**:
-1. Check status in Power Platform Admin Center
-2. If the environment was created but the script timed out, resume from step 7:
-   ```powershell
-   .\scripts\Provision-Customer.ps1 -CustomerId "demo" ... -ResumeFromStep 7
-   ```
-
-#### Dataverse solution import fails
-
-**Symptoms**: `Deploy-DataverseSolutions.ps1` fails with import errors.
-
-**Common causes**:
-1. **Missing dependency**: Solutions must import in order (SpaarkeCore first). Re-run the script, which handles order.
-2. **Version conflict**: Unmanaged customizations conflict with managed solution. In the target environment, remove conflicting unmanaged components.
-3. **Missing prerequisite solution**: Ensure all upstream solutions were imported successfully.
-
-#### Redis connection refused
-
-**Symptoms**: BFF API health check fails with Redis connection error.
-
-**Fix**: If Redis is not yet provisioned, disable it temporarily:
-```powershell
-az webapp config appsettings set -g rg-spaarke-platform-prod -n spaarke-bff-prod --settings Redis__Enabled=false
-```
-
-Enable it once Redis is provisioned and the connection string is in Key Vault.
-
-#### Custom domain SSL binding fails
-
-**Symptoms**: `az webapp config ssl create` fails.
-
-**Cause**: DNS record not yet propagated, or hostname not validated.
-
-**Fix**:
-1. Verify DNS is resolving: `nslookup api.spaarke.com`
-2. Check hostname binding: `az webapp config hostname list -g rg-spaarke-platform-prod -n spaarke-bff-prod`
-3. Wait for DNS propagation (up to 24 hours for new records, typically 5-30 minutes)
-
----
-
-## 11. Maintenance Operations
-
-### Secret Rotation
-
-Use the dedicated rotation script:
-
-```powershell
-.\scripts\Rotate-Secrets.ps1 -EnvironmentName prod
-```
-
-See `docs/guides/SECRET-ROTATION-PROCEDURES.md` for the full secret rotation runbook.
-
-### Customer Decommissioning
-
-To cleanly remove a customer and all their resources:
-
-```powershell
-.\scripts\Decommission-Customer.ps1 `
-    -CustomerId "<customer-id>" `
-    -EnvironmentName prod `
-    -TenantId "<tenant-id>" `
-    -ClientId "<client-id>" `
-    -ClientSecret "<secret>"
-```
-
-This removes:
-- Azure resource group (`rg-spaarke-{customerId}-prod`)
-- Dataverse environment
-- SPE containers
-- Tenant registry entry in BFF API
+## 10. Day-2 Operations
 
 ### Subsequent BFF API Deployments
 
-After the initial setup, deploying new API versions requires only:
+**[AI]** After initial setup, deploying new API versions:
 
 ```powershell
 .\scripts\Deploy-BffApi.ps1 `
@@ -676,23 +643,9 @@ After the initial setup, deploying new API versions requires only:
     -UseSlotDeploy
 ```
 
-### Viewing Logs
-
-```powershell
-# Live log stream
-az webapp log tail -g rg-spaarke-platform-prod -n spaarke-bff-prod
-
-# Staging slot logs
-az webapp log tail -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging
-
-# App Insights queries (via Azure Portal)
-# Navigate to: App Insights > Logs
-# KQL: requests | where timestamp > ago(1h) | summarize count() by resultCode
-```
-
 ### Provisioning Additional Customers
 
-Onboard new customers using the same script:
+**[AI]** Same script, different CustomerId:
 
 ```powershell
 .\scripts\Provision-Customer.ps1 `
@@ -703,25 +656,224 @@ Onboard new customers using the same script:
     -ClientSecret "<secret>"
 ```
 
-See `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` for the complete customer onboarding runbook.
+See [Customer Onboarding Runbook](./CUSTOMER-ONBOARDING-RUNBOOK.md) for the complete lifecycle.
+
+### Customer Decommissioning
+
+**[AI+HUMAN]** Preview first, then execute with confirmation:
+
+```powershell
+# Preview what would be deleted
+.\scripts\Decommission-Customer.ps1 -CustomerId "test" -Environment prod -DryRun
+
+# Execute (will prompt for confirmation)
+.\scripts\Decommission-Customer.ps1 `
+    -CustomerId "test" `
+    -Environment prod `
+    -TenantId "<tenant-id>" `
+    -ClientId "<client-id>" `
+    -ClientSecret "<secret>"
+```
+
+Removes: Azure resource group, Dataverse environment, SPE containers, tenant registry entry.
+
+> **Safety**: Platform resource groups (`rg-spaarke-platform-*`) are explicitly blocked from deletion.
+
+### Secret Rotation
+
+**[AI]** Regular rotation (recommended every 90 days):
+
+```powershell
+# Preview
+.\scripts\Rotate-Secrets.ps1 -Scope Platform -SecretType All -DryRun
+
+# Execute platform secrets
+.\scripts\Rotate-Secrets.ps1 -Scope Platform -SecretType All
+
+# Execute customer secrets
+.\scripts\Rotate-Secrets.ps1 -Scope Customer -CustomerId "demo" -SecretType All
+```
+
+Supported types: `StorageKey`, `ServiceBus`, `Redis`, `EntraId`, `All`.
+
+See [Secret Rotation Procedures](./SECRET-ROTATION-PROCEDURES.md) for the full runbook.
+
+### Viewing Logs
+
+**[AI]** Claude Code runs:
+
+```powershell
+# Live log stream
+az webapp log tail -g rg-spaarke-platform-prod -n spaarke-bff-prod
+
+# Staging slot logs
+az webapp log tail -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging
+```
+
+For App Insights KQL queries, see [Monitoring and Alerting Guide](./MONITORING-AND-ALERTING-GUIDE.md).
 
 ---
 
-## 12. Reference: Resource Inventory
+## 11. Rollback Procedures
+
+### BFF API Rollback
+
+**[AI]** Automatic rollback is built into `Deploy-BffApi.ps1` when `-UseSlotDeploy` is used.
+
+For manual rollback after a completed swap:
+
+```powershell
+# Previous version is in the staging slot after a swap — swap back
+az webapp deployment slot swap `
+    -g rg-spaarke-platform-prod `
+    -n spaarke-bff-prod `
+    --slot staging `
+    --target-slot production
+```
+
+Verify: `curl https://api.spaarke.com/healthz`
+
+### Platform Infrastructure Rollback
+
+**[AI]** Bicep is idempotent. Redeploy previous version:
+
+```powershell
+git checkout <previous-commit> -- infrastructure/bicep/
+.\scripts\Deploy-Platform.ps1 -EnvironmentName prod
+```
+
+### Dataverse Solution Rollback
+
+**[HUMAN]** Managed solutions support version rollback in Power Platform Admin Center:
+1. Environment > Solutions > Select solution > Solution history
+2. Import the previous managed solution version
+
+---
+
+## 12. Troubleshooting
+
+### Decision Tree for Claude Code
+
+When troubleshooting, Claude Code should follow this decision tree:
+
+```
+API returns 503 after deployment?
+  → Check staging slot Key Vault RBAC (Section 4.5)
+  → Check managed identity principal ID for BOTH slots
+  → Restart: az webapp restart -g rg-spaarke-platform-prod -n spaarke-bff-prod
+
+Health check fails on staging slot?
+  → Staging slot has DIFFERENT managed identity than production
+  → Grant Key Vault Secrets User to staging slot's principal ID
+
+Bicep deployment fails with QuotaExceeded?
+  → Check Known Issues section for OpenAI region and AI Search SKU
+  → Request quota increases in Azure Portal > Subscription > Usage + quotas
+
+Custom domain binding fails?
+  → Verify BOTH DNS records exist: CNAME + TXT (asuid.*)
+  → Get verification ID: az webapp show ... --query customDomainVerificationId
+  → Wait for DNS propagation (nslookup to verify)
+
+Dataverse environment creation times out?
+  → Check Power Platform Admin Center for status
+  → If created but script timed out: -ResumeFromStep 7
+
+PAC CLI output capture fails?
+  → PAC is a .cmd wrapper on Windows
+  → Use: cmd /c pac <command>
+
+Redis connection refused?
+  → Set Redis__Enabled=false until per-customer Redis provisioned
+  → az webapp config appsettings set -g ... --settings Redis__Enabled=false
+```
+
+### Common Issues Reference
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| 503 after deploy | Key Vault refs not resolving | Grant managed identity `Key Vault Secrets User` role |
+| Staging slot 503 | Different managed identity | Grant staging slot separate RBAC |
+| `QuotaExceeded` on OpenAI | Region capacity | Deploy to westus3 with `openAiLocation` parameter |
+| `SkuNotAvailable` on AI Search | Standard2 unavailable | Use `standard` SKU instead |
+| DNS TXT record error | Missing verification record | Add `asuid.api.spaarke.com` TXT record |
+| PAC CLI hangs | .cmd wrapper issue | Use `cmd /c pac` for output capture |
+| Redis timeout | Not provisioned yet | Set `Redis__Enabled=false` |
+| Service Bus name conflict | `-sb` suffix reserved | Use `-sbus` suffix |
+| Solution import fails | Dependency order wrong | `Deploy-DataverseSolutions.ps1` handles ordering |
+
+---
+
+## 13. Known Issues and Lessons Learned
+
+These were discovered during the initial March 2026 production deployment and are critical for future deployments.
+
+### Azure OpenAI Not Available in westus2
+
+**Issue**: Azure OpenAI GPT-4o and GPT-4o-mini are NOT available in westus2.
+
+**Resolution**: Deploy OpenAI to `westus3` using the `openAiLocation` parameter in `platform-prod.bicepparam`. All other resources remain in westus2.
+
+```bicep
+// in platform-prod.bicepparam
+param openAiLocation = 'westus3'
+```
+
+**Impact**: GPT-4o capacity limited to 50K TPM in westus3 (lower than westus2 would have offered).
+
+### AI Search Standard2 Not Available
+
+**Issue**: AI Search `standard2` SKU provisioning fails in westus2 with insufficient capacity.
+
+**Resolution**: Downgraded to `standard` SKU. Sufficient for current workload. Monitor and upgrade when capacity is available.
+
+### Service Bus Naming — `-sb` Is Reserved
+
+**Issue**: Azure rejects Service Bus names ending in `-sb`.
+
+**Resolution**: Customer Bicep template uses `-sbus` suffix: `sprk-{customerId}-{env}-sbus`.
+
+### Custom Domain Requires BOTH CNAME and TXT Records
+
+**Issue**: Azure App Service custom domain binding requires TWO DNS records, not just CNAME. The TXT record (`asuid.api.spaarke.com`) contains a domain verification token.
+
+**Resolution**: `Configure-CustomDomain.ps1` now prominently shows both required records. The `-ShowDnsInstructions` flag outputs exact values.
+
+### Staging Slot Has Different Managed Identity
+
+**Issue**: After deploying to staging slot, health check fails with 503 because Key Vault references can't resolve.
+
+**Resolution**: The staging slot's managed identity needs its own `Key Vault Secrets User` role assignment. This is a separate principal ID from the production slot.
+
+### PAC CLI on Windows Is a .cmd Wrapper
+
+**Issue**: `pac` commands fail to capture output in PowerShell because `pac` is a `.cmd` file, not a native executable.
+
+**Resolution**: Use `cmd /c pac <args>` for output capture in scripts. The `Test-Deployment.ps1` script handles this automatically.
+
+### Document Intelligence API Version
+
+**Issue**: The legacy `formrecognizer/info` endpoint no longer works.
+
+**Resolution**: Use `formrecognizer/documentModels` with GA API version `2024-11-30`. `Test-Deployment.ps1` uses the correct endpoint.
+
+---
+
+## 14. Reference: Resource Inventory
 
 ### Production Platform Resources
 
-| Resource | Name | Resource Group |
-|----------|------|----------------|
-| App Service Plan | `spaarke-bff-prod-plan` | `rg-spaarke-platform-prod` |
-| App Service | `spaarke-bff-prod` | `rg-spaarke-platform-prod` |
-| App Service (staging slot) | `spaarke-bff-prod/staging` | `rg-spaarke-platform-prod` |
-| Azure OpenAI | `spaarke-openai-prod` | `rg-spaarke-platform-prod` |
-| AI Search | `spaarke-search-prod` | `rg-spaarke-platform-prod` |
-| Document Intelligence | `spaarke-docintel-prod` | `rg-spaarke-platform-prod` |
-| Key Vault | `sprk-platform-prod-kv` | `rg-spaarke-platform-prod` |
-| App Insights | `spaarke-appinsights-prod` | `rg-spaarke-platform-prod` |
-| Log Analytics | `spaarke-logs-prod` | `rg-spaarke-platform-prod` |
+| Resource | Name | Resource Group | Region |
+|----------|------|----------------|--------|
+| App Service Plan | `spaarke-bff-prod-plan` | `rg-spaarke-platform-prod` | westus2 |
+| App Service | `spaarke-bff-prod` | `rg-spaarke-platform-prod` | westus2 |
+| Staging Slot | `spaarke-bff-prod/staging` | `rg-spaarke-platform-prod` | westus2 |
+| Azure OpenAI | `spaarke-openai-prod` | `rg-spaarke-platform-prod` | **westus3** |
+| AI Search | `spaarke-search-prod` | `rg-spaarke-platform-prod` | westus2 |
+| Document Intelligence | `spaarke-docintel-prod` | `rg-spaarke-platform-prod` | westus2 |
+| Key Vault | `sprk-platform-prod-kv` | `rg-spaarke-platform-prod` | westus2 |
+| App Insights | `spaarke-appinsights-prod` | `rg-spaarke-platform-prod` | westus2 |
+| Log Analytics | `spaarke-logs-prod` | `rg-spaarke-platform-prod` | westus2 |
 
 ### Per-Customer Resources (Template)
 
@@ -729,7 +881,7 @@ See `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` for the complete customer onboard
 |----------|-------------|----------------|
 | Storage Account | `sprk{customerId}{env}sa` | `rg-spaarke-{customerId}-{env}` |
 | Key Vault | `sprk-{customerId}-{env}-kv` | `rg-spaarke-{customerId}-{env}` |
-| Service Bus | `sprk-{customerId}-{env}-sb` | `rg-spaarke-{customerId}-{env}` |
+| Service Bus | `sprk-{customerId}-{env}-sbus` | `rg-spaarke-{customerId}-{env}` |
 | Redis Cache | `sprk-{customerId}-{env}-redis` | `rg-spaarke-{customerId}-{env}` |
 | Dataverse Env | `spaarke-{customerId}` | (Power Platform) |
 
@@ -740,8 +892,9 @@ See `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` for the complete customer onboard
 | BFF API (production) | `https://api.spaarke.com` |
 | BFF API (direct) | `https://spaarke-bff-prod.azurewebsites.net` |
 | Health check | `https://api.spaarke.com/healthz` |
-| OpenAI endpoint | `https://spaarke-openai-prod.openai.azure.com/` |
-| AI Search endpoint | `https://spaarke-search-prod.search.windows.net/` |
+| OpenAI | `https://spaarke-openai-prod.openai.azure.com/` |
+| AI Search | `https://spaarke-search-prod.search.windows.net/` |
+| Doc Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
 
 ### Entra ID App Registrations
 
@@ -752,23 +905,128 @@ See `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` for the complete customer onboard
 
 ---
 
-## Quick Reference: Deployment Sequence
+## 15. CI/CD Pipelines
 
-For a complete fresh deployment, execute in this order:
+Three GitHub Actions workflows automate deployment after initial setup:
 
+### deploy-platform.yml
+
+**Trigger**: Manual dispatch (`workflow_dispatch`)
+
+```yaml
+# 3-job pipeline:
+# 1. what-if: Preview changes (always runs)
+# 2. deploy: Apply changes (requires environment approval)
+# 3. verify: Run smoke tests
 ```
-1. Deploy-Platform.ps1 -EnvironmentName prod -WhatIf    (preview)
-2. Deploy-Platform.ps1 -EnvironmentName prod             (deploy shared infra)
-3. Create Entra ID app registrations                      (manual in portal)
-4. Store secrets in Key Vault                             (az keyvault secret set)
-5. Grant managed identity Key Vault access                (az role assignment create)
-6. Configure App Service app settings                     (Key Vault references)
-7. Deploy-BffApi.ps1 -Environment production -UseSlotDeploy  (deploy API)
-8. Configure custom domain + SSL                          (DNS + az webapp config)
-9. Provision-Customer.ps1 -CustomerId demo                (first customer)
-10. Test-Deployment.ps1 -EnvironmentName prod             (validate everything)
+
+### deploy-bff-api.yml
+
+**Trigger**: Push to `master` (path filter: `src/server/api/**`)
+
+```yaml
+# 8-job pipeline with zero-downtime:
+# 1. build → 2. test → 3. deploy-staging → 4. health-check-staging
+# → 5. swap → 6. health-check-production → 7. rollback (on failure)
+# → 8. notify
 ```
+
+### provision-customer.yml
+
+**Trigger**: Manual dispatch with customer parameters
+
+```yaml
+# 4-job pipeline:
+# 1. validate-inputs → 2. provision → 3. verify → 4. audit-trail
+```
+
+### GitHub Environment Protection
+
+| Environment | Protection Rules |
+|-------------|-----------------|
+| staging | Auto-approve, wait timer: 0 |
+| production | Required reviewer, wait timer: 5 minutes |
+
+See [GitHub Environment Protection](./GITHUB-ENVIRONMENT-PROTECTION.md) for setup details.
+
+### Required GitHub Secrets
+
+| Secret | Purpose |
+|--------|---------|
+| `AZURE_CLIENT_ID` | OIDC federated credential (not a password) |
+| `AZURE_TENANT_ID` | Entra ID tenant |
+| `AZURE_SUBSCRIPTION_ID` | Target subscription |
+
+> **Note**: GitHub Actions use OIDC (federated credentials), not service principal secrets.
 
 ---
 
-*This guide was written based on the production deployment completed in March 2026. All scripts referenced are in the `scripts/` directory of the Spaarke repository.*
+## Quick Reference: Complete Deployment Sequence
+
+For a fresh production deployment, execute phases in order:
+
+```
+PHASE 1: SHARED PLATFORM                                    [AI]
+  1. Deploy-Platform.ps1 -EnvironmentName prod -WhatIf      (preview)
+  2. Deploy-Platform.ps1 -EnvironmentName prod               (deploy, 10-20 min)
+
+PHASE 2: ENTRA ID                                           [AI + HUMAN]
+  3. Register-EntraAppRegistrations.ps1                      (create apps)
+  4. Azure Portal: Grant admin consent                       [HUMAN]
+  5. Power Platform: Create application user                 [HUMAN]
+  6. Test-EntraAppRegistrations.ps1                          (verify)
+  7. Grant managed identity Key Vault RBAC (both slots!)     [AI]
+
+PHASE 3: SECRETS & SETTINGS                                  [AI]
+  8. Seed-ProductionKeyVault.ps1                             (seed secrets)
+  9. Configure-ProductionAppSettings.ps1                     (KV references)
+
+PHASE 4: BFF API                                             [AI]
+  10. Deploy-BffApi.ps1 -Environment production -UseSlotDeploy (deploy, 3-5 min)
+
+PHASE 5: CUSTOM DOMAIN                                       [AI + HUMAN]
+  11. Configure-CustomDomain.ps1 -ShowDnsInstructions        (get DNS values)
+  12. Create CNAME + TXT DNS records                         [HUMAN]
+  13. Wait for DNS propagation                               [HUMAN]
+  14. Configure-CustomDomain.ps1                             (bind domain + SSL)
+  15. Test-CustomDomain.ps1                                  (verify)
+
+PHASE 6: FIRST CUSTOMER                                      [AI]
+  16. Provision-Customer.ps1 -CustomerId demo -WhatIf        (preview)
+  17. Provision-Customer.ps1 -CustomerId demo                (provision, 20-30 min)
+  18. Load-DemoSampleData.ps1                                (sample data)
+  19. Invite-DemoUsers.ps1                                   (demo access)
+
+PHASE 7: VERIFY                                              [AI]
+  20. Test-Deployment.ps1 -EnvironmentName prod              (17 smoke tests)
+```
+
+**Total estimated time**: 2-4 hours (first deployment). Steps 1-10 and 16-20 are fully automatable by Claude Code.
+
+---
+
+## Script Reference
+
+All scripts are in the `scripts/` directory:
+
+| Script | Purpose | Key Parameters |
+|--------|---------|----------------|
+| `Deploy-Platform.ps1` | Deploy shared platform Bicep | `-EnvironmentName`, `-WhatIf` |
+| `Deploy-BffApi.ps1` | Deploy BFF API with zero-downtime | `-Environment`, `-UseSlotDeploy`, `-SkipBuild` |
+| `Deploy-DataverseSolutions.ps1` | Import 10 managed solutions in order | `-Environment` |
+| `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi`, `-SkipDataverseS2S` |
+| `Test-EntraAppRegistrations.ps1` | Verify app registrations | (none) |
+| `Configure-CustomDomain.ps1` | Custom domain + SSL setup | `-ShowDnsInstructions`, `-SkipDnsCheck`, `-SkipSsl` |
+| `Test-CustomDomain.ps1` | Verify custom domain | (none) |
+| `Seed-ProductionKeyVault.ps1` | Populate Key Vault with secrets | (none) |
+| `Configure-ProductionAppSettings.ps1` | Set app settings with KV refs | (none) |
+| `Provision-Customer.ps1` | End-to-end customer provisioning | `-CustomerId`, `-ResumeFromStep`, `-WhatIf`, `-SkipDataverse` |
+| `Decommission-Customer.ps1` | Customer teardown | `-CustomerId`, `-DryRun`, `-Force` |
+| `Load-DemoSampleData.ps1` | Load sample data for demo | (none) |
+| `Invite-DemoUsers.ps1` | B2B guest invitations for demo | (none) |
+| `Test-Deployment.ps1` | Smoke tests (17 tests, 6 groups) | `-EnvironmentName` |
+| `Rotate-Secrets.ps1` | Zero-downtime secret rotation | `-Scope`, `-SecretType`, `-CustomerId`, `-DryRun` |
+
+---
+
+*This guide was written based on the production deployment completed in March 2026. All scripts are in `scripts/`. All lessons learned are from actual deployment execution.*
