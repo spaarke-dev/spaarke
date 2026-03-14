@@ -50,19 +50,19 @@
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 013 | List/Get containers endpoints | 🔲 | 006, 009 | 2h |
-| 014 | Create container endpoint | 🔲 | 013, 007 | 2h |
-| 015 | Update/Activate/Lock/Unlock container endpoints | 🔲 | 013, 007 | 3h |
-| 016 | Container permission CRUD endpoints | 🔲 | 013, 007 | 3h |
+| 014 | Create container endpoint | ✅ | 013, 007 | 2h |
+| 015 | Update/Activate/Lock/Unlock container endpoints | ✅ | 013, 007 | 3h |
+| 016 | Container permission CRUD endpoints | ✅ | 013, 007 | 3h |
 
 ### 1.5 BFF API — File Endpoints
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 017 | List items in container endpoint | 🔲 | 006, 009 | 2h |
-| 018 | Upload file endpoint | 🔲 | 017, 007 | 3h |
-| 019 | Download/Preview/Delete file endpoints | 🔲 | 017, 007 | 2h |
-| 020 | File versions/thumbnails/sharing endpoints | 🔲 | 017 | 2h |
-| 021 | Create folder endpoint | 🔲 | 017 | 1h |
+| 018 | Upload file endpoint | ✅ | 017, 007 | 3h |
+| 019 | Download/Preview/Delete file endpoints | ✅ | 017, 007 | 2h |
+| 020 | File versions/thumbnails/sharing endpoints | ✅ | 017 | 2h |
+| 021 | Create folder endpoint | ✅ | 017 | 1h |
 
 ### 1.6 BFF API — Dashboard & Audit
 
@@ -86,43 +86,43 @@
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 029 | Create AppShell layout component | 🔲 | 025, 028 | 3h |
-| 030 | Create BuContextPicker cascade component | 🔲 | 029, 027 | 3h |
+| 030 | Create BuContextPicker cascade component | ✅ | 029, 027 | 3h |
 | 031 | Create NavigationPanel component | 🔲 | 029 | 2h |
 
 ### 1.9 Code Page — Dashboard
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 032 | Create DashboardPage | 🔲 | 029, 027, 028 | 3h |
+| 032 | Create DashboardPage | ✅ | 029, 027, 028 | 3h |
 
 ### 1.10 Code Page — Container Management
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 033 | Create ContainersPage | 🔲 | 029, 027, 028 | 3h |
-| 034 | Create ContainerDetail side panel | 🔲 | 033 | 3h |
+| 033 | Create ContainersPage | ✅ | 029, 027, 028 | 3h |
+| 034 | Create ContainerDetail side panel | ✅ | 033 | 3h |
 | 035 | Create PermissionPanel component | 🔲 | 034 | 3h |
 
 ### 1.11 Code Page — File Browser
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 036 | Create FileBrowserPage | 🔲 | 029, 027, 028 | 4h |
-| 037 | Create FileDetailPanel | 🔲 | 036 | 3h |
+| 036 | Create FileBrowserPage | ✅ | 029, 027, 028 | 4h |
+| 037 | Create FileDetailPanel | ✅ | 036 | 3h |
 
 ### 1.12 Code Page — Settings
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 038 | Create SettingsPage | 🔲 | 029, 027 | 3h |
-| 039 | Create EnvironmentConfig component | 🔲 | 038 | 2h |
-| 040 | Create ContainerTypeConfig component | 🔲 | 038 | 3h |
+| 039 | Create EnvironmentConfig component | ✅ | 038 | 2h |
+| 040 | Create ContainerTypeConfig component | ✅ | 038 | 3h |
 
 ### 1.13 Code Page — Audit Log
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 041 | Create AuditLogPage | 🔲 | 029, 027 | 3h |
+| 041 | Create AuditLogPage | ✅ | 029, 027 | 3h |
 
 ### 1.14 Phase 1 Integration & Deploy
 
