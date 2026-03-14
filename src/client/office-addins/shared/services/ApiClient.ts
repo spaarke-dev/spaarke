@@ -60,11 +60,7 @@ class ApiClient implements IApiClient {
     return this.request<T>('DELETE', endpoint);
   }
 
-  async uploadFile(
-    endpoint: string,
-    file: File | Blob,
-    fileName: string
-  ): Promise<UploadResponse> {
+  async uploadFile(endpoint: string, file: File | Blob, fileName: string): Promise<UploadResponse> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
       throw new Error('Not authenticated');
@@ -88,11 +84,7 @@ class ApiClient implements IApiClient {
     return response.json();
   }
 
-  private async request<T>(
-    method: string,
-    endpoint: string,
-    body?: unknown
-  ): Promise<T> {
+  private async request<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
     const accessToken = await this.getAccessToken();
     if (!accessToken) {
       throw new Error('Not authenticated');
@@ -162,5 +154,6 @@ export class ApiClientError extends Error {
 }
 
 // Export singleton instance
-export const apiClient: IApiClient & { configure: (config: ApiClientConfig) => void } =
-  new ApiClient();
+export const apiClient: IApiClient & {
+  configure: (config: ApiClientConfig) => void;
+} = new ApiClient();

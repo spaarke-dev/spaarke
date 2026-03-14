@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// Phase 1 Implementation:
 /// - Shared and Dedicated models fully supported
 /// - CustomerOwned model requires Key Vault integration (connection strings)
-/// - Deployment configs cached in-memory (TODO: Dataverse persistence in future task)
+/// - Deployment configs cached in-memory (TRACKED: GitHub #229 - Dataverse persistence)
 ///
 /// Index naming (configurable via AnalysisOptions):
 /// - Shared: Uses AnalysisOptions.SharedIndexName (single multi-tenant index)
@@ -30,7 +30,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     private readonly AnalysisOptions _options;
     private readonly ILogger<KnowledgeDeploymentService> _logger;
 
-    // In-memory cache for deployment configs (TODO: Move to Dataverse in future task)
+    // In-memory cache for deployment configs (TRACKED: GitHub #229 - Move to Dataverse)
     private readonly ConcurrentDictionary<string, KnowledgeDeploymentConfig> _configCache = new();
     private readonly ConcurrentDictionary<string, SearchClient> _clientCache = new();
 
@@ -62,7 +62,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
             return Task.FromResult(cachedConfig);
         }
 
-        // TODO: Load from Dataverse sprk_aiknowledgedeployment entity
+        // TRACKED: GitHub #229 - Load from Dataverse sprk_aiknowledgedeployment entity
         // For now, return default config based on AnalysisOptions
         var defaultConfig = CreateDefaultConfig(tenantId);
 
@@ -96,7 +96,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
 
         if (config == null)
         {
-            // TODO: Load from Dataverse by ID
+            // TRACKED: GitHub #229 - Load from Dataverse by ID
             throw new InvalidOperationException($"Deployment {deploymentId} not found. Dataverse integration pending.");
         }
 
@@ -121,7 +121,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
             CreatedAt = config.CreatedAt == default ? DateTimeOffset.UtcNow : config.CreatedAt
         };
 
-        // TODO: Persist to Dataverse sprk_aiknowledgedeployment entity
+        // TRACKED: GitHub #229 - Persist to Dataverse sprk_aiknowledgedeployment entity
         // For now, update cache
         _configCache[config.TenantId] = savedConfig;
 

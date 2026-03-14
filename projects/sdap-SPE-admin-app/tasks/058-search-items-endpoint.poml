@@ -1,0 +1,50 @@
+<task id="SPE-058" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Search Items Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-006, SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement the endpoint to search for items within containers using the Microsoft Graph search API. This allows administrators to find specific files and documents across containers, supporting content governance and compliance scenarios.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>A working POST endpoint that searches items within containers via Graph search API, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Searching items within containers uses the Graph search API with driveItem entity type scoped to specific containers. Administrators need to find files by name, content, or metadata across containers for compliance reviews, data governance, and troubleshooting. The search can be scoped to a specific container or span multiple containers.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define SearchItemsRequest with query, containerId (optional scope), fileType filter, pageSize, skipToken, and SearchItemsResponse with results and pagination</step>
+    <step order="2" name="add-graph-method">Add SearchItemsAsync to SpeAdminGraphService that calls POST /search/query with entityTypes: ["driveItem"] and optional container scoping</step>
+    <step order="3" name="add-endpoint">Add POST /api/spe/search/items?configId={id} endpoint with validation and graph call</step>
+    <step order="4" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="5" name="add-tests">Write unit tests covering scoped search, unscoped search, empty results, pagination</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SearchItemsRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SearchItemsResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/SearchItemsTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/search/items searches Graph API with entityTypes driveItem</criterion>
+    <criterion testable="true">Search can be optionally scoped to a specific containerId</criterion>
+    <criterion testable="true">Results include item id, name, size, lastModifiedDateTime, and parent container info</criterion>
+    <criterion testable="true">Pagination is supported via skipToken</criterion>
+    <criterion testable="true">Empty query string is rejected with 400</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

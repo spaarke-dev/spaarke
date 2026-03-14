@@ -5,12 +5,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  shorthands,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, shorthands } from '@fluentui/react-components';
 import { Settings20Regular } from '@fluentui/react-icons';
 import { useCanvasStore } from '../../stores';
 import { NodePropertiesForm } from './NodePropertiesForm';
@@ -63,14 +58,12 @@ const useStyles = makeStyles({
  */
 export const PropertiesPanel = React.memo(function PropertiesPanel() {
   const styles = useStyles();
-  const { selectedNodeId, nodes } = useCanvasStore((state) => ({
+  const { selectedNodeId, nodes } = useCanvasStore(state => ({
     selectedNodeId: state.selectedNodeId,
     nodes: state.nodes,
   }));
 
-  const selectedNode = selectedNodeId
-    ? nodes.find((n) => n.id === selectedNodeId)
-    : null;
+  const selectedNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) : null;
 
   return (
     <div className={styles.panel}>
@@ -90,9 +83,7 @@ export const PropertiesPanel = React.memo(function PropertiesPanel() {
           <div className={styles.emptyState}>
             <Settings20Regular className={styles.emptyIcon} />
             <Text size={300}>No node selected</Text>
-            <Text size={200}>
-              Select a node on the canvas to view and edit its properties
-            </Text>
+            <Text size={200}>Select a node on the canvas to view and edit its properties</Text>
           </div>
         )}
       </div>

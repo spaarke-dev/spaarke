@@ -219,7 +219,9 @@ describe('themeStorage', () => {
         localStorageMock.getItem.mockReturnValue('auto');
         const mockNavbar = document.createElement('div');
         querySelectorSpy.mockReturnValue(mockNavbar);
-        getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(10, 10, 10)' });
+        getComputedStyleSpy.mockReturnValue({
+          backgroundColor: 'rgb(10, 10, 10)',
+        });
 
         const result = getEffectiveDarkMode();
         expect(result).toBe(true);
@@ -229,7 +231,9 @@ describe('themeStorage', () => {
         localStorageMock.getItem.mockReturnValue('auto');
         const mockNavbar = document.createElement('div');
         querySelectorSpy.mockReturnValue(mockNavbar);
-        getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(240, 240, 240)' });
+        getComputedStyleSpy.mockReturnValue({
+          backgroundColor: 'rgb(240, 240, 240)',
+        });
 
         const result = getEffectiveDarkMode();
         expect(result).toBe(false);
@@ -239,7 +243,9 @@ describe('themeStorage', () => {
         localStorageMock.getItem.mockReturnValue('auto');
         const mockNavbar = document.createElement('div');
         querySelectorSpy.mockReturnValue(mockNavbar);
-        getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(100, 100, 100)' });
+        getComputedStyleSpy.mockReturnValue({
+          backgroundColor: 'rgb(100, 100, 100)',
+        });
         mockMatchMedia.mockReturnValue({
           matches: true,
           addEventListener: jest.fn(),
@@ -359,9 +365,7 @@ describe('themeStorage', () => {
       setupThemeListener(onChange);
 
       // Get the storage handler that was registered
-      const storageHandler = addEventListenerSpy.mock.calls.find(
-        call => call[0] === 'storage'
-      )?.[1];
+      const storageHandler = addEventListenerSpy.mock.calls.find(call => call[0] === 'storage')?.[1];
 
       // Simulate storage event
       storageHandler({ key: THEME_STORAGE_KEY } as StorageEvent);
@@ -373,9 +377,7 @@ describe('themeStorage', () => {
       const onChange = jest.fn();
       setupThemeListener(onChange);
 
-      const storageHandler = addEventListenerSpy.mock.calls.find(
-        call => call[0] === 'storage'
-      )?.[1];
+      const storageHandler = addEventListenerSpy.mock.calls.find(call => call[0] === 'storage')?.[1];
 
       storageHandler({ key: 'other-key' } as StorageEvent);
 
@@ -387,9 +389,7 @@ describe('themeStorage', () => {
       localStorageMock.getItem.mockReturnValue('light');
       setupThemeListener(onChange);
 
-      const themeHandler = addEventListenerSpy.mock.calls.find(
-        call => call[0] === THEME_CHANGE_EVENT
-      )?.[1];
+      const themeHandler = addEventListenerSpy.mock.calls.find(call => call[0] === THEME_CHANGE_EVENT)?.[1];
 
       themeHandler();
 

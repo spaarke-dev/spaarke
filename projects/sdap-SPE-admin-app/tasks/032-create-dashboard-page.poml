@@ -1,0 +1,40 @@
+<task id="SPE-032" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create DashboardPage</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027, SPE-028</dependencies>
+  </metadata>
+  <prompt>Create the DashboardPage component that provides an at-a-glance overview of the SPE environment. It shows key metrics cards (container count, storage used, active containers) and a recent activity grid, with a refresh button to update cached data.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>DashboardPage renders metric cards and a recent activity grid using shared components, with a working refresh button that calls POST /api/spe/dashboard/refresh and supports dark mode.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens; dark mode required.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The Dashboard is the default landing page of the SPE Admin App. It gives administrators a quick overview of their SPE environment's health — how many containers exist, total storage consumed, and recent operations. Metrics are cached server-side and refreshed on demand via the refresh endpoint.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page">Create components/dashboard/DashboardPage.tsx as the default landing page.</step>
+    <step order="2" name="metrics-cards">Add MetricsCards section showing container count, storage used, and active containers using Fluent v9 Card components.</step>
+    <step order="3" name="activity-grid">Add RecentActivityGrid using UniversalDatasetGrid from the shared library to display recent operations.</step>
+    <step order="4" name="refresh-button">Add a Refresh button that calls POST /api/spe/dashboard/refresh and reloads the dashboard data.</step>
+    <step order="5" name="loading-states">Implement loading and error states for data fetching.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/dashboard/DashboardPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Dashboard shows cached metrics (container count, storage used, active containers).</criterion>
+    <criterion testable="true">Refresh button triggers POST /api/spe/dashboard/refresh and reloads data.</criterion>
+    <criterion testable="true">Dashboard renders correctly in dark mode.</criterion>
+  </acceptance-criteria>
+</task>

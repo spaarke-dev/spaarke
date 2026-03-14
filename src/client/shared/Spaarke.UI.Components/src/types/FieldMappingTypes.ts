@@ -25,13 +25,13 @@ export enum FieldType {
  * Display names for field types (for UI display)
  */
 export const FieldTypeLabels: Record<FieldType, string> = {
-  [FieldType.Text]: "Text",
-  [FieldType.Lookup]: "Lookup",
-  [FieldType.OptionSet]: "Option Set",
-  [FieldType.Number]: "Number",
-  [FieldType.DateTime]: "Date/Time",
-  [FieldType.Boolean]: "Yes/No",
-  [FieldType.Memo]: "Multiline Text",
+  [FieldType.Text]: 'Text',
+  [FieldType.Lookup]: 'Lookup',
+  [FieldType.OptionSet]: 'Option Set',
+  [FieldType.Number]: 'Number',
+  [FieldType.DateTime]: 'Date/Time',
+  [FieldType.Boolean]: 'Yes/No',
+  [FieldType.Memo]: 'Multiline Text',
 };
 
 /**
@@ -48,9 +48,9 @@ export enum MappingDirection {
  * Display names for mapping directions (for UI display)
  */
 export const MappingDirectionLabels: Record<MappingDirection, string> = {
-  [MappingDirection.ParentToChild]: "Parent to Child",
-  [MappingDirection.ChildToParent]: "Child to Parent",
-  [MappingDirection.Bidirectional]: "Bidirectional",
+  [MappingDirection.ParentToChild]: 'Parent to Child',
+  [MappingDirection.ChildToParent]: 'Child to Parent',
+  [MappingDirection.Bidirectional]: 'Bidirectional',
 };
 
 /**
@@ -72,8 +72,8 @@ export enum SyncMode {
  * Display names for sync modes (for UI display)
  */
 export const SyncModeLabels: Record<SyncMode, string> = {
-  [SyncMode.OneTime]: "One-time (at creation)",
-  [SyncMode.ManualRefresh]: "Manual Refresh",
+  [SyncMode.OneTime]: 'One-time (at creation)',
+  [SyncMode.ManualRefresh]: 'Manual Refresh',
 };
 
 /**
@@ -91,8 +91,8 @@ export enum CompatibilityMode {
  * Display names for compatibility modes (for UI display)
  */
 export const CompatibilityModeLabels: Record<CompatibilityMode, string> = {
-  [CompatibilityMode.Strict]: "Strict",
-  [CompatibilityMode.Resolve]: "Resolve (future)",
+  [CompatibilityMode.Strict]: 'Strict',
+  [CompatibilityMode.Resolve]: 'Resolve (future)',
 };
 
 /**
@@ -174,23 +174,23 @@ export interface IMappingError {
  */
 export enum MappingErrorCode {
   /** Source field not found on source record */
-  SourceFieldNotFound = "SOURCE_FIELD_NOT_FOUND",
+  SourceFieldNotFound = 'SOURCE_FIELD_NOT_FOUND',
   /** Target field not found on target record/form */
-  TargetFieldNotFound = "TARGET_FIELD_NOT_FOUND",
+  TargetFieldNotFound = 'TARGET_FIELD_NOT_FOUND',
   /** Source and target field types are incompatible */
-  TypeMismatch = "TYPE_MISMATCH",
+  TypeMismatch = 'TYPE_MISMATCH',
   /** Required source field has no value and no default */
-  RequiredFieldEmpty = "REQUIRED_FIELD_EMPTY",
+  RequiredFieldEmpty = 'REQUIRED_FIELD_EMPTY',
   /** Profile not found for entity pair */
-  ProfileNotFound = "PROFILE_NOT_FOUND",
+  ProfileNotFound = 'PROFILE_NOT_FOUND',
   /** Profile exists but is inactive */
-  ProfileInactive = "PROFILE_INACTIVE",
+  ProfileInactive = 'PROFILE_INACTIVE',
   /** Cascading loop detected (exceeded two-pass limit) */
-  CascadingLoopDetected = "CASCADING_LOOP_DETECTED",
+  CascadingLoopDetected = 'CASCADING_LOOP_DETECTED',
   /** Dataverse API call failed */
-  DataverseError = "DATAVERSE_ERROR",
+  DataverseError = 'DATAVERSE_ERROR',
   /** Unknown error */
-  Unknown = "UNKNOWN",
+  Unknown = 'UNKNOWN',
 }
 
 /**
@@ -236,13 +236,13 @@ export interface ITypeCompatibilityResult {
  */
 export enum CompatibilityLevel {
   /** Types are exactly the same */
-  Exact = "exact",
+  Exact = 'exact',
   /** Types are different but conversion is safe (e.g., Text -> Memo) */
-  SafeConversion = "safe_conversion",
+  SafeConversion = 'safe_conversion',
   /** Types require resolution logic (future) */
-  RequiresResolve = "requires_resolve",
+  RequiresResolve = 'requires_resolve',
   /** Types are incompatible */
-  Incompatible = "incompatible",
+  Incompatible = 'incompatible',
 }
 
 /**

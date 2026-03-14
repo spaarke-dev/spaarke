@@ -8,7 +8,7 @@
  * - ADR-021: Uses Fluent tokens for urgency color mapping
  */
 
-import { tokens } from "@fluentui/react-components";
+import { tokens } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -17,36 +17,36 @@ import { tokens } from "@fluentui/react-components";
 /**
  * Urgency level based on days until due.
  */
-export type UrgencyLevel = "overdue" | "critical" | "urgent" | "warning" | "normal";
+export type UrgencyLevel = 'overdue' | 'critical' | 'urgent' | 'warning' | 'normal';
 
 /**
  * Result of calculating days until due.
  */
 export interface IDaysUntilDueResult {
-    /** Raw number of days (negative if overdue) */
-    days: number;
-    /** Absolute value of days */
-    absoluteDays: number;
-    /** Whether the event is overdue */
-    isOverdue: boolean;
-    /** Whether the event is due today */
-    isDueToday: boolean;
-    /** Formatted display string (e.g., "3", "+2", "Today") */
-    displayValue: string;
-    /** Urgency level for styling */
-    urgency: UrgencyLevel;
-    /** Accessible label for screen readers */
-    accessibleLabel: string;
+  /** Raw number of days (negative if overdue) */
+  days: number;
+  /** Absolute value of days */
+  absoluteDays: number;
+  /** Whether the event is overdue */
+  isOverdue: boolean;
+  /** Whether the event is due today */
+  isDueToday: boolean;
+  /** Formatted display string (e.g., "3", "+2", "Today") */
+  displayValue: string;
+  /** Urgency level for styling */
+  urgency: UrgencyLevel;
+  /** Accessible label for screen readers */
+  accessibleLabel: string;
 }
 
 /**
  * Color configuration based on urgency.
  */
 export interface IUrgencyColorConfig {
-    /** Background color token */
-    background: string;
-    /** Foreground (text) color token */
-    foreground: string;
+  /** Background color token */
+  background: string;
+  /** Foreground (text) color token */
+  foreground: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,12 +58,12 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Urgency thresholds in days */
 export const URGENCY_THRESHOLDS = {
-    /** Critical: 0-1 days (today or tomorrow) */
-    CRITICAL: 1,
-    /** Urgent: 2-3 days */
-    URGENT: 3,
-    /** Warning: 4-7 days */
-    WARNING: 7
+  /** Critical: 0-1 days (today or tomorrow) */
+  CRITICAL: 1,
+  /** Urgent: 2-3 days */
+  URGENT: 3,
+  /** Warning: 4-7 days */
+  WARNING: 7,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,31 +75,31 @@ export const URGENCY_THRESHOLDS = {
  * Uses Fluent UI v9 semantic tokens for dark mode compatibility.
  */
 export const urgencyColorConfigs: Record<UrgencyLevel, IUrgencyColorConfig> = {
-    overdue: {
-        // Deep red for overdue items - most attention-grabbing
-        background: tokens.colorStatusDangerBackground3,
-        foreground: tokens.colorNeutralForegroundOnBrand
-    },
-    critical: {
-        // Red for critical (today/tomorrow)
-        background: tokens.colorPaletteRedBackground3,
-        foreground: tokens.colorNeutralForegroundOnBrand
-    },
-    urgent: {
-        // Dark orange/red for urgent (2-3 days)
-        background: tokens.colorPaletteDarkOrangeBackground3,
-        foreground: tokens.colorNeutralForegroundOnBrand
-    },
-    warning: {
-        // Orange for warning (4-7 days)
-        background: tokens.colorPaletteMarigoldBackground3,
-        foreground: tokens.colorNeutralForeground1
-    },
-    normal: {
-        // Neutral for normal (8+ days)
-        background: tokens.colorNeutralBackground5,
-        foreground: tokens.colorNeutralForeground1
-    }
+  overdue: {
+    // Deep red for overdue items - most attention-grabbing
+    background: tokens.colorStatusDangerBackground3,
+    foreground: tokens.colorNeutralForegroundOnBrand,
+  },
+  critical: {
+    // Red for critical (today/tomorrow)
+    background: tokens.colorPaletteRedBackground3,
+    foreground: tokens.colorNeutralForegroundOnBrand,
+  },
+  urgent: {
+    // Dark orange/red for urgent (2-3 days)
+    background: tokens.colorPaletteDarkOrangeBackground3,
+    foreground: tokens.colorNeutralForegroundOnBrand,
+  },
+  warning: {
+    // Orange for warning (4-7 days)
+    background: tokens.colorPaletteMarigoldBackground3,
+    foreground: tokens.colorNeutralForeground1,
+  },
+  normal: {
+    // Neutral for normal (8+ days)
+    background: tokens.colorNeutralBackground5,
+    foreground: tokens.colorNeutralForeground1,
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,14 +115,14 @@ export const urgencyColorConfigs: Record<UrgencyLevel, IUrgencyColorConfig> = {
  * @returns Number of days (can be negative for overdue)
  */
 export function calculateDaysDifference(dueDate: Date, referenceDate?: Date): number {
-    const reference = referenceDate ?? new Date();
+  const reference = referenceDate ?? new Date();
 
-    // Normalize both dates to midnight for accurate day calculation
-    const dueMidnight = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-    const refMidnight = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
+  // Normalize both dates to midnight for accurate day calculation
+  const dueMidnight = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+  const refMidnight = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
 
-    const diffMs = dueMidnight.getTime() - refMidnight.getTime();
-    return Math.round(diffMs / MS_PER_DAY);
+  const diffMs = dueMidnight.getTime() - refMidnight.getTime();
+  return Math.round(diffMs / MS_PER_DAY);
 }
 
 /**
@@ -132,11 +132,11 @@ export function calculateDaysDifference(dueDate: Date, referenceDate?: Date): nu
  * @returns The urgency level
  */
 export function getUrgencyLevel(days: number): UrgencyLevel {
-    if (days < 0) return "overdue";
-    if (days <= URGENCY_THRESHOLDS.CRITICAL) return "critical";
-    if (days <= URGENCY_THRESHOLDS.URGENT) return "urgent";
-    if (days <= URGENCY_THRESHOLDS.WARNING) return "warning";
-    return "normal";
+  if (days < 0) return 'overdue';
+  if (days <= URGENCY_THRESHOLDS.CRITICAL) return 'critical';
+  if (days <= URGENCY_THRESHOLDS.URGENT) return 'urgent';
+  if (days <= URGENCY_THRESHOLDS.WARNING) return 'warning';
+  return 'normal';
 }
 
 /**
@@ -147,9 +147,9 @@ export function getUrgencyLevel(days: number): UrgencyLevel {
  * @returns Formatted display string
  */
 export function formatDaysDisplay(days: number, isOverdue: boolean): string {
-    if (days === 0) return "Today";
-    if (isOverdue) return `+${Math.abs(days)}`;
-    return String(days);
+  if (days === 0) return 'Today';
+  if (isOverdue) return `+${Math.abs(days)}`;
+  return String(days);
 }
 
 /**
@@ -160,21 +160,17 @@ export function formatDaysDisplay(days: number, isOverdue: boolean): string {
  * @returns Accessible label string
  */
 export function generateAccessibleLabel(days: number, isOverdue: boolean): string {
-    const absoluteDays = Math.abs(days);
+  const absoluteDays = Math.abs(days);
 
-    if (days === 0) {
-        return "Due today";
-    }
+  if (days === 0) {
+    return 'Due today';
+  }
 
-    if (isOverdue) {
-        return absoluteDays === 1
-            ? "1 day overdue"
-            : `${absoluteDays} days overdue`;
-    }
+  if (isOverdue) {
+    return absoluteDays === 1 ? '1 day overdue' : `${absoluteDays} days overdue`;
+  }
 
-    return days === 1
-        ? "Due in 1 day"
-        : `Due in ${days} days`;
+  return days === 1 ? 'Due in 1 day' : `Due in ${days} days`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,20 +202,20 @@ export function generateAccessibleLabel(days: number, isOverdue: boolean): strin
  * // result.accessibleLabel = "2 days overdue"
  */
 export function getDaysUntilDue(dueDate: Date, referenceDate?: Date): IDaysUntilDueResult {
-    const days = calculateDaysDifference(dueDate, referenceDate);
-    const isOverdue = days < 0;
-    const isDueToday = days === 0;
-    const absoluteDays = Math.abs(days);
+  const days = calculateDaysDifference(dueDate, referenceDate);
+  const isOverdue = days < 0;
+  const isDueToday = days === 0;
+  const absoluteDays = Math.abs(days);
 
-    return {
-        days,
-        absoluteDays,
-        isOverdue,
-        isDueToday,
-        displayValue: formatDaysDisplay(days, isOverdue),
-        urgency: getUrgencyLevel(days),
-        accessibleLabel: generateAccessibleLabel(days, isOverdue)
-    };
+  return {
+    days,
+    absoluteDays,
+    isOverdue,
+    isDueToday,
+    displayValue: formatDaysDisplay(days, isOverdue),
+    urgency: getUrgencyLevel(days),
+    accessibleLabel: generateAccessibleLabel(days, isOverdue),
+  };
 }
 
 /**
@@ -229,9 +225,7 @@ export function getDaysUntilDue(dueDate: Date, referenceDate?: Date): IDaysUntil
  * @returns Color configuration with background and foreground tokens
  */
 export function getUrgencyColors(urgencyOrDays: UrgencyLevel | number): IUrgencyColorConfig {
-    const urgency = typeof urgencyOrDays === "number"
-        ? getUrgencyLevel(urgencyOrDays)
-        : urgencyOrDays;
+  const urgency = typeof urgencyOrDays === 'number' ? getUrgencyLevel(urgencyOrDays) : urgencyOrDays;
 
-    return urgencyColorConfigs[urgency];
+  return urgencyColorConfigs[urgency];
 }

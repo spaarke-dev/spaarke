@@ -10,7 +10,12 @@
     "lint": "eslint src/**/*.ts",
     "prepublishOnly": "npm run build && npm test"
   },
-  "keywords": ["sdap", "sharepoint-embedded", "pcf", "power-platform"],
+  "keywords": [
+    "sdap",
+    "sharepoint-embedded",
+    "pcf",
+    "power-platform"
+  ],
   "author": "Spaarke Engineering",
   "license": "UNLICENSED",
   "private": true,

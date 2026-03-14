@@ -1,0 +1,48 @@
+<task id="SPE-024" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Scaffold SpeAdminApp Code Page Project</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, vite, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Scaffold the SpeAdminApp code page project as a standalone React 18 application using Vite with the viteSingleFile plugin. This project produces a single HTML file deployed as a Dataverse web resource, following the same patterns as LegalWorkspace.</prompt>
+  <role>Frontend developer with React 18 and Vite expertise</role>
+  <goal>A fully scaffolded Vite project that installs dependencies and builds to a single HTML file, ready for component development.</goal>
+  <constraints>
+    <constraint source="ADR-006">Use Code Page pattern for standalone dialogs and pages — no legacy JS webresources, no custom page + PCF wrapper.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no Fluent v8, no hard-coded colors, dark mode required.</constraint>
+    <constraint source="ADR-022">Code Pages bundle React 18 (not platform-provided) — use createRoot, not ReactDOM.render.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App is a full-page administration interface deployed as a Dataverse web resource. It follows the Code Page architecture pattern used by LegalWorkspace and other standalone pages in the project. The build must produce a single self-contained HTML file using vite-plugin-singlefile so it can be uploaded as a single web resource to Dataverse.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create directory structure">Create src/solutions/SpeAdminApp/ with src/, public/, and config directories.</step>
+    <step order="2" name="Create package.json">Create package.json with dependencies: react 18, react-dom 18, @fluentui/react-components, @spaarke/ui-components, @spaarke/auth. Dev dependencies: vite, @vitejs/plugin-react, vite-plugin-singlefile, typescript.</step>
+    <step order="3" name="Create vite.config.ts">Create vite.config.ts with viteSingleFile plugin and shared library aliases matching LegalWorkspace patterns.</step>
+    <step order="4" name="Create tsconfig.json">Create tsconfig.json with React 18 JSX settings and path aliases.</step>
+    <step order="5" name="Create index.html">Create index.html with root div, theme detection script (reads Dataverse theme or defaults to light), and entry point script tag.</step>
+    <step order="6" name="Install and build">Run npm install and npm run build to verify the scaffold produces a single HTML file.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/package.json</output>
+    <output type="code">src/solutions/SpeAdminApp/vite.config.ts</output>
+    <output type="code">src/solutions/SpeAdminApp/tsconfig.json</output>
+    <output type="code">src/solutions/SpeAdminApp/index.html</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">npm install succeeds without errors.</criterion>
+    <criterion testable="true">npm run build produces a single HTML file in the dist/ directory.</criterion>
+    <criterion testable="true">package.json includes React 18, Fluent UI v9, and shared library dependencies.</criterion>
+    <criterion testable="true">vite.config.ts uses viteSingleFile plugin.</criterion>
+    <criterion testable="true">tsconfig.json targets React 18 JSX transform.</criterion>
+  </acceptance-criteria>
+</task>

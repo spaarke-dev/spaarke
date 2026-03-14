@@ -1,0 +1,42 @@
+<task id="SPE-025" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create main.tsx Entry Point</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <tags>code-page, frontend, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-024</dependencies>
+  </metadata>
+  <prompt>Create the main.tsx entry point for the SpeAdminApp code page that initializes React 18 with createRoot, sets up FluentProvider with theme detection (light/dark), and reads URL parameters for initial state.</prompt>
+  <role>Frontend developer with React 18 and Fluent UI v9 expertise</role>
+  <goal>A working entry point that renders the app shell with correct Fluent v9 theming and dark mode support.</goal>
+  <constraints>
+    <constraint source="ADR-021">Use FluentProvider with spaarkeLight/spaarkeDark themes — dark mode support is required.</constraint>
+    <constraint source="ADR-022">Use React 18 createRoot() — do not use ReactDOM.render().</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The entry point follows the same pattern as LegalWorkspace's main.tsx. It uses createRoot for React 18, wraps the app in FluentProvider with theme detection that reads the Dataverse client theme preference, and parses URL search parameters (passed via Xrm.Navigation.navigateTo data parameter) to determine initial context like selected business unit or config ID.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create main.tsx">Create src/solutions/SpeAdminApp/src/main.tsx with React 18 createRoot initialization.</step>
+    <step order="2" name="Set up FluentProvider">Wrap the App component in FluentProvider with theme detection logic (spaarkeLight for light mode, spaarkeDark for dark mode).</step>
+    <step order="3" name="Parse URL parameters">Read URL search parameters for configId, buId, and any other initial state values.</step>
+    <step order="4" name="Create App shell component">Create a minimal App.tsx shell component that will later host the router/navigation.</step>
+    <step order="5" name="Test rendering">Verify the app renders without console errors and responds to theme changes.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/main.tsx</output>
+    <output type="code">src/solutions/SpeAdminApp/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">App renders using React 18 createRoot() — no ReactDOM.render() usage.</criterion>
+    <criterion testable="true">FluentProvider wraps the entire app with correct theme (spaarkeLight or spaarkeDark).</criterion>
+    <criterion testable="true">URL parameters are parsed and available to the app.</criterion>
+    <criterion testable="true">No console errors on initial render.</criterion>
+  </acceptance-criteria>
+</task>

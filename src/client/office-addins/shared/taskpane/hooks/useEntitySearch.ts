@@ -8,13 +8,7 @@ export type EntityType = 'Matter' | 'Project' | 'Invoice' | 'Account' | 'Contact
 /**
  * All valid entity types for filtering.
  */
-export const ALL_ENTITY_TYPES: EntityType[] = [
-  'Matter',
-  'Project',
-  'Invoice',
-  'Account',
-  'Contact',
-];
+export const ALL_ENTITY_TYPES: EntityType[] = ['Matter', 'Project', 'Invoice', 'Account', 'Contact'];
 
 /**
  * Entity logical names mapping for Dataverse.
@@ -141,10 +135,7 @@ function saveRecentEntities(entities: RecentEntity[]): void {
   }
 
   try {
-    sessionStorage.setItem(
-      RECENT_ENTITIES_KEY,
-      JSON.stringify(entities.slice(0, MAX_RECENT_ENTITIES))
-    );
+    sessionStorage.setItem(RECENT_ENTITIES_KEY, JSON.stringify(entities.slice(0, MAX_RECENT_ENTITIES)));
   } catch {
     // Ignore storage errors
   }
@@ -158,37 +149,100 @@ async function mockSearchEntities(
   query: string,
   typeFilter: EntityType[],
   maxResults: number
-): Promise<{ results: EntitySearchResult[]; totalCount: number; hasMore: boolean }> {
+): Promise<{
+  results: EntitySearchResult[];
+  totalCount: number;
+  hasMore: boolean;
+}> {
   // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await new Promise(resolve => setTimeout(resolve, 200));
 
   // Mock data - in production, call API
   const mockEntities: EntitySearchResult[] = [
-    { id: '1', entityType: 'Matter', logicalName: 'sprk_matter', name: 'Smith vs Jones', displayInfo: 'Client: Acme Corp | Status: Active' },
-    { id: '2', entityType: 'Matter', logicalName: 'sprk_matter', name: 'Johnson Estate Planning', displayInfo: 'Client: Johnson Family | Status: Active' },
-    { id: '3', entityType: 'Project', logicalName: 'sprk_project', name: 'Website Redesign', displayInfo: 'Account: TechCorp | Due: Mar 2026' },
-    { id: '4', entityType: 'Project', logicalName: 'sprk_project', name: 'Mobile App Development', displayInfo: 'Account: StartupXYZ | Status: In Progress' },
-    { id: '5', entityType: 'Invoice', logicalName: 'sprk_invoice', name: 'INV-2026-001', displayInfo: 'Amount: $5,000 | Status: Pending' },
-    { id: '6', entityType: 'Invoice', logicalName: 'sprk_invoice', name: 'INV-2026-002', displayInfo: 'Amount: $12,500 | Status: Paid' },
-    { id: '7', entityType: 'Account', logicalName: 'account', name: 'Acme Corporation', displayInfo: 'Industry: Manufacturing | City: Chicago' },
-    { id: '8', entityType: 'Account', logicalName: 'account', name: 'TechCorp Industries', displayInfo: 'Industry: Technology | City: San Francisco' },
-    { id: '9', entityType: 'Contact', logicalName: 'contact', name: 'John Smith', displayInfo: 'Email: john@acme.com | Account: Acme Corp' },
-    { id: '10', entityType: 'Contact', logicalName: 'contact', name: 'Jane Doe', displayInfo: 'Email: jane@techcorp.com | Account: TechCorp' },
+    {
+      id: '1',
+      entityType: 'Matter',
+      logicalName: 'sprk_matter',
+      name: 'Smith vs Jones',
+      displayInfo: 'Client: Acme Corp | Status: Active',
+    },
+    {
+      id: '2',
+      entityType: 'Matter',
+      logicalName: 'sprk_matter',
+      name: 'Johnson Estate Planning',
+      displayInfo: 'Client: Johnson Family | Status: Active',
+    },
+    {
+      id: '3',
+      entityType: 'Project',
+      logicalName: 'sprk_project',
+      name: 'Website Redesign',
+      displayInfo: 'Account: TechCorp | Due: Mar 2026',
+    },
+    {
+      id: '4',
+      entityType: 'Project',
+      logicalName: 'sprk_project',
+      name: 'Mobile App Development',
+      displayInfo: 'Account: StartupXYZ | Status: In Progress',
+    },
+    {
+      id: '5',
+      entityType: 'Invoice',
+      logicalName: 'sprk_invoice',
+      name: 'INV-2026-001',
+      displayInfo: 'Amount: $5,000 | Status: Pending',
+    },
+    {
+      id: '6',
+      entityType: 'Invoice',
+      logicalName: 'sprk_invoice',
+      name: 'INV-2026-002',
+      displayInfo: 'Amount: $12,500 | Status: Paid',
+    },
+    {
+      id: '7',
+      entityType: 'Account',
+      logicalName: 'account',
+      name: 'Acme Corporation',
+      displayInfo: 'Industry: Manufacturing | City: Chicago',
+    },
+    {
+      id: '8',
+      entityType: 'Account',
+      logicalName: 'account',
+      name: 'TechCorp Industries',
+      displayInfo: 'Industry: Technology | City: San Francisco',
+    },
+    {
+      id: '9',
+      entityType: 'Contact',
+      logicalName: 'contact',
+      name: 'John Smith',
+      displayInfo: 'Email: john@acme.com | Account: Acme Corp',
+    },
+    {
+      id: '10',
+      entityType: 'Contact',
+      logicalName: 'contact',
+      name: 'Jane Doe',
+      displayInfo: 'Email: jane@techcorp.com | Account: TechCorp',
+    },
   ];
 
   // Filter by type
   let filtered = mockEntities;
   if (typeFilter.length > 0 && typeFilter.length < ALL_ENTITY_TYPES.length) {
-    filtered = filtered.filter((e) => typeFilter.includes(e.entityType));
+    filtered = filtered.filter(e => typeFilter.includes(e.entityType));
   }
 
   // Filter by query
   if (query.length >= 2) {
     const lowerQuery = query.toLowerCase();
     filtered = filtered.filter(
-      (e) =>
-        e.name.toLowerCase().includes(lowerQuery) ||
-        (e.displayInfo && e.displayInfo.toLowerCase().includes(lowerQuery))
+      e =>
+        e.name.toLowerCase().includes(lowerQuery) || (e.displayInfo && e.displayInfo.toLowerCase().includes(lowerQuery))
     );
   }
 
@@ -236,9 +290,7 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
   const [results, setResults] = useState<EntitySearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [recentEntities, setRecentEntities] = useState<RecentEntity[]>(() =>
-    getStoredRecentEntities()
-  );
+  const [recentEntities, setRecentEntities] = useState<RecentEntity[]>(() => getStoredRecentEntities());
   const [typeFilter, setTypeFilterState] = useState<EntityType[]>(initialTypeFilter);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
@@ -282,8 +334,8 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
             `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&top=${maxResults}`,
             {
               headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
               },
               signal: abortControllerRef.current.signal,
             }
@@ -296,19 +348,15 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
           const data = await response.json();
 
           // Map API response to EntitySearchResult format
-          const mappedResults: EntitySearchResult[] = (data.results || []).map((item: {
-            id: string;
-            entityType: string;
-            logicalName: string;
-            name: string;
-            displayInfo?: string;
-          }) => ({
-            id: item.id,
-            entityType: item.entityType as EntityType,
-            logicalName: item.logicalName,
-            name: item.name,
-            displayInfo: item.displayInfo,
-          }));
+          const mappedResults: EntitySearchResult[] = (data.results || []).map(
+            (item: { id: string; entityType: string; logicalName: string; name: string; displayInfo?: string }) => ({
+              id: item.id,
+              entityType: item.entityType as EntityType,
+              logicalName: item.logicalName,
+              name: item.name,
+              displayInfo: item.displayInfo,
+            })
+          );
 
           setResults(mappedResults);
           setTotalCount(data.totalCount || mappedResults.length);
@@ -369,9 +417,9 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
 
   // Toggle type filter
   const toggleTypeFilter = useCallback((type: EntityType) => {
-    setTypeFilterState((prev) => {
+    setTypeFilterState(prev => {
       if (prev.includes(type)) {
-        return prev.filter((t) => t !== type);
+        return prev.filter(t => t !== type);
       }
       return [...prev, type];
     });
@@ -379,8 +427,8 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
 
   // Add to recent
   const addToRecent = useCallback((entity: EntitySearchResult) => {
-    setRecentEntities((prev) => {
-      const filtered = prev.filter((e) => e.id !== entity.id);
+    setRecentEntities(prev => {
+      const filtered = prev.filter(e => e.id !== entity.id);
       const newRecent: RecentEntity = {
         ...entity,
         lastUsed: new Date().toISOString(),
@@ -419,7 +467,7 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
     if (typeFilter.length === 0 || typeFilter.length === ALL_ENTITY_TYPES.length) {
       return recentEntities;
     }
-    return recentEntities.filter((e) => typeFilter.includes(e.entityType));
+    return recentEntities.filter(e => typeFilter.includes(e.entityType));
   }, [recentEntities, typeFilter]);
 
   // Cleanup on unmount

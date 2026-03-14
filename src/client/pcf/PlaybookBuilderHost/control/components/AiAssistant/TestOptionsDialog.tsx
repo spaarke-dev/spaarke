@@ -333,24 +333,20 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
             {/* Test mode selection */}
             <Label className={styles.sectionTitle}>Select Test Mode</Label>
             <div className={styles.radioGroup}>
-              {(Object.entries(modeInfo) as [TestMode, typeof modeInfo.mock][]).map(
-                ([mode, info]) => (
-                  <Card
-                    key={mode}
-                    className={`${styles.modeCard} ${
-                      selectedMode === mode ? styles.modeCardSelected : ''
-                    }`}
-                    onClick={() => handleModeSelect(mode)}
-                  >
-                    <div className={styles.modeHeader}>
-                      {info.icon}
-                      <Text weight="semibold">{info.label}</Text>
-                      <Text className={styles.modeBadge}>{info.badge}</Text>
-                    </div>
-                    <Text className={styles.modeDescription}>{info.description}</Text>
-                  </Card>
-                )
-              )}
+              {(Object.entries(modeInfo) as [TestMode, typeof modeInfo.mock][]).map(([mode, info]) => (
+                <Card
+                  key={mode}
+                  className={`${styles.modeCard} ${selectedMode === mode ? styles.modeCardSelected : ''}`}
+                  onClick={() => handleModeSelect(mode)}
+                >
+                  <div className={styles.modeHeader}>
+                    {info.icon}
+                    <Text weight="semibold">{info.label}</Text>
+                    <Text className={styles.modeBadge}>{info.badge}</Text>
+                  </div>
+                  <Text className={styles.modeDescription}>{info.description}</Text>
+                </Card>
+              ))}
             </div>
 
             {/* Quick mode: File upload */}
@@ -390,8 +386,8 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 <div className={styles.infoSection}>
                   <Info16Regular className={styles.infoIcon} />
                   <Text>
-                    Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size: 50MB.
-                    Document will be processed using Azure Document Intelligence.
+                    Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size: 50MB. Document will be processed using Azure
+                    Document Intelligence.
                   </Text>
                 </div>
               </div>
@@ -403,9 +399,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 <Label>Document ID</Label>
                 {!playbookSaved && (
                   <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
-                    <MessageBarBody>
-                      Playbook must be saved before running Production tests.
-                    </MessageBarBody>
+                    <MessageBarBody>Playbook must be saved before running Production tests.</MessageBarBody>
                   </MessageBar>
                 )}
                 <Input
@@ -418,8 +412,8 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
                 <div className={styles.infoSection}>
                   <Info16Regular className={styles.infoIcon} />
                   <Text>
-                    Production test uses an existing document from SharePoint Embedded.
-                    This creates test records in Dataverse with the IsTestExecution flag.
+                    Production test uses an existing document from SharePoint Embedded. This creates test records in
+                    Dataverse with the IsTestExecution flag.
                   </Text>
                 </div>
               </div>
@@ -430,8 +424,8 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
               <div className={styles.infoSection} style={{ marginTop: tokens.spacingVerticalL }}>
                 <Info16Regular className={styles.infoIcon} />
                 <Text>
-                  Mock test generates sample data based on document type definitions.
-                  Use this for rapid iteration when designing playbook logic.
+                  Mock test generates sample data based on document type definitions. Use this for rapid iteration when
+                  designing playbook logic.
                 </Text>
               </div>
             )}
@@ -439,12 +433,7 @@ export const TestOptionsDialog: React.FC<TestOptionsDialogProps> = ({
         </DialogBody>
 
         <DialogActions>
-          <Button
-            appearance="secondary"
-            icon={<Dismiss20Regular />}
-            onClick={handleClose}
-            disabled={isExecuting}
-          >
+          <Button appearance="secondary" icon={<Dismiss20Regular />} onClick={handleClose} disabled={isExecuting}>
             Cancel
           </Button>
           <Button

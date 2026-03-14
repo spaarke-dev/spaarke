@@ -9,11 +9,11 @@
 export { SdapApiClient } from './SdapApiClient';
 
 export type {
-    SdapClientConfig,
-    DriveItem,
-    UploadSession,
-    FileMetadata,
-    UploadProgressCallback,
-    SdapApiError,
-    Container
+  SdapClientConfig,
+  DriveItem,
+  UploadSession,
+  FileMetadata,
+  UploadProgressCallback,
+  SdapApiError,
+  Container,
 } from './types';

@@ -26,7 +26,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[SprkChatPane:ContextService]";
+const LOG_PREFIX = '[SprkChatPane:ContextService]';
 
 /**
  * Default polling interval for context-change detection (2 seconds).
@@ -39,7 +39,7 @@ const CONTEXT_POLL_INTERVAL_MS = 2_000;
  * Session storage key prefix. Keyed by pane ID for isolation when multiple
  * side panes exist simultaneously.
  */
-const SESSION_STORAGE_PREFIX = "sprkchat-session-";
+const SESSION_STORAGE_PREFIX = 'sprkchat-session-';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,12 +49,12 @@ const SESSION_STORAGE_PREFIX = "sprkchat-session-";
  * Detected context describing the active Dataverse record.
  */
 export interface DetectedContext {
-    /** Dataverse entity logical name (e.g., "sprk_matter"). Empty if unknown. */
-    entityType: string;
-    /** Record GUID (without braces). Empty if unknown. */
-    entityId: string;
-    /** Resolved playbook ID. Empty if no mapping and no URL param. */
-    playbookId: string;
+  /** Dataverse entity logical name (e.g., "sprk_matter"). Empty if unknown. */
+  entityType: string;
+  /** Record GUID (without braces). Empty if unknown. */
+  entityId: string;
+  /** Resolved playbook ID. Empty if no mapping and no URL param. */
+  playbookId: string;
 }
 
 /**
@@ -62,26 +62,23 @@ export interface DetectedContext {
  * Survives pane reloads (Code Page re-mount) within the same browser tab.
  */
 export interface PersistedSession {
-    /** Active chat session ID from the BFF API. */
-    sessionId: string;
-    /** Entity type when the session was started. */
-    entityType: string;
-    /** Entity ID when the session was started. */
-    entityId: string;
-    /** Playbook ID used for this session. */
-    playbookId: string;
-    /** ISO timestamp when the session was last updated. */
-    timestamp: string;
+  /** Active chat session ID from the BFF API. */
+  sessionId: string;
+  /** Entity type when the session was started. */
+  entityType: string;
+  /** Entity ID when the session was started. */
+  entityId: string;
+  /** Playbook ID used for this session. */
+  playbookId: string;
+  /** ISO timestamp when the session was last updated. */
+  timestamp: string;
 }
 
 /**
  * Callback for context-change detection.
  * Invoked when the Xrm context differs from the current context.
  */
-export type ContextChangeCallback = (
-    newContext: DetectedContext,
-    previousContext: DetectedContext
-) => void;
+export type ContextChangeCallback = (newContext: DetectedContext, previousContext: DetectedContext) => void;
 
 // ---------------------------------------------------------------------------
 // Default Playbook Mapping (Configurable)
@@ -98,18 +95,18 @@ export type ContextChangeCallback = (
  * "out-of-the-box" mapping; they can be overridden at runtime.
  */
 const DEFAULT_PLAYBOOK_MAP: Record<string, string> = {
-    // All entity types currently use SprkChat Document Assistant playbook.
-    // Add entity-specific playbook GUIDs here as they are created in Dataverse.
-    sprk_matter: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
-    sprk_project: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
-    sprk_invoice: "5ece14f7-8a17-f111-8343-7ced8d1dc988",
+  // All entity types currently use SprkChat Document Assistant playbook.
+  // Add entity-specific playbook GUIDs here as they are created in Dataverse.
+  sprk_matter: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
+  sprk_project: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
+  sprk_invoice: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
 };
 
 /**
  * Fallback playbook when no entity-specific mapping exists.
  * Uses the SprkChat Document Assistant playbook GUID from Dataverse.
  */
-const FALLBACK_PLAYBOOK_ID = "5ece14f7-8a17-f111-8343-7ced8d1dc988";
+const FALLBACK_PLAYBOOK_ID = '5ece14f7-8a17-f111-8343-7ced8d1dc988';
 
 /**
  * Runtime playbook mapping. Initialized from DEFAULT_PLAYBOOK_MAP and
@@ -124,14 +121,14 @@ let activePlaybookMap: Record<string, string> = { ...DEFAULT_PLAYBOOK_MAP };
  * @param mapping - Partial mapping of entity types to playbook IDs.
  */
 export function setPlaybookMapping(mapping: Record<string, string>): void {
-    activePlaybookMap = { ...activePlaybookMap, ...mapping };
+  activePlaybookMap = { ...activePlaybookMap, ...mapping };
 }
 
 /**
  * Get the full current playbook mapping (for testing/debugging).
  */
 export function getPlaybookMapping(): Readonly<Record<string, string>> {
-    return { ...activePlaybookMap };
+  return { ...activePlaybookMap };
 }
 
 /**
@@ -141,8 +138,8 @@ export function getPlaybookMapping(): Readonly<Record<string, string>> {
  * @returns The mapped playbook ID, or the fallback "general-assistant".
  */
 export function resolveDefaultPlaybook(entityType: string): string {
-    if (!entityType) return FALLBACK_PLAYBOOK_ID;
-    return activePlaybookMap[entityType] ?? FALLBACK_PLAYBOOK_ID;
+  if (!entityType) return FALLBACK_PLAYBOOK_ID;
+  return activePlaybookMap[entityType] ?? FALLBACK_PLAYBOOK_ID;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,34 +155,34 @@ export function resolveDefaultPlaybook(entityType: string): string {
  * @returns The Xrm namespace object, or null if not found.
  */
 function findXrm(): XrmNamespace | null {
-    const frames: Window[] = [window];
-    try {
-        if (window.parent && window.parent !== window) {
-            frames.push(window.parent);
-        }
-    } catch {
-        /* cross-origin */
+  const frames: Window[] = [window];
+  try {
+    if (window.parent && window.parent !== window) {
+      frames.push(window.parent);
     }
-    try {
-        if (window.top && window.top !== window && window.top !== window.parent) {
-            frames.push(window.top);
-        }
-    } catch {
-        /* cross-origin */
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent) {
+      frames.push(window.top);
     }
+  } catch {
+    /* cross-origin */
+  }
 
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm as XrmNamespace | undefined;
-            if (xrm?.Utility?.getGlobalContext) {
-                return xrm;
-            }
-        } catch {
-            /* cross-origin or property access error */
-        }
+  for (const frame of frames) {
+    try {
+      const xrm = (frame as any).Xrm as XrmNamespace | undefined;
+      if (xrm?.Utility?.getGlobalContext) {
+        return xrm;
+      }
+    } catch {
+      /* cross-origin or property access error */
     }
+  }
 
-    return null;
+  return null;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -199,7 +196,7 @@ function findXrm(): XrmNamespace | null {
  * Xrm.Page.data.entity.getId() returns "{GUID}" format.
  */
 function normalizeGuid(guid: string): string {
-    return guid.replace(/[{}]/g, "").toLowerCase();
+  return guid.replace(/[{}]/g, '').toLowerCase();
 }
 
 /**
@@ -209,14 +206,14 @@ function normalizeGuid(guid: string): string {
  * @returns Partial context from URL, or null if not available.
  */
 function detectContextFromUrl(params: URLSearchParams): { entityType: string; entityId: string } | null {
-    const entityType = params.get("entityType") ?? "";
-    const entityId = params.get("entityId") ?? "";
+  const entityType = params.get('entityType') ?? '';
+  const entityId = params.get('entityId') ?? '';
 
-    if (entityType && entityId) {
-        return { entityType, entityId: normalizeGuid(entityId) };
-    }
+  if (entityType && entityId) {
+    return { entityType, entityId: normalizeGuid(entityId) };
+  }
 
-    return null;
+  return null;
 }
 
 /**
@@ -224,22 +221,25 @@ function detectContextFromUrl(params: URLSearchParams): { entityType: string; en
  *
  * @returns Context from Xrm Page API, or null if unavailable.
  */
-function detectContextFromXrmPage(): { entityType: string; entityId: string } | null {
-    try {
-        const xrm = findXrm();
-        if (!xrm?.Page?.data?.entity) return null;
+function detectContextFromXrmPage(): {
+  entityType: string;
+  entityId: string;
+} | null {
+  try {
+    const xrm = findXrm();
+    if (!xrm?.Page?.data?.entity) return null;
 
-        const entity = xrm.Page.data.entity;
-        const entityType = entity.getEntityName?.();
-        const entityId = entity.getId?.();
+    const entity = xrm.Page.data.entity;
+    const entityType = entity.getEntityName?.();
+    const entityId = entity.getId?.();
 
-        if (entityType && entityId) {
-            return { entityType, entityId: normalizeGuid(entityId) };
-        }
-    } catch {
-        console.debug(`${LOG_PREFIX} Xrm.Page.data.entity not available`);
+    if (entityType && entityId) {
+      return { entityType, entityId: normalizeGuid(entityId) };
     }
-    return null;
+  } catch {
+    console.debug(`${LOG_PREFIX} Xrm.Page.data.entity not available`);
+  }
+  return null;
 }
 
 /**
@@ -247,24 +247,27 @@ function detectContextFromXrmPage(): { entityType: string; entityId: string } | 
  *
  * @returns Context from Xrm page context API, or null if unavailable.
  */
-function detectContextFromPageContext(): { entityType: string; entityId: string } | null {
-    try {
-        const xrm = findXrm();
-        if (!xrm?.Utility?.getPageContext) return null;
+function detectContextFromPageContext(): {
+  entityType: string;
+  entityId: string;
+} | null {
+  try {
+    const xrm = findXrm();
+    if (!xrm?.Utility?.getPageContext) return null;
 
-        const pageContext = xrm.Utility.getPageContext();
-        const input = pageContext?.input;
+    const pageContext = xrm.Utility.getPageContext();
+    const input = pageContext?.input;
 
-        if (input?.entityName && input?.entityId) {
-            return {
-                entityType: input.entityName,
-                entityId: normalizeGuid(input.entityId),
-            };
-        }
-    } catch {
-        console.debug(`${LOG_PREFIX} Xrm.Utility.getPageContext() not available`);
+    if (input?.entityName && input?.entityId) {
+      return {
+        entityType: input.entityName,
+        entityId: normalizeGuid(input.entityId),
+      };
     }
-    return null;
+  } catch {
+    console.debug(`${LOG_PREFIX} Xrm.Utility.getPageContext() not available`);
+  }
+  return null;
 }
 
 /**
@@ -281,38 +284,38 @@ function detectContextFromPageContext(): { entityType: string; entityId: string 
  * @returns The fully resolved DetectedContext.
  */
 export function detectContext(params: URLSearchParams): DetectedContext {
-    // Priority 1: URL parameters
-    const urlContext = detectContextFromUrl(params);
-    if (urlContext) {
-        const playbookFromUrl = params.get("playbookId") ?? "";
-        const playbookId = playbookFromUrl || resolveDefaultPlaybook(urlContext.entityType);
-        console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId);
-        return { ...urlContext, playbookId };
-    }
+  // Priority 1: URL parameters
+  const urlContext = detectContextFromUrl(params);
+  if (urlContext) {
+    const playbookFromUrl = params.get('playbookId') ?? '';
+    const playbookId = playbookFromUrl || resolveDefaultPlaybook(urlContext.entityType);
+    console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId);
+    return { ...urlContext, playbookId };
+  }
 
-    // Priority 2: Xrm.Page.data.entity
-    const xrmPageContext = detectContextFromXrmPage();
-    if (xrmPageContext) {
-        const playbookId = resolveDefaultPlaybook(xrmPageContext.entityType);
-        console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId);
-        return { ...xrmPageContext, playbookId };
-    }
+  // Priority 2: Xrm.Page.data.entity
+  const xrmPageContext = detectContextFromXrmPage();
+  if (xrmPageContext) {
+    const playbookId = resolveDefaultPlaybook(xrmPageContext.entityType);
+    console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId);
+    return { ...xrmPageContext, playbookId };
+  }
 
-    // Priority 3: Xrm.Utility.getPageContext()
-    const pageContext = detectContextFromPageContext();
-    if (pageContext) {
-        const playbookId = resolveDefaultPlaybook(pageContext.entityType);
-        console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId);
-        return { ...pageContext, playbookId };
-    }
+  // Priority 3: Xrm.Utility.getPageContext()
+  const pageContext = detectContextFromPageContext();
+  if (pageContext) {
+    const playbookId = resolveDefaultPlaybook(pageContext.entityType);
+    console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId);
+    return { ...pageContext, playbookId };
+  }
 
-    // Priority 4: Empty fallback (pane opened without entity context)
-    console.warn(`${LOG_PREFIX} No entity context detected — using fallback`);
-    return {
-        entityType: "",
-        entityId: "",
-        playbookId: FALLBACK_PLAYBOOK_ID,
-    };
+  // Priority 4: Empty fallback (pane opened without entity context)
+  console.warn(`${LOG_PREFIX} No entity context detected — using fallback`);
+  return {
+    entityType: '',
+    entityId: '',
+    playbookId: FALLBACK_PLAYBOOK_ID,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +327,7 @@ export function detectContext(params: URLSearchParams): DetectedContext {
  * Scoped by pane to support multiple side panes simultaneously.
  */
 function getStorageKey(paneId: string): string {
-    return `${SESSION_STORAGE_PREFIX}${paneId}`;
+  return `${SESSION_STORAGE_PREFIX}${paneId}`;
 }
 
 /**
@@ -335,13 +338,13 @@ function getStorageKey(paneId: string): string {
  * @param session - The session state to persist.
  */
 export function saveSession(paneId: string, session: PersistedSession): void {
-    try {
-        const key = getStorageKey(paneId);
-        sessionStorage.setItem(key, JSON.stringify(session));
-        console.debug(`${LOG_PREFIX} Session saved for pane: ${paneId}`);
-    } catch (err) {
-        console.warn(`${LOG_PREFIX} Failed to save session to sessionStorage:`, err);
-    }
+  try {
+    const key = getStorageKey(paneId);
+    sessionStorage.setItem(key, JSON.stringify(session));
+    console.debug(`${LOG_PREFIX} Session saved for pane: ${paneId}`);
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Failed to save session to sessionStorage:`, err);
+  }
 }
 
 /**
@@ -351,26 +354,26 @@ export function saveSession(paneId: string, session: PersistedSession): void {
  * @returns The persisted session, or null if not found or corrupted.
  */
 export function restoreSession(paneId: string): PersistedSession | null {
-    try {
-        const key = getStorageKey(paneId);
-        const raw = sessionStorage.getItem(key);
-        if (!raw) return null;
+  try {
+    const key = getStorageKey(paneId);
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
 
-        const parsed = JSON.parse(raw) as PersistedSession;
+    const parsed = JSON.parse(raw) as PersistedSession;
 
-        // Validate required fields
-        if (!parsed.sessionId || !parsed.entityType || !parsed.entityId) {
-            console.warn(`${LOG_PREFIX} Invalid persisted session, discarding`);
-            sessionStorage.removeItem(key);
-            return null;
-        }
-
-        console.debug(`${LOG_PREFIX} Session restored for pane: ${paneId}`);
-        return parsed;
-    } catch (err) {
-        console.warn(`${LOG_PREFIX} Failed to restore session from sessionStorage:`, err);
-        return null;
+    // Validate required fields
+    if (!parsed.sessionId || !parsed.entityType || !parsed.entityId) {
+      console.warn(`${LOG_PREFIX} Invalid persisted session, discarding`);
+      sessionStorage.removeItem(key);
+      return null;
     }
+
+    console.debug(`${LOG_PREFIX} Session restored for pane: ${paneId}`);
+    return parsed;
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Failed to restore session from sessionStorage:`, err);
+    return null;
+  }
 }
 
 /**
@@ -379,13 +382,13 @@ export function restoreSession(paneId: string): PersistedSession | null {
  * @param paneId - Unique pane identifier.
  */
 export function clearSession(paneId: string): void {
-    try {
-        const key = getStorageKey(paneId);
-        sessionStorage.removeItem(key);
-        console.debug(`${LOG_PREFIX} Session cleared for pane: ${paneId}`);
-    } catch (err) {
-        console.warn(`${LOG_PREFIX} Failed to clear session from sessionStorage:`, err);
-    }
+  try {
+    const key = getStorageKey(paneId);
+    sessionStorage.removeItem(key);
+    console.debug(`${LOG_PREFIX} Session cleared for pane: ${paneId}`);
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Failed to clear session from sessionStorage:`, err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -406,64 +409,62 @@ export function clearSession(paneId: string): void {
  * @returns A cleanup function that stops the polling.
  */
 export function startContextChangeDetection(
-    currentContext: DetectedContext,
-    onChange: ContextChangeCallback,
-    intervalMs: number = CONTEXT_POLL_INTERVAL_MS
+  currentContext: DetectedContext,
+  onChange: ContextChangeCallback,
+  intervalMs: number = CONTEXT_POLL_INTERVAL_MS
 ): () => void {
-    let lastEntityType = currentContext.entityType;
-    let lastEntityId = currentContext.entityId;
-    let notified = false;
+  let lastEntityType = currentContext.entityType;
+  let lastEntityId = currentContext.entityId;
+  let notified = false;
 
-    const intervalId = setInterval(() => {
-        // Try Xrm.Page first, then getPageContext
-        const xrmPageCtx = detectContextFromXrmPage();
-        const pageCtx = xrmPageCtx ?? detectContextFromPageContext();
+  const intervalId = setInterval(() => {
+    // Try Xrm.Page first, then getPageContext
+    const xrmPageCtx = detectContextFromXrmPage();
+    const pageCtx = xrmPageCtx ?? detectContextFromPageContext();
 
-        if (!pageCtx) {
-            // Xrm not available — cannot detect changes
-            return;
-        }
+    if (!pageCtx) {
+      // Xrm not available — cannot detect changes
+      return;
+    }
 
-        const newEntityType = pageCtx.entityType;
-        const newEntityId = pageCtx.entityId;
+    const newEntityType = pageCtx.entityType;
+    const newEntityId = pageCtx.entityId;
 
-        // Check if context has changed
-        const hasChanged =
-            (newEntityType !== lastEntityType || newEntityId !== lastEntityId) &&
-            newEntityType !== "" &&
-            newEntityId !== "";
+    // Check if context has changed
+    const hasChanged =
+      (newEntityType !== lastEntityType || newEntityId !== lastEntityId) && newEntityType !== '' && newEntityId !== '';
 
-        if (hasChanged && !notified) {
-            notified = true;
-            const newPlaybookId = resolveDefaultPlaybook(newEntityType);
-            const newContext: DetectedContext = {
-                entityType: newEntityType,
-                entityId: newEntityId,
-                playbookId: newPlaybookId,
-            };
-            const previousContext: DetectedContext = {
-                entityType: lastEntityType,
-                entityId: lastEntityId,
-                playbookId: resolveDefaultPlaybook(lastEntityType),
-            };
+    if (hasChanged && !notified) {
+      notified = true;
+      const newPlaybookId = resolveDefaultPlaybook(newEntityType);
+      const newContext: DetectedContext = {
+        entityType: newEntityType,
+        entityId: newEntityId,
+        playbookId: newPlaybookId,
+      };
+      const previousContext: DetectedContext = {
+        entityType: lastEntityType,
+        entityId: lastEntityId,
+        playbookId: resolveDefaultPlaybook(lastEntityType),
+      };
 
-            console.info(
-                `${LOG_PREFIX} Context change detected:`,
-                `${lastEntityType}/${lastEntityId}`,
-                "->",
-                `${newEntityType}/${newEntityId}`
-            );
+      console.info(
+        `${LOG_PREFIX} Context change detected:`,
+        `${lastEntityType}/${lastEntityId}`,
+        '->',
+        `${newEntityType}/${newEntityId}`
+      );
 
-            onChange(newContext, previousContext);
-        } else if (!hasChanged && notified) {
-            // User navigated back to the original context — reset notification flag
-            notified = false;
-        }
-    }, intervalMs);
+      onChange(newContext, previousContext);
+    } else if (!hasChanged && notified) {
+      // User navigated back to the original context — reset notification flag
+      notified = false;
+    }
+  }, intervalMs);
 
-    return () => {
-        clearInterval(intervalId);
-    };
+  return () => {
+    clearInterval(intervalId);
+  };
 }
 
 /**
@@ -474,20 +475,16 @@ export function startContextChangeDetection(
  * @param paneId - Pane ID for session storage update.
  * @param sessionId - Current session ID (empty to start fresh).
  */
-export function acceptContextSwitch(
-    newContext: DetectedContext,
-    paneId: string,
-    sessionId: string
-): void {
-    if (sessionId) {
-        saveSession(paneId, {
-            sessionId,
-            entityType: newContext.entityType,
-            entityId: newContext.entityId,
-            playbookId: newContext.playbookId,
-            timestamp: new Date().toISOString(),
-        });
-    }
+export function acceptContextSwitch(newContext: DetectedContext, paneId: string, sessionId: string): void {
+  if (sessionId) {
+    saveSession(paneId, {
+      sessionId,
+      entityType: newContext.entityType,
+      entityId: newContext.entityId,
+      playbookId: newContext.playbookId,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
 
 /**
@@ -495,20 +492,20 @@ export function acceptContextSwitch(
  * Used in the context-switch dialog to show friendly labels.
  */
 export function getEntityDisplayName(entityType: string): string {
-    const displayNames: Record<string, string> = {
-        sprk_matter: "Matter",
-        sprk_project: "Project",
-        sprk_invoice: "Invoice",
-        account: "Account",
-        contact: "Contact",
-        opportunity: "Opportunity",
-    };
+  const displayNames: Record<string, string> = {
+    sprk_matter: 'Matter',
+    sprk_project: 'Project',
+    sprk_invoice: 'Invoice',
+    account: 'Account',
+    contact: 'Contact',
+    opportunity: 'Opportunity',
+  };
 
-    if (displayNames[entityType]) {
-        return displayNames[entityType];
-    }
+  if (displayNames[entityType]) {
+    return displayNames[entityType];
+  }
 
-    // Strip prefix and capitalize: "sprk_something" -> "Something"
-    const stripped = entityType.replace(/^[a-z]+_/, "");
-    return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+  // Strip prefix and capitalize: "sprk_something" -> "Something"
+  const stripped = entityType.replace(/^[a-z]+_/, '');
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }

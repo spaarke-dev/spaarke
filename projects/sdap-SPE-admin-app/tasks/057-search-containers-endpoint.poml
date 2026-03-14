@@ -1,0 +1,49 @@
+<task id="SPE-057" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Search Containers Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-006, SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement the endpoint to search for containers using the Microsoft Graph search API. This enables administrators to find containers across all container types using full-text search, which is essential for managing large numbers of containers efficiently.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>A working POST endpoint that searches containers via Graph search API with the fileStorageContainer entity type, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The Microsoft Graph search API (/search/query) supports searching for fileStorageContainer entities. Administrators need to search across containers by name, description, or custom properties to quickly locate and manage specific containers. The search request uses entity type "fileStorageContainer" and supports query terms, filters, and pagination.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define SearchContainersRequest with query, filters, pageSize, skipToken fields, and SearchContainersResponse with results and pagination</step>
+    <step order="2" name="add-graph-method">Add SearchContainersAsync to SpeAdminGraphService that calls POST /search/query with entityTypes: ["fileStorageContainer"]</step>
+    <step order="3" name="add-endpoint">Add POST /api/spe/search/containers?configId={id} endpoint with validation and graph call</step>
+    <step order="4" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="5" name="add-tests">Write unit tests covering search with results, empty results, pagination, and invalid query</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SearchContainersRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SearchContainersResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/SearchContainersTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/search/containers searches Graph API with entityTypes fileStorageContainer</criterion>
+    <criterion testable="true">Search results include container id, displayName, description, and containerTypeId</criterion>
+    <criterion testable="true">Pagination is supported via skipToken</criterion>
+    <criterion testable="true">Empty query string is rejected with 400</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

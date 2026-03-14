@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit BFF API C# Code Quality</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 030</blocks>
+    <tags>audit, dotnet, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive code quality audit of the BFF API C# codebase (src/server/api/Sprk.Bff.Api/).
+    Identify dead code, abstraction violations (interfaces with single implementations per ADR-010),
+    Program.cs size issues (currently 1,940 lines), endpoint pattern inconsistencies, error handling
+    pattern violations (ADR-019 ProblemDetails), and method/file size outliers. Produce a structured
+    audit report with findings, severity ratings, and recommended remediation actions.
+  </prompt>
+
+  <role>
+    Senior .NET developer and code quality analyst. Expert in C# 12, .NET 8 Minimal API, and
+    Spaarke BFF API conventions. Apply ADR-010 (DI minimalism) and ADR-019 (ProblemDetails) as
+    primary quality lenses.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-bff-api.md
+    covering all six audit areas with findings ranked by severity (Critical/High/Medium/Low),
+    an overall letter grade (A-F) for the BFF API area, and a prioritized remediation list
+    that feeds into task 007 (scorecard) and task 008 (remediation plan).
+  </goal>
+
+  <context>
+    <background>
+      The Spaarke BFF API (src/server/api/Sprk.Bff.Api/) is a .NET 8 Minimal API serving as the
+      backend for all PCF controls and Code Pages. It has grown organically over multiple AI-assisted
+      development cycles and has never undergone a formal quality audit. Key known issues:
+
+      - Program.cs is 1,940 lines — far beyond the single responsibility principle and the feature
+        module pattern described in ADR-010 (AddSpaarkeCore, AddDocumentsModule, etc.)
+      - The codebase contains approximately 525 C# source files across API, plugins, and shared libs
+      - ADR-010 mandates concrete types by default (no unnecessary interfaces) with ≤15 non-framework
+        DI registrations — verify compliance
+      - ADR-019 mandates ProblemDetails for all error responses — verify endpoint error handling
+      - Catch-log-rethrow anti-patterns are common in AI-generated code and must be identified
+      - Dead code (unused using statements, unreachable methods, commented-out blocks) accumulates
+        over time in AI-generated codebases
+
+      Architecture tests exist in tests/Spaarke.ArchTests/ (6 classes) and should be referenced
+      to understand what constraints are already machine-verified vs. what requires manual audit.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (read — primary target, 1,940 lines)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (read — full directory structure)</file>
+      <file>tests/Spaarke.ArchTests/ (read — understand existing automated checks)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Interfaces are only justified when: (a) multiple implementations exist now, (b) testability requires seam injection, or (c) cross-module boundaries require decoupling. Flag any interface with exactly one implementation that does not meet these criteria.</constraint>
+    <constraint source="ADR-010">DI registrations must not exceed 15 non-framework services. Count and report the actual number.</constraint>
+    <constraint source="ADR-019">All error responses MUST use ProblemDetails format. Identify any endpoint returning raw exceptions, string errors, or custom error objects.</constraint>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any source files during this task. Document findings only.</constraint>
+    <constraint source="spec">Program.cs refactoring is task 030 — this task only identifies and documents the issue.</constraint>
+    <constraint source="testing.md">Run dotnet build first to establish baseline (0 errors required). Report any warnings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/adr/ADR-019.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `dotnet build src/server/api/Sprk.Bff.Api/` and record build output — note any warnings (treat warnings as future quality signals even if not errors yet)</step>
+    <step order="2">Analyze Program.cs structure: count lines, identify top-level sections, map DI registrations, count non-framework service registrations, identify feature modules that could be extracted</step>
+    <step order="3">Run dead code analysis: search for unused `using` directives (`dotnet format --diagnostics IDE0005`), unreachable methods, private methods with no callers, commented-out code blocks</step>
+    <step order="4">Audit abstraction patterns: find all interface definitions (`grep -r "^public interface"`) and verify each has either multiple implementations or a documented justification per ADR-010</step>
+    <step order="5">Analyze endpoint patterns: examine all endpoint definition files (*Endpoints.cs) for consistency — method naming, route conventions, filter application, response type declarations</step>
+    <step order="6">Audit error handling: search for catch blocks across the codebase — identify catch-log-rethrow patterns, bare `throw`, non-ProblemDetails error returns, and exception swallowing</step>
+    <step order="7">Analyze file/method size distribution: identify files over 300 lines (besides Program.cs), identify methods over 50 lines, identify classes with more than 10 public methods</step>
+    <step order="8">Review comment quality: search for TODO/FIXME/HACK comments, code-restating comments (e.g., `// increment counter` above `counter++`), and outdated comments referencing removed features</step>
+    <step order="9">Cross-reference findings with existing ArchTests to distinguish machine-verified constraints from findings that need new test coverage</step>
+    <step order="10">Compile all findings into the audit report structure — group by severity (Critical/High/Medium/Low), assign an overall letter grade (A-F) for the BFF API, and list top 5 remediation priorities</step>
+    <step order="11">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</step>
+    <step order="12">Update TASK-INDEX.md: change task 001 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-bff-api.md exists and covers all six audit areas: dead code, abstraction, Program.cs, endpoint patterns, error handling, file/method size</criterion>
+    <criterion>Each finding includes: area, file path, line number (where applicable), severity (Critical/High/Medium/Low), description, and recommended action</criterion>
+    <criterion>DI registration count is explicitly stated (actual number vs. 15-registration limit)</criterion>
+    <criterion>Program.cs section breakdown is documented (which logical sections exist at which line ranges)</criterion>
+    <criterion>Overall letter grade (A-F) assigned to BFF API area with justification</criterion>
+    <criterion>Top 5 remediation priorities listed with estimated effort</criterion>
+    <criterion>All identified TODO/FIXME comments are listed with file paths and line numbers</criterion>
+    <criterion>Report distinguishes between findings already covered by ArchTests and new findings requiring attention</criterion>
+    <criterion>No source files were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

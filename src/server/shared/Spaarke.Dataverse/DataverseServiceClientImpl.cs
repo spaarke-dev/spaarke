@@ -1259,7 +1259,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             // Special handling for DocumentId lookup field
             // TEMPORARILY SKIP - debugging "Entity does not exist" error
-            // TODO: Re-enable once we figure out why Document lookup fails
+            // TRACKED: GitHub #233 - Re-enable once Document lookup issue resolved
             if (prop.Name == "DocumentId")
             {
                 // Skip setting the Document lookup for now to test if other fields work
@@ -1341,7 +1341,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             // Special handling for DocumentId lookup field
             // TEMPORARILY SKIP - debugging "Entity does not exist" error
-            // TODO: Re-enable once we figure out why Document lookup fails
+            // TRACKED: GitHub #233 - Re-enable once Document lookup issue resolved
             if (prop.Name == "DocumentId")
             {
                 // Skip setting the Document lookup for now to test if other fields work

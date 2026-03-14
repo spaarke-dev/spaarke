@@ -26,11 +26,7 @@ import {
   Divider,
 } from '@fluentui/react-components';
 import type { DropdownProps } from '@fluentui/react-components';
-import {
-  ArrowSplit20Regular,
-  Checkmark20Regular,
-  Dismiss20Regular,
-} from '@fluentui/react-icons';
+import { ArrowSplit20Regular, Checkmark20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
@@ -210,10 +206,7 @@ function serializeCondition(expr: ConditionExpression): string {
 /**
  * ConditionEditor component - Visual expression builder for condition nodes.
  */
-export const ConditionEditor = React.memo(function ConditionEditor({
-  conditionJson,
-  onChange,
-}: ConditionEditorProps) {
+export const ConditionEditor = React.memo(function ConditionEditor({ conditionJson, onChange }: ConditionEditorProps) {
   const styles = useStyles();
 
   // Parse current condition
@@ -282,9 +275,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
   const needsRightOperand = condition.condition.operator !== 'exists';
 
   // Find selected operator label
-  const selectedOperator = OPERATORS.find(
-    (op) => op.value === condition.condition.operator
-  );
+  const selectedOperator = OPERATORS.find(op => op.value === condition.condition.operator);
 
   return (
     <div className={styles.container}>
@@ -309,9 +300,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
             onChange={handleLeftChange}
             placeholder="{{node.output.field}}"
           />
-          <Text className={styles.fieldHint}>
-            Use {'{{variableName}}'} for template variables
-          </Text>
+          <Text className={styles.fieldHint}>Use {'{{variableName}}'} for template variables</Text>
         </div>
 
         {/* Operator */}
@@ -327,7 +316,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
             selectedOptions={[condition.condition.operator]}
             onOptionSelect={handleOperatorChange}
           >
-            {OPERATORS.map((op) => (
+            {OPERATORS.map(op => (
               <Option key={op.value} value={op.value}>
                 {op.label}
               </Option>
@@ -364,11 +353,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
 
         <div className={styles.branchRow}>
           <div className={styles.branchField}>
-            <Label
-              htmlFor="condition-true-branch"
-              size="small"
-              className={styles.trueBranchLabel}
-            >
+            <Label htmlFor="condition-true-branch" size="small" className={styles.trueBranchLabel}>
               <Checkmark20Regular />
               True Branch
             </Label>
@@ -382,11 +367,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
           </div>
 
           <div className={styles.branchField}>
-            <Label
-              htmlFor="condition-false-branch"
-              size="small"
-              className={styles.falseBranchLabel}
-            >
+            <Label htmlFor="condition-false-branch" size="small" className={styles.falseBranchLabel}>
               <Dismiss20Regular />
               False Branch
             </Label>
@@ -400,9 +381,7 @@ export const ConditionEditor = React.memo(function ConditionEditor({
           </div>
         </div>
 
-        <Text className={styles.fieldHint}>
-          Branch names are used in the orchestrator to route execution
-        </Text>
+        <Text className={styles.fieldHint}>Branch names are used in the orchestrator to route execution</Text>
       </div>
     </div>
   );

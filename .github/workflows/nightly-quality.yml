@@ -1,0 +1,499 @@
+# Nightly Quality Pipeline
+#
+# Runs a comprehensive quality sweep on weeknights (Mon-Fri, 6 AM UTC / midnight MST).
+# Supports manual dispatch for on-demand execution during development.
+#
+# Jobs:
+#   1. test-and-coverage — Full test suite with Coverlet coverage collection
+#   2. sonarcloud-analysis — SonarCloud deep analysis (depends on test-and-coverage for coverage artifacts)
+#   3. ai-code-review — Claude Code headless review using scripts/quality/nightly-review-prompt.md
+#   4. dependency-audit — dotnet list --vulnerable + npm audit
+#   5. report-results — Aggregates findings into a rolling GitHub issue (label: nightly-quality)
+#
+# Job dependency graph:
+#   test-and-coverage ──────┐
+#                           ├──→ sonarcloud-analysis
+#   ai-code-review ─────────┤
+#                           ├──→ report-results (always, needs all 4)
+#   dependency-audit ───────┘
+#
+# Total workflow budget: 15 minutes (NFR from spec).
+
+name: Nightly Quality
+
+on:
+  schedule:
+    # Weeknights only (Mon-Fri), 6 AM UTC / midnight MST
+    - cron: '0 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      run_sonarcloud:
+        description: 'Run SonarCloud analysis'
+        required: false
+        default: 'true'
+        type: boolean
+      run_ai_review:
+        description: 'Run Claude Code AI review'
+        required: false
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 1: Full Test Suite with Coverlet Coverage
+  # ─────────────────────────────────────────────────────────────────────
+  test-and-coverage:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore --verbosity minimal
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run tests with coverage
+        run: |
+          dotnet test --configuration Release --no-build \
+            --collect:"XPlat Code Coverage" \
+            --settings config/coverlet-nightly.runsettings \
+            --results-directory ./TestResults \
+            --logger "trx;LogFileName=test-results.trx"
+        continue-on-error: true
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: coverage-reports
+          path: |
+            ./TestResults/**/coverage.cobertura.xml
+            ./TestResults/**/coverage.opencover.xml
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: test-results
+          path: ./TestResults/**/*.trx
+          retention-days: 7
+
+      - name: Summarize test results
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+
+          # Count pass/fail from trx files
+          TOTAL=$(grep -r 'outcome=' ./TestResults/ --include="*.trx" 2>/dev/null | grep -c 'UnitTestResult' || echo "0")
+          PASSED=$(grep -r 'outcome="Passed"' ./TestResults/ --include="*.trx" 2>/dev/null | grep -c 'outcome' || echo "0")
+          FAILED=$(grep -r 'outcome="Failed"' ./TestResults/ --include="*.trx" 2>/dev/null | grep -c 'outcome' || echo "0")
+
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total  | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 2: SonarCloud Analysis (depends on test-and-coverage for coverage)
+  # ─────────────────────────────────────────────────────────────────────
+  sonarcloud-analysis:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: test-and-coverage
+    if: always() && (github.event_name == 'schedule' || github.event.inputs.run_sonarcloud != 'false')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-reports
+          path: ./coverage
+        continue-on-error: true
+
+      - name: Locate coverage reports
+        run: |
+          echo "## Coverage files downloaded for SonarCloud:"
+          find ./coverage -name "coverage.opencover.xml" -type f 2>/dev/null || echo "No opencover reports found"
+          find ./coverage -name "coverage.cobertura.xml" -type f 2>/dev/null || echo "No cobertura reports found"
+
+      - name: Build for SonarCloud
+        run: |
+          dotnet restore --verbosity minimal
+          dotnet build --configuration Release --no-restore
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.cs.opencover.reportsPaths=coverage/**/coverage.opencover.xml
+
+      - name: Save SonarCloud status
+        if: always()
+        run: |
+          echo '{"job": "sonarcloud-analysis", "status": "${{ job.status }}"}' > sonarcloud-status.json
+
+      - name: Upload SonarCloud status
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: sonarcloud-status
+          path: sonarcloud-status.json
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 3: Claude Code Headless AI Review (independent, parallel)
+  # ─────────────────────────────────────────────────────────────────────
+  ai-code-review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'schedule' || github.event.inputs.run_ai_review != 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Verify review prompt exists
+        run: |
+          if [ ! -f "scripts/quality/nightly-review-prompt.md" ]; then
+            echo "::warning::Review prompt file not found at scripts/quality/nightly-review-prompt.md"
+            echo "Skipping AI review — prompt file will be created by task 021."
+            echo '{"job": "ai-code-review", "status": "skipped", "reason": "Prompt file not yet created (task 021)"}' > ai-review-results.json
+            exit 0
+          fi
+
+      - name: Run Claude Code headless review
+        if: hashFiles('scripts/quality/nightly-review-prompt.md') != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "$(cat scripts/quality/nightly-review-prompt.md)" \
+            --output-format json \
+            --dangerously-skip-permissions \
+            > ai-review-results.json 2>&1 || true
+
+      - name: Upload AI review results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ai-review-results
+          path: ai-review-results.json
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 4: Dependency Vulnerability Audit (independent, parallel)
+  # ─────────────────────────────────────────────────────────────────────
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore .NET dependencies
+        run: dotnet restore --verbosity minimal
+
+      - name: Audit .NET packages
+        run: |
+          echo "## .NET Vulnerability Audit" > dotnet-audit.md
+          echo "" >> dotnet-audit.md
+          dotnet list src/ package --vulnerable --include-transitive 2>&1 | tee dotnet-vulnerable.txt
+
+          if grep -q "has the following vulnerable packages" dotnet-vulnerable.txt; then
+            echo "**Status:** Vulnerable packages found" >> dotnet-audit.md
+            echo "" >> dotnet-audit.md
+            echo '```' >> dotnet-audit.md
+            cat dotnet-vulnerable.txt >> dotnet-audit.md
+            echo '```' >> dotnet-audit.md
+          else
+            echo "**Status:** No vulnerable .NET packages detected" >> dotnet-audit.md
+          fi
+
+      - name: Audit npm packages
+        run: |
+          echo "" >> dotnet-audit.md
+          echo "## npm Vulnerability Audit" >> dotnet-audit.md
+          echo "" >> dotnet-audit.md
+
+          # Find all package.json files (excluding node_modules)
+          FOUND_VULNS=false
+          for pkg in $(find src/client -name "package.json" -not -path "*/node_modules/*" -not -path "*/dist/*"); do
+            DIR=$(dirname "$pkg")
+            PROJECT=$(basename "$DIR")
+            echo "### $PROJECT" >> dotnet-audit.md
+
+            if [ -f "$DIR/package-lock.json" ] || [ -f "$DIR/npm-shrinkwrap.json" ]; then
+              cd "$DIR"
+              npm audit --json > /tmp/npm-audit-$PROJECT.json 2>&1 || true
+
+              VULNS=$(jq '.metadata.vulnerabilities // {} | to_entries | map(select(.value > 0)) | length' /tmp/npm-audit-$PROJECT.json 2>/dev/null || echo "0")
+              if [ "$VULNS" -gt 0 ]; then
+                FOUND_VULNS=true
+                SUMMARY=$(jq -r '.metadata.vulnerabilities | to_entries | map(select(.value > 0)) | map("\(.key): \(.value)") | join(", ")' /tmp/npm-audit-$PROJECT.json 2>/dev/null || echo "unknown")
+                echo "**Vulnerabilities:** $SUMMARY" >> "$GITHUB_WORKSPACE/dotnet-audit.md"
+              else
+                echo "No vulnerabilities found." >> "$GITHUB_WORKSPACE/dotnet-audit.md"
+              fi
+              cd "$GITHUB_WORKSPACE"
+            else
+              echo "No lockfile found — skipped." >> dotnet-audit.md
+            fi
+            echo "" >> dotnet-audit.md
+          done
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: dependency-audit-results
+          path: dotnet-audit.md
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 5: Aggregate Results into Rolling GitHub Issue
+  # ─────────────────────────────────────────────────────────────────────
+  report-results:
+    name: Report Results
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [test-and-coverage, sonarcloud-analysis, ai-code-review, dependency-audit]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: ./artifacts
+        continue-on-error: true
+
+      - name: Create or update rolling GitHub issue
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const now = new Date().toISOString();
+            const date = now.split('T')[0];
+
+            // ── Collect job statuses ──
+            const testStatus = '${{ needs.test-and-coverage.result }}';
+            const sonarStatus = '${{ needs.sonarcloud-analysis.result }}';
+            const aiStatus = '${{ needs.ai-code-review.result }}';
+            const depStatus = '${{ needs.dependency-audit.result }}';
+
+            const statusIcon = (s) => {
+              if (s === 'success') return 'passed';
+              if (s === 'skipped') return 'skipped';
+              if (s === 'cancelled') return 'cancelled';
+              return 'failed';
+            };
+
+            // ── Read artifact content ──
+            let depAuditContent = 'No dependency audit results available.';
+            try {
+              depAuditContent = fs.readFileSync('./artifacts/dependency-audit-results/dotnet-audit.md', 'utf8');
+            } catch (e) {
+              console.log('No dependency audit artifact found');
+            }
+
+            let aiReviewContent = 'No AI review results available.';
+            try {
+              const raw = fs.readFileSync('./artifacts/ai-review-results/ai-review-results.json', 'utf8');
+              const parsed = JSON.parse(raw);
+              if (parsed.status === 'skipped') {
+                aiReviewContent = `Skipped: ${parsed.reason || 'unknown reason'}`;
+              } else if (parsed.result) {
+                aiReviewContent = typeof parsed.result === 'string'
+                  ? parsed.result.substring(0, 3000)
+                  : JSON.stringify(parsed.result, null, 2).substring(0, 3000);
+              } else {
+                aiReviewContent = raw.substring(0, 3000);
+              }
+            } catch (e) {
+              console.log('No AI review artifact found or parse error:', e.message);
+            }
+
+            // ── Build issue body ──
+            let body = `# Nightly Quality Report\n\n`;
+            body += `**Run Date:** ${now}\n`;
+            body += `**Branch:** \`${process.env.GITHUB_REF_NAME || 'master'}\`\n`;
+            body += `**Commit:** \`${process.env.GITHUB_SHA?.substring(0, 7) || 'unknown'}\`\n`;
+            body += `**Workflow Run:** [#${process.env.GITHUB_RUN_NUMBER}](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})\n\n`;
+            body += `---\n\n`;
+
+            body += `## Job Summary\n\n`;
+            body += `| Job | Status |\n`;
+            body += `|-----|--------|\n`;
+            body += `| Test & Coverage | ${statusIcon(testStatus)} |\n`;
+            body += `| SonarCloud Analysis | ${statusIcon(sonarStatus)} |\n`;
+            body += `| AI Code Review | ${statusIcon(aiStatus)} |\n`;
+            body += `| Dependency Audit | ${statusIcon(depStatus)} |\n\n`;
+
+            // ── Dependency Audit Section ──
+            body += `## Dependency Audit\n\n`;
+            body += depAuditContent + '\n\n';
+
+            // ── AI Review Section ──
+            body += `## AI Code Review\n\n`;
+            body += aiReviewContent + '\n\n';
+
+            // ── Deduplication hash ──
+            // Hash the findings so we can detect if content changed between runs
+            const findingsHash = crypto.createHash('md5')
+              .update(depAuditContent + aiReviewContent + testStatus + sonarStatus)
+              .digest('hex')
+              .substring(0, 8);
+
+            body += `---\n\n`;
+            body += `*Findings hash: \`${findingsHash}\` | Updated: ${now}*\n`;
+            body += `*Automated by [Nightly Quality Workflow](../../actions/workflows/nightly-quality.yml)*\n`;
+
+            // ── Find or create rolling issue ──
+            const label = 'nightly-quality';
+
+            // Ensure label exists
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label
+              });
+            } catch (e) {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '6f42c1',
+                description: 'Nightly quality pipeline findings'
+              });
+            }
+
+            // Search for existing open issue with nightly-quality label
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 10
+            });
+
+            const existingIssue = issues.find(i =>
+              i.title.includes('Nightly Quality Report')
+            );
+
+            const issueTitle = `Nightly Quality Report — ${date}`;
+
+            if (existingIssue) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                title: issueTitle,
+                body: body
+              });
+              console.log(`Updated existing issue #${existingIssue.number}`);
+            } else {
+              // Create new issue
+              const { data: newIssue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: body,
+                labels: [label]
+              });
+              console.log(`Created new issue #${newIssue.number}`);
+            }
+
+      - name: Workflow summary
+        if: always()
+        run: |
+          echo "## Nightly Quality Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Test & Coverage | ${{ needs.test-and-coverage.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SonarCloud Analysis | ${{ needs.sonarcloud-analysis.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AI Code Review | ${{ needs.ai-code-review.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Audit | ${{ needs.dependency-audit.result }} |" >> $GITHUB_STEP_SUMMARY

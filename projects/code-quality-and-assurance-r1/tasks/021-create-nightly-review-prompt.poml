@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Create Nightly Claude Code Review Prompt</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>043</blocks>
+    <tags>automation, ai-review, prompt-engineering</tags>
+  </metadata>
+
+  <prompt>
+    Create the comprehensive review prompt file used by Claude Code in headless mode during the nightly
+    quality workflow. Stored at scripts/quality/nightly-review-prompt.md. The prompt must instruct
+    Claude to perform five review sections: (1) review recent changes from the last 24 hours using
+    git log, (2) check pattern consistency across similar files, (3) sweep all 22+ ADRs for compliance,
+    (4) flag TODO/FIXME items older than 30 days, (5) detect dead code. The prompt must specify a
+    structured JSON output format so the nightly workflow can parse findings programmatically.
+  </prompt>
+
+  <role>
+    AI prompt engineer specializing in code review automation and structured output design. Expert in
+    crafting Claude Code headless prompts that produce consistent, parseable JSON results.
+  </role>
+
+  <goal>
+    A production-ready prompt file at scripts/quality/nightly-review-prompt.md that, when executed by
+    Claude Code in headless mode (`claude -p "$(cat scripts/quality/nightly-review-prompt.md)" --output-format json`),
+    produces a structured JSON review containing findings from all five review sections. The JSON schema
+    must be parseable by the nightly workflow's issue-update job.
+  </goal>
+
+  <context>
+    <background>
+      The nightly workflow (task 020) runs Claude Code headless mode with this prompt file as input.
+      Claude Code will execute in the repository context with full file access. The prompt must be
+      self-contained — it cannot rely on any runtime context injection other than the file system.
+
+      The five review sections address different quality dimensions:
+      1. Recent changes: Uses `git log --since="24 hours ago" --name-only` to scope review to what
+         changed. Focuses on whether changes follow established patterns.
+      2. Pattern consistency: Picks a random sample of similar files (e.g., 3 *Endpoints.cs files)
+         and checks whether they follow the same structural patterns.
+      3. ADR compliance: Sweeps the codebase for violations of all ADRs defined in .claude/adr/*.
+         Focuses on high-signal ADRs: ADR-002, ADR-006, ADR-007, ADR-008, ADR-010, ADR-021, ADR-022.
+      4. TODO/FIXME aging: Uses git log to find when each TODO/FIXME comment was introduced.
+         Flag any item older than 30 days as requiring resolution.
+      5. Dead code: Identifies unused using directives, private methods with no callers, unreachable
+         code branches, commented-out code blocks > 10 lines.
+
+      JSON output schema must include: summary (overall quality signal), findings array (each with
+      section, severity, file, line, description, recommendation), metrics (count by severity), and
+      a generated_at timestamp.
+    </background>
+    <relevant-files>
+      <file>scripts/quality/nightly-review-prompt.md (create)</file>
+      <file>.claude/adr/ (read — all ADR files to reference in the ADR compliance section)</file>
+      <file>.claude/skills/code-review/references/review-checklist.md (read — existing review checklist to align with)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">The prompt must produce valid JSON output parseable by the nightly workflow. Define the JSON schema explicitly in the prompt so Claude follows it consistently.</constraint>
+    <constraint source="spec">The prompt must be self-contained — all ADR references, checklists, and instructions must be embedded or referenced via relative file paths that exist in the repository.</constraint>
+    <constraint source="spec">The prompt must instruct Claude to focus only on findings with actionable remediation — suppress informational observations that generate noise without driving action.</constraint>
+    <constraint source="spec">Dead code detection must be scoped to src/ directory only. Do not flag dead code in tests/, projects/, or infrastructure/.</constraint>
+    <constraint source="spec">TODO/FIXME aging requires git blame/log — the prompt must instruct Claude to use git commands to determine age, not just report existence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-002.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/skills/code-review/references/review-checklist.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/skills/code-review/references/review-checklist.md to understand the existing review checklist structure and align the nightly prompt with it (avoid duplication, complement it).</step>
+    <step order="2">Read all ADR files in .claude/adr/ to compile the full list of ADRs (IDs and key constraints) that the ADR compliance section must check. Note the 22+ ADRs and identify the highest-signal ones for automated checking.</step>
+    <step order="3">Design the JSON output schema: define the structure for summary, findings array (section, severity, file, line, description, recommendation), metrics object (critical_count, high_count, medium_count, low_count), and generated_at timestamp. Write this schema as a TypeScript interface in the prompt for unambiguous specification.</step>
+    <step order="4">Write Section 1 of the prompt (Recent Changes Review): instruct Claude to run `git log --since="24 hours ago" --name-only --pretty=format:"%H %s"`, identify all changed files, and review each changed file for adherence to established patterns in surrounding similar files.</step>
+    <step order="5">Write Section 2 of the prompt (Pattern Consistency): instruct Claude to sample three files of each significant type (*Endpoints.cs, *.tsx PCF controls, *Service.cs) and verify structural consistency — method ordering, comment style, error handling approach, import organization.</step>
+    <step order="6">Write Section 3 of the prompt (ADR Compliance Sweep): for each of the seven high-signal ADRs, specify exactly what to search for (e.g., for ADR-010: count IService interfaces with single implementation; for ADR-006: check for legacy JS webresource patterns; for ADR-022: verify PCF files do not use React 18 createRoot).</step>
+    <step order="7">Write Section 4 of the prompt (TODO/FIXME Aging): instruct Claude to find all TODO/FIXME comments in src/, use `git log -S "TODO" --diff-filter=A --follow -- {file}` to determine when each was introduced, and flag items where the introduction date is > 30 days ago.</step>
+    <step order="8">Write Section 5 of the prompt (Dead Code Detection): instruct Claude to search for unused using directives in .cs files, private methods in classes where no other method or test references them, commented-out code blocks > 10 lines, and unreachable branches after return/throw statements.</step>
+    <step order="9">Write the output instruction section: explicitly tell Claude to produce ONLY valid JSON matching the defined schema as its final output, with no prose before or after the JSON block. Include an example of a well-formed finding object.</step>
+    <step order="10">Review the complete prompt for clarity, completeness, and testability. Ensure each section produces findings in the unified JSON schema. Verify the prompt would fit within Claude's context window for a typical repository state.</step>
+    <step order="11">Write the complete prompt to scripts/quality/nightly-review-prompt.md.</step>
+    <step order="12">Update TASK-INDEX.md: change task 021 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">scripts/quality/nightly-review-prompt.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>scripts/quality/nightly-review-prompt.md exists and contains all five review sections</criterion>
+    <criterion>JSON output schema is explicitly defined in the prompt (TypeScript interface or equivalent)</criterion>
+    <criterion>Section 1 (Recent Changes) uses git log --since="24 hours ago" to scope review</criterion>
+    <criterion>Section 3 (ADR Compliance) covers at minimum ADR-002, ADR-006, ADR-007, ADR-008, ADR-010, ADR-021, ADR-022 with specific detection instructions for each</criterion>
+    <criterion>Section 4 (TODO/FIXME Aging) instructs use of git commands to determine introduction date, not just report existence</criterion>
+    <criterion>Section 5 (Dead Code) is scoped to src/ directory only</criterion>
+    <criterion>Output instruction explicitly states: produce ONLY valid JSON, no prose before or after</criterion>
+    <criterion>Each finding in the schema has: section, severity, file, line, description, recommendation</criterion>
+    <criterion>An example finding object is included in the prompt to reduce output format drift</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

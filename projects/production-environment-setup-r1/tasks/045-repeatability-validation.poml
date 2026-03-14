@@ -1,0 +1,96 @@
+<task id="PRODENV-045" project="Production Environment Setup R1">
+  <metadata>
+    <title>Provision + decommission second test customer (repeatability validation)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>5</phase>
+    <parallel-group>P5-B</parallel-group>
+    <tags>testing, validation, provisioning, decommission</tags>
+  </metadata>
+
+  <prompt>
+    Provision a second test customer (customerId=test) using Provision-Customer.ps1,
+    run full smoke tests, then decommission using Decommission-Customer.ps1.
+    This validates the complete customer lifecycle is repeatable.
+  </prompt>
+
+  <role>QA engineer validating provisioning repeatability and decommission safety.</role>
+
+  <goal>
+    Confirmed repeatable customer provisioning: second customer provisions successfully,
+    passes smoke tests, and decommissions cleanly without affecting demo or platform.
+  </goal>
+
+  <inputs>
+    <file purpose="provision-script">scripts/Provision-Customer.ps1</file>
+    <file purpose="decommission-script">scripts/Decommission-Customer.ps1</file>
+    <file purpose="test-script">scripts/Test-Deployment.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-03">Decommission must not affect demo or platform</constraint>
+    <constraint source="FR-10">Provisioning must be repeatable</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Customer lifecycle validation</topic>
+    <files>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Decommission-Customer.ps1</file>
+      <file>scripts/Test-Deployment.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the repeatability validation — proving the provisioning and decommissioning
+      process works for a second customer and doesn't affect existing environments.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-014" status="complete">Provision-Customer.ps1 exists</dependency>
+      <dependency task="PRODENV-015" status="complete">Decommission-Customer.ps1 exists</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Provision test customer">
+      Run: Provision-Customer.ps1 -CustomerId test -DisplayName "Test Customer"
+    </step>
+    <step order="2" name="Verify test customer">
+      Run: Test-Deployment.ps1 -Scope Customer -CustomerId test
+    </step>
+    <step order="3" name="Verify demo unaffected">
+      Run: Test-Deployment.ps1 -Scope Customer -CustomerId demo
+      Confirm demo still works.
+    </step>
+    <step order="4" name="Decommission test customer">
+      Run: Decommission-Customer.ps1 -CustomerId test
+    </step>
+    <step order="5" name="Verify clean teardown">
+      Confirm rg-spaarke-test-prod is deleted.
+      Run demo smoke tests again to confirm platform unaffected.
+    </step>
+    <step order="6" name="Document results">
+      Record provisioning time, decommission time, any issues.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Repeatability validation results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test customer provisioned successfully</criterion>
+    <criterion testable="true">Test customer smoke tests pass</criterion>
+    <criterion testable="true">Demo customer unaffected during test provisioning</criterion>
+    <criterion testable="true">Test customer decommissioned cleanly</criterion>
+    <criterion testable="true">Platform and demo unaffected after decommission</criterion>
+    <criterion testable="true">Complete lifecycle (provision → test → decommission) documented</criterion>
+  </acceptance-criteria>
+</task>

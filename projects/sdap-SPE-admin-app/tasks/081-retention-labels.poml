@@ -1,0 +1,56 @@
+<task id="SPE-081" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Retention Label Management</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, bff-api, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-072</dependencies>
+  </metadata>
+  <prompt>Implement retention label endpoints and UI for viewing and applying retention labels to containers. Retention labels enforce data governance policies by controlling how long content is retained and what happens when the retention period expires, ensuring compliance with regulatory requirements.</prompt>
+  <role>Full-Stack Developer with Microsoft Graph compliance API and Fluent UI v9 expertise</role>
+  <goal>Working BFF endpoints for retention labels and a UI for viewing available labels and applying them to containers.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+    <constraint source="ADR-012">Use shared UI components from @spaarke/ui-components</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Retention labels are Microsoft Purview compliance features that enforce data retention policies. They specify how long content must be kept (retention period) and what action to take when the period expires (delete, start disposition review, or do nothing). Administrators need to view available labels and apply them to containers to ensure their SPE content complies with organizational and regulatory retention requirements.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define RetentionLabelDto with id, displayName, description, retentionDuration, retentionAction, and ContainerRetentionLabelDto</step>
+    <step order="2" name="add-graph-methods">Add ListRetentionLabelsAsync and ApplyRetentionLabelAsync to SpeAdminGraphService</step>
+    <step order="3" name="add-list-endpoint">Add GET /api/spe/retention/labels endpoint to list available retention labels</step>
+    <step order="4" name="add-apply-endpoint">Add POST /api/spe/containers/{id}/retentionlabel endpoint to apply a label to a container</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to both endpoints</step>
+    <step order="6" name="create-ui">Create components/retention/RetentionLabelsPanel.tsx showing available labels and apply action</step>
+    <step order="7" name="integrate-container-detail">Add retention label section to ContainerDetail panel showing current label and change option</step>
+    <step order="8" name="add-tests">Write unit tests for endpoints</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/RetentionLabelDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/retention/RetentionLabelsPanel.tsx</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/RetentionLabelTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/retention/labels returns available retention labels</criterion>
+    <criterion testable="true">POST /api/spe/containers/{id}/retentionlabel applies a label to a container</criterion>
+    <criterion testable="true">RetentionLabelsPanel shows available labels with apply action</criterion>
+    <criterion testable="true">ContainerDetail shows current retention label for the container</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to all endpoints</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

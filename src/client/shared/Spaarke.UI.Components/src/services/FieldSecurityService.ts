@@ -3,7 +3,7 @@
  * Uses Dataverse Field Security Profiles
  */
 
-import { IFieldSecurity } from "../types/CommandTypes";
+import { IFieldSecurity } from '../types/CommandTypes';
 
 /**
  * Field security service for column-level permissions
@@ -37,18 +37,13 @@ export class FieldSecurityService {
 
       // Step 3: Query field permissions for each field
       for (const fieldName of fieldNames) {
-        const fieldSecurity = await this.getFieldPermissions(
-          webAPI,
-          entityLogicalName,
-          fieldName,
-          userProfiles
-        );
+        const fieldSecurity = await this.getFieldPermissions(webAPI, entityLogicalName, fieldName, userProfiles);
         fieldSecurityMap.set(fieldName, fieldSecurity);
       }
 
       return fieldSecurityMap;
     } catch (error) {
-      console.error("Error retrieving field security permissions:", error);
+      console.error('Error retrieving field security permissions:', error);
 
       // Default: assume all fields are readable but not updateable
       fieldNames.forEach(fieldName => {
@@ -58,8 +53,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       });
 
@@ -71,16 +66,13 @@ export class FieldSecurityService {
    * Get current user ID from usersettings
    */
   private static async getCurrentUserId(webAPI: ComponentFramework.WebApi): Promise<string> {
-    const userSettings = await webAPI.retrieveMultipleRecords(
-      "usersettings",
-      "?$select=systemuserid&$top=1"
-    );
+    const userSettings = await webAPI.retrieveMultipleRecords('usersettings', '?$select=systemuserid&$top=1');
 
     if (userSettings.entities && userSettings.entities.length > 0) {
       return userSettings.entities[0].systemuserid;
     }
 
-    throw new Error("Could not retrieve current user ID");
+    throw new Error('Could not retrieve current user ID');
   }
 
   /**
@@ -93,13 +85,13 @@ export class FieldSecurityService {
     try {
       // Query systemuserprofiles association
       const response = await webAPI.retrieveMultipleRecords(
-        "systemuserprofiles",
+        'systemuserprofiles',
         `?$select=fieldsecurityprofileid&$filter=systemuserid eq ${userId}`
       );
 
       return response.entities.map(e => e.fieldsecurityprofileid);
     } catch (error) {
-      console.warn("Could not retrieve user field security profiles:", error);
+      console.warn('Could not retrieve user field security profiles:', error);
       return [];
     }
   }
@@ -116,10 +108,10 @@ export class FieldSecurityService {
 
     try {
       // Query attribute metadata to check IsSecured property
-      const filter = fieldNames.map(f => `LogicalName eq '${f}'`).join(" or ");
+      const filter = fieldNames.map(f => `LogicalName eq '${f}'`).join(' or ');
 
       const attributes = await webAPI.retrieveMultipleRecords(
-        "attributedefinition",
+        'attributedefinition',
         `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and (${filter})`
       );
 
@@ -131,8 +123,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: !isSecured, // If secured and no profile, cannot read
             canUpdate: !isSecured,
-            canCreate: !isSecured
-          }
+            canCreate: !isSecured,
+          },
         });
       });
 
@@ -145,15 +137,15 @@ export class FieldSecurityService {
             permissions: {
               canRead: true,
               canUpdate: true,
-              canCreate: true
-            }
+              canCreate: true,
+            },
           });
         }
       });
 
       return fieldSecurityMap;
     } catch (error) {
-      console.warn("Could not retrieve field security metadata:", error);
+      console.warn('Could not retrieve field security metadata:', error);
 
       // Default: all fields accessible
       fieldNames.forEach(fieldName => {
@@ -163,8 +155,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       });
 
@@ -184,7 +176,7 @@ export class FieldSecurityService {
     try {
       // Step 1: Check if field is secured
       const attributeMetadata = await webAPI.retrieveMultipleRecords(
-        "attributedefinition",
+        'attributedefinition',
         `?$select=logicalname,issecured&$filter=EntityLogicalName eq '${entityLogicalName}' and LogicalName eq '${fieldName}'`
       );
 
@@ -196,8 +188,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         };
       }
 
@@ -211,17 +203,17 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         };
       }
 
       // Step 2: Query field permissions from fieldsecurityprofile
       const attributeId = attributeMetadata.entities[0].metadataid;
-      const profileFilter = profileIds.map(id => `_fieldsecurityprofileid_value eq ${id}`).join(" or ");
+      const profileFilter = profileIds.map(id => `_fieldsecurityprofileid_value eq ${id}`).join(' or ');
 
       const permissions = await webAPI.retrieveMultipleRecords(
-        "fieldpermission",
+        'fieldpermission',
         `?$select=canread,canupdate,cancreate,canreadunmasked&$filter=_attributeid_value eq ${attributeId} and (${profileFilter})`
       );
 
@@ -251,8 +243,8 @@ export class FieldSecurityService {
           canRead,
           canUpdate,
           canCreate,
-          canReadUnmasked
-        }
+          canReadUnmasked,
+        },
       };
     } catch (error) {
       console.warn(`Could not retrieve field permissions for ${fieldName}:`, error);
@@ -264,8 +256,8 @@ export class FieldSecurityService {
         permissions: {
           canRead: false,
           canUpdate: false,
-          canCreate: false
-        }
+          canCreate: false,
+        },
       };
     }
   }
@@ -274,9 +266,7 @@ export class FieldSecurityService {
    * Get field security from dataset column metadata (dataset-bound mode)
    * This is the preferred method when available
    */
-  static getFieldSecurityFromDataset(
-    dataset: ComponentFramework.PropertyTypes.DataSet
-  ): Map<string, IFieldSecurity> {
+  static getFieldSecurityFromDataset(dataset: ComponentFramework.PropertyTypes.DataSet): Map<string, IFieldSecurity> {
     const fieldSecurityMap = new Map<string, IFieldSecurity>();
 
     // PCF dataset columns have security information
@@ -290,8 +280,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: security.readable !== false,
             canUpdate: security.editable !== false,
-            canCreate: security.editable !== false
-          }
+            canCreate: security.editable !== false,
+          },
         });
       } else {
         // No security metadata - assume accessible
@@ -301,8 +291,8 @@ export class FieldSecurityService {
           permissions: {
             canRead: true,
             canUpdate: true,
-            canCreate: true
-          }
+            canCreate: true,
+          },
         });
       }
     });

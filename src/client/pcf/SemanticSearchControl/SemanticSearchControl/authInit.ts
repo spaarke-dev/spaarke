@@ -44,22 +44,22 @@ const BFF_APP_ID = '1e40baad-e065-4aea-a8d4-4b7ab273458c';
  * @param bffApiUrl BFF API base URL (from control parameters)
  */
 export async function initializeAuth(bffApiUrl: string): Promise<void> {
-    console.info('[authInit] Initializing @spaarke/auth for SemanticSearchControl...');
+  console.info('[authInit] Initializing @spaarke/auth for SemanticSearchControl...');
 
-    const config: IAuthConfig = {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-        // CRITICAL: Static redirect URI matching Azure AD app registration
-        // Must be the Dataverse org URL, NOT window.location.origin
-        redirectUri: 'https://spaarkedev1.crm.dynamics.com',
-        // Named scope: api://<BFF_APP_ID>/user_impersonation
-        bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
-        bffBaseUrl: bffApiUrl,
-        // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
-        proactiveRefresh: true,
-    };
+  const config: IAuthConfig = {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    // CRITICAL: Static redirect URI matching Azure AD app registration
+    // Must be the Dataverse org URL, NOT window.location.origin
+    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
+    // Named scope: api://<BFF_APP_ID>/user_impersonation
+    bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
+    bffBaseUrl: bffApiUrl,
+    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
+    proactiveRefresh: true,
+  };
 
-    await initAuth(config);
+  await initAuth(config);
 
-    console.info('[authInit] @spaarke/auth initialized successfully for SemanticSearchControl');
+  console.info('[authInit] @spaarke/auth initialized successfully for SemanticSearchControl');
 }

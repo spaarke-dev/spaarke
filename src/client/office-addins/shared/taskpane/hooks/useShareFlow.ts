@@ -108,11 +108,7 @@ export interface ShareFlowCallbacks {
   /** Search for documents */
   onSearch?: (query: string) => Promise<ShareDocument[]>;
   /** Generate share links */
-  onGenerateLinks?: (
-    documentIds: string[],
-    role: ShareRole,
-    recipientEmails?: string[]
-  ) => Promise<ShareLink[]>;
+  onGenerateLinks?: (documentIds: string[], role: ShareRole, recipientEmails?: string[]) => Promise<ShareLink[]>;
   /** Prepare document attachments */
   onPrepareAttachments?: (documentIds: string[]) => Promise<ShareAttachment[]>;
   /** Insert links into email/document via host adapter */
@@ -245,10 +241,8 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   // Derived: selected documents from search results and recent
   const selectedDocuments = useMemo(() => {
     const allDocuments = [...state.searchResults, ...state.recentDocuments];
-    const uniqueDocuments = allDocuments.filter(
-      (doc, index, self) => self.findIndex((d) => d.id === doc.id) === index
-    );
-    return uniqueDocuments.filter((doc) => state.selectedDocumentIds.has(doc.id));
+    const uniqueDocuments = allDocuments.filter((doc, index, self) => self.findIndex(d => d.id === doc.id) === index);
+    return uniqueDocuments.filter(doc => state.selectedDocumentIds.has(doc.id));
   }, [state.searchResults, state.recentDocuments, state.selectedDocumentIds]);
 
   // Derived: has selection
@@ -269,21 +263,21 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   // Derived: exceeds attachment limit
   const exceedsAttachmentLimit = useMemo(() => {
     if (selectedDocuments.length === 0) return false;
-    const exceedsSingle = selectedDocuments.some((doc) => doc.size > MAX_ATTACHMENT_SIZE_BYTES);
+    const exceedsSingle = selectedDocuments.some(doc => doc.size > MAX_ATTACHMENT_SIZE_BYTES);
     const exceedsTotal = totalSelectedSize > MAX_TOTAL_ATTACHMENT_SIZE_BYTES;
     return exceedsSingle || exceedsTotal;
   }, [selectedDocuments, totalSelectedSize]);
 
   // Actions
   const setSearchQuery = useCallback((query: string) => {
-    setState((prev) => ({ ...prev, searchQuery: query }));
+    setState(prev => ({ ...prev, searchQuery: query }));
   }, []);
 
   const executeSearch = useCallback(async () => {
     const query = state.searchQuery.trim();
     if (!query || !callbacks.onSearch) return;
 
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isSearching: true,
       searchError: null,
@@ -292,13 +286,13 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
     try {
       const results = await callbacks.onSearch(query);
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isSearching: false,
         searchResults: results,
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isSearching: false,
         searchError: error instanceof Error ? error.message : 'Search failed',
@@ -307,7 +301,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, [state.searchQuery, callbacks]);
 
   const clearSearch = useCallback(() => {
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       searchQuery: '',
       searchResults: [],
@@ -316,7 +310,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const selectDocument = useCallback((documentId: string) => {
-    setState((prev) => {
+    setState(prev => {
       const newSelected = new Set(prev.selectedDocumentIds);
       newSelected.add(documentId);
       return {
@@ -330,7 +324,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const deselectDocument = useCallback((documentId: string) => {
-    setState((prev) => {
+    setState(prev => {
       const newSelected = new Set(prev.selectedDocumentIds);
       newSelected.delete(documentId);
       return {
@@ -344,7 +338,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const toggleDocumentSelection = useCallback((documentId: string) => {
-    setState((prev) => {
+    setState(prev => {
       const newSelected = new Set(prev.selectedDocumentIds);
       if (newSelected.has(documentId)) {
         newSelected.delete(documentId);
@@ -363,8 +357,8 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
   const selectAll = useCallback(() => {
     const allDocuments = [...state.searchResults, ...state.recentDocuments];
-    const shareableIds = allDocuments.filter((doc) => doc.canShare).map((doc) => doc.id);
-    setState((prev) => ({
+    const shareableIds = allDocuments.filter(doc => doc.canShare).map(doc => doc.id);
+    setState(prev => ({
       ...prev,
       selectedDocumentIds: new Set(shareableIds),
       generatedLinks: [],
@@ -374,7 +368,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, [state.searchResults, state.recentDocuments]);
 
   const clearSelection = useCallback(() => {
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       selectedDocumentIds: new Set(),
       generatedLinks: [],
@@ -384,7 +378,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const setSelectedRole = useCallback((role: ShareRole) => {
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       selectedRole: role,
       generatedLinks: [], // Clear links when role changes
@@ -392,14 +386,14 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const setGrantAccessToRecipients = useCallback((value: boolean) => {
-    setState((prev) => ({ ...prev, grantAccessToRecipients: value }));
+    setState(prev => ({ ...prev, grantAccessToRecipients: value }));
   }, []);
 
   const generateLinks = useCallback(
     async (recipientEmails?: string[]) => {
       if (!callbacks.onGenerateLinks || state.selectedDocumentIds.size === 0) return;
 
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isGenerating: true,
         actionError: null,
@@ -413,14 +407,14 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
           state.selectedRole,
           state.grantAccessToRecipients ? recipientEmails : undefined
         );
-        setState((prev) => ({
+        setState(prev => ({
           ...prev,
           isGenerating: false,
           generatedLinks: links,
           successMessage: `Generated ${links.length} share link${links.length !== 1 ? 's' : ''}`,
         }));
       } catch (error) {
-        setState((prev) => ({
+        setState(prev => ({
           ...prev,
           isGenerating: false,
           actionError: error instanceof Error ? error.message : 'Failed to generate links',
@@ -433,7 +427,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const prepareAttachments = useCallback(async () => {
     if (!callbacks.onPrepareAttachments || state.selectedDocumentIds.size === 0) return;
 
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isGenerating: true,
       actionError: null,
@@ -443,14 +437,14 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
     try {
       const documentIds = Array.from(state.selectedDocumentIds);
       const attachments = await callbacks.onPrepareAttachments(documentIds);
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isGenerating: false,
         preparedAttachments: attachments,
         successMessage: `Prepared ${attachments.length} attachment${attachments.length !== 1 ? 's' : ''}`,
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isGenerating: false,
         actionError: error instanceof Error ? error.message : 'Failed to prepare attachments',
@@ -461,7 +455,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const insertLinks = useCallback(async () => {
     if (!callbacks.onInsertLinks || state.generatedLinks.length === 0) return;
 
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isInserting: true,
       actionError: null,
@@ -469,13 +463,13 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
     try {
       await callbacks.onInsertLinks(state.generatedLinks);
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isInserting: false,
         successMessage: `Inserted ${state.generatedLinks.length} link${state.generatedLinks.length !== 1 ? 's' : ''} into email`,
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isInserting: false,
         actionError: error instanceof Error ? error.message : 'Failed to insert links',
@@ -486,7 +480,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const attachFiles = useCallback(async () => {
     if (!callbacks.onAttachFiles || state.preparedAttachments.length === 0) return;
 
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isInserting: true,
       actionError: null,
@@ -494,13 +488,13 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
 
     try {
       await callbacks.onAttachFiles(state.preparedAttachments);
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isInserting: false,
         successMessage: `Attached ${state.preparedAttachments.length} file${state.preparedAttachments.length !== 1 ? 's' : ''} to email`,
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isInserting: false,
         actionError: error instanceof Error ? error.message : 'Failed to attach files',
@@ -511,9 +505,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const copyLinksToClipboard = useCallback(async () => {
     if (state.generatedLinks.length === 0) return;
 
-    const linkText = state.generatedLinks
-      .map((link) => `${link.title}: ${link.url}`)
-      .join('\n');
+    const linkText = state.generatedLinks.map(link => `${link.title}: ${link.url}`).join('\n');
 
     try {
       if (callbacks.onCopyToClipboard) {
@@ -521,12 +513,12 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
       } else {
         await navigator.clipboard.writeText(linkText);
       }
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         successMessage: 'Links copied to clipboard',
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         actionError: error instanceof Error ? error.message : 'Failed to copy to clipboard',
       }));
@@ -536,20 +528,20 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   const loadRecentDocuments = useCallback(async () => {
     if (!callbacks.onFetchRecent) return;
 
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       isLoadingRecent: true,
     }));
 
     try {
       const recent = await callbacks.onFetchRecent();
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isLoadingRecent: false,
         recentDocuments: recent,
       }));
     } catch (error) {
-      setState((prev) => ({
+      setState(prev => ({
         ...prev,
         isLoadingRecent: false,
         // Don't set error for recent - it's not critical
@@ -558,7 +550,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, [callbacks]);
 
   const clearError = useCallback(() => {
-    setState((prev) => ({
+    setState(prev => ({
       ...prev,
       actionError: null,
       searchError: null,
@@ -566,7 +558,7 @@ export function useShareFlow(callbacks: ShareFlowCallbacks = {}): UseShareFlowRe
   }, []);
 
   const clearSuccess = useCallback(() => {
-    setState((prev) => ({ ...prev, successMessage: null }));
+    setState(prev => ({ ...prev, successMessage: null }));
   }, []);
 
   const reset = useCallback(() => {

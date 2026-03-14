@@ -10,14 +10,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Badge,
-  Tooltip,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, Badge, Tooltip, mergeClasses } from '@fluentui/react-components';
 import { Sparkle20Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -115,29 +108,13 @@ export const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({
   const description = getConfidenceDescription(confidence);
 
   const levelClassName =
-    level === 'high'
-      ? styles.highConfidence
-      : level === 'medium'
-        ? styles.mediumConfidence
-        : styles.lowConfidence;
+    level === 'high' ? styles.highConfidence : level === 'medium' ? styles.mediumConfidence : styles.lowConfidence;
 
-  const sizeClassName =
-    size === 'compact'
-      ? styles.compact
-      : size === 'large'
-        ? styles.large
-        : undefined;
+  const sizeClassName = size === 'compact' ? styles.compact : size === 'large' ? styles.large : undefined;
 
   return (
     <Tooltip content={description} relationship="description" withArrow>
-      <span
-        className={mergeClasses(
-          styles.badge,
-          levelClassName,
-          sizeClassName,
-          className
-        )}
-      >
+      <span className={mergeClasses(styles.badge, levelClassName, sizeClassName, className)}>
         {showIcon && <Sparkle20Regular className={styles.icon} />}
         {percentage}%
       </span>
@@ -156,16 +133,12 @@ export interface ConfidenceNodeBadgeProps {
   className?: string;
 }
 
-export const ConfidenceNodeBadge: React.FC<ConfidenceNodeBadgeProps> = ({
-  confidence,
-  className,
-}) => {
+export const ConfidenceNodeBadge: React.FC<ConfidenceNodeBadgeProps> = ({ confidence, className }) => {
   const level = getConfidenceLevel(confidence);
   const percentage = Math.round(confidence * 100);
   const description = getConfidenceDescription(confidence);
 
-  const color =
-    level === 'high' ? 'success' : level === 'medium' ? 'warning' : 'danger';
+  const color = level === 'high' ? 'success' : level === 'medium' ? 'warning' : 'danger';
 
   return (
     <Tooltip content={description} relationship="description" withArrow>

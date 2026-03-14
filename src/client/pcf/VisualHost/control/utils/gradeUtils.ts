@@ -3,23 +3,18 @@
  * Converts grade values, resolves colors, handles template substitution
  */
 
-import { tokens } from "@fluentui/react-components";
-import * as React from "react";
-import {
-  GavelRegular,
-  MoneyRegular,
-  TargetRegular,
-  QuestionCircleRegular,
-} from "@fluentui/react-icons";
+import { tokens } from '@fluentui/react-components';
+import * as React from 'react';
+import { GavelRegular, MoneyRegular, TargetRegular, QuestionCircleRegular } from '@fluentui/react-icons';
 
 // ============= Interfaces =============
 
 export interface IColorRule {
   range: [number, number];
-  color: "blue" | "yellow" | "red";
+  color: 'blue' | 'yellow' | 'red';
 }
 
-export type GradeColorScheme = "blue" | "yellow" | "red" | "neutral";
+export type GradeColorScheme = 'blue' | 'yellow' | 'red' | 'neutral';
 
 export interface IGradeColorTokens {
   cardBackground: string;
@@ -33,50 +28,47 @@ export interface IGradeColorTokens {
 // ============= Constants =============
 
 export const DEFAULT_COLOR_RULES: IColorRule[] = [
-  { range: [0.85, 1.00], color: "blue" },
-  { range: [0.70, 0.84], color: "yellow" },
-  { range: [0.00, 0.69], color: "red" },
+  { range: [0.85, 1.0], color: 'blue' },
+  { range: [0.7, 0.84], color: 'yellow' },
+  { range: [0.0, 0.69], color: 'red' },
 ];
 
 // ============= Grade Conversion =============
 
 export function gradeValueToLetter(value: number | null): string {
-  if (value === null || value === undefined) return "N/A";
+  if (value === null || value === undefined) return 'N/A';
   const clamped = Math.max(0, Math.min(1, value));
-  if (clamped >= 1.00) return "A+";
-  if (clamped >= 0.95) return "A";
-  if (clamped >= 0.90) return "B+";
-  if (clamped >= 0.85) return "B";
-  if (clamped >= 0.80) return "C+";
-  if (clamped >= 0.75) return "C";
-  if (clamped >= 0.70) return "D+";
-  if (clamped >= 0.65) return "D";
-  return "F";
+  if (clamped >= 1.0) return 'A+';
+  if (clamped >= 0.95) return 'A';
+  if (clamped >= 0.9) return 'B+';
+  if (clamped >= 0.85) return 'B';
+  if (clamped >= 0.8) return 'C+';
+  if (clamped >= 0.75) return 'C';
+  if (clamped >= 0.7) return 'D+';
+  if (clamped >= 0.65) return 'D';
+  return 'F';
 }
 
 export function gradeValueToPercent(value: number | null): string {
-  if (value === null || value === undefined) return "N/A";
+  if (value === null || value === undefined) return 'N/A';
   return Math.round(value * 100).toString();
 }
 
 // ============= Color Resolution =============
 
-export function resolveGradeColorScheme(
-  gradeValue: number | null,
-  colorRules?: IColorRule[]
-): GradeColorScheme {
-  if (gradeValue === null || gradeValue === undefined) return "neutral";
+export function resolveGradeColorScheme(gradeValue: number | null, colorRules?: IColorRule[]): GradeColorScheme {
+  if (gradeValue === null || gradeValue === undefined) return 'neutral';
   const rules = colorRules || DEFAULT_COLOR_RULES;
   for (const rule of rules) {
     const [min, max] = rule.range;
     if (gradeValue >= min && gradeValue <= max) return rule.color;
   }
-  return "red";
+  return 'red';
 }
 
 export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens {
   switch (scheme) {
-    case "blue":
+    case 'blue':
       return {
         cardBackground: tokens.colorBrandBackground2,
         borderAccent: tokens.colorBrandBackground,
@@ -85,7 +77,7 @@ export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens
         contextText: tokens.colorNeutralForeground2,
         labelColor: tokens.colorNeutralForeground2,
       };
-    case "yellow":
+    case 'yellow':
       return {
         cardBackground: tokens.colorPaletteYellowBackground1,
         borderAccent: tokens.colorPaletteYellowBorderActive,
@@ -94,7 +86,7 @@ export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens
         contextText: tokens.colorNeutralForeground2,
         labelColor: tokens.colorNeutralForeground2,
       };
-    case "red":
+    case 'red':
       return {
         cardBackground: tokens.colorPaletteRedBackground1,
         borderAccent: tokens.colorPaletteRedBorderActive,
@@ -103,7 +95,7 @@ export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens
         contextText: tokens.colorNeutralForeground2,
         labelColor: tokens.colorNeutralForeground2,
       };
-    case "neutral":
+    case 'neutral':
     default:
       return {
         cardBackground: tokens.colorNeutralBackground3,
@@ -118,17 +110,11 @@ export function getGradeColorTokens(scheme: GradeColorScheme): IGradeColorTokens
 
 // ============= Template Substitution =============
 
-export function resolveContextTemplate(
-  template: string,
-  gradeValue: number | null,
-  areaName: string
-): string {
+export function resolveContextTemplate(template: string, gradeValue: number | null, areaName: string): string {
   if (gradeValue === null || gradeValue === undefined) {
     return `No grade data available for ${areaName}`;
   }
-  return template
-    .replace(/\{grade\}/g, gradeValueToPercent(gradeValue))
-    .replace(/\{area\}/g, areaName);
+  return template.replace(/\{grade\}/g, gradeValueToPercent(gradeValue)).replace(/\{area\}/g, areaName);
 }
 
 // ============= Icon Resolution =============
@@ -141,9 +127,7 @@ const AREA_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>>
 
 const DEFAULT_ICON = QuestionCircleRegular;
 
-export function resolveAreaIcon(
-  areaIcon: string
-): React.ComponentType<{ className?: string }> {
+export function resolveAreaIcon(areaIcon: string): React.ComponentType<{ className?: string }> {
   const normalized = areaIcon.toLowerCase().trim();
   return AREA_ICON_MAP[normalized] || DEFAULT_ICON;
 }

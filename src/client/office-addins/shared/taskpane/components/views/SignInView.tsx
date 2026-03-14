@@ -72,11 +72,7 @@ export interface SignInViewProps {
   error?: string | null;
 }
 
-export const SignInView: React.FC<SignInViewProps> = ({
-  onSignIn,
-  isLoading = false,
-  error,
-}) => {
+export const SignInView: React.FC<SignInViewProps> = ({ onSignIn, isLoading = false, error }) => {
   const styles = useStyles();
 
   const handleSignIn = async () => {

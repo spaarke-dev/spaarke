@@ -14,14 +14,8 @@
  *   - Parent container controls scrolling — component never scrolls itself
  */
 
-import * as React from "react";
-import {
-  Card,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import {
   GavelRegular,
   MoneyRegular,
@@ -35,17 +29,11 @@ import {
   PeopleRegular,
   StarRegular,
   ClipboardRegular,
-} from "@fluentui/react-icons";
-import type {
-  IAggregatedDataPoint,
-  DrillInteraction,
-  ICardConfig,
-  ColorTokenSet,
-  ValueFormatType,
-} from "../types";
-import { formatValue } from "../utils/valueFormatters";
+} from '@fluentui/react-icons';
+import type { IAggregatedDataPoint, DrillInteraction, ICardConfig, ColorTokenSet, ValueFormatType } from '../types';
+import { formatValue } from '../utils/valueFormatters';
 
-export type MatrixJustification = "left" | "left-center" | "center" | "right-center" | "right";
+export type MatrixJustification = 'left' | 'left-center' | 'center' | 'right-center' | 'right';
 
 export interface IMetricCardMatrixProps {
   /** Title displayed above the card grid */
@@ -73,9 +61,9 @@ const CARD_GAP = 8;
 
 /** Card size → CSS min-width for auto-fill grid */
 const CARD_SIZE_MAP: Record<string, string> = {
-  small: "140px",
-  medium: "200px",
-  large: "280px",
+  small: '140px',
+  medium: '200px',
+  large: '280px',
 };
 
 // ============= Icon Resolution =============
@@ -106,9 +94,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 /**
  * Resolve icon component from config icon name string
  */
-function resolveIcon(
-  iconName: string | undefined
-): React.ComponentType<{ className?: string }> | null {
+function resolveIcon(iconName: string | undefined): React.ComponentType<{ className?: string }> | null {
   if (!iconName) return null;
   const normalized = iconName.toLowerCase().trim();
   return ICON_MAP[normalized] || null;
@@ -127,7 +113,7 @@ function getIconForDataPoint(
   const byLabel = iconMap[dp.label];
   if (byLabel) return resolveIcon(byLabel);
   // Try raw field value as string (e.g., "100000000")
-  const rawKey = String(dp.fieldValue ?? "");
+  const rawKey = String(dp.fieldValue ?? '');
   const byRaw = iconMap[rawKey];
   if (byRaw) return resolveIcon(byRaw);
   return null;
@@ -151,35 +137,35 @@ interface ICardColorTokens {
  */
 function getTokenSetColors(tokenSet: ColorTokenSet): ICardColorTokens {
   switch (tokenSet) {
-    case "brand":
+    case 'brand':
       return {
         cardBackground: tokens.colorBrandBackground2,
         borderAccent: tokens.colorBrandBackground,
         valueText: tokens.colorBrandForeground1,
         iconColor: tokens.colorBrandForeground2,
       };
-    case "warning":
+    case 'warning':
       return {
         cardBackground: tokens.colorPaletteYellowBackground1,
         borderAccent: tokens.colorPaletteYellowBorderActive,
         valueText: tokens.colorPaletteYellowForeground2,
         iconColor: tokens.colorPaletteYellowForeground2,
       };
-    case "danger":
+    case 'danger':
       return {
         cardBackground: tokens.colorPaletteRedBackground1,
         borderAccent: tokens.colorPaletteRedBorderActive,
         valueText: tokens.colorPaletteRedForeground1,
         iconColor: tokens.colorPaletteRedForeground1,
       };
-    case "success":
+    case 'success':
       return {
         cardBackground: tokens.colorPaletteGreenBackground1,
         borderAccent: tokens.colorPaletteGreenBorderActive,
         valueText: tokens.colorPaletteGreenForeground1,
         iconColor: tokens.colorPaletteGreenForeground1,
       };
-    case "neutral":
+    case 'neutral':
     default:
       return {
         cardBackground: tokens.colorNeutralBackground3,
@@ -193,14 +179,11 @@ function getTokenSetColors(tokenSet: ColorTokenSet): ICardColorTokens {
 /**
  * Resolve per-card color tokens based on config and data point
  */
-function resolveCardColors(
-  dp: IAggregatedDataPoint,
-  config?: ICardConfig
-): ICardColorTokens {
+function resolveCardColors(dp: IAggregatedDataPoint, config?: ICardConfig): ICardColorTokens {
   if (!config) return {};
 
   switch (config.colorSource) {
-    case "optionSetColor": {
+    case 'optionSetColor': {
       // Use option set hex color as accent only (border + icon tint)
       // Card background and text remain neutral for dark mode compatibility
       if (dp.color) {
@@ -212,7 +195,7 @@ function resolveCardColors(
       return {};
     }
 
-    case "valueThreshold": {
+    case 'valueThreshold': {
       if (!config.colorThresholds || config.colorThresholds.length === 0) return {};
       // Find matching threshold for this data point's value
       const normalizedValue = dp.value;
@@ -223,22 +206,22 @@ function resolveCardColors(
         }
       }
       // No match — use neutral
-      return getTokenSetColors("neutral");
+      return getTokenSetColors('neutral');
     }
 
-    case "signBased": {
+    case 'signBased': {
       // Negative → danger (red), zero → neutral, positive → success (green)
       // invertSign flips the meaning (negative = good, positive = bad)
       const invert = config.invertSign ?? false;
       if (dp.value < 0) {
-        return getTokenSetColors(invert ? "success" : "danger");
+        return getTokenSetColors(invert ? 'success' : 'danger');
       } else if (dp.value > 0) {
-        return getTokenSetColors(invert ? "danger" : "success");
+        return getTokenSetColors(invert ? 'danger' : 'success');
       }
-      return getTokenSetColors("neutral");
+      return getTokenSetColors('neutral');
     }
 
-    case "none":
+    case 'none':
     default:
       return {};
   }
@@ -268,36 +251,36 @@ function resolveDescription(
 
 const useStyles = makeStyles({
   wrapper: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    boxSizing: "border-box",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   title: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    paddingBottom: "4px",
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    paddingBottom: '4px',
     flexShrink: 0,
   },
   grid: {
-    display: "grid",
+    display: 'grid',
     gap: `${CARD_GAP}px`,
   },
   card: {
-    display: "grid",
-    gridTemplateRows: "auto 1fr auto",
-    boxSizing: "border-box",
-    cursor: "default",
-    transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
+    display: 'grid',
+    gridTemplateRows: 'auto 1fr auto',
+    boxSizing: 'border-box',
+    cursor: 'default',
+    transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out',
     padding: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalS,
     // aspectRatio set inline from cardConfig.aspectRatio
-    position: "relative",
-    overflow: "hidden",
-    containerType: "inline-size",
+    position: 'relative',
+    overflow: 'hidden',
+    containerType: 'inline-size',
   },
   cardWithAccentBar: {
     paddingLeft: `calc(${tokens.spacingHorizontalS} + 4px)`,
@@ -310,38 +293,38 @@ const useStyles = makeStyles({
     paddingLeft: `calc(${tokens.spacingHorizontalXS} + 4px)`,
   },
   cardInteractive: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       boxShadow: tokens.shadow8,
-      transform: "translateY(-2px)",
+      transform: 'translateY(-2px)',
     },
-    "&:active": {
-      transform: "translateY(0)",
+    '&:active': {
+      transform: 'translateY(0)',
     },
   },
   borderAccent: {
-    position: "absolute",
-    left: "0",
-    top: "0",
-    bottom: "0",
-    width: "4px",
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    bottom: '0',
+    width: '4px',
   },
   cardContent: {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     minWidth: 0,
   },
   iconSlot: {
-    position: "absolute",
+    position: 'absolute',
     left: 0,
-    top: "50%",
-    transform: "translateY(-50%)",
-    fontSize: "clamp(18px, 10cqi, 28px)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    top: '50%',
+    transform: 'translateY(-50%)',
+    fontSize: 'clamp(18px, 10cqi, 28px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -351,25 +334,25 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   cardValue: {
-    fontSize: "clamp(16px, 12cqi, 28px)",
+    fontSize: 'clamp(16px, 12cqi, 28px)',
     fontWeight: tokens.fontWeightSemibold,
     lineHeight: 1.2,
     color: tokens.colorNeutralForeground1,
-    overflowWrap: "break-word" as const,
-    wordBreak: "break-all" as const,
-    textAlign: "center" as const,
+    overflowWrap: 'break-word' as const,
+    wordBreak: 'break-all' as const,
+    textAlign: 'center' as const,
   },
   cardValueLarge: {
-    fontSize: "clamp(18px, 14cqi, 36px)",
+    fontSize: 'clamp(18px, 14cqi, 36px)',
     lineHeight: 1.2,
   },
   cardDescription: {
     fontSize: tokens.fontSizeBase200,
     lineHeight: tokens.lineHeightBase200,
     color: tokens.colorNeutralForeground3,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     flexShrink: 0,
   },
 });
@@ -379,22 +362,19 @@ const useStyles = makeStyles({
 /**
  * Sort data points according to config sortBy
  */
-function sortDataPoints(
-  points: IAggregatedDataPoint[],
-  sortBy: string
-): IAggregatedDataPoint[] {
+function sortDataPoints(points: IAggregatedDataPoint[], sortBy: string): IAggregatedDataPoint[] {
   const sorted = [...points];
   switch (sortBy) {
-    case "value":
+    case 'value':
       sorted.sort((a, b) => b.value - a.value);
       break;
-    case "valueAsc":
+    case 'valueAsc':
       sorted.sort((a, b) => a.value - b.value);
       break;
-    case "optionSetOrder":
+    case 'optionSetOrder':
       sorted.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
       break;
-    case "label":
+    case 'label':
     default:
       sorted.sort((a, b) => a.label.localeCompare(b.label));
       break;
@@ -412,7 +392,7 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   dataPoints,
   columns: columnsProp,
   height,
-  justification = "left",
+  justification = 'left',
   onDrillInteraction,
   drillField,
   cardConfig,
@@ -421,16 +401,16 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
 
   // Resolve effective config with defaults
   const config = cardConfig;
-  const effectiveValueFormat = config?.valueFormat ?? "shortNumber";
-  const effectiveNullDisplay = config?.nullDisplay ?? "—";
-  const effectiveCardSize = config?.cardSize ?? "medium";
-  const effectiveSortBy = config?.sortBy ?? "label";
+  const effectiveValueFormat = config?.valueFormat ?? 'shortNumber';
+  const effectiveNullDisplay = config?.nullDisplay ?? '—';
+  const effectiveCardSize = config?.cardSize ?? 'medium';
+  const effectiveSortBy = config?.sortBy ?? 'label';
   const effectiveCompact = config?.compact ?? false;
   const effectiveColumns = config?.columns ?? columnsProp;
   const effectiveMaxCards = config?.maxCards;
   const effectiveShowAccentBar = config?.showAccentBar ?? false;
   const effectiveTitleFontSize = config?.titleFontSize;
-  const effectiveAspectRatio = config?.aspectRatio ?? "5 / 3";
+  const effectiveAspectRatio = config?.aspectRatio ?? '5 / 3';
   const effectiveDataJustification = config?.dataJustification;
 
   // Sort and limit data points
@@ -446,7 +426,7 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
     if (isInteractive && onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: dp.fieldValue ?? dp.label,
         label: dp.label,
       });
@@ -456,21 +436,21 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
   // Grid layout: responsive auto-fill or fixed columns
   const cardMinWidth = CARD_SIZE_MAP[effectiveCardSize] || CARD_SIZE_MAP.medium;
   const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: effectiveColumns && effectiveColumns > 0
-      ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
-      : `repeat(auto-fill, minmax(${cardMinWidth}, 1fr))`,
+    gridTemplateColumns:
+      effectiveColumns && effectiveColumns > 0
+        ? `repeat(${Math.min(effectiveColumns, count)}, 1fr)`
+        : `repeat(auto-fill, minmax(${cardMinWidth}, 1fr))`,
     justifyItems:
-      justification === "center" || justification === "left-center" || justification === "right-center"
-        ? "center"
-        : justification === "right" ? "end"
-          : "stretch",
-    alignContent: "start", // Prevent vertical stretching — no whitespace below cards
+      justification === 'center' || justification === 'left-center' || justification === 'right-center'
+        ? 'center'
+        : justification === 'right'
+          ? 'end'
+          : 'stretch',
+    alignContent: 'start', // Prevent vertical stretching — no whitespace below cards
   };
 
   // Wrapper min-height from Height prop
-  const wrapperStyle: React.CSSProperties = height
-    ? { minHeight: `${height}px` }
-    : {};
+  const wrapperStyle: React.CSSProperties = height ? { minHeight: `${height}px` } : {};
 
   // Determine whether to show title from config (default: hidden)
   const showTitle = config?.showTitle ?? false;
@@ -515,19 +495,16 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
               }}
               onClick={isInteractive ? () => handleCardClick(dp) : undefined}
               tabIndex={isInteractive ? 0 : undefined}
-              role={isInteractive ? "button" : "region"}
+              role={isInteractive ? 'button' : 'region'}
               aria-label={
                 isInteractive
-                  ? `${dp.label}: ${formattedVal}. ${description || ""}Click to view details.`
-                  : `${dp.label}: ${formattedVal}${description ? `. ${description}` : ""}`
+                  ? `${dp.label}: ${formattedVal}. ${description || ''}Click to view details.`
+                  : `${dp.label}: ${formattedVal}${description ? `. ${description}` : ''}`
               }
             >
               {/* Color-coded left border accent (conditional on showAccentBar) */}
               {effectiveShowAccentBar && colorTokens.borderAccent && (
-                <div
-                  className={styles.borderAccent}
-                  style={{ backgroundColor: colorTokens.borderAccent }}
-                />
+                <div className={styles.borderAccent} style={{ backgroundColor: colorTokens.borderAccent }} />
               )}
 
               {/* Label: top-left */}
@@ -545,10 +522,7 @@ export const MetricCardMatrix: React.FC<IMetricCardMatrixProps> = ({
                   </span>
                 )}
                 <Text
-                  className={mergeClasses(
-                    styles.cardValue,
-                    effectiveCardSize === "large" && styles.cardValueLarge
-                  )}
+                  className={mergeClasses(styles.cardValue, effectiveCardSize === 'large' && styles.cardValueLarge)}
                   style={colorTokens.valueText ? { color: colorTokens.valueText } : undefined}
                   aria-live="polite"
                 >

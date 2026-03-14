@@ -1,0 +1,41 @@
+<task id="SPE-003" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create sprk_speauditlog Dataverse Table Schema</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>dataverse, schema, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-001, SPE-002</dependencies>
+  </metadata>
+  <prompt>Create the sprk_speauditlog Dataverse table that records all administrative operations performed through the SPE Admin App. This table provides an immutable audit trail with lookups to the environment, container type config, and business unit entities for full traceability.</prompt>
+  <role>Dataverse Platform Engineer</role>
+  <goal>The sprk_speauditlog table exists in Dataverse with all columns, lookups, and a category optionset with correct values.</goal>
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins — no HTTP/Graph calls in plugins; keep execution under 50ms p95.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The audit log captures every administrative operation (container creation, permission changes, billing updates, etc.) with full context about who performed the action, when, against which resource, and the outcome. Category optionset values classify operations for filtering and reporting. Lookups to environment, config, and BU enable scoped audit queries.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define table schema">Define the sprk_speauditlog table with columns: sprk_operation (string), sprk_category (optionset), sprk_targetresource (string), sprk_responsestatus (integer), sprk_performedby (string), sprk_performedon (datetime), plus lookup columns for environment, config, and business unit.</step>
+    <step order="2" name="Create category optionset">Define the sprk_category optionset with values covering key operation categories (e.g., ContainerTypeManagement, PermissionManagement, BillingManagement, EnvironmentManagement, Authentication).</step>
+    <step order="3" name="Create table in Dataverse">Create the table in the Dataverse development environment with all columns and the category optionset.</step>
+    <step order="4" name="Create lookup relationships">Create lookups to sprk_speenvironment, sprk_specontainertypeconfig, and the built-in businessunit entity.</step>
+    <step order="5" name="Add to solution">Add the table, all columns, optionsets, and relationships to the target unmanaged solution.</step>
+    <step order="6" name="Verify creation">Confirm all columns, optionset values, and lookup relationships are correct.</step>
+  </steps>
+  <outputs>
+    <output type="dataverse-table">sprk_speauditlog table with all columns, optionsets, and relationships</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">sprk_speauditlog table exists with columns: sprk_operation, sprk_category, sprk_targetresource, sprk_responsestatus, sprk_performedby, sprk_performedon.</criterion>
+    <criterion testable="true">sprk_category optionset contains values for all operation categories.</criterion>
+    <criterion testable="true">Lookup relationships to sprk_speenvironment, sprk_specontainertypeconfig, and businessunit are functional.</criterion>
+    <criterion testable="true">Table and all components are added to the target unmanaged solution.</criterion>
+  </acceptance-criteria>
+</task>

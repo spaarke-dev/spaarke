@@ -17,17 +17,9 @@ interface AiCompletionNodeProps {
  * AI Completion node - generates text using AI completion.
  * Use for: drafting emails, creating summaries, generating content.
  */
-export const AiCompletionNode = React.memo(function AiCompletionNode({
-  data,
-  selected,
-}: AiCompletionNodeProps) {
+export const AiCompletionNode = React.memo(function AiCompletionNode({ data, selected }: AiCompletionNodeProps) {
   return (
-    <BaseNode
-      data={data}
-      selected={selected}
-      icon={<BrainCircuit20Regular />}
-      typeLabel="AI Completion"
-    >
+    <BaseNode data={data} selected={selected} icon={<BrainCircuit20Regular />} typeLabel="AI Completion">
       {data.outputVariable && (
         <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
           Output: {data.outputVariable}

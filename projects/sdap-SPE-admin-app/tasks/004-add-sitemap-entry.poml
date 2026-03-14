@@ -1,0 +1,38 @@
+<task id="SPE-004" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Add SPE Admin Sitemap Entry</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <tags>dataverse, sitemap, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Add a sitemap entry in the Administration area of the model-driven app so that users can navigate to the SPE Admin web resource (sprk_speadmin). This makes the SPE Admin App discoverable within the existing Dataverse application navigation.</prompt>
+  <role>Dataverse Platform Engineer</role>
+  <goal>The SPE Admin entry appears in the model-driven app navigation under the Administration area and opens the sprk_speadmin web resource.</goal>
+  <constraints>
+    <constraint source="ADR-006">No legacy JS webresources for standalone dialogs — use Code Page pattern for the target web resource.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App will be accessed through the existing model-driven app's sitemap. Adding a sub-area entry under the Administration group provides a natural location for admin-level tooling. The entry points to the sprk_speadmin web resource which hosts the React-based admin interface.</background>
+  </context>
+  <steps>
+    <step order="1" name="Locate sitemap definition">Find the existing sitemap XML definition in the solution or model-driven app configuration.</step>
+    <step order="2" name="Add sub-area entry">Add a SubArea element under the Administration area group pointing to the sprk_speadmin web resource, with appropriate title, icon, and ID.</step>
+    <step order="3" name="Update solution">Include the updated sitemap in the target unmanaged solution.</step>
+    <step order="4" name="Verify navigation">Confirm the SPE Admin entry appears in the model-driven app navigation and opens the correct web resource.</step>
+  </steps>
+  <outputs>
+    <output type="dataverse-sitemap">Updated sitemap with SPE Admin sub-area entry</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SPE Admin appears as a navigation item in the model-driven app under the Administration area.</criterion>
+    <criterion testable="true">Clicking the entry opens the sprk_speadmin web resource.</criterion>
+    <criterion testable="true">Updated sitemap is included in the target unmanaged solution.</criterion>
+  </acceptance-criteria>
+</task>

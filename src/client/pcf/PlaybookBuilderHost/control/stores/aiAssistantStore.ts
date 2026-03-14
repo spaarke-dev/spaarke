@@ -282,10 +282,7 @@ interface AiAssistantState {
   setError: (error: string | null) => void;
 
   // API Integration
-  sendMessage: (
-    message: string,
-    serviceConfig?: AiPlaybookServiceConfig
-  ) => Promise<void>;
+  sendMessage: (message: string, serviceConfig?: AiPlaybookServiceConfig) => Promise<void>;
   abortStream: () => void;
 
   // Test execution actions
@@ -338,21 +335,17 @@ const getService = (config: AiPlaybookServiceConfig): AiPlaybookService => {
 /**
  * Generate a unique ID for messages.
  */
-const generateMessageId = () =>
-  `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const generateMessageId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 /**
  * Generate a unique session ID.
  */
-const generateSessionId = () =>
-  `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const generateSessionId = () => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 /**
  * Convert a CanvasPatchNode to a PlaybookNode for the canvas store.
  */
-const patchNodeToPlaybookNode = (
-  patchNode: CanvasPatchNode
-): PlaybookNode => ({
+const patchNodeToPlaybookNode = (patchNode: CanvasPatchNode): PlaybookNode => ({
   id: patchNode.id,
   type: patchNode.type,
   position: patchNode.position ?? { x: 100, y: 100 },
@@ -441,14 +434,14 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
   // Modal actions
   openModal: () => set({ isOpen: true }),
   closeModal: () => set({ isOpen: false }),
-  toggleModal: () => set((state) => ({ isOpen: !state.isOpen })),
+  toggleModal: () => set(state => ({ isOpen: !state.isOpen })),
 
   // Session actions
-  setPlaybookId: (playbookId) => set({ currentPlaybookId: playbookId }),
+  setPlaybookId: playbookId => set({ currentPlaybookId: playbookId }),
 
-  setServiceConfig: (config) => set({ serviceConfig: config }),
+  setServiceConfig: config => set({ serviceConfig: config }),
 
-  startSession: (playbookId) =>
+  startSession: playbookId =>
     set({
       currentPlaybookId: playbookId,
       sessionId: generateSessionId(),
@@ -464,7 +457,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }),
 
   // Message actions
-  addUserMessage: (content) => {
+  addUserMessage: content => {
     const id = generateMessageId();
     const message: ChatMessage = {
       id,
@@ -472,7 +465,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       content,
       timestamp: new Date(),
     };
-    set((state) => ({ messages: [...state.messages, message] }));
+    set(state => ({ messages: [...state.messages, message] }));
     return id;
   },
 
@@ -485,11 +478,11 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       timestamp: new Date(),
       canvasOperations,
     };
-    set((state) => ({ messages: [...state.messages, message] }));
+    set(state => ({ messages: [...state.messages, message] }));
     return id;
   },
 
-  addSystemMessage: (content) => {
+  addSystemMessage: content => {
     const id = generateMessageId();
     const message: ChatMessage = {
       id,
@@ -497,22 +490,18 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       content,
       timestamp: new Date(),
     };
-    set((state) => ({ messages: [...state.messages, message] }));
+    set(state => ({ messages: [...state.messages, message] }));
     return id;
   },
 
   updateMessage: (messageId, updates) =>
-    set((state) => ({
-      messages: state.messages.map((msg) =>
-        msg.id === messageId ? { ...msg, ...updates } : msg
-      ),
+    set(state => ({
+      messages: state.messages.map(msg => (msg.id === messageId ? { ...msg, ...updates } : msg)),
     })),
 
   appendToMessage: (messageId, content) =>
-    set((state) => ({
-      messages: state.messages.map((msg) =>
-        msg.id === messageId ? { ...msg, content: msg.content + content } : msg
-      ),
+    set(state => ({
+      messages: state.messages.map(msg => (msg.id === messageId ? { ...msg, content: msg.content + content } : msg)),
     })),
 
   clearHistory: () =>
@@ -522,21 +511,24 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }),
 
   // Streaming actions
-  setStreaming: (isStreaming) =>
+  setStreaming: isStreaming =>
     set({
       isStreaming,
       streamingState: isStreaming
         ? { isActive: true, operationCount: 0 }
-        : { isActive: false, operationCount: get().streamingState.operationCount },
+        : {
+            isActive: false,
+            operationCount: get().streamingState.operationCount,
+          },
     }),
 
-  updateStreamingState: (state) =>
-    set((current) => ({
+  updateStreamingState: state =>
+    set(current => ({
       streamingState: { ...current.streamingState, ...state },
     })),
 
   // Canvas patch actions
-  applyCanvasPatch: (patch) => {
+  applyCanvasPatch: patch => {
     const operations: CanvasOperation[] = [];
     const canvasStore = useCanvasStore.getState();
 
@@ -606,9 +598,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
         case 'RemoveEdge':
           if (patch.edgeId) {
-            canvasStore.setEdges(
-              canvasStore.edges.filter((e) => e.id !== patch.edgeId)
-            );
+            canvasStore.setEdges(canvasStore.edges.filter(e => e.id !== patch.edgeId));
             operations.push({
               type: 'remove_edge',
               edgeId: patch.edgeId,
@@ -658,7 +648,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }
 
     if (patch.addEdges) {
-      const newEdges = patch.addEdges.map((edge) => ({
+      const newEdges = patch.addEdges.map(edge => ({
         id: edge.id,
         source: edge.sourceId,
         target: edge.targetId,
@@ -678,9 +668,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }
 
     if (patch.removeEdgeIds) {
-      canvasStore.setEdges(
-        canvasStore.edges.filter((e) => !patch.removeEdgeIds!.includes(e.id))
-      );
+      canvasStore.setEdges(canvasStore.edges.filter(e => !patch.removeEdgeIds!.includes(e.id)));
       for (const edgeId of patch.removeEdgeIds) {
         operations.push({
           type: 'remove_edge',
@@ -692,7 +680,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
     // Update streaming operation count
     if (operations.length > 0) {
-      set((state) => ({
+      set(state => ({
         streamingState: {
           ...state.streamingState,
           operationCount: state.streamingState.operationCount + operations.length,
@@ -704,7 +692,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
   },
 
   // Error handling
-  setError: (error) => set({ error }),
+  setError: error => set({ error }),
 
   // API Integration
   sendMessage: async (message, serviceConfig) => {
@@ -749,7 +737,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       isStreaming: true,
       canvasOperations: [],
     };
-    set((s) => ({
+    set(s => ({
       messages: [...s.messages, assistantMessage],
       isStreaming: true,
       streamingState: { isActive: true, operationCount: 0 },
@@ -763,14 +751,14 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     const request: BuildPlaybookCanvasRequest = {
       message,
       canvasState: {
-        nodes: canvasStore.nodes.map((node) => ({
+        nodes: canvasStore.nodes.map(node => ({
           id: node.id,
           type: node.type,
           position: node.position,
           label: node.data?.label,
           config: node.data,
         })),
-        edges: canvasStore.edges.map((edge) => ({
+        edges: canvasStore.edges.map(edge => ({
           id: edge.id,
           sourceId: edge.source,
           targetId: edge.target,
@@ -782,7 +770,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       },
       playbookId: state.currentPlaybookId ?? undefined,
       sessionId: state.sessionId ?? undefined,
-      chatHistory: state.messages.map((m) => ({
+      chatHistory: state.messages.map(m => ({
         role: m.role,
         content: m.content,
       })),
@@ -796,7 +784,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       await service.buildPlaybookCanvas(request, {
         // Handle thinking events - update streaming state
         onThinking: (data: ThinkingEventData) => {
-          set((s) => ({
+          set(s => ({
             streamingState: {
               ...s.streamingState,
               currentStep: data.step ?? data.message,
@@ -821,15 +809,12 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
           const operations = get().applyCanvasPatch(data.patch);
 
           // Add operations to assistant message
-          set((s) => ({
-            messages: s.messages.map((m) =>
+          set(s => ({
+            messages: s.messages.map(m =>
               m.id === assistantMessageId
                 ? {
                     ...m,
-                    canvasOperations: [
-                      ...(m.canvasOperations ?? []),
-                      ...operations,
-                    ],
+                    canvasOperations: [...(m.canvasOperations ?? []), ...operations],
                   }
                 : m
             ),
@@ -838,7 +823,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
         // Handle dataverse operation events - update streaming state
         onDataverseOperation: (data: DataverseOperationEventData) => {
-          set((s) => ({
+          set(s => ({
             streamingState: {
               ...s.streamingState,
               currentStep: `${data.operation} ${data.entity}${data.id ? ` (${data.id})` : ''}`,
@@ -873,9 +858,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
         // Handle plan preview events - show as formatted message
         onPlanPreview: (data: PlanPreviewEventData) => {
           let planContent = `**Plan Preview**: ${data.summary}\n\n`;
-          planContent += data.steps
-            .map((s) => `${s.step}. **${s.operation}**: ${s.description}`)
-            .join('\n');
+          planContent += data.steps.map(s => `${s.step}. **${s.operation}**: ${s.description}`).join('\n');
           planContent += `\n\nEstimated nodes: ${data.estimatedNodes}`;
           get().updateMessage(assistantMessageId, { content: planContent });
         },
@@ -888,7 +871,10 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
           });
           set({
             isStreaming: false,
-            streamingState: { isActive: false, operationCount: get().streamingState.operationCount },
+            streamingState: {
+              isActive: false,
+              operationCount: get().streamingState.operationCount,
+            },
             error: data.message,
           });
         },
@@ -896,7 +882,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
         // Handle done events - mark streaming complete
         onDone: (data: DoneEventData) => {
           console.info('[AiAssistantStore] onDone handler called', data);
-          const finalContent = get().messages.find((m) => m.id === assistantMessageId)?.content ?? '';
+          const finalContent = get().messages.find(m => m.id === assistantMessageId)?.content ?? '';
           const summaryAddition = data.summary ? (finalContent ? '\n\n' : '') + data.summary : '';
 
           get().updateMessage(assistantMessageId, {
@@ -947,7 +933,10 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }
     set({
       isStreaming: false,
-      streamingState: { isActive: false, operationCount: get().streamingState.operationCount },
+      streamingState: {
+        isActive: false,
+        operationCount: get().streamingState.operationCount,
+      },
     });
   },
 
@@ -972,10 +961,8 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }),
 
   updateTestNodeProgress: (nodeId: string, progress: Partial<TestNodeProgress>) =>
-    set((state) => {
-      const existingIndex = state.testExecution.nodesProgress.findIndex(
-        (n) => n.nodeId === nodeId
-      );
+    set(state => {
+      const existingIndex = state.testExecution.nodesProgress.findIndex(n => n.nodeId === nodeId);
 
       let updatedProgress: TestNodeProgress[];
       if (existingIndex >= 0) {
@@ -1005,8 +992,8 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       };
     }),
 
-  completeTestExecution: (result) =>
-    set((state) => ({
+  completeTestExecution: result =>
+    set(state => ({
       testExecution: {
         ...state.testExecution,
         isActive: false,
@@ -1018,7 +1005,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     })),
 
   failTestExecution: (error: string) =>
-    set((state) => ({
+    set(state => ({
       testExecution: {
         ...state.testExecution,
         isActive: false,
@@ -1033,21 +1020,18 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }),
 
   // Model selection actions
-  setModelSelection: (model: AiModelSelection) =>
-    set({ modelSelection: model }),
+  setModelSelection: (model: AiModelSelection) => set({ modelSelection: model }),
 
-  toggleAdvancedOptions: () =>
-    set((state) => ({ showAdvancedOptions: !state.showAdvancedOptions })),
+  toggleAdvancedOptions: () => set(state => ({ showAdvancedOptions: !state.showAdvancedOptions })),
 
-  setShowAdvancedOptions: (show: boolean) =>
-    set({ showAdvancedOptions: show }),
+  setShowAdvancedOptions: (show: boolean) => set({ showAdvancedOptions: show }),
 
   // Clarification actions
   respondToClarification: (messageId, response) => {
     const state = get();
 
     // Find the message with clarification
-    const message = state.messages.find((m) => m.id === messageId);
+    const message = state.messages.find(m => m.id === messageId);
     if (!message?.clarification) {
       console.warn('[AiAssistantStore] respondToClarification: No clarification found for message', messageId);
       return;
@@ -1063,8 +1047,8 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }
 
     // Update the clarification as responded
-    set((s) => ({
-      messages: s.messages.map((m) =>
+    set(s => ({
+      messages: s.messages.map(m =>
         m.id === messageId
           ? {
               ...m,

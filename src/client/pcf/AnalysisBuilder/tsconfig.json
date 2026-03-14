@@ -3,10 +3,7 @@
   "compilerOptions": {
     "outDir": "./out/controls",
     "rootDir": "./control",
-    "typeRoots": [
-      "node_modules/@types",
-      "../node_modules/@types"
-    ],
+    "typeRoots": ["node_modules/@types", "../node_modules/@types"],
     "jsx": "react",
     "jsxFactory": "React.createElement",
     "esModuleInterop": true,
@@ -19,11 +16,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": [
-    "control/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "out"
-  ]
+  "include": ["control/**/*"],
+  "exclude": ["node_modules", "out"]
 }

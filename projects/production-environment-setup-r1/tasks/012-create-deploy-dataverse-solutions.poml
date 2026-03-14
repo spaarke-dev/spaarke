@@ -1,0 +1,92 @@
+<task id="PRODENV-012" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create Deploy-DataverseSolutions.ps1 (managed solution import in order)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-A</parallel-group>
+    <tags>powershell, dataverse, solutions, deployment</tags>
+  </metadata>
+
+  <prompt>
+    Create Deploy-DataverseSolutions.ps1 that imports all Spaarke managed solutions
+    to a target Dataverse environment in dependency order. Handle PAC CLI authentication,
+    import ordering, error handling, and import verification.
+  </prompt>
+
+  <role>
+    Power Platform developer experienced with PAC CLI, managed solution deployment, and Dataverse.
+  </role>
+
+  <goal>
+    A PowerShell script that reliably imports all 10 Spaarke managed solutions to any
+    Dataverse environment in the correct dependency order with proper error handling.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-05">Import all 10 solutions in dependency order (SpaarkeCore first)</constraint>
+    <constraint source="FR-10">Script must be idempotent — upgrade if solution exists</constraint>
+    <constraint source="project">Use managed solutions only (not unmanaged)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse managed solution deployment</topic>
+    <files>
+      <file>src/solutions/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spaarke has ~10 managed solutions that must be imported in dependency order.
+      SpaarkeCore is the base solution. The script authenticates via PAC CLI using
+      service principal credentials and imports solutions sequentially.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Inventory solutions">
+      List all solutions in src/solutions/ and determine dependency order.
+      SpaarkeCore must be first.
+    </step>
+    <step order="2" name="Create Deploy-DataverseSolutions.ps1">
+      Create scripts/Deploy-DataverseSolutions.ps1 with:
+      - Parameters: EnvironmentUrl, TenantId, ClientId, ClientSecret (or cert),
+        SolutionPath, ImportOrder
+      - PAC CLI authentication
+      - Sequential import with dependency ordering
+      - Import verification (pac solution list)
+      - Error handling with rollback guidance
+      - Logging of each import step
+    </step>
+    <step order="3" name="Add solution existence check">
+      Check if solution already exists — upgrade instead of fresh import.
+    </step>
+    <step order="4" name="Test syntax">
+      Validate PowerShell syntax.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-DataverseSolutions.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists and parses without syntax errors</criterion>
+    <criterion testable="true">SpaarkeCore imported first in dependency order</criterion>
+    <criterion testable="true">Script handles both fresh import and upgrade scenarios</criterion>
+    <criterion testable="true">PAC CLI authentication with service principal supported</criterion>
+    <criterion testable="true">Each import verified with pac solution list</criterion>
+    <criterion testable="true">Comprehensive error handling with meaningful messages</criterion>
+  </acceptance-criteria>
+</task>

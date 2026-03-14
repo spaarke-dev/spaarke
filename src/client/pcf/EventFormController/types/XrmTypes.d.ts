@@ -3,19 +3,19 @@
  */
 
 interface XrmAttribute {
-    getValue(): Array<{ id: string; name: string; entityType: string }> | null;
-    addOnChange(handler: () => void): void;
-    removeOnChange(handler: () => void): void;
+  getValue(): Array<{ id: string; name: string; entityType: string }> | null;
+  addOnChange(handler: () => void): void;
+  removeOnChange(handler: () => void): void;
 }
 
 interface XrmPage {
-    getAttribute(name: string): XrmAttribute | null;
+  getAttribute(name: string): XrmAttribute | null;
 }
 
 interface XrmGlobal {
-    Page?: XrmPage;
+  Page?: XrmPage;
 }
 
 interface Window {
-    Xrm?: XrmGlobal;
+  Xrm?: XrmGlobal;
 }

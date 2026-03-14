@@ -330,10 +330,7 @@ export interface QuickCreateContactRequest {
 /**
  * Union type for all quick create requests.
  */
-export type QuickCreateRequest =
-  | QuickCreateMatterRequest
-  | QuickCreateAccountRequest
-  | QuickCreateContactRequest;
+export type QuickCreateRequest = QuickCreateMatterRequest | QuickCreateAccountRequest | QuickCreateContactRequest;
 
 /**
  * Quick create response.

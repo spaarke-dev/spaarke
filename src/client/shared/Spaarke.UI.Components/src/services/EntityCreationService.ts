@@ -75,7 +75,11 @@ export interface ISendEmailInput {
   subject: string;
   body: string;
   bodyFormat?: 'HTML' | 'Text';
-  associations?: Array<{ entityType: string; entityId: string; entityName?: string }>;
+  associations?: Array<{
+    entityType: string;
+    entityId: string;
+    entityName?: string;
+  }>;
 }
 
 /** Result of a send-email operation. */
@@ -104,7 +108,7 @@ export class EntityCreationService {
   constructor(
     private readonly _webApi: IWebApiWithCreate,
     private readonly _authenticatedFetch: AuthenticatedFetchFn,
-    private readonly _bffBaseUrl: string,
+    private readonly _bffBaseUrl: string
   ) {}
 
   /**
@@ -123,7 +127,13 @@ export class EntityCreationService {
     onProgress?: (progress: IUploadProgress) => void
   ): Promise<IFileUploadResult> {
     if (files.length === 0) {
-      return { success: true, successCount: 0, failureCount: 0, uploadedFiles: [], errors: [] };
+      return {
+        success: true,
+        successCount: 0,
+        failureCount: 0,
+        uploadedFiles: [],
+        errors: [],
+      };
     }
 
     const uploadedFiles: ISpeFileMetadata[] = [];
@@ -154,7 +164,10 @@ export class EntityCreationService {
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => response.statusText);
-          errors.push({ fileName: file.name, error: `HTTP ${response.status}: ${errorText}` });
+          errors.push({
+            fileName: file.name,
+            error: `HTTP ${response.status}: ${errorText}`,
+          });
           onProgress?.({
             current: i + 1,
             total: files.length,
@@ -203,10 +216,7 @@ export class EntityCreationService {
    * @param entityData Entity payload with field values and @odata.bind lookups
    * @returns The GUID of the created record
    */
-  async createEntityRecord(
-    entityName: string,
-    entityData: Record<string, unknown>
-  ): Promise<string> {
+  async createEntityRecord(entityName: string, entityData: Record<string, unknown>): Promise<string> {
     const result = await this._webApi.createRecord(entityName, entityData);
     return result.id;
   }
@@ -261,8 +271,7 @@ export class EntityCreationService {
 
         // Add @odata.bind navigation property to link document to parent entity
         if (navigationProperty) {
-          documentEntity[`${navigationProperty}@odata.bind`] =
-            `/${parentEntityName}(${parentEntityId})`;
+          documentEntity[`${navigationProperty}@odata.bind`] = `/${parentEntityName}(${parentEntityId})`;
         }
 
         console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
@@ -296,16 +305,12 @@ export class EntityCreationService {
    * Calls POST /api/documents/{id}/analyze which queues a Service Bus job
    * for each document. Failures are non-fatal (added as warnings).
    */
-  private async _triggerDocumentAnalysis(
-    documentIds: string[],
-    warnings: string[]
-  ): Promise<void> {
+  private async _triggerDocumentAnalysis(documentIds: string[], warnings: string[]): Promise<void> {
     for (const docId of documentIds) {
       try {
-        const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/documents/${docId}/analyze`,
-          { method: 'POST' }
-        );
+        const response = await this._authenticatedFetch(`${this._bffBaseUrl}/documents/${docId}/analyze`, {
+          method: 'POST',
+        });
         if (response.ok) {
           console.info(`[EntityCreationService] Document analysis queued for ${docId}`);
         } else {
@@ -328,7 +333,7 @@ export class EntityCreationService {
       const normalize = (val: string | string[] | undefined): string[] => {
         if (!val) return [];
         const arr = Array.isArray(val) ? val : val.split(/[;,]/);
-        return arr.map((a) => a.trim()).filter(Boolean);
+        return arr.map(a => a.trim()).filter(Boolean);
       };
 
       const to = normalize(input.to);
@@ -337,21 +342,18 @@ export class EntityCreationService {
       }
 
       const cc = normalize(input.cc);
-      const response = await this._authenticatedFetch(
-        `${this._bffBaseUrl}/communications/send`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to,
-            cc: cc.length > 0 ? cc : undefined,
-            subject: input.subject,
-            body: input.body,
-            bodyFormat: input.bodyFormat ?? 'HTML',
-            associations: input.associations,
-          }),
-        }
-      );
+      const response = await this._authenticatedFetch(`${this._bffBaseUrl}/communications/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to,
+          cc: cc.length > 0 ? cc : undefined,
+          subject: input.subject,
+          body: input.body,
+          bodyFormat: input.bodyFormat ?? 'HTML',
+          associations: input.associations,
+        }),
+      });
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Unknown error');

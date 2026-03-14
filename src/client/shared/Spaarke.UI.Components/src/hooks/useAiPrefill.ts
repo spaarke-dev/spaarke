@@ -149,14 +149,20 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
 
   // Stable refs for callbacks to avoid re-triggering useEffect
   const onApplyRef = React.useRef(onApply);
-  React.useEffect(() => { onApplyRef.current = onApply; }, [onApply]);
+  React.useEffect(() => {
+    onApplyRef.current = onApply;
+  }, [onApply]);
   const fieldExtractorRef = React.useRef(fieldExtractor);
-  React.useEffect(() => { fieldExtractorRef.current = fieldExtractor; }, [fieldExtractor]);
+  React.useEffect(() => {
+    fieldExtractorRef.current = fieldExtractor;
+  }, [fieldExtractor]);
   const lookupResolversRef = React.useRef(lookupResolvers);
-  React.useEffect(() => { lookupResolversRef.current = lookupResolvers; }, [lookupResolvers]);
+  React.useEffect(() => {
+    lookupResolversRef.current = lookupResolvers;
+  }, [lookupResolvers]);
 
   // Stable dependency key: join file names so the effect doesn't re-run on array ref changes
-  const prefillKey = uploadedFiles.map((f) => f.name).join('|');
+  const prefillKey = uploadedFiles.map(f => f.name).join('|');
 
   React.useEffect(() => {
     if (uploadedFiles.length === 0 || attemptedRef.current) {
@@ -180,7 +186,9 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
           formData.append('files', f.file, f.name);
         }
 
-        console.info(`[${logPrefix}] Starting AI pre-fill...`, { fileCount: uploadedFiles.length });
+        console.info(`[${logPrefix}] Starting AI pre-fill...`, {
+          fileCount: uploadedFiles.length,
+        });
 
         const response = await fetchFn(`${bffBaseUrl}${endpoint}`, {
           method: 'POST',
@@ -233,7 +241,7 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
 
           resolvePromises.push(
             resolver(aiValue)
-              .then((candidates) => {
+              .then(candidates => {
                 const best = findBestLookupMatch(aiValue, candidates);
                 if (best) {
                   resolved[fieldName] = { id: best.id, name: best.name };

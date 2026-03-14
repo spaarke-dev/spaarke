@@ -137,6 +137,13 @@ public class ScopeResolverService : IScopeResolverService
             var knowledge = (await knowledgeTask).Where(k => k != null).Cast<AnalysisKnowledge>().ToArray();
             var tools = (await toolsTask).Where(t => t != null).Cast<AnalysisTool>().ToArray();
 
+            if (tools.Length > 0)
+            {
+                _logger.LogDebug(
+                    "Resolved {ToolCount} tools: {ToolNames}",
+                    tools.Length, string.Join(", ", tools.Select(t => t.Name)));
+            }
+
             _logger.LogInformation(
                 "Scope resolution complete: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
                 skills.Length, knowledge.Length, tools.Length);

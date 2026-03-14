@@ -1,0 +1,279 @@
+# provision-customer.yml — Manual-dispatch workflow for customer provisioning
+#
+# Runs Provision-Customer.ps1 end-to-end with provided parameters.
+# Requires manual approval via GitHub environment protection rules (FR-09).
+# Uploads provisioning logs as artifacts for audit trail (NFR-05).
+
+name: Provision Customer
+
+on:
+  workflow_dispatch:
+    inputs:
+      customerId:
+        description: "Customer identifier (lowercase, alphanumeric, 3-10 chars)"
+        required: true
+        type: string
+      displayName:
+        description: "Human-readable customer name"
+        required: true
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - prod
+          - staging
+          - dev
+        default: "prod"
+      location:
+        description: "Azure region for customer resources"
+        required: false
+        type: string
+        default: "westus2"
+      skipDataverse:
+        description: "Skip Dataverse provisioning (use if env already exists)"
+        required: false
+        type: boolean
+        default: false
+      dryRun:
+        description: "Preview provisioning plan without executing (WhatIf)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write  # Required for Azure OIDC login
+
+concurrency:
+  group: provision-customer-${{ github.event.inputs.customerId }}
+  cancel-in-progress: false  # Never cancel a provisioning run
+
+env:
+  PROVISION_LOG_DIR: ${{ github.workspace }}/provisioning-logs
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      customerId: ${{ steps.validate.outputs.customerId }}
+      displayName: ${{ steps.validate.outputs.displayName }}
+    steps:
+      - name: Validate customer ID format
+        id: validate
+        shell: bash
+        run: |
+          CUSTOMER_ID="${{ github.event.inputs.customerId }}"
+          DISPLAY_NAME="${{ github.event.inputs.displayName }}"
+
+          # FR-02: Validate customerId format (lowercase, alphanumeric, 3-10 chars)
+          if [[ ! "$CUSTOMER_ID" =~ ^[a-z0-9]{3,10}$ ]]; then
+            echo "::error::Invalid customerId '$CUSTOMER_ID'. Must be lowercase alphanumeric, 3-10 characters."
+            exit 1
+          fi
+
+          # Validate displayName is not empty
+          if [ -z "$DISPLAY_NAME" ]; then
+            echo "::error::displayName cannot be empty."
+            exit 1
+          fi
+
+          echo "customerId=$CUSTOMER_ID" >> "$GITHUB_OUTPUT"
+          echo "displayName=$DISPLAY_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "## Input Validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Customer ID | \`$CUSTOMER_ID\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Display Name | $DISPLAY_NAME |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Location | ${{ github.event.inputs.location }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Skip Dataverse | ${{ github.event.inputs.skipDataverse }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry Run | ${{ github.event.inputs.dryRun }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  provision:
+    name: Provision Customer
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    # FR-09: Environment protection requires manual approval
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create log directory
+        shell: bash
+        run: mkdir -p "$PROVISION_LOG_DIR"
+
+      - name: Log provisioning start
+        shell: bash
+        run: |
+          # NFR-05: Audit trail — record who triggered and when
+          cat <<EOF > "$PROVISION_LOG_DIR/provision-metadata.json"
+          {
+            "customerId": "${{ github.event.inputs.customerId }}",
+            "displayName": "${{ github.event.inputs.displayName }}",
+            "environment": "${{ github.event.inputs.environment }}",
+            "location": "${{ github.event.inputs.location }}",
+            "skipDataverse": ${{ github.event.inputs.skipDataverse }},
+            "dryRun": ${{ github.event.inputs.dryRun }},
+            "triggeredBy": "${{ github.actor }}",
+            "triggeredAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "runId": "${{ github.run_id }}",
+            "runNumber": "${{ github.run_number }}",
+            "sha": "${{ github.sha }}"
+          }
+          EOF
+          echo "Provisioning metadata saved to logs."
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run Provision-Customer.ps1
+        id: provision
+        shell: pwsh
+        run: |
+          $params = @{
+            CustomerId           = "${{ github.event.inputs.customerId }}"
+            DisplayName          = "${{ github.event.inputs.displayName }}"
+            EnvironmentName      = "${{ github.event.inputs.environment }}"
+            Location             = "${{ github.event.inputs.location }}"
+            TenantId             = "${{ secrets.AZURE_TENANT_ID }}"
+            ClientId             = "${{ secrets.AZURE_CLIENT_ID }}"
+            ClientSecret         = "${{ secrets.AZURE_CLIENT_SECRET }}"
+            PlatformKeyVaultName = "sprk-platform-${{ github.event.inputs.environment }}-kv"
+          }
+
+          # Optional: skip Dataverse
+          if ("${{ github.event.inputs.skipDataverse }}" -eq "true") {
+            $params.SkipDataverse = $true
+          }
+
+          # Optional: dry run (WhatIf)
+          if ("${{ github.event.inputs.dryRun }}" -eq "true") {
+            $params.WhatIf = $true
+          }
+
+          # Run provisioning with transcript logging
+          $transcriptPath = "$env:PROVISION_LOG_DIR/provision-transcript.log"
+          Start-Transcript -Path $transcriptPath -Append
+
+          try {
+            ./scripts/Provision-Customer.ps1 @params 2>&1 | Tee-Object -FilePath "$env:PROVISION_LOG_DIR/provision-output.log"
+            $exitCode = $LASTEXITCODE
+            if ($null -eq $exitCode) { $exitCode = 0 }
+          }
+          catch {
+            $_ | Out-File -Append "$env:PROVISION_LOG_DIR/provision-errors.log"
+            Write-Error "Provisioning failed: $_"
+            $exitCode = 1
+          }
+          finally {
+            Stop-Transcript
+          }
+
+          echo "exitCode=$exitCode" >> $env:GITHUB_OUTPUT
+
+          if ($exitCode -ne 0) {
+            Write-Error "Provision-Customer.ps1 exited with code $exitCode"
+            exit $exitCode
+          }
+
+      - name: Upload provisioning logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: provisioning-logs-${{ github.event.inputs.customerId }}-${{ github.run_number }}
+          path: ${{ env.PROVISION_LOG_DIR }}/
+          retention-days: 90
+
+  verify:
+    name: Post-Provisioning Verification
+    runs-on: ubuntu-latest
+    needs: provision
+    # Only run verification if provisioning succeeded and not a dry run
+    if: success() && github.event.inputs.dryRun != 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create log directory
+        shell: bash
+        run: mkdir -p "$PROVISION_LOG_DIR"
+
+      - name: Run Test-Deployment.ps1
+        shell: pwsh
+        run: |
+          $params = @{
+            Environment = "${{ github.event.inputs.environment }}"
+            CustomerId  = "${{ github.event.inputs.customerId }}"
+          }
+
+          ./scripts/Test-Deployment.ps1 @params -Verbose 2>&1 |
+            Tee-Object -FilePath "$env:PROVISION_LOG_DIR/verification-output.log"
+
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: verification-logs-${{ github.event.inputs.customerId }}-${{ github.run_number }}
+          path: ${{ env.PROVISION_LOG_DIR }}/
+          retention-days: 90
+
+  summary:
+    name: Provisioning Summary
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, provision, verify]
+    if: always()
+    steps:
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "## Customer Provisioning Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Customer ID | \`${{ github.event.inputs.customerId }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Display Name | ${{ github.event.inputs.displayName }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Location | ${{ github.event.inputs.location }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry Run | ${{ github.event.inputs.dryRun }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered By | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run ID | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### Job Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Job | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Input Validation | ${{ needs.validate-inputs.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Provisioning | ${{ needs.provision.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Verification | ${{ needs.verify.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.provision.result }}" == "success" ] && [ "${{ needs.verify.result }}" == "success" ]; then
+            echo "### Expected Resources" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Resource | Name |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|----------|------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Resource Group | \`rg-spaarke-${{ github.event.inputs.customerId }}-${{ github.event.inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Key Vault | \`sprk-${{ github.event.inputs.customerId }}-${{ github.event.inputs.environment }}-kv\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Storage Account | \`sprk${{ github.event.inputs.customerId }}${{ github.event.inputs.environment }}sa\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Status: Provisioning complete and verified.**" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ needs.provision.result }}" == "success" ]; then
+            echo "**Status: Provisioning succeeded but verification had issues. Check logs.**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Status: Provisioning failed. Check logs for details.**" >> "$GITHUB_STEP_SUMMARY"
+          fi

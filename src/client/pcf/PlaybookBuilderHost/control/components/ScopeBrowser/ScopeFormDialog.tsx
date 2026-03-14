@@ -189,7 +189,7 @@ export const ScopeFormDialog: React.FC<ScopeFormDialogProps> = ({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   // Determine if read-only
-  const isReadOnly = mode === 'view' || (scope?.ownershipType === 'system');
+  const isReadOnly = mode === 'view' || scope?.ownershipType === 'system';
   const isSystemScope = scope?.ownershipType === 'system';
 
   // Initialize form data when dialog opens
@@ -222,17 +222,20 @@ export const ScopeFormDialog: React.FC<ScopeFormDialogProps> = ({
   }, [open, mode, scope, initialData]);
 
   // Update field
-  const updateField = useCallback((field: keyof ScopeFormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-    // Clear validation error when field changes
-    if (validationErrors[field]) {
-      setValidationErrors((prev) => {
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      });
-    }
-  }, [validationErrors]);
+  const updateField = useCallback(
+    (field: keyof ScopeFormData, value: string) => {
+      setFormData(prev => ({ ...prev, [field]: value }));
+      // Clear validation error when field changes
+      if (validationErrors[field]) {
+        setValidationErrors(prev => {
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
+      }
+    },
+    [validationErrors]
+  );
 
   // Validate form
   const validateForm = useCallback((): boolean => {
@@ -374,12 +377,10 @@ export const ScopeFormDialog: React.FC<ScopeFormDialogProps> = ({
                 <Field className={styles.field} label="Action Type">
                   <Dropdown
                     value={formData.actionType || 'ai-analysis'}
-                    onOptionSelect={(_, data) =>
-                      updateField('actionType', data.optionValue as string)
-                    }
+                    onOptionSelect={(_, data) => updateField('actionType', data.optionValue as string)}
                     disabled={isReadOnly}
                   >
-                    {ACTION_TYPES.map((type) => (
+                    {ACTION_TYPES.map(type => (
                       <Option key={type.value} value={type.value}>
                         {type.label}
                       </Option>
@@ -441,12 +442,10 @@ export const ScopeFormDialog: React.FC<ScopeFormDialogProps> = ({
                 <Field className={styles.field} label="Tool Type">
                   <Dropdown
                     value={formData.toolType || 'custom'}
-                    onOptionSelect={(_, data) =>
-                      updateField('toolType', data.optionValue as string)
-                    }
+                    onOptionSelect={(_, data) => updateField('toolType', data.optionValue as string)}
                     disabled={isReadOnly}
                   >
-                    {TOOL_TYPES.map((type) => (
+                    {TOOL_TYPES.map(type => (
                       <Option key={type.value} value={type.value}>
                         {type.label}
                       </Option>
@@ -482,12 +481,10 @@ export const ScopeFormDialog: React.FC<ScopeFormDialogProps> = ({
                 <Field className={styles.field} label="Knowledge Type">
                   <Dropdown
                     value={formData.knowledgeType || 'inline'}
-                    onOptionSelect={(_, data) =>
-                      updateField('knowledgeType', data.optionValue as string)
-                    }
+                    onOptionSelect={(_, data) => updateField('knowledgeType', data.optionValue as string)}
                     disabled={isReadOnly}
                   >
-                    {KNOWLEDGE_TYPES.map((type) => (
+                    {KNOWLEDGE_TYPES.map(type => (
                       <Option key={type.value} value={type.value}>
                         {type.label}
                       </Option>

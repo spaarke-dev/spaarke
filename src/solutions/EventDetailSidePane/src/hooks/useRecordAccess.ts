@@ -11,7 +11,7 @@
  * across Dataverse versions and caused noisy 404 errors in console, so it
  * is bypassed for now.
  *
- * TODO: Re-enable with a working RetrievePrincipalAccess format if
+ * TRACKED: GitHub #234 - Re-enable with a working RetrievePrincipalAccess format if
  * proactive read-only UX is needed in the future.
  *
  * @see projects/events-workspace-apps-UX-r1/tasks/042-add-securityrole-awareness.poml

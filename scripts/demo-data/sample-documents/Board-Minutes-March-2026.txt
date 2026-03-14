@@ -1,0 +1,108 @@
+BOARD OF DIRECTORS MEETING MINUTES
+
+Date: March 15, 2026
+Time: 10:00 AM - 12:30 PM PST
+Location: Spaarke Legal Services - Conference Room A / Virtual (Teams)
+Chair: Board Chair
+
+ATTENDEES:
+  Present: 5 of 6 board members
+  Management: CEO, CFO, General Counsel, CTO
+  Secretary: Corporate Secretary
+
+==========================================================================
+1. CALL TO ORDER AND QUORUM
+==========================================================================
+
+Meeting called to order at 10:02 AM. Quorum confirmed with 5 of 6
+directors present. One director participated virtually.
+
+==========================================================================
+2. APPROVAL OF PREVIOUS MINUTES
+==========================================================================
+
+MOTION: Approve minutes from February 2026 board meeting.
+MOVED BY: Director A
+SECONDED BY: Director B
+VOTE: Approved unanimously.
+
+==========================================================================
+3. Q1 2026 FINANCIAL RESULTS
+==========================================================================
+
+CFO presented Q1 2026 financial highlights:
+  - Revenue: $2.4M (12% increase YoY)
+  - Operating margin: 22% (target: 20%)
+  - New customer acquisitions: 8 (target: 6)
+  - Customer retention rate: 96%
+  - Cash position: $4.2M
+  - Burn rate adjusted for new hires: within budget
+
+Key discussion points:
+  - Revenue growth driven by enterprise segment (+18%)
+  - SMB segment growth slower than projected (+5% vs target 10%)
+  - Board recommended increased marketing spend for SMB in Q2
+
+==========================================================================
+4. COMPLIANCE AUDIT STATUS
+==========================================================================
+
+General Counsel provided compliance update:
+  - GDPR compliance audit: On track, expected completion April 2026
+  - SOC 2 Type II certification: Renewal in progress, no findings to date
+  - Data processing agreements: 95% of vendors updated to new template
+  - Outstanding item: 3 legacy vendor DPAs require renegotiation
+
+ACTION ITEM: Complete legacy vendor DPA renegotiation by May 31, 2026.
+ASSIGNED TO: General Counsel
+
+==========================================================================
+5. VENDOR PROGRAM UPDATE
+==========================================================================
+
+CTO presented vendor management program status:
+  - 42 active vendors assessed under new risk framework
+  - 3 vendors flagged for elevated risk (mitigation plans in place)
+  - New vendor onboarding process reduced from 6 weeks to 3 weeks
+  - Cost savings of $180K/year from consolidated vendor contracts
+
+Board commended the progress and requested quarterly vendor risk report.
+
+==========================================================================
+6. STRATEGIC PLANNING - H2 2026
+==========================================================================
+
+CEO outlined strategic priorities for H2 2026:
+  a) AI-powered document analysis platform launch (September target)
+  b) International expansion: UK and EU markets (Q4 planning)
+  c) Partnership program with 3 major law firms
+  d) SOC 2 + ISO 27001 dual certification
+
+DISCUSSION:
+  - Board expressed strong support for AI platform initiative
+  - Requested detailed ROI analysis for international expansion
+  - Suggested pilot program with one law firm before full launch
+
+==========================================================================
+7. EXECUTIVE SESSION
+==========================================================================
+
+Board entered executive session at 12:00 PM.
+Management excused.
+[Executive session matters are confidential]
+
+==========================================================================
+8. ADJOURNMENT
+==========================================================================
+
+Meeting adjourned at 12:30 PM.
+
+Next Board Meeting: April 19, 2026 at 10:00 AM PST.
+
+Respectfully submitted,
+Corporate Secretary
+Date: March 16, 2026
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All names, figures, and details are fictitious.

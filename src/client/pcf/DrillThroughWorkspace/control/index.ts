@@ -15,40 +15,30 @@
  * @version 1.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-  Theme,
-} from "@fluentui/react-components";
-import { DrillThroughWorkspaceApp } from "./components/DrillThroughWorkspaceApp";
-import { logger } from "./utils/logger";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { FluentProvider, webLightTheme, webDarkTheme, teamsHighContrastTheme, Theme } from '@fluentui/react-components';
+import { DrillThroughWorkspaceApp } from './components/DrillThroughWorkspaceApp';
+import { logger } from './utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "spaarke-theme";
-type ThemePreference = "auto" | "light" | "dark";
-type ThemeMode = "light" | "dark" | "high-contrast";
+const STORAGE_KEY = 'spaarke-theme';
+type ThemePreference = 'auto' | 'light' | 'dark';
+type ThemeMode = 'light' | 'dark' | 'high-contrast';
 
 function getUserThemePreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "auto") {
+    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
       return stored;
     }
     try {
       const parentStored = window.parent?.localStorage?.getItem(STORAGE_KEY);
-      if (
-        parentStored === "light" ||
-        parentStored === "dark" ||
-        parentStored === "auto"
-      ) {
+      if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
         return parentStored;
       }
     } catch {
@@ -57,20 +47,17 @@ function getUserThemePreference(): ThemePreference {
   } catch {
     /* localStorage not available */
   }
-  return "auto";
+  return 'auto';
 }
 
 function isHighContrast(): boolean {
   if (window.matchMedia) {
-    const forcedColors = window.matchMedia("(forced-colors: active)");
+    const forcedColors = window.matchMedia('(forced-colors: active)');
     if (forcedColors.matches) return true;
-    const msHighContrast = window.matchMedia("(-ms-high-contrast: active)");
+    const msHighContrast = window.matchMedia('(-ms-high-contrast: active)');
     if (msHighContrast.matches) return true;
   }
-  if (
-    document.body.classList.contains("high-contrast") ||
-    document.body.classList.contains("ms-highContrast")
-  ) {
+  if (document.body.classList.contains('high-contrast') || document.body.classList.contains('ms-highContrast')) {
     return true;
   }
   return false;
@@ -79,17 +66,14 @@ function isHighContrast(): boolean {
 function detectDarkModeFromUrl(): boolean | null {
   try {
     if (
-      window.location.href.includes("themeOption%3Ddarkmode") ||
-      window.location.href.includes("themeOption=darkmode")
+      window.location.href.includes('themeOption%3Ddarkmode') ||
+      window.location.href.includes('themeOption=darkmode')
     ) {
       return true;
     }
     try {
       const parentUrl = window.parent?.location?.href;
-      if (
-        parentUrl?.includes("themeOption%3Ddarkmode") ||
-        parentUrl?.includes("themeOption=darkmode")
-      ) {
+      if (parentUrl?.includes('themeOption%3Ddarkmode') || parentUrl?.includes('themeOption=darkmode')) {
         return true;
       }
     } catch {
@@ -102,31 +86,29 @@ function detectDarkModeFromUrl(): boolean | null {
 }
 
 function getThemeMode(): ThemeMode {
-  if (isHighContrast()) return "high-contrast";
+  if (isHighContrast()) return 'high-contrast';
 
   const preference = getUserThemePreference();
-  if (preference === "dark") return "dark";
-  if (preference === "light") return "light";
+  if (preference === 'dark') return 'dark';
+  if (preference === 'light') return 'light';
 
   // Auto mode - check URL flag first
   const urlDarkMode = detectDarkModeFromUrl();
   if (urlDarkMode !== null) {
-    return urlDarkMode ? "dark" : "light";
+    return urlDarkMode ? 'dark' : 'light';
   }
 
   // Fallback to system preference
-  if (typeof window !== "undefined" && window.matchMedia) {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  return "light";
+  return 'light';
 }
 
 function getResolvedTheme(): Theme {
   const mode = getThemeMode();
-  if (mode === "high-contrast") return teamsHighContrastTheme;
-  if (mode === "dark") return webDarkTheme;
+  if (mode === 'high-contrast') return teamsHighContrastTheme;
+  if (mode === 'dark') return webDarkTheme;
   return webLightTheme;
 }
 
@@ -134,17 +116,15 @@ function getResolvedTheme(): Theme {
 // PCF Control Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class DrillThroughWorkspace
-  implements ComponentFramework.StandardControl<IInputs, IOutputs>
-{
+export class DrillThroughWorkspace implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private _container: HTMLDivElement;
   private _context: ComponentFramework.Context<IInputs>;
   private _notifyOutputChanged: () => void;
-  private _isRendered: boolean = false;
+  private _isRendered = false;
 
   // Output values
-  private _shouldClose: boolean = false;
-  private _selectedRecordIds: string = "";
+  private _shouldClose = false;
+  private _selectedRecordIds = '';
 
   // Theme state
   private _currentTheme: Theme = webLightTheme;
@@ -152,7 +132,7 @@ export class DrillThroughWorkspace
   private _forcedColorsQuery: MediaQueryList | null = null;
 
   constructor() {
-    logger.info("DrillThroughWorkspace", "Constructor called");
+    logger.info('DrillThroughWorkspace', 'Constructor called');
   }
 
   public init(
@@ -161,7 +141,7 @@ export class DrillThroughWorkspace
     _state: ComponentFramework.Dictionary,
     container: HTMLDivElement
   ): void {
-    logger.info("DrillThroughWorkspace", "init() called");
+    logger.info('DrillThroughWorkspace', 'init() called');
 
     this._context = context;
     this._container = container;
@@ -171,10 +151,10 @@ export class DrillThroughWorkspace
     context.mode.trackContainerResize(true);
 
     // Set container base styles
-    this._container.style.display = "flex";
-    this._container.style.flexDirection = "column";
-    this._container.style.boxSizing = "border-box";
-    this._container.style.overflow = "hidden";
+    this._container.style.display = 'flex';
+    this._container.style.flexDirection = 'column';
+    this._container.style.boxSizing = 'border-box';
+    this._container.style.overflow = 'hidden';
 
     // Set up theme
     this._currentTheme = getResolvedTheme();
@@ -188,7 +168,7 @@ export class DrillThroughWorkspace
   }
 
   public updateView(context: ComponentFramework.Context<IInputs>): void {
-    logger.info("DrillThroughWorkspace", "updateView() called");
+    logger.info('DrillThroughWorkspace', 'updateView() called');
     this._context = context;
     this.renderComponent();
   }
@@ -201,7 +181,7 @@ export class DrillThroughWorkspace
   }
 
   public destroy(): void {
-    logger.info("DrillThroughWorkspace", "destroy() called");
+    logger.info('DrillThroughWorkspace', 'destroy() called');
     this.cleanupThemeListeners();
     this.cleanupKeyboardHandler();
     if (this._isRendered) {
@@ -223,29 +203,25 @@ export class DrillThroughWorkspace
     if (allocatedWidth > 0) {
       this._container.style.width = `${allocatedWidth}px`;
     } else {
-      this._container.style.width = "100%";
+      this._container.style.width = '100%';
     }
 
     if (allocatedHeight > 0) {
       this._container.style.height = `${allocatedHeight}px`;
     } else {
-      this._container.style.height = "100%";
+      this._container.style.height = '100%';
     }
 
-    logger.info(
-      "DrillThroughWorkspace",
-      `Container size: ${allocatedWidth}x${allocatedHeight}`
-    );
+    logger.info('DrillThroughWorkspace', `Container size: ${allocatedWidth}x${allocatedHeight}`);
 
     // Get input parameters
-    const chartDefinitionId =
-      this._context.parameters.chartDefinitionId?.raw || "";
+    const chartDefinitionId = this._context.parameters.chartDefinitionId?.raw || '';
 
     // Get dataset from platform (Dataset PCF pattern per ADR-011)
     const dataset = this._context.parameters.dataset;
 
     logger.info(
-      "DrillThroughWorkspace",
+      'DrillThroughWorkspace',
       `Rendering with chartDefinitionId: ${chartDefinitionId}, dataset records: ${
         dataset?.sortedRecordIds?.length ?? 0
       }`
@@ -270,7 +246,7 @@ export class DrillThroughWorkspace
   }
 
   private handleRecordSelect(recordIds: string[]): void {
-    this._selectedRecordIds = recordIds.join(",");
+    this._selectedRecordIds = recordIds.join(',');
     this._notifyOutputChanged();
   }
 
@@ -300,11 +276,7 @@ export class DrillThroughWorkspace
       // Fallback to window methods
       this.tryWindowClose();
     } catch (err) {
-      logger.error(
-        "DrillThroughWorkspace",
-        "closeDialog error, trying fallback",
-        err
-      );
+      logger.error('DrillThroughWorkspace', 'closeDialog error, trying fallback', err);
       this.tryWindowClose();
     }
   }
@@ -319,71 +291,53 @@ export class DrillThroughWorkspace
 
       // For dialogs in iframe, message the parent
       if (window.parent !== window) {
-        window.parent.postMessage({ type: "DRILLTHROUGH_WORKSPACE_CLOSE" }, "*");
+        window.parent.postMessage({ type: 'DRILLTHROUGH_WORKSPACE_CLOSE' }, '*');
       }
 
       // Try window.close as last resort
       window.close();
     } catch {
-      logger.error("DrillThroughWorkspace", "Failed to close dialog");
+      logger.error('DrillThroughWorkspace', 'Failed to close dialog');
     }
   }
 
   private _keyboardHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
+    if (e.key === 'Escape') {
       this.handleClose();
     }
   };
 
   private setupKeyboardHandler(): void {
-    window.addEventListener("keydown", this._keyboardHandler);
+    window.addEventListener('keydown', this._keyboardHandler);
   }
 
   private cleanupKeyboardHandler(): void {
-    window.removeEventListener("keydown", this._keyboardHandler);
+    window.removeEventListener('keydown', this._keyboardHandler);
   }
 
   private setupThemeListeners(): void {
-    if (typeof window !== "undefined" && window.matchMedia) {
+    if (typeof window !== 'undefined' && window.matchMedia) {
       // Listen for dark mode changes
-      this._themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-      this._themeMediaQuery.addEventListener(
-        "change",
-        this.handleThemeChange.bind(this)
-      );
+      this._themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      this._themeMediaQuery.addEventListener('change', this.handleThemeChange.bind(this));
 
       // Listen for high-contrast changes
-      this._forcedColorsQuery = window.matchMedia("(forced-colors: active)");
-      this._forcedColorsQuery.addEventListener(
-        "change",
-        this.handleThemeChange.bind(this)
-      );
+      this._forcedColorsQuery = window.matchMedia('(forced-colors: active)');
+      this._forcedColorsQuery.addEventListener('change', this.handleThemeChange.bind(this));
     }
 
     // Listen for custom theme change events
-    window.addEventListener(
-      "spaarke-theme-change",
-      this.handleThemeChange.bind(this)
-    );
+    window.addEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
   }
 
   private cleanupThemeListeners(): void {
     if (this._themeMediaQuery) {
-      this._themeMediaQuery.removeEventListener(
-        "change",
-        this.handleThemeChange.bind(this)
-      );
+      this._themeMediaQuery.removeEventListener('change', this.handleThemeChange.bind(this));
     }
     if (this._forcedColorsQuery) {
-      this._forcedColorsQuery.removeEventListener(
-        "change",
-        this.handleThemeChange.bind(this)
-      );
+      this._forcedColorsQuery.removeEventListener('change', this.handleThemeChange.bind(this));
     }
-    window.removeEventListener(
-      "spaarke-theme-change",
-      this.handleThemeChange.bind(this)
-    );
+    window.removeEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
   }
 
   private handleThemeChange(): void {

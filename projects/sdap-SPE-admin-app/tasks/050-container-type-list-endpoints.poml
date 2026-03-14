@@ -1,0 +1,51 @@
+<task id="SPE-050" project="SDAP SPE Admin App">
+  <metadata>
+    <title>List/Get Container Types Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-006, SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement endpoints to list and retrieve individual container types from the Microsoft Graph API. These endpoints enable the admin UI to display available container types for the selected business unit configuration, which is the foundation for all container type management operations in Phase 2.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>Two working endpoints that return container type data from Graph API, with proper auth filtering and error handling, verified by integration tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+    <constraint source="ADR-010">Maintain DI minimalism — reuse existing SpeAdminGraphService</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container types are the fundamental building blocks in SharePoint Embedded. Each container type defines a template for storage containers with specific settings (sharing, versioning, storage limits). Administrators need to view all container types associated with their owning application to manage and configure them. The Graph API endpoint is GET /storage/fileStorage/containerTypes.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define ContainerTypeDto and ContainerTypeListDto response models with properties: id, displayName, description, billingClassification, createdDateTime</step>
+    <step order="2" name="add-graph-methods">Add ListContainerTypesAsync and GetContainerTypeAsync methods to SpeAdminGraphService, querying Graph API /storage/fileStorage/containerTypes</step>
+    <step order="3" name="add-list-endpoint">Add GET /api/spe/containertypes?configId={id} endpoint that resolves the config, calls the graph service, and returns the list</step>
+    <step order="4" name="add-get-endpoint">Add GET /api/spe/containertypes/{typeId}?configId={id} endpoint that returns a single container type by ID</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to both endpoints</step>
+    <step order="6" name="add-tests">Write unit tests for both endpoints covering success, not-found, and unauthorized scenarios</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/ContainerTypeDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/ContainerTypeEndpointTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/containertypes?configId={id} returns a JSON array of container types from Graph API</criterion>
+    <criterion testable="true">GET /api/spe/containertypes/{typeId}?configId={id} returns a single container type or 404</criterion>
+    <criterion testable="true">Both endpoints require valid configId and return 400 if missing</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to both endpoints</criterion>
+    <criterion testable="true">Graph SDK types do not appear in response DTOs</criterion>
+    <criterion testable="true">Unit tests pass for success, not-found, and unauthorized scenarios</criterion>
+  </acceptance-criteria>
+</task>

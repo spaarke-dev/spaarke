@@ -10,11 +10,11 @@
  */
 
 import {
-    CalendarFilterOutput,
-    ICalendarFilterSingle,
-    ICalendarFilterRange,
-    ICalendarFilterClear
-} from "../types/CalendarFilter";
+  CalendarFilterOutput,
+  ICalendarFilterSingle,
+  ICalendarFilterRange,
+  ICalendarFilterClear,
+} from '../types/CalendarFilter';
 
 /**
  * Convert a Date to ISO 8601 date string (YYYY-MM-DD)
@@ -27,10 +27,10 @@ import {
  * toIsoDateString(new Date(2026, 1, 10)) // "2026-02-10"
  */
 export function toIsoDateString(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -44,8 +44,8 @@ export function toIsoDateString(date: Date): string {
  * parseIsoDate("2026-02-10") // Date object for Feb 10, 2026
  */
 export function parseIsoDate(dateStr: string): Date {
-    const [year, month, day] = dateStr.split("-").map(Number);
-    return new Date(year, month - 1, day);
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
 
 /**
@@ -59,11 +59,11 @@ export function parseIsoDate(dateStr: string): Date {
  * // { type: "single", date: "2026-02-10" }
  */
 export function formatSingleDateFilter(date: Date | string): ICalendarFilterSingle {
-    const dateStr = typeof date === "string" ? date : toIsoDateString(date);
-    return {
-        type: "single",
-        date: dateStr
-    };
+  const dateStr = typeof date === 'string' ? date : toIsoDateString(date);
+  return {
+    type: 'single',
+    date: dateStr,
+  };
 }
 
 /**
@@ -79,26 +79,26 @@ export function formatSingleDateFilter(date: Date | string): ICalendarFilterSing
  * // { type: "range", start: "2026-02-01", end: "2026-02-07" }
  */
 export function formatRangeFilter(date1: Date | string, date2: Date | string): ICalendarFilterRange {
-    const dateStr1 = typeof date1 === "string" ? date1 : toIsoDateString(date1);
-    const dateStr2 = typeof date2 === "string" ? date2 : toIsoDateString(date2);
+  const dateStr1 = typeof date1 === 'string' ? date1 : toIsoDateString(date1);
+  const dateStr2 = typeof date2 === 'string' ? date2 : toIsoDateString(date2);
 
-    // Sort chronologically
-    const d1 = parseIsoDate(dateStr1);
-    const d2 = parseIsoDate(dateStr2);
+  // Sort chronologically
+  const d1 = parseIsoDate(dateStr1);
+  const d2 = parseIsoDate(dateStr2);
 
-    if (d1 <= d2) {
-        return {
-            type: "range",
-            start: dateStr1,
-            end: dateStr2
-        };
-    } else {
-        return {
-            type: "range",
-            start: dateStr2,
-            end: dateStr1
-        };
-    }
+  if (d1 <= d2) {
+    return {
+      type: 'range',
+      start: dateStr1,
+      end: dateStr2,
+    };
+  } else {
+    return {
+      type: 'range',
+      start: dateStr2,
+      end: dateStr1,
+    };
+  }
 }
 
 /**
@@ -111,7 +111,7 @@ export function formatRangeFilter(date1: Date | string, date2: Date | string): I
  * // { type: "clear" }
  */
 export function formatClearFilter(): ICalendarFilterClear {
-    return { type: "clear" };
+  return { type: 'clear' };
 }
 
 /**
@@ -126,7 +126,7 @@ export function formatClearFilter(): ICalendarFilterClear {
  * // '{"type":"single","date":"2026-02-10"}'
  */
 export function formatFilterOutputToJson(filter: CalendarFilterOutput): string {
-    return JSON.stringify(filter);
+  return JSON.stringify(filter);
 }
 
 /**
@@ -141,7 +141,7 @@ export function formatFilterOutputToJson(filter: CalendarFilterOutput): string {
  * // '{"type":"single","date":"2026-02-10"}'
  */
 export function createSingleFilterJson(date: Date | string): string {
-    return formatFilterOutputToJson(formatSingleDateFilter(date));
+  return formatFilterOutputToJson(formatSingleDateFilter(date));
 }
 
 /**
@@ -157,7 +157,7 @@ export function createSingleFilterJson(date: Date | string): string {
  * // '{"type":"range","start":"2026-02-01","end":"2026-02-07"}'
  */
 export function createRangeFilterJson(date1: Date | string, date2: Date | string): string {
-    return formatFilterOutputToJson(formatRangeFilter(date1, date2));
+  return formatFilterOutputToJson(formatRangeFilter(date1, date2));
 }
 
 /**
@@ -171,5 +171,5 @@ export function createRangeFilterJson(date1: Date | string, date2: Date | string
  * // '{"type":"clear"}'
  */
 export function createClearFilterJson(): string {
-    return formatFilterOutputToJson(formatClearFilter());
+  return formatFilterOutputToJson(formatClearFilter());
 }

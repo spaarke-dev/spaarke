@@ -17,10 +17,7 @@ interface DeliverOutputNodeProps {
  * Deliver Output node - outputs data to Power Apps or other consumers.
  * Terminal node (no output handle).
  */
-export const DeliverOutputNode = React.memo(function DeliverOutputNode({
-  data,
-  selected,
-}: DeliverOutputNodeProps) {
+export const DeliverOutputNode = React.memo(function DeliverOutputNode({ data, selected }: DeliverOutputNodeProps) {
   return (
     <BaseNode
       data={data}

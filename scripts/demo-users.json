@@ -1,0 +1,31 @@
+{
+  "$schema": "demo-users-schema",
+  "description": "Demo user accounts for B2B guest access to Spaarke demo environment",
+  "lastUpdated": "2026-03-13",
+  "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+  "dataverseEnvironmentUrl": "https://spaarke-demo.crm.dynamics.com",
+  "inviteRedirectUrl": "https://spaarke-demo.crm.dynamics.com",
+  "users": [
+    {
+      "email": "demo-user1@spaarke.com",
+      "displayName": "Demo User 1",
+      "role": "Basic User",
+      "notes": "Primary demo account for sales presentations"
+    },
+    {
+      "email": "demo-user2@spaarke.com",
+      "displayName": "Demo User 2",
+      "role": "Basic User",
+      "notes": "Secondary demo account for parallel demonstrations"
+    }
+  ],
+  "dataverseSecurityRoles": [
+    "Basic User",
+    "Spaarke User"
+  ],
+  "instructions": {
+    "addingUsers": "Add new entries to the 'users' array with email, displayName, role, and notes fields.",
+    "removingUsers": "Remove entries from the 'users' array and re-run Invite-DemoUsers.ps1 with -RevokeRemoved to clean up.",
+    "customRoles": "The 'role' field maps to Dataverse security roles. Default roles are listed in 'dataverseSecurityRoles'."
+  }
+}

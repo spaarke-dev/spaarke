@@ -12,21 +12,11 @@
  *   - onNavigateToEntity for Dataverse record navigation
  */
 import * as React from 'react';
-import {
-  Button,
-  MessageBar,
-  MessageBarBody,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
@@ -76,12 +66,8 @@ type FileAction =
 function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
     case 'ADD_FILES': {
-      const existing = new Set(
-        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`),
-      );
-      const newFiles = action.files.filter(
-        (f) => !existing.has(`${f.name}::${f.sizeBytes}`),
-      );
+      const existing = new Set(state.uploadedFiles.map(f => `${f.name}::${f.sizeBytes}`));
+      const newFiles = action.files.filter(f => !existing.has(`${f.name}::${f.sizeBytes}`));
       return {
         ...state,
         uploadedFiles: [...state.uploadedFiles, ...newFiles],
@@ -91,7 +77,7 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
     case 'REMOVE_FILE':
       return {
         ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
+        uploadedFiles: state.uploadedFiles.filter(f => f.id !== action.fileId),
       };
     case 'SET_VALIDATION_ERRORS':
       return { ...state, validationErrors: action.errors };
@@ -165,20 +151,14 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
   // -- File handlers --
   const handleFilesAccepted = React.useCallback(
     (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
-    [],
+    []
   );
   const handleValidationErrors = React.useCallback(
     (errors: IFileValidationError[]) => fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
-    [],
+    []
   );
-  const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
-    [],
-  );
-  const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
-    [],
-  );
+  const handleRemoveFile = React.useCallback((fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }), []);
+  const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
 
   // -- Run search --
   const runSearch = React.useCallback(async () => {
@@ -227,12 +207,7 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
     console.info('[FindSimilarDialog] Finish with', totalFound, 'total results');
 
     return {
-      icon: (
-        <CheckmarkCircleFilled
-          fontSize={64}
-          style={{ color: tokens.colorPaletteGreenForeground1 }}
-        />
-      ),
+      icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: 'Search Complete',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
@@ -263,17 +238,13 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
                 Upload file(s)
               </Text>
               <Text size={200} className={styles.stepSubtitle}>
-                Upload one or more documents. The AI will extract text and search for
-                similar documents, matters, and projects.
+                Upload one or more documents. The AI will extract text and search for similar documents, matters, and
+                projects.
               </Text>
             </div>
 
             {fileState.validationErrors.length > 0 && (
-              <MessageBar
-                intent="error"
-                className={styles.errorBar}
-                onMouseEnter={handleClearErrors}
-              >
+              <MessageBar intent="error" className={styles.errorBar} onMouseEnter={handleClearErrors}>
                 <MessageBarBody>
                   {fileState.validationErrors.map((err, i) => (
                     <div key={i}>
@@ -284,16 +255,10 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
               </MessageBar>
             )}
 
-            <FileUploadZone
-              onFilesAccepted={handleFilesAccepted}
-              onValidationErrors={handleValidationErrors}
-            />
+            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
 
             {fileState.uploadedFiles.length > 0 && (
-              <UploadedFileList
-                files={fileState.uploadedFiles}
-                onRemove={handleRemoveFile}
-              />
+              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
             )}
           </>
         ),
@@ -339,7 +304,7 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
       runSearch,
       onNavigateToEntity,
       filePreviewServices,
-    ],
+    ]
   );
 
   // -- Render --

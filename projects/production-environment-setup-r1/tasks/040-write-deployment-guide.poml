@@ -1,0 +1,83 @@
+<task id="PRODENV-040" project="Production Environment Setup R1">
+  <metadata>
+    <title>Write production deployment guide (step-by-step)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>5</phase>
+    <parallel-group>P5-A</parallel-group>
+    <tags>documentation, deployment, guide</tags>
+  </metadata>
+
+  <prompt>
+    Write a comprehensive step-by-step production deployment guide covering initial
+    setup, platform deployment, customer provisioning, and ongoing maintenance.
+    Must be testable by a second person independently.
+  </prompt>
+
+  <role>Technical writer creating operational documentation for production deployments.</role>
+
+  <goal>
+    A complete deployment guide that enables a second person to deploy Spaarke
+    to production independently, covering all prerequisites and steps.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="scripts">scripts/Deploy-Platform.ps1</file>
+    <file purpose="scripts">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="scripts">scripts/Provision-Customer.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Must be independently testable by second person</constraint>
+    <constraint source="project">No assumed knowledge beyond listed prerequisites</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Production deployment documentation</topic>
+    <files>
+      <file>scripts/Deploy-Platform.ps1</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Provision-Customer.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This guide is the primary operational document for Spaarke deployments.
+      It captures all lessons learned during the initial production deployment.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-020" status="complete">Platform deployed (lessons learned)</dependency>
+      <dependency task="PRODENV-027" status="complete">Smoke tests validated deployment</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Outline guide structure">
+      Prerequisites, platform setup, BFF deployment, customer provisioning, verification, troubleshooting.
+    </step>
+    <step order="2" name="Write deployment guide">
+      Create docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md with step-by-step instructions.
+    </step>
+    <step order="3" name="Add troubleshooting section">
+      Document common issues encountered and their resolutions.
+    </step>
+    <step order="4" name="Review for completeness">
+      Walk through guide mentally to verify no steps are missing.
+    </step>
+  </steps>
+
+  <tools><tool name="git">Version control</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide covers full deployment lifecycle (prerequisites → verification)</criterion>
+    <criterion testable="true">Each step has explicit commands or actions</criterion>
+    <criterion testable="true">Troubleshooting section with common issues</criterion>
+    <criterion testable="true">Prerequisites clearly listed at the top</criterion>
+  </acceptance-criteria>
+</task>

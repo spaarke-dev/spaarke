@@ -28,7 +28,7 @@
  * ```
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -37,10 +37,7 @@ import * as React from "react";
 /**
  * Callback for notifying parent (e.g., grid) of updates
  */
-export type RecordUpdateCallback = (
-  recordId: string,
-  updatedFields: Record<string, unknown>
-) => void;
+export type RecordUpdateCallback = (recordId: string, updatedFields: Record<string, unknown>) => void;
 
 /**
  * Error state for save failure
@@ -63,10 +60,7 @@ export interface UseOptimisticSaveResult {
   /** Set the original record (called on initial load) */
   setOriginal: (record: Record<string, unknown>) => void;
   /** Handle successful save */
-  handleSuccess: (
-    savedFields: Record<string, unknown>,
-    currentValues: Record<string, unknown>
-  ) => void;
+  handleSuccess: (savedFields: Record<string, unknown>, currentValues: Record<string, unknown>) => void;
   /** Handle failed save */
   handleError: (
     errorMessage: string,
@@ -95,9 +89,7 @@ export interface UseOptimisticSaveResult {
  * @param recordId - The record ID being edited (for callback notifications)
  * @returns Save lifecycle management functions
  */
-export function useOptimisticSave(
-  recordId: string | undefined
-): UseOptimisticSaveResult {
+export function useOptimisticSave(recordId: string | undefined): UseOptimisticSaveResult {
   const [originalRecord, setOriginalRecord] = React.useState<Record<string, unknown> | null>(null);
   const [errorState, setErrorState] = React.useState<SaveErrorState | null>(null);
   const updateCallbackRef = React.useRef<RecordUpdateCallback | null>(null);
@@ -108,12 +100,9 @@ export function useOptimisticSave(
   }, []);
 
   const handleSuccess = React.useCallback(
-    (
-      savedFields: Record<string, unknown>,
-      currentValues: Record<string, unknown>
-    ) => {
+    (savedFields: Record<string, unknown>, currentValues: Record<string, unknown>) => {
       // Update original to reflect saved state
-      setOriginalRecord((prev) => {
+      setOriginalRecord(prev => {
         if (!prev) return prev;
         return { ...prev, ...savedFields };
       });
@@ -128,11 +117,7 @@ export function useOptimisticSave(
   );
 
   const handleError = React.useCallback(
-    (
-      errorMessage: string,
-      failedFields: Record<string, unknown>,
-      currentValues: Record<string, unknown>
-    ) => {
+    (errorMessage: string, failedFields: Record<string, unknown>, currentValues: Record<string, unknown>) => {
       setErrorState({
         message: errorMessage,
         failedFields,
@@ -157,12 +142,9 @@ export function useOptimisticSave(
     setErrorState(null);
   }, []);
 
-  const registerUpdateCallback = React.useCallback(
-    (callback: RecordUpdateCallback | null) => {
-      updateCallbackRef.current = callback;
-    },
-    []
-  );
+  const registerUpdateCallback = React.useCallback((callback: RecordUpdateCallback | null) => {
+    updateCallbackRef.current = callback;
+  }, []);
 
   return {
     originalRecord,

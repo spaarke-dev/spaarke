@@ -14,15 +14,7 @@
 
 import * as React from 'react';
 import { useEffect, useCallback, useRef, useState } from 'react';
-import {
-  Button,
-  Spinner,
-  Text,
-  Tooltip,
-  makeStyles,
-  tokens,
-  shorthands,
-} from '@fluentui/react-components';
+import { Button, Spinner, Text, Tooltip, makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { DocumentMultiple20Regular } from '@fluentui/react-icons';
 import { ReactFlowProvider } from 'react-flow-renderer';
 import { BuilderLayout, TemplateLibraryDialog } from './components';
@@ -165,19 +157,19 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   // Template store - initialize API base URL
-  const { setApiBaseUrl } = useTemplateStore((state) => ({
+  const { setApiBaseUrl } = useTemplateStore(state => ({
     setApiBaseUrl: state.setApiBaseUrl,
   }));
 
   // AI Assistant store - initialize playbook ID and service config
-  const { setPlaybookId, setServiceConfig, startSession } = useAiAssistantStore((state) => ({
+  const { setPlaybookId, setServiceConfig, startSession } = useAiAssistantStore(state => ({
     setPlaybookId: state.setPlaybookId,
     setServiceConfig: state.setServiceConfig,
     startSession: state.startSession,
   }));
 
   // Get store state and actions
-  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
+  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore(state => ({
     isDirty: state.isDirty,
     loadCanvas: state.loadCanvas,
     getCanvasJson: state.getCanvasJson,
@@ -229,7 +221,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       // The BFF API endpoint will return an error if authentication is required
       setServiceConfig({
         apiBaseUrl,
-        accessToken: '', // TODO: Get access token from PCF context or auth provider
+        accessToken: '', // TRACKED: GitHub #234 - Get access token from PCF context
       });
     }
   }, [playbookId, apiBaseUrl, setPlaybookId, setServiceConfig, startSession]);
@@ -303,12 +295,19 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   // Handle clone success - navigate to the cloned playbook
   const handleCloneSuccess = useCallback((clonedId: string, clonedName: string) => {
     setTemplateDialogOpen(false);
-    console.info('[PlaybookBuilderHost] Template cloned successfully', { clonedId, clonedName });
+    console.info('[PlaybookBuilderHost] Template cloned successfully', {
+      clonedId,
+      clonedName,
+    });
 
     // Navigate to the cloned playbook record
     // In Dataverse, we use Xrm.Navigation.openForm to navigate to records
     try {
-      const Xrm = (window as unknown as { Xrm?: { Navigation?: { openForm: (options: unknown) => void } } }).Xrm;
+      const Xrm = (
+        window as unknown as {
+          Xrm?: { Navigation?: { openForm: (options: unknown) => void } };
+        }
+      ).Xrm;
       if (Xrm?.Navigation?.openForm) {
         Xrm.Navigation.openForm({
           entityName: 'sprk_analysisplaybook',
@@ -366,12 +365,8 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
         <div className={styles.headerLeft}>
           <Text className={styles.headerTitle}>Playbook Builder</Text>
           <div className={styles.headerStatus}>
-            <span
-              className={`${styles.statusDot} ${isDirty ? styles.statusDotUnsaved : ''}`}
-            />
-            <Text size={200}>
-              {isDirty ? 'Unsaved changes' : 'All changes saved'}
-            </Text>
+            <span className={`${styles.statusDot} ${isDirty ? styles.statusDotUnsaved : ''}`} />
+            <Text size={200}>{isDirty ? 'Unsaved changes' : 'All changes saved'}</Text>
           </div>
         </div>
 

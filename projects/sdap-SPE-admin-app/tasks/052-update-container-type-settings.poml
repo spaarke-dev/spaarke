@@ -1,0 +1,47 @@
+<task id="SPE-052" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Update Container Type Settings Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-050</dependencies>
+  </metadata>
+  <prompt>Implement the endpoint to update container type settings such as sharing capability, versioning policy, and storage limits. These settings control the default behavior of all containers created from this type, making this a critical configuration endpoint for administrators.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>A working PUT endpoint that updates container type settings via Graph API with validation, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type settings define default behaviors for containers: sharing capability (disabled, view-only, edit, full), versioning (enabled/disabled with major/minor version limits), and storage quota limits. Administrators update these to enforce organizational policies across all containers of that type.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-request-dto">Define UpdateContainerTypeSettingsRequest with sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes fields</step>
+    <step order="2" name="add-graph-method">Add UpdateContainerTypeSettingsAsync to SpeAdminGraphService using PATCH on Graph API container type resource</step>
+    <step order="3" name="add-endpoint">Add PUT /api/spe/containertypes/{typeId}/settings?configId={id} endpoint with validation and graph call</step>
+    <step order="4" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="5" name="add-tests">Write unit tests covering success, invalid settings, not-found container type</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/UpdateContainerTypeSettingsRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/UpdateContainerTypeSettingsTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">PUT /api/spe/containertypes/{typeId}/settings updates settings via Graph API and returns updated resource</criterion>
+    <criterion testable="true">Invalid sharing capability values are rejected with 400</criterion>
+    <criterion testable="true">Non-existent container type returns 404</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

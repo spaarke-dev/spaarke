@@ -12,23 +12,23 @@ import { Button } from '@fluentui/react-button';
 import { Tooltip } from '@fluentui/react-tooltip';
 
 export interface SprkButtonProps {
-    /** Tooltip text (optional - shows on hover) */
-    tooltip?: string;
+  /** Tooltip text (optional - shows on hover) */
+  tooltip?: string;
 
-    /** Button appearance */
-    appearance?: 'primary' | 'secondary' | 'subtle';
+  /** Button appearance */
+  appearance?: 'primary' | 'secondary' | 'subtle';
 
-    /** Icon element */
-    icon?: React.ReactElement;
+  /** Icon element */
+  icon?: React.ReactElement;
 
-    /** Disabled state */
-    disabled?: boolean;
+  /** Disabled state */
+  disabled?: boolean;
 
-    /** Click handler */
-    onClick?: () => void;
+  /** Click handler */
+  onClick?: () => void;
 
-    /** Button content */
-    children?: React.ReactNode;
+  /** Button content */
+  children?: React.ReactNode;
 }
 
 /**
@@ -48,33 +48,21 @@ export interface SprkButtonProps {
  * </SprkButton>
  * ```
  */
-export const SprkButton: React.FC<SprkButtonProps> = ({
-    tooltip,
-    appearance,
-    icon,
-    disabled,
-    onClick,
-    children
-}) => {
-    const button = (
-        <Button
-            appearance={appearance}
-            icon={icon}
-            disabled={disabled}
-            onClick={onClick}
-        >
-            {children}
-        </Button>
+export const SprkButton: React.FC<SprkButtonProps> = ({ tooltip, appearance, icon, disabled, onClick, children }) => {
+  const button = (
+    <Button appearance={appearance} icon={icon} disabled={disabled} onClick={onClick}>
+      {children}
+    </Button>
+  );
+
+  // Wrap with tooltip if provided
+  if (tooltip) {
+    return (
+      <Tooltip content={tooltip} relationship="label">
+        {button}
+      </Tooltip>
     );
+  }
 
-    // Wrap with tooltip if provided
-    if (tooltip) {
-        return (
-            <Tooltip content={tooltip} relationship="label">
-                {button}
-            </Tooltip>
-        );
-    }
-
-    return button;
+  return button;
 };

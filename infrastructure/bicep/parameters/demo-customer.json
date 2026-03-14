@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "customerId": {
+      "value": "demo"
+    },
+    "environmentName": {
+      "value": "prod"
+    },
+    "location": {
+      "value": "westus2"
+    },
+    "platformKeyVaultName": {
+      "value": "sprk-platform-prod-kv"
+    },
+    "storageSku": {
+      "value": "Standard_LRS"
+    },
+    "serviceBusSku": {
+      "value": "Standard"
+    },
+    "redisSku": {
+      "value": "Basic"
+    },
+    "redisCapacity": {
+      "value": 0
+    },
+    "tags": {
+      "value": {
+        "customer": "demo",
+        "environment": "prod",
+        "application": "spaarke",
+        "managedBy": "bicep",
+        "purpose": "demo-validation"
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+<task id="SPE-069" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create RecycleBinPage</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-029, SPE-059</dependencies>
+  </metadata>
+  <prompt>Create the RecycleBinPage component that displays deleted containers with restore and permanent delete actions. This page is essential for data lifecycle management, allowing administrators to recover accidentally deleted containers or permanently purge containers that should not be retained.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working RecycleBinPage with a grid showing deleted containers and toolbar actions for Restore and Permanent Delete with confirmation dialogs.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid and CommandToolbar from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The recycle bin holds soft-deleted containers that can be recovered within a retention period. Administrators need to view what has been deleted (with deletion date for urgency context), restore containers that were deleted by mistake, or permanently purge containers to free resources and ensure compliance. Permanent deletion is irreversible and requires explicit confirmation.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page-component">Create components/recycle-bin/RecycleBinPage.tsx with UniversalDatasetGrid showing deleted containers (name, container type, deleted date)</step>
+    <step order="2" name="add-toolbar">Add CommandToolbar with Restore and Permanent Delete buttons</step>
+    <step order="3" name="add-restore-action">Implement Restore action that calls POST /api/spe/recyclebin/{id}/restore with success notification</step>
+    <step order="4" name="add-delete-confirmation">Add confirmation dialog for Permanent Delete: "This action is irreversible. Are you sure you want to permanently delete {name}?"</step>
+    <step order="5" name="add-navigation-route">Register RecycleBinPage in app shell navigation/routing</step>
+    <step order="6" name="add-empty-state">Add empty state for when recycle bin has no items</step>
+    <step order="7" name="add-loading-states">Add loading and error states</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/recycle-bin/RecycleBinPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">RecycleBinPage renders a grid of deleted containers with name, type, and deletion date</criterion>
+    <criterion testable="true">Restore button calls POST /api/spe/recyclebin/{id}/restore and refreshes the grid</criterion>
+    <criterion testable="true">Permanent Delete shows irreversibility warning in confirmation dialog</criterion>
+    <criterion testable="true">Permanent Delete calls DELETE /api/spe/recyclebin/{id} and refreshes the grid</criterion>
+    <criterion testable="true">Empty state shows message when recycle bin is empty</criterion>
+    <criterion testable="true">Toolbar buttons disable when no row is selected</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

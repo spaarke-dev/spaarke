@@ -11,8 +11,8 @@
  * @version 1.1.1
  */
 
-import * as React from "react";
-import { useState, useCallback, useEffect } from "react";
+import * as React from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   makeStyles,
   tokens,
@@ -22,26 +22,20 @@ import {
   MessageBarBody,
   Text,
   Tooltip,
-} from "@fluentui/react-components";
-import {
-  DismissRegular,
-  FilterRegular,
-} from "@fluentui/react-icons";
-import type { DrillInteraction, IChartDefinition, IChartData } from "../types";
-import { TwoPanelLayout } from "./TwoPanelLayout";
-import { DrillThroughGrid } from "./DrillThroughGrid";
-import { ChartRenderer } from "./charts";
-import {
-  FilterStateProvider,
-  useFilterState,
-} from "../context/FilterStateContext";
+} from '@fluentui/react-components';
+import { DismissRegular, FilterRegular } from '@fluentui/react-icons';
+import type { DrillInteraction, IChartDefinition, IChartData } from '../types';
+import { TwoPanelLayout } from './TwoPanelLayout';
+import { DrillThroughGrid } from './DrillThroughGrid';
+import { ChartRenderer } from './charts';
+import { FilterStateProvider, useFilterState } from '../context/FilterStateContext';
 import {
   loadChartDefinition,
   ConfigurationNotFoundError,
   ConfigurationLoadError,
-} from "../services/ConfigurationLoader";
-import { fetchAndAggregate, AggregationError } from "../services/DataAggregationService";
-import { logger } from "../utils/logger";
+} from '../services/ConfigurationLoader';
+import { fetchAndAggregate, AggregationError } from '../services/DataAggregationService';
+import { logger } from '../utils/logger';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -49,15 +43,15 @@ import { logger } from "../utils/logger";
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
@@ -69,16 +63,16 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase400,
   },
   headerActions: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
   content: {
     flex: 1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   filterBadge: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorBrandBackground,
@@ -87,29 +81,29 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   filterActions: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   chartContainer: {
-    height: "100%",
+    height: '100%',
     padding: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalS,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
   footer: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     padding: tokens.spacingVerticalS,
     paddingRight: tokens.spacingHorizontalL,
     borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
@@ -146,11 +140,7 @@ interface IWorkspaceContentProps {
 /**
  * Inner workspace content that uses the FilterStateContext
  */
-const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
-  chartDefinitionId,
-  webApi,
-  onClose,
-}) => {
+const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({ chartDefinitionId, webApi, onClose }) => {
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -158,14 +148,13 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   const [chartData, setChartData] = useState<IChartData | null>(null);
 
   // Get filter state from context
-  const { activeFilter, setFilter, clearFilter, isFiltered, dataset } =
-    useFilterState();
+  const { activeFilter, setFilter, clearFilter, isFiltered, dataset } = useFilterState();
 
   // Load chart definition and data
   useEffect(() => {
     if (!chartDefinitionId) {
       setIsLoading(false);
-      setError("No chart definition ID provided");
+      setError('No chart definition ID provided');
       return;
     }
 
@@ -173,54 +162,39 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
       try {
         setIsLoading(true);
         setError(null);
-        logger.info(
-          "WorkspaceContent",
-          `Loading chart definition: ${chartDefinitionId}`
-        );
+        logger.info('WorkspaceContent', `Loading chart definition: ${chartDefinitionId}`);
 
         // Load chart definition from Dataverse
-        const definition = await loadChartDefinition(
-          { webAPI: webApi },
-          chartDefinitionId
-        );
+        const definition = await loadChartDefinition({ webAPI: webApi }, chartDefinitionId);
         setChartDefinition(definition);
 
-        logger.info(
-          "WorkspaceContent",
-          `Loaded definition: ${definition.sprk_name}`
-        );
+        logger.info('WorkspaceContent', `Loaded definition: ${definition.sprk_name}`);
 
         // Fetch and aggregate data for the chart
         if (definition.sprk_entitylogicalname) {
-          logger.info(
-            "WorkspaceContent",
-            `Fetching data from ${definition.sprk_entitylogicalname}`
-          );
+          logger.info('WorkspaceContent', `Fetching data from ${definition.sprk_entitylogicalname}`);
 
-          const data = await fetchAndAggregate(
-            { webAPI: webApi },
-            definition
-          );
+          const data = await fetchAndAggregate({ webAPI: webApi }, definition);
           setChartData(data);
 
           logger.info(
-            "WorkspaceContent",
+            'WorkspaceContent',
             `Aggregated ${data.dataPoints.length} data points from ${data.totalRecords} records`
           );
         }
       } catch (err) {
         if (err instanceof ConfigurationNotFoundError) {
-          logger.warn("WorkspaceContent", `Chart not found: ${chartDefinitionId}`);
+          logger.warn('WorkspaceContent', `Chart not found: ${chartDefinitionId}`);
           setError(`Chart definition not found: ${chartDefinitionId}`);
         } else if (err instanceof ConfigurationLoadError) {
-          logger.error("WorkspaceContent", "Failed to load configuration", err);
+          logger.error('WorkspaceContent', 'Failed to load configuration', err);
           setError(`Failed to load chart: ${err.message}`);
         } else if (err instanceof AggregationError) {
-          logger.error("WorkspaceContent", "Failed to aggregate data", err);
+          logger.error('WorkspaceContent', 'Failed to aggregate data', err);
           setError(`Failed to load chart data: ${err.message}`);
         } else {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-          logger.error("WorkspaceContent", "Failed to load chart", err);
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          logger.error('WorkspaceContent', 'Failed to load chart', err);
           setError(`Failed to load chart: ${errorMessage}`);
         }
       } finally {
@@ -237,7 +211,7 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
    */
   const handleDrillInteraction = useCallback(
     (interaction: DrillInteraction) => {
-      logger.info("WorkspaceContent", "Drill interaction", interaction);
+      logger.info('WorkspaceContent', 'Drill interaction', interaction);
       setFilter(interaction);
     },
     [setFilter]
@@ -248,7 +222,7 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
    * Calls clearFilter from context which clears filter via platform API
    */
   const handleClearFilter = useCallback(() => {
-    logger.info("WorkspaceContent", "Clearing filter");
+    logger.info('WorkspaceContent', 'Clearing filter');
     clearFilter();
   }, [clearFilter]);
 
@@ -258,10 +232,10 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   const getFilterLabel = (filter: DrillInteraction): string => {
     if (filter.label) return filter.label;
     if (Array.isArray(filter.value)) {
-      if (filter.operator === "between" && filter.value.length === 2) {
+      if (filter.operator === 'between' && filter.value.length === 2) {
         return `${filter.field}: ${filter.value[0]} - ${filter.value[1]}`;
       }
-      return `${filter.field}: ${filter.value.join(", ")}`;
+      return `${filter.field}: ${filter.value.join(', ')}`;
     }
     return `${filter.field}: ${String(filter.value)}`;
   };
@@ -310,13 +284,10 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   /**
    * Handle record selection from grid
    */
-  const handleGridSelectionChange = useCallback(
-    (recordIds: string[]) => {
-      logger.debug("WorkspaceContent", "Grid selection changed", { recordIds });
-      // Selection is managed by DrillThroughGrid and synced with platform
-    },
-    []
-  );
+  const handleGridSelectionChange = useCallback((recordIds: string[]) => {
+    logger.debug('WorkspaceContent', 'Grid selection changed', { recordIds });
+    // Selection is managed by DrillThroughGrid and synced with platform
+  }, []);
 
   /**
    * Render dataset grid content
@@ -331,12 +302,7 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
       );
     }
 
-    return (
-      <DrillThroughGrid
-        dataset={dataset}
-        onSelectionChange={handleGridSelectionChange}
-      />
-    );
+    return <DrillThroughGrid dataset={dataset} onSelectionChange={handleGridSelectionChange} />;
   };
 
   /**
@@ -362,23 +328,16 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
     );
   };
 
-  const chartTitle = chartDefinition?.sprk_name || "Chart";
+  const chartTitle = chartDefinition?.sprk_name || 'Chart';
 
   return (
     <div className={styles.container}>
       {/* Header with title and close button */}
       <div className={styles.header}>
-        <Text className={styles.headerTitle}>
-          {chartTitle} - Drill-Through View
-        </Text>
+        <Text className={styles.headerTitle}>{chartTitle} - Drill-Through View</Text>
         <div className={styles.headerActions}>
           <Tooltip content="Close (Esc)" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<DismissRegular />}
-              onClick={onClose}
-              aria-label="Close workspace"
-            />
+            <Button appearance="subtle" icon={<DismissRegular />} onClick={onClose} aria-label="Close workspace" />
           </Tooltip>
         </div>
       </div>
@@ -423,11 +382,7 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
 }) => {
   return (
     <FilterStateProvider dataset={dataset}>
-      <WorkspaceContent
-        chartDefinitionId={chartDefinitionId}
-        webApi={webApi}
-        onClose={onClose}
-      />
+      <WorkspaceContent chartDefinitionId={chartDefinitionId} webApi={webApi} onClose={onClose} />
     </FilterStateProvider>
   );
 };

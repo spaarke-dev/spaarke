@@ -1,0 +1,38 @@
+<task id="SPE-031" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create NavigationPanel Component</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029</dependencies>
+  </metadata>
+  <prompt>Create the NavigationPanel component that provides section-based navigation for the SPE Admin App. Each section is represented by an icon and label, and clicking a section switches the main content area to the corresponding page.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>NavigationPanel renders icons and labels for Dashboard, Containers, File Browser, Audit Log, and Settings sections, with active state indication and content area switching on click.</goal>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 icons from @fluentui/react-icons and design tokens for styling.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The NavigationPanel sits inside the AppShell's left drawer area. It provides the primary navigation mechanism for the admin app, allowing users to switch between the five main sections. The panel should visually indicate the currently active section.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/layout/NavigationPanel.tsx with navigation items for Dashboard, Containers, File Browser, Audit Log, and Settings.</step>
+    <step order="2" name="add-icons">Add appropriate icons from @fluentui/react-icons for each section (e.g., Home, Box, Folder, ClipboardList, Settings).</step>
+    <step order="3" name="active-state">Implement active state styling using Fluent v9 design tokens to highlight the currently selected section.</step>
+    <step order="4" name="wire-navigation">Wire click handlers to update the AppShell's active page state, switching the content area.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/layout/NavigationPanel.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All five navigation sections render with icons and labels.</criterion>
+    <criterion testable="true">Clicking a section changes the main content area to the corresponding page.</criterion>
+    <criterion testable="true">The active section is visually distinguished from inactive sections.</criterion>
+  </acceptance-criteria>
+</task>

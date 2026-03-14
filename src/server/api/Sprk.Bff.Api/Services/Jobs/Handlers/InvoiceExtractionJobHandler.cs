@@ -472,7 +472,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
             // For this implementation, we'll assume matter and vendor are set via UpdateDocumentFieldsAsync
             // when the invoice is confirmed, so we can query the document record
 
-            // TODO: This needs actual implementation when sprk_invoice entity methods are added
+            // TRACKED: GitHub #229 - Implement when sprk_invoice entity methods added
             return Task.FromResult<InvoiceRecord?>(new InvoiceRecord
             {
                 InvoiceId = invoiceId,

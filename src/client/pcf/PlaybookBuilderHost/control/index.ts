@@ -16,12 +16,12 @@
  * @version 2.0.0
  */
 
-import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/react-components";
-import { PlaybookBuilderHost as PlaybookBuilderHostApp } from "./PlaybookBuilderHost";
-import { syncCanvasToNodes, CanvasNode, CanvasEdge } from "./services/playbookNodeSync";
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { PlaybookBuilderHost as PlaybookBuilderHostApp } from './PlaybookBuilderHost';
+import { syncCanvasToNodes, CanvasNode, CanvasEdge } from './services/playbookNodeSync';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -41,25 +41,34 @@ function getUserThemePreference(): ThemePreference {
       if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
         return parentStored;
       }
-    } catch { /* Cross-origin blocked */ }
-  } catch { /* localStorage not available */ }
+    } catch {
+      /* Cross-origin blocked */
+    }
+  } catch {
+    /* localStorage not available */
+  }
   return 'auto';
 }
 
 function detectDarkModeFromUrl(): boolean | null {
   try {
-    if (window.location.href.includes('themeOption%3Ddarkmode') ||
-        window.location.href.includes('themeOption=darkmode')) {
+    if (
+      window.location.href.includes('themeOption%3Ddarkmode') ||
+      window.location.href.includes('themeOption=darkmode')
+    ) {
       return true;
     }
     try {
       const parentUrl = window.parent?.location?.href;
-      if (parentUrl?.includes('themeOption%3Ddarkmode') ||
-          parentUrl?.includes('themeOption=darkmode')) {
+      if (parentUrl?.includes('themeOption%3Ddarkmode') || parentUrl?.includes('themeOption=darkmode')) {
         return true;
       }
-    } catch { /* Cross-origin blocked */ }
-  } catch { /* Error */ }
+    } catch {
+      /* Cross-origin blocked */
+    }
+  } catch {
+    /* Error */
+  }
   return null;
 }
 
@@ -76,9 +85,7 @@ function getResolvedTheme(): Theme {
 
   // Fallback to system preference
   if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? webDarkTheme
-      : webLightTheme;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? webDarkTheme : webLightTheme;
   }
   return webLightTheme;
 }
@@ -101,9 +108,7 @@ function logError(message: string, error?: unknown): void {
 // PCF Control Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class PlaybookBuilderHost
-  implements ComponentFramework.StandardControl<IInputs, IOutputs>
-{
+export class PlaybookBuilderHost implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement | null = null;
   private notifyOutputChanged: () => void;
   private context: ComponentFramework.Context<IInputs> | null = null;
@@ -111,14 +116,14 @@ export class PlaybookBuilderHost
   private themeMediaQuery: MediaQueryList | null = null;
 
   // Output values
-  private isDirty: boolean = false;
+  private isDirty = false;
   private canvasJsonOutput: string | undefined = undefined;
   private playbookNameOutput: string | undefined = undefined;
   private playbookDescriptionOutput: string | undefined = undefined;
 
   // Fallback canvas data loaded via WebAPI when bound property is null
   private fallbackCanvasJson: string | null = null;
-  private fallbackLoadAttempted: boolean = false;
+  private fallbackLoadAttempted = false;
 
   constructor() {
     logInfo('Constructor called');
@@ -274,7 +279,11 @@ export class PlaybookBuilderHost
     try {
       // Try multiple methods to get the record ID
       // Method 1: contextInfo.entityId (standard for model-driven apps)
-      const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string; entityTypeName?: string } }).contextInfo;
+      const contextInfo = (
+        context.mode as unknown as {
+          contextInfo?: { entityId?: string; entityTypeName?: string };
+        }
+      ).contextInfo;
 
       // Method 2: Extract from URL (fallback for model-driven apps)
       let urlRecordId = '';
@@ -285,7 +294,9 @@ export class PlaybookBuilderHost
         if (idMatch) {
           urlRecordId = decodeURIComponent(idMatch[1]);
         }
-      } catch { /* URL parsing error */ }
+      } catch {
+        /* URL parsing error */
+      }
 
       // Method 3: Input parameter (manual binding - fallback)
       const paramId = context.parameters.playbookId?.raw || '';
@@ -297,7 +308,7 @@ export class PlaybookBuilderHost
         contextInfoEntityId: contextInfo?.entityId,
         urlRecordId,
         paramId,
-        resolved: playbookId
+        resolved: playbookId,
       });
 
       // Get other input parameters
@@ -311,7 +322,9 @@ export class PlaybookBuilderHost
 
       // If bound property is null and we have a playbook ID, load via WebAPI
       if (!boundCanvasJson && !this.fallbackCanvasJson && playbookId && !this.fallbackLoadAttempted) {
-        logInfo('Bound canvasJson is null - triggering fallback WebAPI load', { playbookId });
+        logInfo('Bound canvasJson is null - triggering fallback WebAPI load', {
+          playbookId,
+        });
         this.loadCanvasFromDataverse(playbookId);
       }
 
@@ -336,7 +349,13 @@ export class PlaybookBuilderHost
           FluentProvider,
           {
             theme: this.currentTheme,
-            style: { height: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
+            style: {
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              flex: 1,
+              minHeight: 0,
+            },
           },
           React.createElement(PlaybookBuilderHostApp, {
             key: componentKey,
@@ -396,9 +415,11 @@ export class PlaybookBuilderHost
 
     try {
       // Try multiple methods to get the record ID (same as renderReactTree)
-      const contextInfo = (this.context.mode as unknown as {
-        contextInfo?: { entityId?: string; entityTypeName?: string }
-      }).contextInfo;
+      const contextInfo = (
+        this.context.mode as unknown as {
+          contextInfo?: { entityId?: string; entityTypeName?: string };
+        }
+      ).contextInfo;
 
       // Method 2: Extract from URL
       let urlRecordId = '';
@@ -408,7 +429,9 @@ export class PlaybookBuilderHost
         if (idMatch) {
           urlRecordId = decodeURIComponent(idMatch[1]);
         }
-      } catch { /* URL parsing error */ }
+      } catch {
+        /* URL parsing error */
+      }
 
       // Method 3: Input parameter
       const paramId = this.context.parameters.playbookId?.raw || '';
@@ -449,7 +472,11 @@ export class PlaybookBuilderHost
       });
 
       // Use the PCF webAPI to update the record directly
-      logInfo('Calling webAPI.updateRecord', { entityName, entityId, updateDataKeys: Object.keys(updateData) });
+      logInfo('Calling webAPI.updateRecord', {
+        entityName,
+        entityId,
+        updateDataKeys: Object.keys(updateData),
+      });
       this.context.webAPI.updateRecord(entityName, entityId, updateData).then(
         (result: unknown) => {
           logInfo('Canvas auto-saved successfully', { result });

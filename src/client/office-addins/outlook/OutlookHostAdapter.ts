@@ -1,9 +1,4 @@
-import type {
-  IHostAdapter,
-  IHostContext,
-  IContentData,
-  HostFeature,
-} from '@shared/adapters';
+import type { IHostAdapter, IHostContext, IContentData, HostFeature } from '@shared/adapters';
 import type {
   HostType,
   ItemType,
@@ -72,10 +67,9 @@ export class OutlookHostAdapter implements IHostAdapter {
         return;
       }
 
-      const coercionType =
-        preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
+      const coercionType = preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
 
-      this.currentItem.body.getAsync(coercionType, (result) => {
+      this.currentItem.body.getAsync(coercionType, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           resolve({
             content: result.value,
@@ -97,7 +91,7 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     const attachments = this.currentItem.attachments;
-    return attachments.map((att) => ({
+    return attachments.map(att => ({
       id: att.id,
       name: att.name,
       contentType: att.contentType,
@@ -120,12 +114,12 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     return new Promise((resolve, reject) => {
-      this.currentItem!.getAttachmentContentAsync(attachmentId, (result) => {
+      this.currentItem!.getAttachmentContentAsync(attachmentId, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           const content = result.value;
           // Find the attachment info
           const attachments = (this.currentItem as Office.MessageRead).attachments || [];
-          const attachment = attachments.find((a) => a.id === attachmentId);
+          const attachment = attachments.find(a => a.id === attachmentId);
 
           if (!attachment) {
             reject(new Error(`Attachment ${attachmentId} not found`));
@@ -227,7 +221,7 @@ export class OutlookHostAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host === Office.HostType.Outlook) {
           this.mailbox = Office.context.mailbox;
           this.currentItem = this.mailbox.item as Office.MessageRead | Office.AppointmentRead | null;
@@ -258,32 +252,24 @@ export class OutlookHostAdapter implements IHostAdapter {
       };
     }
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const composeItem = this.currentItem as Office.MessageCompose;
       const linkHtml = `<a href="${url}">${displayText || url}</a>`;
 
-      composeItem.body.setSelectedDataAsync(
-        linkHtml,
-        { coercionType: Office.CoercionType.Html },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({ success: true });
-          } else {
-            resolve({ success: false, errorMessage: result.error.message });
-          }
+      composeItem.body.setSelectedDataAsync(linkHtml, { coercionType: Office.CoercionType.Html }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, errorMessage: result.error.message });
         }
-      );
+      });
     });
   }
 
   /**
    * Attach a file to the email (compose mode only).
    */
-  async attachFile(
-    content: string,
-    fileName: string,
-    contentType: string
-  ): Promise<AttachFileResult> {
+  async attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult> {
     if (!this.isComposeMode()) {
       return {
         success: false,
@@ -291,21 +277,16 @@ export class OutlookHostAdapter implements IHostAdapter {
       };
     }
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const composeItem = this.currentItem as Office.MessageCompose;
 
-      composeItem.addFileAttachmentFromBase64Async(
-        content,
-        fileName,
-        { asyncContext: { contentType } },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({ success: true, attachmentId: result.value });
-          } else {
-            resolve({ success: false, errorMessage: result.error.message });
-          }
+      composeItem.addFileAttachmentFromBase64Async(content, fileName, { asyncContext: { contentType } }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({ success: true, attachmentId: result.value });
+        } else {
+          resolve({ success: false, errorMessage: result.error.message });
         }
-      );
+      });
     });
   }
 
@@ -407,8 +388,11 @@ export class OutlookHostAdapter implements IHostAdapter {
   }
 
   private isComposeMode(): boolean {
-    return this.currentItem !== null && 'body' in this.currentItem &&
-           typeof (this.currentItem as Office.MessageCompose).body?.setSelectedDataAsync === 'function';
+    return (
+      this.currentItem !== null &&
+      'body' in this.currentItem &&
+      typeof (this.currentItem as Office.MessageCompose).body?.setSelectedDataAsync === 'function'
+    );
   }
 
   private sanitizeFileName(name: string): string {

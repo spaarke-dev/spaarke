@@ -25,11 +25,7 @@
 export { naaAuthService, NaaAuthServiceImpl } from './NaaAuthService';
 
 // Types and interfaces
-export type {
-  INaaAuthService,
-  NaaAuthState,
-  TokenResult,
-} from './NaaAuthService';
+export type { INaaAuthService, NaaAuthState, TokenResult } from './NaaAuthService';
 
 // Error types
 export { NaaAuthError, NaaAuthErrorCode } from './NaaAuthService';

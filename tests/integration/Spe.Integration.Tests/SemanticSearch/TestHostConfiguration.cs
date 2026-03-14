@@ -109,28 +109,9 @@ internal static class TestHostConfiguration
         services.RemoveAll<IChatClient>();
         services.AddSingleton(new Mock<IChatClient>().Object);
 
-        // Remove background hosted services that use fake ServiceBus connection.
-        // The ServiceBusJobProcessor creates a real ServiceBusProcessor from the fake
-        // connection string, which throws ObjectDisposedException during test teardown.
-        RemoveHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillService>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Communication.GraphSubscriptionManager>(services);
-        RemoveHostedService<Sprk.Bff.Api.Services.Communication.InboundPollingBackupService>(services);
-    }
-
-    /// <summary>
-    /// Removes a specific hosted service registration from the service collection.
-    /// </summary>
-    private static void RemoveHostedService<T>(IServiceCollection services) where T : class, IHostedService
-    {
-        var descriptor = services.FirstOrDefault(d =>
-            d.ServiceType == typeof(IHostedService) &&
-            d.ImplementationType == typeof(T));
-        if (descriptor != null)
-        {
-            services.Remove(descriptor);
-        }
+        // Remove ALL hosted services to prevent SemaphoreSlim dispose race and
+        // avoid background workers depending on external services not available in tests.
+        // This replaces individual RemoveHostedService calls to catch any new services added.
+        services.RemoveAll<IHostedService>();
     }
 }

@@ -1034,7 +1034,7 @@ public class BuilderToolExecutor
         _logger.LogInformation("CreateScope: Creating {ScopeType} scope '{Name}'",
             args.ScopeType, args.Name);
 
-        // TODO: Implement actual scope creation in Dataverse using IScopeManagementService
+        // TRACKED: GitHub #229 - Implement scope creation in Dataverse
         // For now, return a placeholder result
         var scopeId = Guid.NewGuid().ToString();
         var fullName = $"CUST-{args.ScopeType.ToUpper()[..3]}-{args.Name}";

@@ -44,22 +44,22 @@ const BFF_API_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
  * Idempotent: @spaarke/auth handles re-initialization by disposing previous instance.
  */
 export async function initializeAuth(): Promise<void> {
-    console.info('[authInit] Initializing @spaarke/auth for UniversalDatasetGrid...');
+  console.info('[authInit] Initializing @spaarke/auth for UniversalDatasetGrid...');
 
-    const config: IAuthConfig = {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-        // CRITICAL: Static redirect URI matching Azure AD app registration
-        // Must be the Dataverse org URL, NOT window.location.origin
-        redirectUri: 'https://spaarkedev1.crm.dynamics.com',
-        // Named scope: api://<BFF_APP_ID>/SDAP.Access
-        bffApiScope: `api://${BFF_APP_ID}/SDAP.Access`,
-        bffBaseUrl: BFF_API_URL,
-        // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
-        proactiveRefresh: true,
-    };
+  const config: IAuthConfig = {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    // CRITICAL: Static redirect URI matching Azure AD app registration
+    // Must be the Dataverse org URL, NOT window.location.origin
+    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
+    // Named scope: api://<BFF_APP_ID>/SDAP.Access
+    bffApiScope: `api://${BFF_APP_ID}/SDAP.Access`,
+    bffBaseUrl: BFF_API_URL,
+    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
+    proactiveRefresh: true,
+  };
 
-    await initAuth(config);
+  await initAuth(config);
 
-    console.info('[authInit] @spaarke/auth initialized successfully for UniversalDatasetGrid');
+  console.info('[authInit] @spaarke/auth initialized successfully for UniversalDatasetGrid');
 }

@@ -149,11 +149,11 @@ export function findNavProp(
   referencedEntity: string,
   columnHint?: string
 ): string | undefined {
-  const matches = entries.filter((e) => e.referencedEntity === referencedEntity);
+  const matches = entries.filter(e => e.referencedEntity === referencedEntity);
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0].navPropName;
   if (columnHint) {
-    const hinted = matches.find((e) => e.columnName.includes(columnHint));
+    const hinted = matches.find(e => e.columnName.includes(columnHint));
     if (hinted) return hinted.navPropName;
   }
   return matches[0].navPropName;

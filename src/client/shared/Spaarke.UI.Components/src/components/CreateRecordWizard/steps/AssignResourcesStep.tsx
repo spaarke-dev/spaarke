@@ -8,12 +8,7 @@
  * @see CreateRecordWizard — wires search callbacks and form state
  */
 import * as React from 'react';
-import {
-  Text,
-  Checkbox,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Checkbox, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
@@ -129,7 +124,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={attorneyValue}
             onChange={onAttorneyChange}
             onSearch={onSearchAttorneys}
-
             minSearchLength={2}
           />
           <LookupField
@@ -138,7 +132,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={paralegalValue}
             onChange={onParalegalChange}
             onSearch={onSearchParalegals}
-
             minSearchLength={2}
           />
         </div>
@@ -155,7 +148,6 @@ export const AssignResourcesStep: React.FC<IAssignResourcesStepProps> = ({
             value={outsideCounselValue}
             onChange={onOutsideCounselChange}
             onSearch={onSearchOutsideCounsel}
-
             minSearchLength={2}
           />
         </div>

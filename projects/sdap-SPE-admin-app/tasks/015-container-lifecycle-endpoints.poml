@@ -1,0 +1,46 @@
+<task id="SPE-015" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Update/Activate/Lock/Unlock Container Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-013, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement container lifecycle management endpoints (update, activate, lock, unlock) so administrators can manage the full lifecycle of SPE containers. All mutations must be audit logged for compliance.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>Four working endpoints for container lifecycle operations, all with audit logging and proper error handling.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Containers go through lifecycle states: created, active, locked. Administrators need to update container metadata (displayName, description), activate newly created containers, lock containers to prevent access, and unlock locked containers. Every mutation must be recorded in the audit log for compliance tracking.</background>
+  </context>
+  <steps>
+    <step order="1" name="Implement PATCH endpoint">Add PATCH /api/spe/containers/{id}?configId={id} to update container properties (displayName, description) via Graph API.</step>
+    <step order="2" name="Implement activate endpoint">Add POST /api/spe/containers/{id}/activate?configId={id} to activate a container via Graph API.</step>
+    <step order="3" name="Implement lock endpoint">Add POST /api/spe/containers/{id}/lock?configId={id} to lock a container via Graph API.</step>
+    <step order="4" name="Implement unlock endpoint">Add POST /api/spe/containers/{id}/unlock?configId={id} to unlock a locked container via Graph API.</step>
+    <step order="5" name="Add audit logging">Write audit log entries to sprk_speauditlog for each mutation with appropriate categories (ContainerUpdated, ContainerActivated, ContainerLocked, ContainerUnlocked).</step>
+    <step order="6" name="Handle error cases">Return appropriate HTTP status codes for invalid states (e.g., activating already active container, unlocking non-locked container).</step>
+    <step order="7" name="Test all endpoints">Verify each lifecycle operation works correctly and audit entries are created.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">PATCH /api/spe/containers/{id} updates container displayName and/or description.</criterion>
+    <criterion testable="true">POST activate transitions container to active state.</criterion>
+    <criterion testable="true">POST lock prevents further access to the container.</criterion>
+    <criterion testable="true">POST unlock restores access to a locked container.</criterion>
+    <criterion testable="true">All four operations write audit log entries with correct categories.</criterion>
+    <criterion testable="true">Invalid state transitions return appropriate error responses.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,58 @@
+<task id="SPE-085" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Phase 3 Integration Testing and Deployment</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>deploy, testing, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-080, SPE-081, SPE-082, SPE-083, SPE-084</dependencies>
+  </metadata>
+  <prompt>Perform comprehensive integration testing of all Phase 3 features and deploy the updated BFF API and Code Page. Phase 3 adds eDiscovery dashboard, retention labels, multi-tenant management, bulk operations, and multi-app registration support — all of which need end-to-end validation before deployment.</prompt>
+  <role>QA Engineer and DevOps Engineer with Azure App Service and Dataverse deployment experience</role>
+  <goal>All Phase 3 features pass integration testing and are deployed to the dev environment and verified working.</goal>
+  <constraints>
+    <constraint source="ADR-001">Deploy BFF API to Azure App Service — no Azure Functions</constraint>
+    <constraint source="ADR-008">Verify auth filters are enforced on all new endpoints</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Phase 3 introduces advanced features that build on Phase 2: eDiscovery visibility for compliance, retention labels for data governance, multi-tenant consuming app management, batch operations for scale, and multi-app OBO token support for complex organizational structures. All of these need thorough testing before deployment since they involve security-sensitive operations (permissions, compliance data, token management).</background>
+  </context>
+  <steps>
+    <step order="1" name="test-ediscovery">Test eDiscovery endpoints and dashboard — cases, custodians, data sources, review sets</step>
+    <step order="2" name="test-retention">Test retention label listing and application to containers</step>
+    <step order="3" name="test-multi-tenant">Test consuming tenant CRUD — add, update, remove consuming apps</step>
+    <step order="4" name="test-bulk-ops">Test bulk delete and bulk permissions with progress tracking</step>
+    <step order="5" name="test-multi-app">Test multi-app token acquisition with different BU configs</step>
+    <step order="6" name="test-ui-pages">Verify all new UI pages render correctly in light and dark mode</step>
+    <step order="7" name="fix-bugs">Fix any bugs discovered during testing</step>
+    <step order="8" name="build-api">Build BFF API: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="9" name="run-all-tests">Run all tests: dotnet test</step>
+    <step order="10" name="build-code-page">Build Code Page: npm run build</step>
+    <step order="11" name="deploy-api">Deploy BFF API using azure-deploy skill</step>
+    <step order="12" name="deploy-code-page">Deploy Code Page using code-page-deploy skill</step>
+    <step order="13" name="verify-deployment">Verify deployment — health check, smoke test all Phase 3 features</step>
+  </steps>
+  <outputs>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/Phase3IntegrationTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">eDiscovery dashboard displays cases and detail views</criterion>
+    <criterion testable="true">Retention labels can be viewed and applied to containers</criterion>
+    <criterion testable="true">Consuming tenant registrations can be added, updated, and removed</criterion>
+    <criterion testable="true">Bulk operations complete with progress tracking</criterion>
+    <criterion testable="true">Multi-app token acquisition works with different BU configs</criterion>
+    <criterion testable="true">All tests pass (existing and new)</criterion>
+    <criterion testable="true">BFF API is deployed and health check returns 200</criterion>
+    <criterion testable="true">Code Page is deployed as web resource</criterion>
+    <criterion testable="true">All new pages load correctly in the browser</criterion>
+    <criterion testable="true">Dark mode renders correctly for all new pages</criterion>
+  </acceptance-criteria>
+</task>

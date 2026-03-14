@@ -10,12 +10,7 @@
 import { create } from 'zustand';
 
 // Node execution status
-export type NodeExecutionStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped';
+export type NodeExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 // Execution event types from SSE stream
 export type ExecutionEventType =
@@ -114,11 +109,12 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
   },
 
   handleEvent: (event: ExecutionEvent) => {
-    const { eventType, nodeId, status, progress, outputPreview, tokensUsed, confidence, overallConfidence, error } = event;
+    const { eventType, nodeId, status, progress, outputPreview, tokensUsed, confidence, overallConfidence, error } =
+      event;
 
     console.debug('[ExecutionStore] Handling event:', eventType, nodeId);
 
-    set((state) => {
+    set(state => {
       const newNodeStates = new Map(state.nodeStates);
 
       switch (eventType) {

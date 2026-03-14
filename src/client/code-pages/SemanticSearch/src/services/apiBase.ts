@@ -9,11 +9,11 @@
  * @see ADR-013: All AI calls go through BFF API
  */
 
-import { getAuthHeader } from "./authInit";
-import type { ApiError } from "../types";
+import { getAuthHeader } from './authInit';
+import type { ApiError } from '../types';
 
 /** BFF API base URL (dev environment). */
-export const BFF_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+export const BFF_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
 /**
  * Build authenticated request headers for BFF API calls.
@@ -24,11 +24,11 @@ export const BFF_API_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
  * @throws Error if auth is not initialized or token acquisition fails
  */
 export async function buildAuthHeaders(): Promise<Record<string, string>> {
-    const authHeader = await getAuthHeader();
-    return {
-        "Authorization": authHeader,
-        "Content-Type": "application/json",
-    };
+  const authHeader = await getAuthHeader();
+  return {
+    Authorization: authHeader,
+    'Content-Type': 'application/json',
+  };
 }
 
 /**
@@ -43,27 +43,27 @@ export async function buildAuthHeaders(): Promise<Record<string, string>> {
  * @throws ApiError with status, title, detail, type, and optional validation errors
  */
 export async function handleApiResponse<T>(response: Response): Promise<T> {
-    if (response.ok) {
-        return response.json() as Promise<T>;
-    }
+  if (response.ok) {
+    return response.json() as Promise<T>;
+  }
 
-    // Parse ProblemDetails error response (RFC 7807)
-    let error: ApiError;
-    try {
-        const body = await response.json();
-        error = {
-            status: response.status,
-            title: body.title || response.statusText,
-            detail: body.detail,
-            type: body.type,
-            errors: body.errors,
-        };
-    } catch {
-        error = {
-            status: response.status,
-            title: response.statusText,
-        };
-    }
+  // Parse ProblemDetails error response (RFC 7807)
+  let error: ApiError;
+  try {
+    const body = await response.json();
+    error = {
+      status: response.status,
+      title: body.title || response.statusText,
+      detail: body.detail,
+      type: body.type,
+      errors: body.errors,
+    };
+  } catch {
+    error = {
+      status: response.status,
+      title: response.statusText,
+    };
+  }
 
-    throw error;
+  throw error;
 }

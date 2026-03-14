@@ -1,0 +1,39 @@
+<task id="SPE-045" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create Dataverse Tables in Environment</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>deploy, dataverse, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-001, SPE-002, SPE-003</dependencies>
+  </metadata>
+  <prompt>Create the three Dataverse tables (sprk_speenvironment, sprk_specontainertypeconfig, sprk_speauditlog) in the dev environment. Verify lookups and relationships are correctly configured, and populate with test data for development.</prompt>
+  <role>Dataverse developer with table creation and configuration experience</role>
+  <goal>All three SPE tables exist in the dev environment with correct columns, relationships, and test data for development and testing.</goal>
+  <constraints>
+    <constraint source="ADR-002">Dataverse tables must follow thin plugin pattern; no complex logic in table events.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/sdap-SPE-admin-app/spec.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App relies on three Dataverse tables to store configuration and audit data. These tables must be created in the dev environment before the app can function. The sprk_speenvironment table stores Azure tenant configurations, sprk_specontainertypeconfig stores container type settings per BU, and sprk_speauditlog records all operations for compliance.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-environment-table">Create the sprk_speenvironment table with all columns defined in task SPE-001.</step>
+    <step order="2" name="create-config-table">Create the sprk_specontainertypeconfig table with all columns defined in task SPE-002, including lookups to environment and BU.</step>
+    <step order="3" name="create-audit-table">Create the sprk_speauditlog table with all columns defined in task SPE-003.</step>
+    <step order="4" name="verify-lookups">Verify all lookup relationships are correctly configured between tables.</step>
+    <step order="5" name="populate-test-data">Populate tables with test data: at least one environment, one config per BU, and sample audit entries.</step>
+  </steps>
+  <outputs>
+    <output type="code">Dataverse tables: sprk_speenvironment, sprk_specontainertypeconfig, sprk_speauditlog</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All three tables exist in the dev Dataverse environment with correct columns.</criterion>
+    <criterion testable="true">Lookup relationships between tables are correctly configured.</criterion>
+    <criterion testable="true">Test data is populated for development use.</criterion>
+  </acceptance-criteria>
+</task>

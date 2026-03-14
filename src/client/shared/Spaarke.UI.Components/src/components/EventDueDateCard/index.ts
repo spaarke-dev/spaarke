@@ -1,2 +1,2 @@
-export { EventDueDateCard } from "./EventDueDateCard";
-export type { IEventDueDateCardProps } from "./EventDueDateCard";
+export { EventDueDateCard } from './EventDueDateCard';
+export type { IEventDueDateCardProps } from './EventDueDateCard';

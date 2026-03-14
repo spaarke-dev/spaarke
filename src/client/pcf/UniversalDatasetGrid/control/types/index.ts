@@ -10,147 +10,147 @@
  * Note: All field names use the 'sprk_' publisher prefix.
  */
 export interface FieldMappings {
-    /** Boolean field indicating if document has an attached file */
-    hasFile: string;
+  /** Boolean field indicating if document has an attached file */
+  hasFile: string;
 
-    /** File name (e.g., "document.pdf") */
-    fileName: string;
+  /** File name (e.g., "document.pdf") */
+  fileName: string;
 
-    /** File size in bytes */
-    fileSize: string;
+  /** File size in bytes */
+  fileSize: string;
 
-    /** MIME type (e.g., "application/pdf") */
-    mimeType: string;
+  /** MIME type (e.g., "application/pdf") */
+  mimeType: string;
 
-    /** SharePoint Graph API item ID */
-    graphItemId: string;
+  /** SharePoint Graph API item ID */
+  graphItemId: string;
 
-    /** SharePoint Graph API drive ID */
-    graphDriveId: string;
+  /** SharePoint Graph API drive ID */
+  graphDriveId: string;
 }
 
 /**
  * Custom command button configuration.
  */
 export interface CustomCommand {
-    /** Unique command identifier */
-    id: string;
+  /** Unique command identifier */
+  id: string;
 
-    /** Display label for the button */
-    label: string;
+  /** Display label for the button */
+  label: string;
 
-    /** Fluent UI icon name (e.g., "Add24Regular") */
-    icon: string;
+  /** Fluent UI icon name (e.g., "Add24Regular") */
+  icon: string;
 
-    /** Enable rule expression (evaluated at runtime) */
-    enableRule: string;
+  /** Enable rule expression (evaluated at runtime) */
+  enableRule: string;
 
-    /** Error message to show when command cannot be executed */
-    errorMessage: string;
+  /** Error message to show when command cannot be executed */
+  errorMessage: string;
 
-    /** Button appearance (primary, secondary, subtle) */
-    appearance?: 'primary' | 'secondary' | 'subtle';
+  /** Button appearance (primary, secondary, subtle) */
+  appearance?: 'primary' | 'secondary' | 'subtle';
 }
 
 /**
  * SDAP client configuration.
  */
 export interface SdapConfig {
-    /** Base URL of SDAP BFF API */
-    baseUrl: string;
+  /** Base URL of SDAP BFF API */
+  baseUrl: string;
 
-    /** Request timeout in milliseconds */
-    timeout: number;
+  /** Request timeout in milliseconds */
+  timeout: number;
 }
 
 /**
  * Overall grid configuration.
  */
 export interface GridConfiguration {
-    /** Field name mappings */
-    fieldMappings: FieldMappings;
+  /** Field name mappings */
+  fieldMappings: FieldMappings;
 
-    /** Custom command buttons */
-    customCommands: CustomCommand[];
+  /** Custom command buttons */
+  customCommands: CustomCommand[];
 
-    /** SDAP client configuration */
-    sdapConfig: SdapConfig;
+  /** SDAP client configuration */
+  sdapConfig: SdapConfig;
 
-    /**
-     * Enable checkbox selection column (Task 014)
-     * When true, adds a checkbox column as the first column for bulk selection.
-     * Header checkbox enables select all/deselect all.
-     * @default true
-     */
-    enableCheckboxSelection?: boolean;
+  /**
+   * Enable checkbox selection column (Task 014)
+   * When true, adds a checkbox column as the first column for bulk selection.
+   * Header checkbox enables select all/deselect all.
+   * @default true
+   */
+  enableCheckboxSelection?: boolean;
 }
 
 /**
  * Default grid configuration with sprk_ field prefix.
  */
 export const DEFAULT_GRID_CONFIG: GridConfiguration = {
-    fieldMappings: {
-        hasFile: 'sprk_hasfile',
-        fileName: 'sprk_filename',
-        fileSize: 'sprk_filesize',
-        mimeType: 'sprk_mimetype',
-        graphItemId: 'sprk_graphitemid',
-        graphDriveId: 'sprk_graphdriveid'
+  fieldMappings: {
+    hasFile: 'sprk_hasfile',
+    fileName: 'sprk_filename',
+    fileSize: 'sprk_filesize',
+    mimeType: 'sprk_mimetype',
+    graphItemId: 'sprk_graphitemid',
+    graphDriveId: 'sprk_graphdriveid',
+  },
+  /** Enable checkbox selection by default (Task 014) */
+  enableCheckboxSelection: true,
+  customCommands: [
+    {
+      id: 'addFile',
+      label: 'Add File',
+      icon: 'Add24Regular',
+      enableRule: 'selectedCount === 1 && !hasFile',
+      errorMessage: 'Select a single document without a file',
+      appearance: 'primary',
     },
-    /** Enable checkbox selection by default (Task 014) */
-    enableCheckboxSelection: true,
-    customCommands: [
-        {
-            id: 'addFile',
-            label: 'Add File',
-            icon: 'Add24Regular',
-            enableRule: 'selectedCount === 1 && !hasFile',
-            errorMessage: 'Select a single document without a file',
-            appearance: 'primary'
-        },
-        {
-            id: 'removeFile',
-            label: 'Remove File',
-            icon: 'Delete24Regular',
-            enableRule: 'selectedCount === 1 && hasFile',
-            errorMessage: 'Select a single document with a file',
-            appearance: 'secondary'
-        },
-        {
-            id: 'updateFile',
-            label: 'Update File',
-            icon: 'ArrowUpload24Regular',
-            enableRule: 'selectedCount === 1 && hasFile',
-            errorMessage: 'Select a single document with a file',
-            appearance: 'secondary'
-        },
-        {
-            id: 'downloadFile',
-            label: 'Download',
-            icon: 'ArrowDownload24Regular',
-            enableRule: 'selectedCount > 0 && (selectedCount > 1 || hasFile)',
-            errorMessage: 'Select at least one document with a file',
-            appearance: 'secondary'
-        }
-    ],
-    sdapConfig: {
-        baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
-        timeout: 300000 // 5 minutes
-    }
+    {
+      id: 'removeFile',
+      label: 'Remove File',
+      icon: 'Delete24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
+    },
+    {
+      id: 'updateFile',
+      label: 'Update File',
+      icon: 'ArrowUpload24Regular',
+      enableRule: 'selectedCount === 1 && hasFile',
+      errorMessage: 'Select a single document with a file',
+      appearance: 'secondary',
+    },
+    {
+      id: 'downloadFile',
+      label: 'Download',
+      icon: 'ArrowDownload24Regular',
+      enableRule: 'selectedCount > 0 && (selectedCount > 1 || hasFile)',
+      errorMessage: 'Select at least one document with a file',
+      appearance: 'secondary',
+    },
+  ],
+  sdapConfig: {
+    baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
+    timeout: 300000, // 5 minutes
+  },
 };
 
 /**
  * Command context for evaluating enable rules.
  */
 export interface CommandContext {
-    /** Number of selected records */
-    selectedCount: number;
+  /** Number of selected records */
+  selectedCount: number;
 
-    /** Whether the single selected record has a file */
-    hasFile: boolean;
+  /** Whether the single selected record has a file */
+  hasFile: boolean;
 
-    /** Selected record IDs */
-    selectedRecordIds: string[];
+  /** Selected record IDs */
+  selectedRecordIds: string[];
 }
 
 /**
@@ -171,32 +171,32 @@ export interface CommandContext {
  * - webUrl → sprk_filepath (URL field)
  */
 export interface SpeFileMetadata {
-    /** Graph API Item ID */
-    id: string;
+  /** Graph API Item ID */
+  id: string;
 
-    /** File name */
-    name: string;
+  /** File name */
+  name: string;
 
-    /** Parent folder ID (optional) */
-    parentId?: string;
+  /** Parent folder ID (optional) */
+  parentId?: string;
 
-    /** File size in bytes */
-    size: number;
+  /** File size in bytes */
+  size: number;
 
-    /** Created date/time (ISO 8601) */
-    createdDateTime: string;
+  /** Created date/time (ISO 8601) */
+  createdDateTime: string;
 
-    /** Last modified date/time (ISO 8601) */
-    lastModifiedDateTime: string;
+  /** Last modified date/time (ISO 8601) */
+  lastModifiedDateTime: string;
 
-    /** Version identifier (ETag) */
-    eTag?: string;
+  /** Version identifier (ETag) */
+  eTag?: string;
 
-    /** Is this a folder */
-    isFolder: boolean;
+  /** Is this a folder */
+  isFolder: boolean;
 
-    /** SharePoint web URL (may not be available in all responses) */
-    webUrl?: string;
+  /** SharePoint web URL (may not be available in all responses) */
+  webUrl?: string;
 }
 
 /**
@@ -204,14 +204,14 @@ export interface SpeFileMetadata {
  * API: PUT /api/drives/{driveId}/upload?fileName={name}
  */
 export interface FileUploadRequest {
-    /** File to upload */
-    file: File;
+  /** File to upload */
+  file: File;
 
-    /** Graph API Drive ID (from sprk_graphdriveid or Container) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid or Container) */
+  driveId: string;
 
-    /** File name */
-    fileName: string;
+  /** File name */
+  fileName: string;
 }
 
 /**
@@ -219,11 +219,11 @@ export interface FileUploadRequest {
  * API: GET /api/drives/{driveId}/items/{itemId}/content
  */
 export interface FileDownloadRequest {
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID (from sprk_graphitemid) */
+  itemId: string;
 }
 
 /**
@@ -231,11 +231,11 @@ export interface FileDownloadRequest {
  * API: DELETE /api/drives/{driveId}/items/{itemId}
  */
 export interface FileDeleteRequest {
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID (from sprk_graphitemid) */
+  itemId: string;
 }
 
 /**
@@ -243,36 +243,36 @@ export interface FileDeleteRequest {
  * Replace = Delete existing + Upload new
  */
 export interface FileReplaceRequest {
-    /** New file to upload */
-    file: File;
+  /** New file to upload */
+  file: File;
 
-    /** Graph API Drive ID (from sprk_graphdriveid) */
-    driveId: string;
+  /** Graph API Drive ID (from sprk_graphdriveid) */
+  driveId: string;
 
-    /** Graph API Item ID of file to replace (from sprk_graphitemid) */
-    itemId: string;
+  /** Graph API Item ID of file to replace (from sprk_graphitemid) */
+  itemId: string;
 
-    /** New file name */
-    fileName: string;
+  /** New file name */
+  fileName: string;
 }
 
 /**
  * API Response wrapper
  */
 export interface ApiResponse<T> {
-    success: boolean;
-    data?: T;
-    error?: string;
-    details?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
+  details?: string;
 }
 
 /**
  * Service operation result
  */
 export interface ServiceResult<T = void> {
-    success: boolean;
-    data?: T;
-    error?: string;
+  success: boolean;
+  data?: T;
+  error?: string;
 }
 
 // =============================================================================
@@ -282,15 +282,15 @@ export interface ServiceResult<T = void> {
 /**
  * Filter type discriminator for calendar filter input
  */
-export type CalendarFilterType = "single" | "range" | "clear";
+export type CalendarFilterType = 'single' | 'range' | 'clear';
 
 /**
  * Single date filter
  * Format: {"type":"single","date":"YYYY-MM-DD"}
  */
 export interface ICalendarFilterSingle {
-    type: "single";
-    date: string;
+  type: 'single';
+  date: string;
 }
 
 /**
@@ -298,9 +298,9 @@ export interface ICalendarFilterSingle {
  * Format: {"type":"range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}
  */
 export interface ICalendarFilterRange {
-    type: "range";
-    start: string;
-    end: string;
+  type: 'range';
+  start: string;
+  end: string;
 }
 
 /**
@@ -308,74 +308,67 @@ export interface ICalendarFilterRange {
  * Format: {"type":"clear"}
  */
 export interface ICalendarFilterClear {
-    type: "clear";
+  type: 'clear';
 }
 
 /**
  * Union type for all calendar filter types
  */
-export type CalendarFilter =
-    | ICalendarFilterSingle
-    | ICalendarFilterRange
-    | ICalendarFilterClear;
+export type CalendarFilter = ICalendarFilterSingle | ICalendarFilterRange | ICalendarFilterClear;
 
 /**
  * Parse calendar filter JSON string
  * Returns null if invalid/empty
  */
 export function parseCalendarFilter(json: string | null | undefined): CalendarFilter | null {
-    if (!json || json.trim() === "") {
-        return null;
+  if (!json || json.trim() === '') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(json);
+
+    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) {
+      return null;
     }
 
-    try {
-        const parsed = JSON.parse(json);
-
-        if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
-            return null;
-        }
-
-        if (parsed.type === "single" && typeof parsed.date === "string") {
-            return parsed as ICalendarFilterSingle;
-        }
-
-        if (
-            parsed.type === "range" &&
-            typeof parsed.start === "string" &&
-            typeof parsed.end === "string"
-        ) {
-            return parsed as ICalendarFilterRange;
-        }
-
-        if (parsed.type === "clear") {
-            return parsed as ICalendarFilterClear;
-        }
-
-        return null;
-    } catch {
-        return null;
+    if (parsed.type === 'single' && typeof parsed.date === 'string') {
+      return parsed as ICalendarFilterSingle;
     }
+
+    if (parsed.type === 'range' && typeof parsed.start === 'string' && typeof parsed.end === 'string') {
+      return parsed as ICalendarFilterRange;
+    }
+
+    if (parsed.type === 'clear') {
+      return parsed as ICalendarFilterClear;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Type guard: Check if filter is a single date
  */
 export function isSingleDateFilter(filter: CalendarFilter): filter is ICalendarFilterSingle {
-    return filter.type === "single";
+  return filter.type === 'single';
 }
 
 /**
  * Type guard: Check if filter is a date range
  */
 export function isRangeFilter(filter: CalendarFilter): filter is ICalendarFilterRange {
-    return filter.type === "range";
+  return filter.type === 'range';
 }
 
 /**
  * Type guard: Check if filter is clear
  */
 export function isClearFilter(filter: CalendarFilter): filter is ICalendarFilterClear {
-    return filter.type === "clear";
+  return filter.type === 'clear';
 }
 
 // =============================================================================
@@ -387,14 +380,14 @@ export function isClearFilter(filter: CalendarFilter): filter is ICalendarFilter
  * Represents a single field value change.
  */
 export interface RowFieldUpdate {
-    /** Field schema name (e.g., 'sprk_eventname', 'statuscode') */
-    fieldName: string;
+  /** Field schema name (e.g., 'sprk_eventname', 'statuscode') */
+  fieldName: string;
 
-    /** New formatted value for display (e.g., 'Meeting with Client') */
-    formattedValue: string;
+  /** New formatted value for display (e.g., 'Meeting with Client') */
+  formattedValue: string;
 
-    /** New raw value (optional, for lookup IDs, numbers, etc.) */
-    rawValue?: unknown;
+  /** New raw value (optional, for lookup IDs, numbers, etc.) */
+  rawValue?: unknown;
 }
 
 /**
@@ -402,11 +395,11 @@ export interface RowFieldUpdate {
  * Used by Side Pane to update grid display without full refresh.
  */
 export interface OptimisticRowUpdateRequest {
-    /** Record ID (GUID) of the row to update */
-    recordId: string;
+  /** Record ID (GUID) of the row to update */
+  recordId: string;
 
-    /** Fields to update with their new values */
-    updates: RowFieldUpdate[];
+  /** Fields to update with their new values */
+  updates: RowFieldUpdate[];
 }
 
 /**
@@ -414,62 +407,60 @@ export interface OptimisticRowUpdateRequest {
  * Includes rollback function for error recovery.
  */
 export interface OptimisticUpdateResult {
-    /** Whether the update was successful */
-    success: boolean;
+  /** Whether the update was successful */
+  success: boolean;
 
-    /** Error message if update failed */
-    error?: string;
+  /** Error message if update failed */
+  error?: string;
 
-    /** Function to rollback to previous values (call on save error) */
-    rollback: () => void;
+  /** Function to rollback to previous values (call on save error) */
+  rollback: () => void;
 }
 
 /**
  * Callback function type for optimistic row updates.
  * Exposed via window object for Side Pane to call.
  */
-export type OptimisticRowUpdateCallback = (
-    request: OptimisticRowUpdateRequest
-) => OptimisticUpdateResult;
+export type OptimisticRowUpdateCallback = (request: OptimisticRowUpdateRequest) => OptimisticUpdateResult;
 
 /**
  * Global interface for grid communication.
  * Attached to window.spaarkeGrid for cross-component access.
  */
 export interface SpaarkeGridApi {
-    /**
-     * Update a single row optimistically.
-     * Call this from Side Pane after saving changes.
-     *
-     * @param request - The row update request
-     * @returns Result with rollback function
-     *
-     * @example
-     * // In Side Pane after successful save:
-     * const result = window.spaarkeGrid.updateRow({
-     *     recordId: 'abc-123-def',
-     *     updates: [
-     *         { fieldName: 'sprk_eventname', formattedValue: 'New Name' },
-     *         { fieldName: 'statuscode', formattedValue: 'Open', rawValue: 3 }
-     *     ]
-     * });
-     *
-     * if (!result.success) {
-     *     console.error('Update failed:', result.error);
-     * }
-     */
-    updateRow: OptimisticRowUpdateCallback;
+  /**
+   * Update a single row optimistically.
+   * Call this from Side Pane after saving changes.
+   *
+   * @param request - The row update request
+   * @returns Result with rollback function
+   *
+   * @example
+   * // In Side Pane after successful save:
+   * const result = window.spaarkeGrid.updateRow({
+   *     recordId: 'abc-123-def',
+   *     updates: [
+   *         { fieldName: 'sprk_eventname', formattedValue: 'New Name' },
+   *         { fieldName: 'statuscode', formattedValue: 'Open', rawValue: 3 }
+   *     ]
+   * });
+   *
+   * if (!result.success) {
+   *     console.error('Update failed:', result.error);
+   * }
+   */
+  updateRow: OptimisticRowUpdateCallback;
 
-    /**
-     * Force a full dataset refresh.
-     * Use when optimistic update isn't suitable (e.g., complex changes).
-     */
-    refresh: () => void;
+  /**
+   * Force a full dataset refresh.
+   * Use when optimistic update isn't suitable (e.g., complex changes).
+   */
+  refresh: () => void;
 }
 
 // Extend Window interface for TypeScript
 declare global {
-    interface Window {
-        spaarkeGrid?: SpaarkeGridApi;
-    }
+  interface Window {
+    spaarkeGrid?: SpaarkeGridApi;
+  }
 }

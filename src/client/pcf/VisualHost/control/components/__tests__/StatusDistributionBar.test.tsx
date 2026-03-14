@@ -4,11 +4,7 @@ import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-com
 import { StatusDistributionBar, IStatusSegment } from '../StatusDistributionBar';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
-  return render(
-    <FluentProvider theme={theme}>
-      {component}
-    </FluentProvider>
-  );
+  return render(<FluentProvider theme={theme}>{component}</FluentProvider>);
 };
 
 const mockSegments: IStatusSegment[] = [
@@ -20,9 +16,7 @@ const mockSegments: IStatusSegment[] = [
 describe('StatusDistributionBar', () => {
   describe('rendering', () => {
     it('renders with required props', () => {
-      renderWithTheme(
-        <StatusDistributionBar segments={mockSegments} />
-      );
+      renderWithTheme(<StatusDistributionBar segments={mockSegments} />);
 
       // All segments should be visible via aria-label
       expect(screen.getByLabelText('Active: 45')).toBeInTheDocument();
@@ -31,25 +25,19 @@ describe('StatusDistributionBar', () => {
     });
 
     it('renders with title', () => {
-      renderWithTheme(
-        <StatusDistributionBar segments={mockSegments} title="Status Overview" />
-      );
+      renderWithTheme(<StatusDistributionBar segments={mockSegments} title="Status Overview" />);
 
       expect(screen.getByText('Status Overview')).toBeInTheDocument();
     });
 
     it('renders empty state when no segments', () => {
-      renderWithTheme(
-        <StatusDistributionBar segments={[]} title="Empty Bar" />
-      );
+      renderWithTheme(<StatusDistributionBar segments={[]} title="Empty Bar" />);
 
       expect(screen.getByText('No data available')).toBeInTheDocument();
     });
 
     it('renders bar segments', () => {
-      const { container } = renderWithTheme(
-        <StatusDistributionBar segments={mockSegments} />
-      );
+      const { container } = renderWithTheme(<StatusDistributionBar segments={mockSegments} />);
 
       // Segments should be rendered with proper widths
       expect(container.firstChild).toBeInTheDocument();
@@ -91,10 +79,7 @@ describe('StatusDistributionBar', () => {
 
   describe('theme support', () => {
     it('renders correctly in dark theme', () => {
-      renderWithTheme(
-        <StatusDistributionBar segments={mockSegments} title="Dark Theme Bar" />,
-        webDarkTheme
-      );
+      renderWithTheme(<StatusDistributionBar segments={mockSegments} title="Dark Theme Bar" />, webDarkTheme);
 
       expect(screen.getByText('Dark Theme Bar')).toBeInTheDocument();
     });
@@ -102,9 +87,7 @@ describe('StatusDistributionBar', () => {
 
   describe('props', () => {
     it('respects height prop', () => {
-      const { container } = renderWithTheme(
-        <StatusDistributionBar segments={mockSegments} height={48} />
-      );
+      const { container } = renderWithTheme(<StatusDistributionBar segments={mockSegments} height={48} />);
 
       expect(container.firstChild).toBeInTheDocument();
     });
@@ -115,9 +98,7 @@ describe('StatusDistributionBar', () => {
         { label: 'Bad', value: 40, fieldValue: 'bad', color: '#FF0000' },
       ];
 
-      renderWithTheme(
-        <StatusDistributionBar segments={segmentsWithColors} />
-      );
+      renderWithTheme(<StatusDistributionBar segments={segmentsWithColors} />);
 
       expect(screen.getByLabelText('Good: 60')).toBeInTheDocument();
       expect(screen.getByLabelText('Bad: 40')).toBeInTheDocument();

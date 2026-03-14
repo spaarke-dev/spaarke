@@ -4,15 +4,11 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
-import { useRef, useState, useEffect } from "react";
-import {
-  DonutChart as FluentDonutChart,
-  IChartDataPoint,
-  IChartProps,
-} from "@fluentui/react-charting";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../../types";
+import * as React from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { DonutChart as FluentDonutChart, IChartDataPoint, IChartProps } from '@fluentui/react-charting';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { DrillInteraction, IAggregatedDataPoint } from '../../types';
 
 export interface IDonutChartProps {
   /** Data points to display */
@@ -39,32 +35,32 @@ export interface IDonutChartProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    minHeight: "200px",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+    minHeight: '200px',
+    alignItems: 'center',
   },
   title: {
     marginBottom: tokens.spacingVerticalS,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    textAlign: "center",
+    textAlign: 'center',
   },
   chartWrapper: {
     flex: 1,
-    position: "relative",
-    minHeight: "150px",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
+    position: 'relative',
+    minHeight: '150px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     color: tokens.colorNeutralForeground3,
   },
 });
@@ -105,7 +101,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
   useEffect(() => {
     if (!responsive || !containerRef.current) return;
 
-    const resizeObserver = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         setContainerWidth(entry.contentRect.width);
       }
@@ -119,7 +115,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     if (onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: dataPoint.fieldValue,
         label: dataPoint.label,
       });
@@ -164,7 +160,7 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           hideLegend={!showLegend}
           hideTooltip={false}
           innerRadius={innerRadius * (chartSize / 2)}
-          valueInsideDonut={showCenterValue ? (centerLabel || total.toLocaleString()) : undefined}
+          valueInsideDonut={showCenterValue ? centerLabel || total.toLocaleString() : undefined}
           {...chartProps}
         />
       </div>

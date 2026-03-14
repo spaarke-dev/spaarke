@@ -1,9 +1,4 @@
-import type {
-  IHostAdapter,
-  IHostContext,
-  IContentData,
-  HostFeature,
-} from '@shared/adapters';
+import type { IHostAdapter, IHostContext, IContentData, HostFeature } from '@shared/adapters';
 import type {
   HostType,
   ItemType,
@@ -38,7 +33,7 @@ export class WordHostAdapter implements IHostAdapter {
    * For Word documents, we use the document URL or a generated identifier.
    */
   async getItemId(): Promise<string> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
       properties.load(['title']);
@@ -61,7 +56,7 @@ export class WordHostAdapter implements IHostAdapter {
    * Get the document title.
    */
   async getSubject(): Promise<string> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
       properties.load(['title']);
@@ -76,7 +71,7 @@ export class WordHostAdapter implements IHostAdapter {
    * Get the body content of the Word document.
    */
   async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const body = context.document.body;
 
       if (preferredType === 'html') {
@@ -132,7 +127,7 @@ export class WordHostAdapter implements IHostAdapter {
   async getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer> {
     const format = options?.format || 'ooxml';
 
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const body = context.document.body;
 
       if (format === 'ooxml') {
@@ -184,7 +179,7 @@ export class WordHostAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host === Office.HostType.Word) {
           this._isInitialized = true;
           resolve();
@@ -206,7 +201,7 @@ export class WordHostAdapter implements IHostAdapter {
    * Insert a link at the current cursor position.
    */
   async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const selection = context.document.getSelection();
       const text = displayText || url;
 
@@ -219,7 +214,7 @@ export class WordHostAdapter implements IHostAdapter {
       return {
         success: true,
       };
-    }).catch((error) => {
+    }).catch(error => {
       return {
         success: false,
         errorMessage: error.message,
@@ -230,11 +225,7 @@ export class WordHostAdapter implements IHostAdapter {
   /**
    * Attach a file - not applicable for Word documents.
    */
-  async attachFile(
-    _content: string,
-    _fileName: string,
-    _contentType: string
-  ): Promise<AttachFileResult> {
+  async attachFile(_content: string, _fileName: string, _contentType: string): Promise<AttachFileResult> {
     return {
       success: false,
       errorMessage: 'Word documents do not support file attachments',
@@ -244,7 +235,7 @@ export class WordHostAdapter implements IHostAdapter {
   // Legacy methods for backward compatibility
 
   async getCurrentContext(): Promise<IHostContext> {
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
       properties.load(['title', 'author', 'creationDate', 'lastSaveTime']);
@@ -309,10 +300,8 @@ export class WordHostAdapter implements IHostAdapter {
 
   // Private helper methods
 
-  private async getDocumentContentAsString(
-    format: 'Ooxml' | 'Text' | 'Html'
-  ): Promise<string> {
-    return Word.run(async (context) => {
+  private async getDocumentContentAsString(format: 'Ooxml' | 'Text' | 'Html'): Promise<string> {
+    return Word.run(async context => {
       const body = context.document.body;
 
       switch (format) {

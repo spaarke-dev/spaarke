@@ -6,15 +6,15 @@
  * Analysis record from Dataverse
  */
 export interface IAnalysis {
-    sprk_analysisid: string;
-    sprk_name: string;
-    sprk_documentid: string;
-    _sprk_actionid_value?: string;  // Lookup field (OData format: _fieldname_value)
-    statuscode: AnalysisStatusCode;  // Standard Power Apps Status Reason field
-    sprk_workingdocument?: string;
-    sprk_chathistory?: string;
-    createdon: string;
-    modifiedon: string;
+  sprk_analysisid: string;
+  sprk_name: string;
+  sprk_documentid: string;
+  _sprk_actionid_value?: string; // Lookup field (OData format: _fieldname_value)
+  statuscode: AnalysisStatusCode; // Standard Power Apps Status Reason field
+  sprk_workingdocument?: string;
+  sprk_chathistory?: string;
+  createdon: string;
+  modifiedon: string;
 }
 
 /**
@@ -30,108 +30,108 @@ export interface IAnalysis {
  * | Completed   | 100,000,003 |
  */
 export enum AnalysisStatusCode {
-    Draft = 1,
-    InProgress = 100000001,
-    InReview = 100000002,
-    Closed = 2,
-    Completed = 100000003
+  Draft = 1,
+  InProgress = 100000001,
+  InReview = 100000002,
+  Closed = 2,
+  Completed = 100000003,
 }
 
 /**
  * Chat message for AI conversation
  */
 export interface IChatMessage {
-    id: string;
-    role: "user" | "assistant" | "system";
-    content: string;
-    timestamp: string;
-    isStreaming?: boolean;
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  isStreaming?: boolean;
 }
 
 /**
  * Props for AnalysisWorkspaceApp component
  */
 export interface IAnalysisWorkspaceAppProps {
-    analysisId: string;
-    documentId: string;
-    containerId: string;
-    fileId: string;
-    apiBaseUrl: string;
-    webApi: ComponentFramework.WebApi;
-    /** Function to get access token for BFF API calls */
-    getAccessToken: () => Promise<string>;
-    /** Whether authentication is ready (MSAL initialized) */
-    isAuthReady: boolean;
-    /** Feature flag: true = use legacy /continue endpoint, false = use new SprkChat component (default false) */
-    useLegacyChat?: boolean;
-    onWorkingDocumentChange: (content: string) => void;
-    onChatHistoryChange: (history: string) => void;
-    onStatusChange: (status: string) => void;
+  analysisId: string;
+  documentId: string;
+  containerId: string;
+  fileId: string;
+  apiBaseUrl: string;
+  webApi: ComponentFramework.WebApi;
+  /** Function to get access token for BFF API calls */
+  getAccessToken: () => Promise<string>;
+  /** Whether authentication is ready (MSAL initialized) */
+  isAuthReady: boolean;
+  /** Feature flag: true = use legacy /continue endpoint, false = use new SprkChat component (default false) */
+  useLegacyChat?: boolean;
+  onWorkingDocumentChange: (content: string) => void;
+  onChatHistoryChange: (history: string) => void;
+  onStatusChange: (status: string) => void;
 }
 
 /**
  * Analysis API execute request
  */
 export interface IAnalysisExecuteRequest {
-    documentId: string;
-    actionId?: string;
-    skillIds?: string[];
-    knowledgeIds?: string[];
-    toolIds?: string[];
-    outputFormat?: "markdown" | "structured_json";
-    maxTokens?: number;
+  documentId: string;
+  actionId?: string;
+  skillIds?: string[];
+  knowledgeIds?: string[];
+  toolIds?: string[];
+  outputFormat?: 'markdown' | 'structured_json';
+  maxTokens?: number;
 }
 
 /**
  * Analysis API continue request (chat)
  */
 export interface IAnalysisContinueRequest {
-    analysisId: string;
-    userMessage: string;
-    workingDocument?: string;
+  analysisId: string;
+  userMessage: string;
+  workingDocument?: string;
 }
 
 /**
  * SSE chunk from streaming response
  */
 export interface ISseChunk {
-    type: "content" | "error" | "done";
-    content?: string;
-    error?: string;
-    tokenUsage?: {
-        promptTokens: number;
-        completionTokens: number;
-        totalTokens: number;
-    };
+  type: 'content' | 'error' | 'done';
+  content?: string;
+  error?: string;
+  tokenUsage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 /**
  * Document preview info
  */
 export interface IDocumentPreview {
-    fileId: string;
-    fileName: string;
-    mimeType: string;
-    previewUrl?: string;
-    textContent?: string;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  previewUrl?: string;
+  textContent?: string;
 }
 
 /**
  * Editor panel state
  */
 export interface IEditorPanelState {
-    content: string;
-    isDirty: boolean;
-    lastSaved?: string;
-    isAutoSaveEnabled: boolean;
+  content: string;
+  isDirty: boolean;
+  lastSaved?: string;
+  isAutoSaveEnabled: boolean;
 }
 
 /**
  * Chat panel state
  */
 export interface IChatPanelState {
-    messages: IChatMessage[];
-    isStreaming: boolean;
-    currentStreamContent: string;
-    inputValue: string;
+  messages: IChatMessage[];
+  isStreaming: boolean;
+  currentStreamContent: string;
+  inputValue: string;
 }

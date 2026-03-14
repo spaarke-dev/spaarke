@@ -2,7 +2,7 @@
  * Hook return types for dataset and headless modes
  */
 
-import { IDatasetRecord, IDatasetColumn } from "../types";
+import { IDatasetRecord, IDatasetColumn } from '../types';
 
 export interface IDatasetResult {
   records: IDatasetRecord[];

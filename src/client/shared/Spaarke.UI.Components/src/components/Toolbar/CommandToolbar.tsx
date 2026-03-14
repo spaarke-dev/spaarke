@@ -3,7 +3,7 @@
  * Standards: KM-UX-FLUENT-DESIGN-V9-STANDARDS.md
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Toolbar,
   ToolbarButton,
@@ -17,11 +17,11 @@ import {
   Tooltip,
   makeStyles,
   tokens,
-  Spinner
-} from "@fluentui/react-components";
-import { MoreHorizontal20Regular } from "@fluentui/react-icons";
-import { ICommand, ICommandContext } from "../../types/CommandTypes";
-import { CommandExecutor } from "../../services/CommandExecutor";
+  Spinner,
+} from '@fluentui/react-components';
+import { MoreHorizontal20Regular } from '@fluentui/react-icons';
+import { ICommand, ICommandContext } from '../../types/CommandTypes';
+import { CommandExecutor } from '../../services/CommandExecutor';
 
 export interface ICommandToolbarProps {
   commands: ICommand[];
@@ -34,28 +34,28 @@ export interface ICommandToolbarProps {
 const useStyles = makeStyles({
   toolbar: {
     backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    minHeight: "44px"
+    minHeight: '44px',
   },
   toolbarCompact: {
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
-    minHeight: "36px"
+    minHeight: '36px',
   },
   shortcut: {
     marginLeft: tokens.spacingHorizontalM,
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3
-  }
+    color: tokens.colorNeutralForeground3,
+  },
 });
 
-export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
+export const CommandToolbar: React.FC<ICommandToolbarProps> = props => {
   const styles = useStyles();
   const [executingCommand, setExecutingCommand] = React.useState<string | null>(null);
 
@@ -65,10 +65,10 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
     const secondary: ICommand[] = [];
     const overflow: ICommand[] = [];
 
-    props.commands.forEach((cmd) => {
-      const group = cmd.group ?? "primary";
-      if (group === "primary") primary.push(cmd);
-      else if (group === "secondary") secondary.push(cmd);
+    props.commands.forEach(cmd => {
+      const group = cmd.group ?? 'primary';
+      if (group === 'primary') primary.push(cmd);
+      else if (group === 'secondary') secondary.push(cmd);
       else overflow.push(cmd);
     });
 
@@ -82,26 +82,29 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
     return {
       primaryCommands: primary,
       secondaryCommands: secondary,
-      overflowCommands: overflow
+      overflowCommands: overflow,
     };
   }, [props.commands, props.showOverflow]);
 
   // Execute command
-  const handleCommandClick = React.useCallback(async (command: ICommand) => {
-    setExecutingCommand(command.key);
+  const handleCommandClick = React.useCallback(
+    async (command: ICommand) => {
+      setExecutingCommand(command.key);
 
-    try {
-      await CommandExecutor.execute(command, props.context);
+      try {
+        await CommandExecutor.execute(command, props.context);
 
-      if (props.onCommandExecuted) {
-        props.onCommandExecuted(command.key);
+        if (props.onCommandExecuted) {
+          props.onCommandExecuted(command.key);
+        }
+      } catch (error) {
+        console.error(`Command ${command.key} failed`, error);
+      } finally {
+        setExecutingCommand(null);
       }
-    } catch (error) {
-      console.error(`Command ${command.key} failed`, error);
-    } finally {
-      setExecutingCommand(null);
-    }
-  }, [props]);
+    },
+    [props]
+  );
 
   // Render command button
   const renderCommandButton = (command: ICommand) => {
@@ -128,9 +131,7 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
         <>
           {command.label}
           {command.description && <div>{command.description}</div>}
-          {command.keyboardShortcut && (
-            <span className={styles.shortcut}>{command.keyboardShortcut}</span>
-          )}
+          {command.keyboardShortcut && <span className={styles.shortcut}>{command.keyboardShortcut}</span>}
         </>
       );
 
@@ -152,15 +153,12 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
       <Menu>
         <MenuTrigger disableButtonEnhancement>
           <Tooltip content="More commands" relationship="label">
-            <ToolbarButton
-              aria-label="More commands"
-              icon={<MoreHorizontal20Regular />}
-            />
+            <ToolbarButton aria-label="More commands" icon={<MoreHorizontal20Regular />} />
           </Tooltip>
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
-            {overflowCommands.map((command) => {
+            {overflowCommands.map(command => {
               const canExecute = CommandExecutor.canExecute(command, props.context);
               const isExecuting = executingCommand === command.key;
 
@@ -183,14 +181,11 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
   };
 
   return (
-    <Toolbar
-      aria-label="Command toolbar"
-      className={`${styles.toolbar} ${props.compact ? styles.toolbarCompact : ""}`}
-    >
+    <Toolbar aria-label="Command toolbar" className={`${styles.toolbar} ${props.compact ? styles.toolbarCompact : ''}`}>
       {/* Primary commands */}
       {primaryCommands.length > 0 && (
         <ToolbarGroup>
-          {primaryCommands.map((command) => (
+          {primaryCommands.map(command => (
             <React.Fragment key={command.key}>
               {renderCommandButton(command)}
               {command.dividerAfter && <ToolbarDivider />}
@@ -200,26 +195,18 @@ export const CommandToolbar: React.FC<ICommandToolbarProps> = (props) => {
       )}
 
       {/* Divider between primary and secondary */}
-      {primaryCommands.length > 0 && secondaryCommands.length > 0 && (
-        <ToolbarDivider />
-      )}
+      {primaryCommands.length > 0 && secondaryCommands.length > 0 && <ToolbarDivider />}
 
       {/* Secondary commands */}
       {secondaryCommands.length > 0 && (
-        <ToolbarGroup>
-          {secondaryCommands.map((command) => renderCommandButton(command))}
-        </ToolbarGroup>
+        <ToolbarGroup>{secondaryCommands.map(command => renderCommandButton(command))}</ToolbarGroup>
       )}
 
       {/* Overflow menu */}
       {overflowCommands.length > 0 && (
         <>
-          {(primaryCommands.length > 0 || secondaryCommands.length > 0) && (
-            <ToolbarDivider />
-          )}
-          <ToolbarGroup>
-            {renderOverflowMenu()}
-          </ToolbarGroup>
+          {(primaryCommands.length > 0 || secondaryCommands.length > 0) && <ToolbarDivider />}
+          <ToolbarGroup>{renderOverflowMenu()}</ToolbarGroup>
         </>
       )}
     </Toolbar>

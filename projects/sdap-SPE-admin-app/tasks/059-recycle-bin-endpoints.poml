@@ -1,0 +1,51 @@
+<task id="SPE-059" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Recycle Bin Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-013, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement endpoints for managing deleted (soft-deleted) containers in the recycle bin. Administrators need to view deleted containers, restore them, or permanently delete them. All recycle bin operations must be audit-logged since they involve data lifecycle decisions.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>Working endpoints for listing deleted containers, restoring, and permanently deleting, with audit logging, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>When containers are deleted, they enter a soft-delete state and remain recoverable for a retention period. Administrators need to manage this recycle bin to recover accidentally deleted containers or permanently purge containers that should not be retained. Permanent deletion is irreversible, so it requires careful confirmation and audit logging.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define DeletedContainerDto with id, displayName, deletedDateTime, containerTypeId fields</step>
+    <step order="2" name="add-graph-methods">Add ListDeletedContainersAsync, RestoreContainerAsync, PermanentDeleteContainerAsync to SpeAdminGraphService</step>
+    <step order="3" name="add-list-endpoint">Add GET /api/spe/recyclebin?configId={id} endpoint to list deleted containers</step>
+    <step order="4" name="add-restore-endpoint">Add POST /api/spe/recyclebin/{id}/restore?configId={id} endpoint with audit logging</step>
+    <step order="5" name="add-purge-endpoint">Add DELETE /api/spe/recyclebin/{id}?configId={id} endpoint for permanent deletion with audit logging</step>
+    <step order="6" name="apply-auth-filter">Apply SpeAdminAuthFilter to all endpoints</step>
+    <step order="7" name="add-tests">Write unit tests for list, restore, and permanent delete operations</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/DeletedContainerDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/RecycleBinTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/recyclebin returns list of soft-deleted containers</criterion>
+    <criterion testable="true">POST /api/spe/recyclebin/{id}/restore restores a deleted container and returns 200</criterion>
+    <criterion testable="true">DELETE /api/spe/recyclebin/{id} permanently deletes a container and returns 204</criterion>
+    <criterion testable="true">Audit log entries are created for restore and permanent delete operations</criterion>
+    <criterion testable="true">Non-existent container in recycle bin returns 404</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to all endpoints</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

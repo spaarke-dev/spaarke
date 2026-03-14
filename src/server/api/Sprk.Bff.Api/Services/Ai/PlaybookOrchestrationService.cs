@@ -692,7 +692,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             if (failedNode != null)
             {
-                // TODO (Phase 4): Check sprk_continueonerror field per node
+                // TRACKED: GitHub #233 - Check sprk_continueonerror field per node
                 _logger.LogWarning(
                     "Node {NodeName} in batch {BatchNumber} failed - stopping playbook execution",
                     failedNode.node.Name, batchNumber);

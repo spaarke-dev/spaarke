@@ -10,7 +10,9 @@ import { WordAdapter } from '../WordAdapter';
 const mockWordBody = {
   text: 'Test document content',
   getHtml: jest.fn().mockReturnValue({ value: '<p>Test document content</p>' }),
-  getOoxml: jest.fn().mockReturnValue({ value: '<?xml version="1.0"?><w:document></w:document>' }),
+  getOoxml: jest.fn().mockReturnValue({
+    value: '<?xml version="1.0"?><w:document></w:document>',
+  }),
   load: jest.fn(),
 };
 
@@ -69,8 +71,14 @@ describe('WordAdapter', () => {
 
     // Mock Office.onReady for Word
     global.Office.onReady = jest.fn().mockImplementation((callback: (info: { host: Office.HostType }) => void) => {
-      callback({ host: Office.HostType.Word, platform: Office.PlatformType.OfficeOnline });
-      return Promise.resolve({ host: Office.HostType.Word, platform: Office.PlatformType.OfficeOnline });
+      callback({
+        host: Office.HostType.Word,
+        platform: Office.PlatformType.OfficeOnline,
+      });
+      return Promise.resolve({
+        host: Office.HostType.Word,
+        platform: Office.PlatformType.OfficeOnline,
+      });
     });
   });
 
@@ -99,7 +107,10 @@ describe('WordAdapter', () => {
 
     it('should reject if not running in Word', async () => {
       global.Office.onReady = jest.fn().mockImplementation((callback: (info: { host: Office.HostType }) => void) => {
-        callback({ host: Office.HostType.Outlook, platform: Office.PlatformType.OfficeOnline });
+        callback({
+          host: Office.HostType.Outlook,
+          platform: Office.PlatformType.OfficeOnline,
+        });
       });
 
       await expect(adapter.initialize()).rejects.toMatchObject({

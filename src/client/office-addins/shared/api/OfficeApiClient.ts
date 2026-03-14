@@ -88,7 +88,7 @@ function generateUuid(): string {
     return crypto.randomUUID();
   }
   // Fallback for older browsers
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
@@ -136,10 +136,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   private includeCredentials: boolean;
   private authService: INaaAuthService;
 
-  constructor(
-    config?: Partial<OfficeApiClientConfig>,
-    authService?: INaaAuthService
-  ) {
+  constructor(config?: Partial<OfficeApiClientConfig>, authService?: INaaAuthService) {
     this.baseUrl = (config?.baseUrl || DEFAULT_AUTH_CONFIG.bffApiBaseUrl).replace(/\/$/, '');
     this.timeout = config?.timeout ?? 30000;
     this.includeCredentials = config?.includeCredentials ?? true;
@@ -209,10 +206,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Search results with entities
    */
-  async searchEntities(
-    params: EntitySearchParams,
-    options?: RequestOptions
-  ): Promise<EntitySearchResponse> {
+  async searchEntities(params: EntitySearchParams, options?: RequestOptions): Promise<EntitySearchResponse> {
     const queryParams = new URLSearchParams();
     queryParams.set('q', params.q);
 
@@ -225,10 +219,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
       queryParams.set('limit', params.limit.toString());
     }
 
-    return this.get<EntitySearchResponse>(
-      `/office/search/entities?${queryParams.toString()}`,
-      options
-    );
+    return this.get<EntitySearchResponse>(`/office/search/entities?${queryParams.toString()}`, options);
   }
 
   /**
@@ -239,10 +230,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Search results with documents
    */
-  async searchDocuments(
-    params: DocumentSearchParams,
-    options?: RequestOptions
-  ): Promise<DocumentSearchResponse> {
+  async searchDocuments(params: DocumentSearchParams, options?: RequestOptions): Promise<DocumentSearchResponse> {
     const queryParams = new URLSearchParams();
     queryParams.set('q', params.q);
 
@@ -262,10 +250,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
       queryParams.set('limit', params.limit.toString());
     }
 
-    return this.get<DocumentSearchResponse>(
-      `/office/search/documents?${queryParams.toString()}`,
-      options
-    );
+    return this.get<DocumentSearchResponse>(`/office/search/documents?${queryParams.toString()}`, options);
   }
 
   // ============================================
@@ -286,11 +271,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
     data: QuickCreateRequest,
     options?: RequestOptions
   ): Promise<QuickCreateResponse> {
-    return this.post<QuickCreateResponse>(
-      `/office/quickcreate/${encodeURIComponent(entityType)}`,
-      data,
-      options
-    );
+    return this.post<QuickCreateResponse>(`/office/quickcreate/${encodeURIComponent(entityType)}`, data, options);
   }
 
   // ============================================
@@ -305,10 +286,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Generated links and invitations
    */
-  async shareLinks(
-    request: ShareLinksRequest,
-    options?: RequestOptions
-  ): Promise<ShareLinksResponse> {
+  async shareLinks(request: ShareLinksRequest, options?: RequestOptions): Promise<ShareLinksResponse> {
     return this.post<ShareLinksResponse>('/office/share/links', request, options);
   }
 
@@ -320,10 +298,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
    * @param options - Request options
    * @returns Attachment info with download URLs
    */
-  async shareAttach(
-    request: ShareAttachRequest,
-    options?: RequestOptions
-  ): Promise<ShareAttachResponse> {
+  async shareAttach(request: ShareAttachRequest, options?: RequestOptions): Promise<ShareAttachResponse> {
     return this.post<ShareAttachResponse>('/office/share/attach', request, options);
   }
 
@@ -356,23 +331,14 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   /**
    * Make a POST request.
    */
-  private async post<T>(
-    endpoint: string,
-    body?: unknown,
-    options?: RequestOptions
-  ): Promise<T> {
+  private async post<T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>('POST', endpoint, body, options);
   }
 
   /**
    * Make an HTTP request with authentication and error handling.
    */
-  private async request<T>(
-    method: string,
-    endpoint: string,
-    body?: unknown,
-    options?: RequestOptions
-  ): Promise<T> {
+  private async request<T>(method: string, endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> {
     // Get access token
     const token = await this.getAccessToken();
 
@@ -512,9 +478,7 @@ class OfficeApiClientImpl implements IOfficeApiClient {
   private async handleErrorResponse(response: Response): Promise<never> {
     // Check for rate limiting
     const isRateLimited = response.status === 429;
-    const retryAfterSeconds = isRateLimited
-      ? parseRetryAfter(response.headers.get('Retry-After'))
-      : undefined;
+    const retryAfterSeconds = isRateLimited ? parseRetryAfter(response.headers.get('Retry-After')) : undefined;
 
     // Check for auth errors
     const isAuthError = response.status === 401;
@@ -612,7 +576,9 @@ class OfficeApiClientImpl implements IOfficeApiClient {
 export function createOfficeApiClient(
   config?: Partial<OfficeApiClientConfig>,
   authService?: INaaAuthService
-): IOfficeApiClient & { configure: (config: Partial<OfficeApiClientConfig>) => void } {
+): IOfficeApiClient & {
+  configure: (config: Partial<OfficeApiClientConfig>) => void;
+} {
   return new OfficeApiClientImpl(config, authService);
 }
 

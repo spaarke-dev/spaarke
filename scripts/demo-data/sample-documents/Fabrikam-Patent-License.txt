@@ -1,0 +1,51 @@
+PATENT CROSS-LICENSING AGREEMENT
+
+Effective Date: March 1, 2026
+Agreement No: PLA-2026-0042
+
+PARTIES:
+  Licensee: Spaarke Legal Services
+  Licensor: Fabrikam Inc.
+
+RECITALS
+WHEREAS, Licensor owns certain patents related to document management software
+and natural language processing technologies;
+WHEREAS, Licensee desires to obtain a license to use said patents in connection
+with its legal technology platform;
+NOW, THEREFORE, the parties agree as follows:
+
+1. LICENSED PATENTS
+   a) US Patent No. 9,876,543 - "Method for Intelligent Document Classification"
+   b) US Patent No. 10,234,567 - "System for Automated Contract Analysis"
+   c) All continuations, divisionals, and foreign counterparts thereof.
+
+2. GRANT OF LICENSE
+   2.1 Licensor grants Licensee a non-exclusive, worldwide, royalty-bearing license
+       to practice the Licensed Patents in the Field of Use.
+   2.2 Field of Use: Legal document management and analysis platforms.
+   2.3 License is non-transferable except in connection with a sale of substantially
+       all of Licensee's assets.
+
+3. ROYALTIES
+   3.1 Base royalty rate: 3.5% of Net Revenue derived from Licensed Products.
+   3.2 Minimum annual royalty: $50,000.
+   3.3 Quarterly payments due within 45 days of quarter end.
+   3.4 Audit rights: Licensor may audit Licensee's records once per calendar year.
+
+4. CROSS-LICENSE
+   4.1 Licensee grants Licensor a reciprocal license to practice Licensee's patents
+       in the AI-assisted document review space.
+   4.2 Offset: Cross-license value credited against royalties at $25,000/year.
+
+5. TERM
+   5.1 Initial term: 5 years from Effective Date.
+   5.2 Renewal: Automatic renewal for 2-year terms unless terminated.
+
+6. INTELLECTUAL PROPERTY PROTECTION
+   6.1 Both parties shall promptly notify each other of any known infringement.
+   6.2 Licensor shall have the first right to enforce Licensed Patents.
+   6.3 Licensee shall cooperate in any enforcement actions at Licensor's expense.
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All patent numbers, company names, and details are fictitious.

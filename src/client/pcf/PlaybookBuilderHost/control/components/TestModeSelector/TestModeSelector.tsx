@@ -396,7 +396,7 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
     if (nodesProgress.length === 0) return 0;
 
     const completed = nodesProgress.filter(
-      (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
+      n => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
     ).length;
 
     return completed / nodesProgress.length;
@@ -407,16 +407,16 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
     const { nodesProgress } = testExecution;
     return {
       total: nodesProgress.length,
-      completed: nodesProgress.filter((n) => n.status === 'completed').length,
-      failed: nodesProgress.filter((n) => n.status === 'failed').length,
-      skipped: nodesProgress.filter((n) => n.status === 'skipped').length,
+      completed: nodesProgress.filter(n => n.status === 'completed').length,
+      failed: nodesProgress.filter(n => n.status === 'failed').length,
+      skipped: nodesProgress.filter(n => n.status === 'skipped').length,
     };
   }, [testExecution.nodesProgress]);
 
   // Current node
   const currentNode = useMemo(() => {
     if (!testExecution.currentNodeId) return null;
-    return testExecution.nodesProgress.find((n) => n.nodeId === testExecution.currentNodeId);
+    return testExecution.nodesProgress.find(n => n.nodeId === testExecution.currentNodeId);
   }, [testExecution.currentNodeId, testExecution.nodesProgress]);
 
   // Is test complete?
@@ -424,11 +424,14 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
   const hasError = testExecution.error !== null || stats.failed > 0;
 
   // Handle mode selection
-  const handleModeSelect = useCallback((mode: TestMode) => {
-    if (disabled || testExecution.isActive) return;
-    setSelectedMode(mode);
-    setError(null);
-  }, [disabled, testExecution.isActive]);
+  const handleModeSelect = useCallback(
+    (mode: TestMode) => {
+      if (disabled || testExecution.isActive) return;
+      setSelectedMode(mode);
+      setError(null);
+    },
+    [disabled, testExecution.isActive]
+  );
 
   // Handle file upload
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -603,12 +606,18 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
           {/* Node list */}
           {!compact && testExecution.nodesProgress.length > 0 && (
             <div className={styles.nodeList}>
-              {testExecution.nodesProgress.map((node) => (
+              {testExecution.nodesProgress.map(node => (
                 <div key={node.nodeId} className={getNodeItemClass(node)}>
                   <div className={styles.nodeIcon}>{renderNodeIcon(node)}</div>
                   <Text size={200}>{node.label}</Text>
                   {node.durationMs !== undefined && node.status === 'completed' && (
-                    <Text size={100} style={{ color: tokens.colorNeutralForeground3, marginLeft: 'auto' }}>
+                    <Text
+                      size={100}
+                      style={{
+                        color: tokens.colorNeutralForeground3,
+                        marginLeft: 'auto',
+                      }}
+                    >
                       {formatDuration(node.durationMs)}
                     </Text>
                   )}
@@ -698,10 +707,7 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
               {(Object.entries(modeInfo) as [TestMode, ModeInfo][]).map(([mode, info]) => (
                 <Card
                   key={mode}
-                  className={mergeClasses(
-                    styles.modeCard,
-                    selectedMode === mode ? styles.modeCardSelected : undefined
-                  )}
+                  className={mergeClasses(styles.modeCard, selectedMode === mode ? styles.modeCardSelected : undefined)}
                   onClick={() => handleModeSelect(mode)}
                 >
                   <div className={styles.modeHeader}>
@@ -752,8 +758,8 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
               <div className={styles.infoSection}>
                 <Info16Regular className={styles.infoIcon} />
                 <Text>
-                  Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size: 50MB.
-                  Document will be processed using Azure Document Intelligence.
+                  Supported formats: PDF, DOCX, XLSX, PNG, JPG. Max size: 50MB. Document will be processed using Azure
+                  Document Intelligence.
                 </Text>
               </div>
             </div>
@@ -765,9 +771,7 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
               <Label>Document ID</Label>
               {!playbookSaved && (
                 <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
-                  <MessageBarBody>
-                    Playbook must be saved before running Production tests.
-                  </MessageBarBody>
+                  <MessageBarBody>Playbook must be saved before running Production tests.</MessageBarBody>
                 </MessageBar>
               )}
               <Input
@@ -780,8 +784,8 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
               <div className={styles.infoSection}>
                 <Info16Regular className={styles.infoIcon} />
                 <Text>
-                  Production test uses an existing document from SharePoint Embedded.
-                  This creates test records in Dataverse with the IsTestExecution flag.
+                  Production test uses an existing document from SharePoint Embedded. This creates test records in
+                  Dataverse with the IsTestExecution flag.
                 </Text>
               </div>
             </div>
@@ -792,8 +796,8 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
             <div className={styles.infoSection}>
               <Info16Regular className={styles.infoIcon} />
               <Text>
-                Mock test generates sample data based on document type definitions.
-                Use this for rapid iteration when designing playbook logic.
+                Mock test generates sample data based on document type definitions. Use this for rapid iteration when
+                designing playbook logic.
               </Text>
             </div>
           )}
@@ -816,7 +820,13 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
       <Dialog open={showProductionConfirm} onOpenChange={(_, data) => setShowProductionConfirm(data.open)}>
         <DialogSurface className={styles.confirmDialogSurface}>
           <DialogTitle>
-            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: tokens.spacingHorizontalS,
+              }}
+            >
               <Warning16Regular style={{ color: tokens.colorPaletteYellowForeground1 }} />
               <span>Confirm Production Test</span>
             </div>
@@ -826,14 +836,26 @@ export const TestModeSelector: React.FC<TestModeSelectorProps> = ({
               <MessageBar intent="warning">
                 <MessageBarTitle>Production Environment</MessageBarTitle>
                 <MessageBarBody>
-                  This test will execute against your production SharePoint Embedded document
-                  and create test records in Dataverse. The records will be flagged as test data.
+                  This test will execute against your production SharePoint Embedded document and create test records in
+                  Dataverse. The records will be flagged as test data.
                 </MessageBarBody>
               </MessageBar>
-              <Text style={{ display: 'block', marginTop: tokens.spacingVerticalM, color: tokens.colorNeutralForeground2 }}>
+              <Text
+                style={{
+                  display: 'block',
+                  marginTop: tokens.spacingVerticalM,
+                  color: tokens.colorNeutralForeground2,
+                }}
+              >
                 Document ID: <strong>{documentId}</strong>
               </Text>
-              <Text style={{ display: 'block', marginTop: tokens.spacingVerticalS, color: tokens.colorNeutralForeground2 }}>
+              <Text
+                style={{
+                  display: 'block',
+                  marginTop: tokens.spacingVerticalS,
+                  color: tokens.colorNeutralForeground2,
+                }}
+              >
                 Are you sure you want to proceed?
               </Text>
             </DialogContent>

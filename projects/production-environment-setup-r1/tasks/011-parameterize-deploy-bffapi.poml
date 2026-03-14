@@ -1,0 +1,110 @@
+<task id="PRODENV-011" project="Production Environment Setup R1">
+  <metadata>
+    <title>Parameterize Deploy-BffApi.ps1 for multi-environment support</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <parallel-group>P2-A</parallel-group>
+    <tags>powershell, deployment, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    Parameterize the existing Deploy-BffApi.ps1 to support any environment (dev, staging,
+    production) with deployment slots, health check verification, and zero-downtime swap.
+    Currently hardcoded to dev environment.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with Azure App Service deployment slots and zero-downtime deployments.
+  </role>
+
+  <goal>
+    An updated Deploy-BffApi.ps1 that deploys the BFF API to any environment using
+    staging slot deployment, health check verification, and slot swap for zero downtime.
+  </goal>
+
+  <inputs>
+    <file purpose="existing-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="app-config">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Health check at /healthz must pass before swap</constraint>
+    <constraint source="NFR-02">Zero-downtime deployment via staging slot swap</constraint>
+    <constraint source="FR-04">Must work for dev, staging, and production environments</constraint>
+    <constraint source="NFR-06">Support rollback via slot swap</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure App Service deployment slots and zero-downtime deployment</topic>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The existing Deploy-BffApi.ps1 is hardcoded for the dev environment. Production
+      deployment requires staging slot support with health check verification before
+      swapping to production. The script must also support rollback.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-005" status="complete">appsettings.Production.json should exist</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Analyze existing script">
+      Read Deploy-BffApi.ps1 to understand current deployment flow and hardcoded values.
+    </step>
+    <step order="2" name="Add parameterization">
+      Add parameters: ResourceGroupName, AppServiceName, EnvironmentName, UseSlotDeploy,
+      HealthCheckUrl, RollbackOnFailure.
+    </step>
+    <step order="3" name="Add staging slot deployment">
+      Deploy to staging slot first, run health check against staging URL,
+      swap slots if healthy, rollback if unhealthy.
+    </step>
+    <step order="4" name="Preserve backward compatibility">
+      Ensure existing dev deployment still works with default parameters.
+    </step>
+    <step order="5" name="Test syntax">
+      Validate PowerShell syntax. Test with -WhatIf if possible.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-BffApi.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script accepts environment parameters (ResourceGroupName, AppServiceName, etc.)</criterion>
+    <criterion testable="true">Default parameter values maintain dev environment backward compatibility</criterion>
+    <criterion testable="true">Staging slot deployment with health check verification implemented</criterion>
+    <criterion testable="true">Slot swap only occurs after /healthz returns 200</criterion>
+    <criterion testable="true">Rollback support via swap-back if post-swap health check fails</criterion>
+    <criterion testable="true">Script parses without syntax errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Parameterized Deploy-BffApi.ps1 from 146 lines to 452 lines.
+    Key changes:
+    - Added 10 parameters (ResourceGroupName, AppServiceName, Environment, UseSlotDeploy, SlotName,
+      HealthCheckPath, RollbackOnFailure, MaxHealthCheckRetries, HealthCheckIntervalSeconds, PublishPath)
+    - Default values preserve dev backward compatibility (same resource group and app service)
+    - Staging slot deploy: deploy to slot -> health check -> swap -> post-swap health check
+    - Rollback: automatic swap-back if post-swap health check fails
+    - Production safety: warns if deploying without slot deploy, requires confirmation
+    - Publish path moved to deploy/api-publish (outside project source tree per azure-deployment.md)
+    - Stdout logging enabled in web.config before packaging
+    - Zip size validation (warns if > 100 MB)
+    - Reusable Test-HealthCheck function with configurable retries
+  </notes>
+</task>

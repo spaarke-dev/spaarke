@@ -1,0 +1,50 @@
+<task id="SPE-072" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Deploy Updated BFF and Code Page (Phase 2)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>deploy, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-071</dependencies>
+  </metadata>
+  <prompt>Build and deploy the updated BFF API and Code Page with all Phase 2 features. This deployment adds container type management, column/property editors, search, recycle bin, and security dashboard to the production SPE Admin App.</prompt>
+  <role>DevOps Engineer with Azure App Service and Dataverse deployment experience</role>
+  <goal>Phase 2 features are deployed to the dev environment and verified working.</goal>
+  <constraints>
+    <constraint source="ADR-001">Deploy BFF API to Azure App Service — no Azure Functions</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Phase 2 deployment includes: updated BFF API with container type, search, recycle bin, and security endpoints; updated Code Page with container types management, column/property editors, search page, recycle bin page, and security dashboard. Both the API and Code Page need to be built and deployed to the dev environment.</background>
+  </context>
+  <steps>
+    <step order="1" name="build-api">Build the BFF API: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="2" name="run-tests">Run all tests: dotnet test</step>
+    <step order="3" name="build-code-page">Build the Code Page: npm run build in the spe-admin code page directory</step>
+    <step order="4" name="deploy-api">Deploy BFF API using azure-deploy skill</step>
+    <step order="5" name="deploy-code-page">Deploy Code Page using code-page-deploy skill</step>
+    <step order="6" name="verify-deployment">Verify deployment by hitting health check and testing key endpoints</step>
+    <step order="7" name="smoke-test-ui">Smoke test the UI in the browser — verify all new pages load</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/</output>
+    <output type="code">src/client/code-pages/spe-admin/</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">BFF API builds without errors</criterion>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Code Page builds without errors</criterion>
+    <criterion testable="true">BFF API is deployed and health check returns 200</criterion>
+    <criterion testable="true">Code Page is deployed as web resource</criterion>
+    <criterion testable="true">Container Types page loads in the browser</criterion>
+    <criterion testable="true">Search page loads and executes searches</criterion>
+    <criterion testable="true">Recycle Bin page loads</criterion>
+    <criterion testable="true">Security page loads with score and alerts</criterion>
+  </acceptance-criteria>
+</task>

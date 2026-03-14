@@ -1,0 +1,49 @@
+<task id="SPE-060" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Security Alerts and Score Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-009</dependencies>
+  </metadata>
+  <prompt>Implement endpoints to retrieve security alerts and the secure score from the Microsoft Graph security API. This provides administrators with visibility into security-related events and the overall security posture of their SharePoint Embedded environment.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>Working endpoints for security alerts and secure score from Graph security API, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Microsoft Graph provides security APIs that surface alerts (suspicious activities, policy violations) and secure score (an overall security health metric). For the SPE admin app, these provide a read-only security dashboard so administrators can monitor their environment without leaving the admin tool.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define SecurityAlertDto with id, title, severity, status, createdDateTime, description and SecureScoreDto with currentScore, maxScore, averageComparativeScores</step>
+    <step order="2" name="add-graph-methods">Add GetSecurityAlertsAsync and GetSecureScoreAsync to SpeAdminGraphService querying Graph security API</step>
+    <step order="3" name="add-alerts-endpoint">Add GET /api/spe/security/alerts?configId={id} endpoint</step>
+    <step order="4" name="add-score-endpoint">Add GET /api/spe/security/score?configId={id} endpoint</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to both endpoints</step>
+    <step order="6" name="add-tests">Write unit tests for both endpoints covering success and empty data scenarios</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SecurityAlertDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/SecureScoreDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/SecurityEndpointTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/security/alerts returns JSON array of security alerts</criterion>
+    <criterion testable="true">GET /api/spe/security/score returns secure score with currentScore and maxScore</criterion>
+    <criterion testable="true">Empty alerts list returns 200 with empty array</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to both endpoints</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

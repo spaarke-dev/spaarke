@@ -107,7 +107,6 @@ export interface TaskPaneHeaderProps {
   compact?: boolean;
 }
 
-
 /**
  * Gets the icon for the current theme preference.
  */
@@ -136,9 +135,7 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
 }) => {
   const styles = useStyles();
 
-  const headerClassName = compact
-    ? `${styles.header} ${styles.headerCompact}`
-    : styles.header;
+  const headerClassName = compact ? `${styles.header} ${styles.headerCompact}` : styles.header;
 
   return (
     <header className={headerClassName}>
@@ -153,19 +150,12 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
           <Menu>
             <MenuTrigger>
               <Tooltip content="Theme" relationship="label">
-                <Button
-                  appearance="subtle"
-                  icon={getThemeIcon(themePreference)}
-                  aria-label="Change theme"
-                />
+                <Button appearance="subtle" icon={getThemeIcon(themePreference)} aria-label="Change theme" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem
-                  icon={<ColorRegular />}
-                  onClick={() => onThemeChange('auto')}
-                >
+                <MenuItem icon={<ColorRegular />} onClick={() => onThemeChange('auto')}>
                   Auto
                   {themePreference === 'auto' && (
                     <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
@@ -173,10 +163,7 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
                     </Badge>
                   )}
                 </MenuItem>
-                <MenuItem
-                  icon={<WeatherSunnyRegular />}
-                  onClick={() => onThemeChange('light')}
-                >
+                <MenuItem icon={<WeatherSunnyRegular />} onClick={() => onThemeChange('light')}>
                   Light
                   {themePreference === 'light' && (
                     <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
@@ -184,10 +171,7 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
                     </Badge>
                   )}
                 </MenuItem>
-                <MenuItem
-                  icon={<WeatherMoonRegular />}
-                  onClick={() => onThemeChange('dark')}
-                >
+                <MenuItem icon={<WeatherMoonRegular />} onClick={() => onThemeChange('dark')}>
                   Dark
                   {themePreference === 'dark' && (
                     <Badge appearance="filled" size="small" style={{ marginLeft: '8px' }}>
@@ -203,12 +187,7 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
         {/* Settings Button */}
         {onSettings && (
           <Tooltip content="Settings" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<SettingsRegular />}
-              onClick={onSettings}
-              aria-label="Settings"
-            />
+            <Button appearance="subtle" icon={<SettingsRegular />} onClick={onSettings} aria-label="Settings" />
           </Tooltip>
         )}
 

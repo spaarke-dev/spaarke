@@ -13,10 +13,10 @@
  * with the correct data bindings per performance area.
  */
 
-import type { TrendDirection } from "../components/TrendCard";
+import type { TrendDirection } from '../components/TrendCard';
 export type { TrendDirection };
 
-export { calculateSlope, getTrendDirection } from "../utils/trendAnalysis";
+export { calculateSlope, getTrendDirection } from '../utils/trendAnalysis';
 
 /**
  * Configuration for a single TrendCard instance on the Report Card tab.
@@ -41,10 +41,10 @@ export interface ITrendCardConfig {
  * from the calculator API response.
  */
 export const GUIDELINES_TREND_CONFIG: ITrendCardConfig = {
-  areaName: "Guidelines",
-  averageField: "sprk_guidelinecompliancegrade_average",
-  trendDataField: "sprk_guidelinecompliancegrade_trend",
-  description: "Guidelines compliance trend over time",
+  areaName: 'Guidelines',
+  averageField: 'sprk_guidelinecompliancegrade_average',
+  trendDataField: 'sprk_guidelinecompliancegrade_trend',
+  description: 'Guidelines compliance trend over time',
 };
 
 /**
@@ -53,10 +53,10 @@ export const GUIDELINES_TREND_CONFIG: ITrendCardConfig = {
  * from the calculator API response.
  */
 export const BUDGET_TREND_CONFIG: ITrendCardConfig = {
-  areaName: "Budget",
-  averageField: "sprk_budgetcompliancegrade_average",
-  trendDataField: "sprk_budgetcompliancegrade_trend",
-  description: "Budget compliance trend over time",
+  areaName: 'Budget',
+  averageField: 'sprk_budgetcompliancegrade_average',
+  trendDataField: 'sprk_budgetcompliancegrade_trend',
+  description: 'Budget compliance trend over time',
 };
 
 /**
@@ -65,10 +65,10 @@ export const BUDGET_TREND_CONFIG: ITrendCardConfig = {
  * from the calculator API response.
  */
 export const OUTCOMES_TREND_CONFIG: ITrendCardConfig = {
-  areaName: "Outcomes",
-  averageField: "sprk_outcomecompliancegrade_average",
-  trendDataField: "sprk_outcomecompliancegrade_trend",
-  description: "Outcomes compliance trend over time",
+  areaName: 'Outcomes',
+  averageField: 'sprk_outcomecompliancegrade_average',
+  trendDataField: 'sprk_outcomecompliancegrade_trend',
+  description: 'Outcomes compliance trend over time',
 };
 
 /**

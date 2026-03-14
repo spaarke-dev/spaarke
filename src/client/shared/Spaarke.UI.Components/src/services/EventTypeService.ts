@@ -23,8 +23,8 @@ import {
   RequiredLevel,
   IEventTypeServiceOptions,
   IEventTypeConfigCacheEntry,
-} from "../types/EventTypeConfig";
-import { IWebApiLike } from "../types/WebApiLike";
+} from '../types/EventTypeConfig';
+import { IWebApiLike } from '../types/WebApiLike';
 
 /**
  * Default cache TTL: 5 minutes
@@ -37,32 +37,32 @@ const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
  */
 export const DEFAULT_EVENT_FIELD_STATES: IFieldDefaultStates = {
   // Primary fields - always visible, event name is required
-  sprk_eventname: { visible: true, requiredLevel: "required" },
-  sprk_description: { visible: true, requiredLevel: "none" },
+  sprk_eventname: { visible: true, requiredLevel: 'required' },
+  sprk_description: { visible: true, requiredLevel: 'none' },
 
   // Date fields - visible but not required by default
-  sprk_basedate: { visible: true, requiredLevel: "none" },
-  sprk_duedate: { visible: true, requiredLevel: "none" },
-  sprk_completeddate: { visible: true, requiredLevel: "none" },
-  scheduledstart: { visible: true, requiredLevel: "none" },
-  scheduledend: { visible: true, requiredLevel: "none" },
+  sprk_basedate: { visible: true, requiredLevel: 'none' },
+  sprk_duedate: { visible: true, requiredLevel: 'none' },
+  sprk_completeddate: { visible: true, requiredLevel: 'none' },
+  scheduledstart: { visible: true, requiredLevel: 'none' },
+  scheduledend: { visible: true, requiredLevel: 'none' },
 
   // Location - visible but optional
-  sprk_location: { visible: true, requiredLevel: "none" },
+  sprk_location: { visible: true, requiredLevel: 'none' },
 
   // Reminder - visible but optional
-  sprk_remindat: { visible: true, requiredLevel: "none" },
+  sprk_remindat: { visible: true, requiredLevel: 'none' },
 
   // Status fields - visible
-  statecode: { visible: true, requiredLevel: "none" },
-  statuscode: { visible: true, requiredLevel: "none" },
-  sprk_priority: { visible: true, requiredLevel: "none" },
-  sprk_source: { visible: true, requiredLevel: "none" },
+  statecode: { visible: true, requiredLevel: 'none' },
+  statuscode: { visible: true, requiredLevel: 'none' },
+  sprk_priority: { visible: true, requiredLevel: 'none' },
+  sprk_source: { visible: true, requiredLevel: 'none' },
 
   // Related event fields - visible but optional
-  sprk_relatedevent: { visible: true, requiredLevel: "none" },
-  sprk_relatedeventtype: { visible: true, requiredLevel: "none" },
-  sprk_relatedeventoffsettype: { visible: true, requiredLevel: "none" },
+  sprk_relatedevent: { visible: true, requiredLevel: 'none' },
+  sprk_relatedeventtype: { visible: true, requiredLevel: 'none' },
+  sprk_relatedeventoffsettype: { visible: true, requiredLevel: 'none' },
 };
 
 /**
@@ -74,16 +74,16 @@ export const ALL_EVENT_FIELDS = Object.keys(DEFAULT_EVENT_FIELD_STATES);
  * Default section collapse states
  */
 export const DEFAULT_SECTION_STATES: ISectionDefaults = {
-  dates: "expanded",
-  relatedEvent: "collapsed",
-  description: "expanded",
-  history: "collapsed",
+  dates: 'expanded',
+  relatedEvent: 'collapsed',
+  description: 'expanded',
+  history: 'collapsed',
 };
 
 /**
  * All controllable section names
  */
-export const ALL_SECTION_NAMES = ["dates", "relatedEvent", "description", "history"] as const;
+export const ALL_SECTION_NAMES = ['dates', 'relatedEvent', 'description', 'history'] as const;
 
 /**
  * Type for section names
@@ -207,7 +207,7 @@ export class EventTypeService {
    * ```
    */
   parseFieldConfigJson(jsonString: string | null | undefined): IEventTypeFieldConfig | null {
-    if (!jsonString || jsonString.trim() === "") {
+    if (!jsonString || jsonString.trim() === '') {
       return null;
     }
 
@@ -215,8 +215,8 @@ export class EventTypeService {
       const parsed = JSON.parse(jsonString);
 
       // Validate basic structure
-      if (typeof parsed !== "object" || parsed === null) {
-        console.warn("[EventTypeService] Invalid config JSON - not an object");
+      if (typeof parsed !== 'object' || parsed === null) {
+        console.warn('[EventTypeService] Invalid config JSON - not an object');
         return null;
       }
 
@@ -224,44 +224,36 @@ export class EventTypeService {
       const config: IEventTypeFieldConfig = {};
 
       if (Array.isArray(parsed.visibleFields)) {
-        config.visibleFields = parsed.visibleFields.filter(
-          (f: unknown) => typeof f === "string"
-        );
+        config.visibleFields = parsed.visibleFields.filter((f: unknown) => typeof f === 'string');
       }
 
       if (Array.isArray(parsed.hiddenFields)) {
-        config.hiddenFields = parsed.hiddenFields.filter(
-          (f: unknown) => typeof f === "string"
-        );
+        config.hiddenFields = parsed.hiddenFields.filter((f: unknown) => typeof f === 'string');
       }
 
       if (Array.isArray(parsed.requiredFields)) {
-        config.requiredFields = parsed.requiredFields.filter(
-          (f: unknown) => typeof f === "string"
-        );
+        config.requiredFields = parsed.requiredFields.filter((f: unknown) => typeof f === 'string');
       }
 
       if (Array.isArray(parsed.optionalFields)) {
-        config.optionalFields = parsed.optionalFields.filter(
-          (f: unknown) => typeof f === "string"
-        );
+        config.optionalFields = parsed.optionalFields.filter((f: unknown) => typeof f === 'string');
       }
 
       if (Array.isArray(parsed.hiddenSections)) {
         // Validate section names against known sections
         const validSections = new Set(ALL_SECTION_NAMES);
         config.hiddenSections = parsed.hiddenSections.filter(
-          (s: unknown) => typeof s === "string" && validSections.has(s as SectionName)
+          (s: unknown) => typeof s === 'string' && validSections.has(s as SectionName)
         );
       }
 
-      if (parsed.sectionDefaults && typeof parsed.sectionDefaults === "object") {
+      if (parsed.sectionDefaults && typeof parsed.sectionDefaults === 'object') {
         config.sectionDefaults = this.parseSectionDefaults(parsed.sectionDefaults);
       }
 
       return config;
     } catch (error) {
-      console.warn("[EventTypeService] Failed to parse config JSON:", error);
+      console.warn('[EventTypeService] Failed to parse config JSON:', error);
       return null;
     }
   }
@@ -274,12 +266,12 @@ export class EventTypeService {
    */
   private parseSectionDefaults(defaults: Record<string, unknown>): ISectionDefaults {
     const result: ISectionDefaults = {};
-    const validStates = ["expanded", "collapsed"];
+    const validStates = ['expanded', 'collapsed'];
 
-    for (const key of ["dates", "relatedEvent", "description", "history"]) {
+    for (const key of ['dates', 'relatedEvent', 'description', 'history']) {
       const value = defaults[key];
-      if (typeof value === "string" && validStates.includes(value)) {
-        result[key as keyof ISectionDefaults] = value as "expanded" | "collapsed";
+      if (typeof value === 'string' && validStates.includes(value)) {
+        result[key as keyof ISectionDefaults] = value as 'expanded' | 'collapsed';
       }
     }
 
@@ -300,10 +292,7 @@ export class EventTypeService {
    * @param customDefaults - Optional custom default states (overrides built-in defaults)
    * @returns Computed field states for all fields
    */
-  computeFieldStates(
-    config: IEventTypeFieldConfig | null,
-    customDefaults?: IFieldDefaultStates
-  ): IComputedFieldStates {
+  computeFieldStates(config: IEventTypeFieldConfig | null, customDefaults?: IFieldDefaultStates): IComputedFieldStates {
     const defaults = customDefaults ?? DEFAULT_EVENT_FIELD_STATES;
     const fields = new Map<string, IComputedFieldState>();
 
@@ -325,7 +314,7 @@ export class EventTypeService {
           const state = fields.get(fieldName);
           if (state) {
             state.isVisible = false;
-            state.requiredLevel = "none"; // Hidden fields cannot be required
+            state.requiredLevel = 'none'; // Hidden fields cannot be required
             state.isOverridden = true;
           }
         }
@@ -347,7 +336,7 @@ export class EventTypeService {
         for (const fieldName of config.optionalFields) {
           const state = fields.get(fieldName);
           if (state) {
-            state.requiredLevel = "none";
+            state.requiredLevel = 'none';
             state.isOverridden = true;
           }
         }
@@ -359,7 +348,7 @@ export class EventTypeService {
           const state = fields.get(fieldName);
           if (state) {
             state.isVisible = true;
-            state.requiredLevel = "required";
+            state.requiredLevel = 'required';
             state.isOverridden = true;
           }
         }
@@ -380,7 +369,7 @@ export class EventTypeService {
       sections.set(sectionName, {
         sectionName,
         isVisible: !hiddenSectionsSet.has(sectionName),
-        collapseState: sectionDefaults[sectionName] ?? "expanded",
+        collapseState: sectionDefaults[sectionName] ?? 'expanded',
       });
     }
 
@@ -430,7 +419,7 @@ export class EventTypeService {
    */
   isFieldRequired(config: IEventTypeFieldConfig | null, fieldName: string): boolean {
     const state = this.getFieldState(config, fieldName);
-    return state?.requiredLevel === "required";
+    return state?.requiredLevel === 'required';
   }
 
   /**
@@ -440,12 +429,9 @@ export class EventTypeService {
    * @param fieldName - Field schema name
    * @returns Required level ("required", "recommended", "none")
    */
-  getFieldRequiredLevel(
-    config: IEventTypeFieldConfig | null,
-    fieldName: string
-  ): RequiredLevel {
+  getFieldRequiredLevel(config: IEventTypeFieldConfig | null, fieldName: string): RequiredLevel {
     const state = this.getFieldState(config, fieldName);
-    return state?.requiredLevel ?? "none";
+    return state?.requiredLevel ?? 'none';
   }
 
   // =========================================================================
@@ -519,19 +505,17 @@ export class EventTypeService {
       }
     };
 
-    checkFields(config.visibleFields, "visibleFields");
-    checkFields(config.hiddenFields, "hiddenFields");
-    checkFields(config.requiredFields, "requiredFields");
-    checkFields(config.optionalFields, "optionalFields");
+    checkFields(config.visibleFields, 'visibleFields');
+    checkFields(config.hiddenFields, 'hiddenFields');
+    checkFields(config.requiredFields, 'requiredFields');
+    checkFields(config.optionalFields, 'optionalFields');
 
     // Check for conflicts
     if (config.hiddenFields && config.requiredFields) {
       const hiddenSet = new Set(config.hiddenFields);
       for (const field of config.requiredFields) {
         if (hiddenSet.has(field)) {
-          errors.push(
-            `Field '${field}' is in both hiddenFields and requiredFields (required takes precedence)`
-          );
+          errors.push(`Field '${field}' is in both hiddenFields and requiredFields (required takes precedence)`);
         }
       }
     }
@@ -614,12 +598,12 @@ export class EventTypeService {
 /**
  * Entity name for Event Type in Dataverse
  */
-const EVENT_TYPE_ENTITY = "sprk_eventtype";
+const EVENT_TYPE_ENTITY = 'sprk_eventtype';
 
 /**
  * Fields to retrieve from Event Type record
  */
-const EVENT_TYPE_SELECT_FIELDS = "sprk_eventtypeid,sprk_name,sprk_fieldconfigjson";
+const EVENT_TYPE_SELECT_FIELDS = 'sprk_eventtypeid,sprk_name,sprk_fieldconfigjson';
 
 /**
  * Result of getEventTypeFieldConfig operation
@@ -697,18 +681,18 @@ export async function getEventTypeFieldConfig(
   options?: { service?: EventTypeService }
 ): Promise<IGetEventTypeFieldConfigResult> {
   // Validate input
-  if (!eventTypeId || eventTypeId.trim() === "") {
+  if (!eventTypeId || eventTypeId.trim() === '') {
     return {
       success: false,
       config: null,
-      eventTypeId: eventTypeId ?? "",
-      error: "Event Type ID is required",
+      eventTypeId: eventTypeId ?? '',
+      error: 'Event Type ID is required',
       notFound: false,
     };
   }
 
   // Normalize GUID (remove braces if present)
-  const normalizedId = eventTypeId.replace(/[{}]/g, "").toLowerCase();
+  const normalizedId = eventTypeId.replace(/[{}]/g, '').toLowerCase();
 
   // Get service instance (use provided or singleton)
   const service = options?.service ?? eventTypeService;
@@ -725,15 +709,11 @@ export async function getEventTypeFieldConfig(
 
   try {
     // Query Dataverse for Event Type record
-    const record = await webApi.retrieveRecord(
-      EVENT_TYPE_ENTITY,
-      normalizedId,
-      `?$select=${EVENT_TYPE_SELECT_FIELDS}`
-    );
+    const record = await webApi.retrieveRecord(EVENT_TYPE_ENTITY, normalizedId, `?$select=${EVENT_TYPE_SELECT_FIELDS}`);
 
     // Extract fields from response
-    const eventTypeName = (record["sprk_name"] as string) ?? undefined;
-    const fieldConfigJson = (record["sprk_fieldconfigjson"] as string) ?? null;
+    const eventTypeName = (record['sprk_name'] as string) ?? undefined;
+    const fieldConfigJson = (record['sprk_fieldconfigjson'] as string) ?? null;
 
     // Parse the field configuration JSON
     const config = service.parseFieldConfigJson(fieldConfigJson);
@@ -756,14 +736,12 @@ export async function getEventTypeFieldConfig(
     // Check for 404 Not Found (Dataverse returns this when record doesn't exist)
     // The error message format varies by API but typically includes "not found" or 404
     const isNotFound =
-      errorMessage.includes("404") ||
-      errorMessage.toLowerCase().includes("not found") ||
-      errorMessage.toLowerCase().includes("does not exist");
+      errorMessage.includes('404') ||
+      errorMessage.toLowerCase().includes('not found') ||
+      errorMessage.toLowerCase().includes('does not exist');
 
     if (isNotFound) {
-      console.warn(
-        `[EventTypeService] Event Type not found: ${normalizedId}`
-      );
+      console.warn(`[EventTypeService] Event Type not found: ${normalizedId}`);
       return {
         success: false,
         config: null,
@@ -774,9 +752,7 @@ export async function getEventTypeFieldConfig(
     }
 
     // Log and return generic error
-    console.error(
-      `[EventTypeService] Failed to fetch Event Type config: ${errorMessage}`
-    );
+    console.error(`[EventTypeService] Failed to fetch Event Type config: ${errorMessage}`);
     return {
       success: false,
       config: null,

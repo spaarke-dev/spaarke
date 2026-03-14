@@ -45,10 +45,7 @@ export async function initAuth(config?: IAuthConfig): Promise<SpaarkeAuthProvide
  */
 export function getAuthProvider(): SpaarkeAuthProvider {
   if (!_provider) {
-    throw new AuthError(
-      'Auth not initialized. Call initAuth() before using authenticatedFetch().',
-      'not_initialized',
-    );
+    throw new AuthError('Auth not initialized. Call initAuth() before using authenticatedFetch().', 'not_initialized');
   }
   return _provider;
 }

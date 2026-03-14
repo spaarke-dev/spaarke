@@ -36,12 +36,36 @@ export interface ActionTypeCapabilities {
 
 // Compatibility map by node type
 const actionTypeCapabilities: Record<PlaybookNodeType, ActionTypeCapabilities> = {
-  aiAnalysis: { allowsSkills: true, allowsKnowledge: true, allowsTools: true },
-  aiCompletion: { allowsSkills: true, allowsKnowledge: true, allowsTools: true },
-  condition: { allowsSkills: false, allowsKnowledge: false, allowsTools: false },
-  deliverOutput: { allowsSkills: false, allowsKnowledge: true, allowsTools: true },
-  createTask: { allowsSkills: false, allowsKnowledge: false, allowsTools: false },
-  sendEmail: { allowsSkills: false, allowsKnowledge: true, allowsTools: false },
+  aiAnalysis: {
+    allowsSkills: true,
+    allowsKnowledge: true,
+    allowsTools: true,
+  },
+  aiCompletion: {
+    allowsSkills: true,
+    allowsKnowledge: true,
+    allowsTools: true,
+  },
+  condition: {
+    allowsSkills: false,
+    allowsKnowledge: false,
+    allowsTools: false,
+  },
+  deliverOutput: {
+    allowsSkills: false,
+    allowsKnowledge: true,
+    allowsTools: true,
+  },
+  createTask: {
+    allowsSkills: false,
+    allowsKnowledge: false,
+    allowsTools: false,
+  },
+  sendEmail: {
+    allowsSkills: false,
+    allowsKnowledge: true,
+    allowsTools: false,
+  },
   wait: { allowsSkills: false, allowsKnowledge: false, allowsTools: false },
 };
 
@@ -201,16 +225,16 @@ export const useScopeStore = create<ScopeState>(() => ({
 
   // Get skills by IDs
   getSkillsByIds: (ids: string[]) => {
-    return mockSkills.filter((s) => ids.includes(s.id));
+    return mockSkills.filter(s => ids.includes(s.id));
   },
 
   // Get knowledge by IDs
   getKnowledgeByIds: (ids: string[]) => {
-    return mockKnowledge.filter((k) => ids.includes(k.id));
+    return mockKnowledge.filter(k => ids.includes(k.id));
   },
 
   // Get tool by ID
   getToolById: (id: string) => {
-    return mockTools.find((t) => t.id === id);
+    return mockTools.find(t => t.id === id);
   },
 }));

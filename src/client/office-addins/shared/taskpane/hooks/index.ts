@@ -3,11 +3,7 @@ export { useOfficeTheme } from './useOfficeTheme';
 export type { UseOfficeThemeResult, OfficeThemeType } from './useOfficeTheme';
 
 export { useTheme } from './useTheme';
-export type {
-  UseThemeResult,
-  ThemePreference,
-  ResolvedThemeType,
-} from './useTheme';
+export type { UseThemeResult, ThemePreference, ResolvedThemeType } from './useTheme';
 
 // Entity search hook
 export { useEntitySearch } from './useEntitySearch';
@@ -39,8 +35,4 @@ export type {
 
 // Accessibility hooks
 export { useAnnounce, useAnnounceOnChange } from './useAnnounce';
-export type {
-  AnnounceMode,
-  UseAnnounceOptions,
-  UseAnnounceResult,
-} from './useAnnounce';
+export type { AnnounceMode, UseAnnounceOptions, UseAnnounceResult } from './useAnnounce';

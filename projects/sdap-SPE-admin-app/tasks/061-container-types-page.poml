@@ -1,0 +1,51 @@
+<task id="SPE-061" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainerTypesPage UI</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-029, SPE-050, SPE-051, SPE-052, SPE-053, SPE-054</dependencies>
+  </metadata>
+  <prompt>Create the ContainerTypesPage component that displays all container types for the selected business unit in a data grid with management actions. This is the primary management surface for container types, allowing administrators to view, create, and initiate registration of container types.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working ContainerTypesPage with UniversalDatasetGrid showing container types, CommandToolbar with Create and Register actions, integrated with the app shell navigation.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid and CommandToolbar from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The ContainerTypesPage is a core Phase 2 feature that provides the management interface for container types. Container types define templates for storage containers — each type has settings for sharing, versioning, and storage limits. Administrators need to see all types at a glance, create new ones, and register them with consuming applications.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page-component">Create components/container-types/ContainerTypesPage.tsx with UniversalDatasetGrid configured for container type columns (name, description, billing classification, created date)</step>
+    <step order="2" name="add-toolbar">Add CommandToolbar with Create and Register action buttons</step>
+    <step order="3" name="add-data-fetching">Implement data fetching from GET /api/spe/containertypes using the selected BU config context</step>
+    <step order="4" name="add-row-click">Add row click handler to open ContainerTypeDetail panel (SPE-062)</step>
+    <step order="5" name="add-create-dialog">Add Create Container Type dialog with name, description, and billing classification fields</step>
+    <step order="6" name="add-navigation-route">Register ContainerTypesPage in the app shell navigation/routing</step>
+    <step order="7" name="add-loading-error-states">Add loading skeleton and error states</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/ContainerTypesPage.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/CreateContainerTypeDialog.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ContainerTypesPage renders a UniversalDatasetGrid with container type data</criterion>
+    <criterion testable="true">CommandToolbar shows Create and Register buttons</criterion>
+    <criterion testable="true">Create button opens a dialog that submits to POST /api/spe/containertypes</criterion>
+    <criterion testable="true">Grid row click navigates to container type detail</criterion>
+    <criterion testable="true">Loading state shows skeleton placeholder</criterion>
+    <criterion testable="true">Error state shows user-friendly message</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,40 @@
+<task id="SPE-042" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Build Code Page and Verify</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, build, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-032, SPE-033, SPE-034, SPE-035, SPE-036, SPE-037, SPE-038, SPE-039, SPE-040, SPE-041</dependencies>
+  </metadata>
+  <prompt>Build the SPE Admin App code page and verify the output. Ensure npm install succeeds, the build produces a single HTML file (dist/speadmin.html), the file is under 2MB, and there are no console errors when opened in a browser.</prompt>
+  <role>Frontend developer with build tooling expertise</role>
+  <goal>Code page builds successfully, producing a single dist/speadmin.html file under 2MB with no build warnings or console errors.</goal>
+  <constraints>
+    <constraint source="ADR-006">Code pages must build to a single HTML file for Dataverse web resource deployment.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App is deployed as a Dataverse web resource, which requires all code to be bundled into a single HTML file. The build step uses webpack to inline all JavaScript, CSS, and assets into one self-contained HTML file. This task verifies the build pipeline works end-to-end and the output meets deployment requirements.</background>
+  </context>
+  <steps>
+    <step order="1" name="install">Run npm install in the spe-admin code page directory.</step>
+    <step order="2" name="build">Run npm run build and capture output.</step>
+    <step order="3" name="verify-output">Verify dist/speadmin.html exists and is a single file.</step>
+    <step order="4" name="verify-size">Verify the file size is under 2MB.</step>
+    <step order="5" name="check-warnings">Review build output for any warnings and resolve them.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/dist/speadmin.html</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds without errors.</criterion>
+    <criterion testable="true">dist/speadmin.html is a single self-contained HTML file.</criterion>
+    <criterion testable="true">File size is under 2MB.</criterion>
+    <criterion testable="true">No build warnings in the output.</criterion>
+  </acceptance-criteria>
+</task>

@@ -38,11 +38,7 @@ let cachedAdapter: IHostAdapter | null = null;
 /**
  * Creates a custom HostAdapterError.
  */
-function createError(
-  code: HostAdapterErrorCode,
-  message: string,
-  innerError?: Error
-): HostAdapterError {
+function createError(code: HostAdapterErrorCode, message: string, innerError?: Error): HostAdapterError {
   return { code, message, innerError };
 }
 
@@ -103,10 +99,7 @@ export const HostAdapterFactory = {
       return 'word';
     }
 
-    throw createError(
-      'INVALID_HOST',
-      `Unsupported Office host: ${host}. Only Outlook and Word are supported.`
-    );
+    throw createError('INVALID_HOST', `Unsupported Office host: ${host}. Only Outlook and Word are supported.`);
   },
 
   /**
@@ -127,7 +120,7 @@ export const HostAdapterFactory = {
       throw createError(
         'INVALID_HOST',
         `No adapter registered for host type: ${targetHost}. ` +
-        `Register an adapter using HostAdapterFactory.registerAdapter().`
+          `Register an adapter using HostAdapterFactory.registerAdapter().`
       );
     }
 
@@ -208,27 +201,17 @@ export const HostAdapterFactory = {
   async waitForOfficeReady(): Promise<HostType> {
     return new Promise((resolve, reject) => {
       if (typeof Office === 'undefined') {
-        reject(
-          createError(
-            'API_NOT_AVAILABLE',
-            'Office.js is not loaded. Make sure to include the Office.js script.'
-          )
-        );
+        reject(createError('API_NOT_AVAILABLE', 'Office.js is not loaded. Make sure to include the Office.js script.'));
         return;
       }
 
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host === Office.HostType.Outlook) {
           resolve('outlook');
         } else if (info.host === Office.HostType.Word) {
           resolve('word');
         } else {
-          reject(
-            createError(
-              'INVALID_HOST',
-              `Unsupported Office host: ${info.host}`
-            )
-          );
+          reject(createError('INVALID_HOST', `Unsupported Office host: ${info.host}`));
         }
       });
     });

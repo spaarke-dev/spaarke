@@ -1,0 +1,101 @@
+<task id="PRODENV-023" project="Production Environment Setup R1">
+  <metadata>
+    <title>Deploy BFF API to production (Deploy-BffApi.ps1)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <parallel-group>P3-B</parallel-group>
+    <tags>deployment, bff-api, app-service</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API to the production App Service using the parameterized
+    Deploy-BffApi.ps1 with staging slot deployment, health check verification,
+    and zero-downtime slot swap.
+  </prompt>
+
+  <role>
+    DevOps engineer executing production API deployment with zero-downtime procedures.
+  </role>
+
+  <goal>
+    BFF API deployed to production, responding at https://api.spaarke.com/healthz
+    with zero downtime during deployment.
+  </goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="app-config">src/server/api/Sprk.Bff.Api/appsettings.Production.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Health check at /healthz must return 200</constraint>
+    <constraint source="NFR-02">Zero-downtime via staging slot</constraint>
+    <constraint source="FR-08">App settings reference Key Vault — no plaintext secrets</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF API deployment</topic>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      First production deployment of the BFF API. Uses staging slot for zero-downtime:
+      deploy to staging → verify health → swap to production.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-020" status="complete">Platform infrastructure deployed</dependency>
+      <dependency task="PRODENV-021" status="complete">Entra ID registrations created</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Build production package">
+      dotnet publish in Release configuration for the BFF API.
+    </step>
+    <step order="2" name="Deploy to staging slot">
+      Run Deploy-BffApi.ps1 with production parameters and staging slot target.
+    </step>
+    <step order="3" name="Verify staging health">
+      Check /healthz on staging slot URL. Verify Key Vault references resolve.
+    </step>
+    <step order="4" name="Swap to production">
+      Execute slot swap. Monitor for errors.
+    </step>
+    <step order="5" name="Verify production health">
+      Check https://api.spaarke.com/healthz returns 200.
+      Verify App Insights receiving telemetry.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF API</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+    <tool name="pwsh">PowerShell</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Deployment verification — /healthz 200, App Insights collecting</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API deployed to production App Service</criterion>
+    <criterion testable="true">https://api.spaarke.com/healthz returns 200</criterion>
+    <criterion testable="true">Deployment used staging slot with zero downtime</criterion>
+    <criterion testable="true">App Insights receiving telemetry from production</criterion>
+    <criterion testable="true">Key Vault references resolving (no configuration errors)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-03-13. Deployed via staging slot swap (zero-downtime).
+    Required fixing task 021 gaps: created Entra ID app registrations (spaarke-bff-api-prod,
+    spaarke-dataverse-s2s-prod), populated Key Vault secrets, granted staging slot Key Vault
+    RBAC access, registered app as Dataverse application user.
+    Redis disabled (no production Redis yet). Dataverse points to dev environment.
+    Production URL: https://api.spaarke.com/healthz (Healthy, 200).
+  </notes>
+</task>

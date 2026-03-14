@@ -2,7 +2,7 @@
 
 > **Purpose**: Developer guide for the complete CI/CD pipeline — from local commits through automated testing, pull request workflow, and deployment to staging/production.
 >
-> **Last Updated**: January 6, 2026
+> **Last Updated**: March 13, 2026
 
 ---
 
@@ -26,9 +26,12 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 3. [Commit Conventions](#commit-conventions)
 4. [Pull Request Workflow](#pull-request-workflow)
 5. [GitHub Actions Workflows](#github-actions-workflows)
-6. [Deployment Pipeline](#deployment-pipeline)
-7. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
-8. [Quick Reference](#quick-reference)
+6. [Nightly Quality Workflow](#nightly-quality-workflow)
+7. [Automated Code Review (AI)](#automated-code-review-ai)
+8. [Weekly Quality Summary](#weekly-quality-summary)
+9. [Deployment Pipeline](#deployment-pipeline)
+10. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
+11. [Quick Reference](#quick-reference)
 
 ---
 
@@ -54,20 +57,21 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │              CI PIPELINE (sdap-ci.yml) - Automatic                  │
-│  ┌────────────┐   ┌────────────┐   ┌────────────┐                  │
-│  │  Security  │   │   Build    │   │   Code     │                  │
-│  │    Scan    │   │  & Test    │   │  Quality   │                  │
-│  │  (Trivy)   │   │  (D+R)     │   │  (ADR)     │                  │
-│  └────────────┘   └────────────┘   └────────────┘                  │
-│        │                │                │                          │
-│        └────────────────┼────────────────┘                          │
-│                         ▼                                           │
-│              ┌─────────────────────┐                                │
-│              │    Integration      │                                │
-│              │    Readiness        │                                │
-│              │  (Package Build)    │                                │
-│              └─────────────────────┘                                │
-└─────────────────────────────────────────────────────────────────────┘
+│  ┌────────────┐   ┌────────────┐   ┌────────────┐  ┌────────────┐ │
+│  │  Security  │   │   Build    │   │   Code     │  │  Client    │ │
+│  │    Scan    │   │  & Test    │   │  Quality   │  │  Quality   │ │
+│  │  (Trivy)   │   │  (D+R)     │   │  (ADR)     │  │(Prettier/  │ │
+│  │            │   │            │   │            │  │  ESLint)   │ │
+│  └────────────┘   └────────────┘   └────────────┘  └────────────┘ │
+│        │                │                │               │         │
+│        └────────────────┼────────────────┼───────────────┘         │
+│                         ▼                                          │
+│              ┌─────────────────────┐                               │
+│              │    Integration      │                               │
+│              │    Readiness        │                               │
+│              │  (Package Build)    │                               │
+│              └─────────────────────┘                               │
+└────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -111,8 +115,11 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 
 | Stage | Trigger | Duration | Blocking |
 |-------|---------|----------|----------|
+| Pre-commit Hooks | Auto (git commit) | ~5-10s | Yes (local) |
 | Local Quality | Manual | ~30s | Yes (recommended) |
 | CI Pipeline | Auto (push/PR) | ~5-8 min | Yes |
+| Nightly Quality | Scheduled (weeknights 6 AM UTC) | ~10-15 min | No (advisory) |
+| Weekly Summary | Scheduled (Monday 8 AM UTC) | ~2 min | No (advisory) |
 | Staging Deploy | Auto (master merge) | ~3-5 min | No |
 | Production Deploy | Manual | ~5-10 min | N/A |
 
@@ -120,9 +127,25 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 
 ## Local Development Workflow
 
+### Pre-Commit Hooks (Automatic)
+
+Husky pre-commit hooks run automatically on every `git commit`. They execute lint-staged, which:
+- **TypeScript/TSX files**: Formats with Prettier, then lints with ESLint (from the nearest `eslint.config.mjs` directory)
+- **JSON/YAML files**: Formats with Prettier
+- **C# files**: Formats with `dotnet format` (scoped to staged files only)
+
+Hooks complete in under 10 seconds. If a hook fails, the commit is blocked until the issue is fixed.
+
+**Emergency skip** (use sparingly, document justification in commit message):
+```bash
+git commit --no-verify -m "fix(api): emergency hotfix — skipping hooks, will fix lint in follow-up"
+```
+
+See [Testing and Code Quality Procedures](testing-and-code-quality.md#husky--lint-staged-pre-commit-hooks) for detailed Husky documentation.
+
 ### Before Committing
 
-Run local quality gates before every commit:
+Run local quality gates before every commit (in addition to automatic pre-commit hooks):
 
 ```powershell
 # 1. Check for changes
@@ -130,7 +153,8 @@ git status
 
 # 2. Run quality gates (or use /push-to-github which does this automatically)
 # Option A: Individual commands
-npm run lint                 # TypeScript lint
+npx prettier --check "src/client/**/*.{ts,tsx}"  # TypeScript formatting
+cd src/client/pcf && npx eslint . --max-warnings 0  # ESLint strict
 dotnet build --warnaserror   # C# lint via Roslyn
 
 # Option B: Use Claude Code skills
@@ -381,6 +405,7 @@ gh pr merge --merge
 |-----|---------|----------|----------|
 | `security-scan` | Trivy vulnerability scan | ~1 min | Yes |
 | `build-test` | Build + run tests (Debug & Release) | ~3-4 min | Yes |
+| `client-quality` | Prettier format check + ESLint strict | ~1-2 min | Yes |
 | `code-quality` | Format check, ADR tests, plugin size | ~2 min | Yes |
 | `integration-readiness` | Package artifacts | ~1 min | Yes |
 | `adr-pr-comment` | Post ADR violations to PR | ~30s | No |
@@ -399,9 +424,15 @@ build-test:
   • dotnet test with coverage
   • Upload test results artifact
 
+client-quality:
+  • npm ci (root) → Prettier check on src/client/**/*.{ts,tsx}
+  • npm ci (src/client/pcf/) → ESLint strict (--max-warnings 0)
+  • Runs on ubuntu-latest (parallel with build-test)
+
 code-quality:
   • dotnet format --verify-no-changes
-  • ADR architecture tests (NetArchTest)
+  • ADR architecture tests (NetArchTest) — blocking
+  • ADR policy check (Legacy PowerShell) — advisory (continue-on-error)
   • Plugin assembly size (<1MB per ADR-002)
   • Vulnerable package detection
 
@@ -409,6 +440,7 @@ integration-readiness:
   • dotnet publish (API)
   • Package deployment artifacts
   • 30-day retention
+  • Depends on: security-scan, build-test, code-quality, client-quality
 ```
 
 ### Staging Deployment: `deploy-staging.yml`
@@ -442,6 +474,145 @@ integration-readiness:
 | Run NetArchTest | Full ADR compliance scan |
 | Create/Update Issue | Track violations with `architecture` label |
 | Auto-close | When all violations resolved |
+
+---
+
+## Nightly Quality Workflow
+
+The nightly quality pipeline (`nightly-quality.yml`) runs a comprehensive quality sweep every weeknight to catch issues that are too expensive to run on every PR.
+
+**Trigger**: Weeknights (Mon-Fri), 6 AM UTC / midnight MST. Also supports manual dispatch via `workflow_dispatch`.
+
+### Jobs
+
+| Job | Purpose | Timeout | Dependencies |
+|-----|---------|---------|--------------|
+| `test-and-coverage` | Full test suite with Coverlet coverage collection | 10 min | None |
+| `sonarcloud-analysis` | SonarCloud deep analysis with coverage data | 8 min | test-and-coverage |
+| `ai-code-review` | Claude Code headless review using `scripts/quality/nightly-review-prompt.md` | 5 min | None (parallel) |
+| `dependency-audit` | `dotnet list --vulnerable` + `npm audit` across all client projects | 5 min | None (parallel) |
+| `report-results` | Aggregates findings into a rolling GitHub issue (label: `nightly-quality`) | 5 min | All four jobs |
+
+### Job Dependency Graph
+
+```
+test-and-coverage ──────┐
+                        ├──→ sonarcloud-analysis
+ai-code-review ─────────┤
+                        ├──→ report-results (always, needs all 4)
+dependency-audit ───────┘
+```
+
+### What Happens When It Fails
+
+1. The `report-results` job creates or updates a rolling GitHub issue titled "Nightly Quality Report -- {date}" with the `nightly-quality` label.
+2. The issue contains a job summary table showing pass/fail/skip status for each job.
+3. Dependency audit results and AI review findings are included in the issue body.
+4. A findings hash is computed to detect when content changes between runs.
+
+### How to Interpret the Nightly Issue
+
+| Section | What to Look For |
+|---------|-----------------|
+| Job Summary | Any "failed" status indicates a problem that needs attention |
+| Dependency Audit | Lists vulnerable .NET and npm packages with severity |
+| AI Code Review | Architecture and code quality observations from Claude Code |
+
+### Manual Dispatch
+
+You can run the nightly workflow on-demand with optional job toggles:
+
+```bash
+# Run all jobs
+gh workflow run nightly-quality.yml
+
+# Run without SonarCloud
+gh workflow run nightly-quality.yml -f run_sonarcloud=false
+
+# Run without AI review
+gh workflow run nightly-quality.yml -f run_ai_review=false
+```
+
+### Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| SonarCloud job fails with "No coverage data" | Coverage artifacts not uploaded by test-and-coverage | Check test-and-coverage logs for test failures; coverage upload uses `continue-on-error: true` |
+| AI Code Review shows "skipped" | `scripts/quality/nightly-review-prompt.md` file missing | Create the prompt file (task 021) or check it was not accidentally deleted |
+| Report issue not created | `GITHUB_TOKEN` lacks `issues: write` permission | Verify workflow `permissions` block includes `issues: write` |
+| Dependency audit shows false positives | Transitive dependency vulnerability | Evaluate with `dotnet list package --vulnerable --include-transitive`; if no direct fix, document in a tracking issue |
+
+---
+
+## Automated Code Review (AI)
+
+Two AI-powered review tools provide automated code review feedback on pull requests.
+
+### CodeRabbit
+
+CodeRabbit is an AI code review tool that reviews every PR automatically.
+
+**What it does**: Provides line-by-line code review comments with architecture-aware feedback based on Spaarke ADR constraints.
+
+**When it runs**: On every PR targeting `master` or `feature/**` branches (configured in `.coderabbit.yaml`).
+
+**Configuration**: `.coderabbit.yaml` at repository root. Key settings:
+- Auto-review enabled for non-draft PRs
+- Custom review instructions reference Spaarke ADRs (001, 008, 010, 021, 022)
+- Path-specific instructions for `src/client/pcf/`, `src/client/code-pages/`, `src/server/api/`, and `scripts/`
+- Advisory profile ("assertive" but non-blocking)
+- Auto-resolve disabled -- human manages conversations
+
+**Advisory status**: CodeRabbit reviews are **informational only**. They do not block PR merges. Review comments for useful insights, but use your judgment on whether to address them.
+
+**Per-PR configuration**: You can adjust CodeRabbit behavior on a specific PR by adding a comment:
+```
+@coderabbitai ignore this PR
+@coderabbitai review this PR
+@coderabbitai configuration
+```
+
+### Claude Code Action
+
+Claude Code Action provides AI review via GitHub Actions on PRs.
+
+**What it does**: Reviews PR changes using Claude Code in headless mode, focusing on architecture patterns, security, and performance.
+
+**When it runs**: Triggered on PR events (configured in the CI workflow or as a separate action).
+
+**Advisory status**: Claude Code Action reviews are **advisory only**. Comments are posted to the PR but do not block merges.
+
+**How to interpret PR comments**: AI review comments appear as bot comments on the PR. They highlight potential issues but may include false positives. Treat them as a second pair of eyes -- address critical findings, evaluate warnings, and ignore suggestions that don't apply.
+
+### Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| CodeRabbit not reviewing | PR is a draft, or target branch not in `base_branches` | Mark PR as ready, or check `.coderabbit.yaml` `base_branches` list |
+| CodeRabbit review is too noisy | Reviewing generated/vendor files | Add paths to CodeRabbit ignore patterns in `.coderabbit.yaml` |
+| Claude Code Action comment is a false positive | AI misinterpreted code pattern | Dismiss the comment; no action required for advisory reviews |
+
+---
+
+## Weekly Quality Summary
+
+A weekly summary workflow aggregates quality trends and posts them as a GitHub issue.
+
+**When it runs**: Weekly (Monday mornings, 8 AM UTC).
+
+**What it shows**:
+- Trend table comparing nightly quality results over the past week
+- Test pass/fail rates
+- SonarCloud quality gate status
+- Dependency vulnerability counts
+- Open nightly-quality issues
+
+**How to read the trend table**: Look for degradation patterns -- if test failures or vulnerability counts are trending upward, prioritize remediation. Consistent green results indicate stable code quality.
+
+**Trigger manually**:
+```bash
+gh workflow run weekly-quality-summary.yml
+```
 
 ---
 
@@ -517,7 +688,9 @@ gh workflow run deploy-to-azure.yml -f artifact_id={id}
 | `security-scan` | Vulnerable dependency | Update package or add to allowlist |
 | `build-test` compile | Code error | Fix locally, push update |
 | `build-test` test | Test failure | Fix test or code |
-| `code-quality` format | Style violation | Run `dotnet format` |
+| `client-quality` Prettier | TypeScript formatting violation | Run `npx prettier --write "src/client/**/*.{ts,tsx}"` |
+| `client-quality` ESLint | ESLint rule violation | Run `cd src/client/pcf && npx eslint . --fix` |
+| `code-quality` format | C# style violation | Run `dotnet format` |
 | `code-quality` ADR | Architecture violation | Run `/adr-check`, fix violations |
 | `code-quality` size | Plugin >1MB | Reduce dependencies per ADR-002 |
 
@@ -675,16 +848,20 @@ gh pr merge --merge                      # Regular merge
 
 ## Integration with Quality Gates
 
-This CI/CD workflow integrates with the [Testing and Code Quality Procedures](testing-and-code-quality.md):
+This CI/CD workflow integrates with the [Testing and Code Quality Procedures](testing-and-code-quality.md). For detailed tool documentation (configuration, run-locally commands, troubleshooting), see the tool-specific sections in that guide.
 
-| Stage | Local (task-execute) | CI (GitHub Actions) |
-|-------|----------------------|---------------------|
-| Code Review | Step 9.5: /code-review | build-test job |
-| ADR Check | Step 9.5: /adr-check | code-quality job |
-| Linting | Step 9.5: npm/dotnet | code-quality job |
-| Tests | During implementation | build-test job |
+| Stage | Local | CI (sdap-ci.yml) | Nightly |
+|-------|-------|-------------------|---------|
+| Prettier | Pre-commit hook | client-quality job | — |
+| ESLint | Pre-commit hook | client-quality job | — |
+| dotnet format | Pre-commit hook | code-quality job | — |
+| Tests | During implementation | build-test job | test-and-coverage |
+| ADR Tests | Step 9.5: /adr-check | code-quality job | — |
+| SonarCloud | — | — | sonarcloud-analysis |
+| AI Review | Step 9.5: /code-review | — | ai-code-review |
+| Dependency Audit | — | code-quality job | dependency-audit |
 
-**Key principle:** Run quality gates locally first (Step 9.5) to catch issues before pushing. CI runs the same checks to enforce standards.
+**Key principle:** Quality checks run at three levels -- pre-commit hooks catch formatting instantly, CI enforces on every PR, and nightly sweeps provide deep analysis. Run quality gates locally first (Step 9.5) to catch issues before pushing.
 
 ---
 
@@ -719,7 +896,7 @@ No secrets required - runs in read-only mode.
 
 ## Related Documentation
 
-- [Testing and Code Quality Procedures](testing-and-code-quality.md) - Quality gates and testing
+- [Testing and Code Quality Procedures](testing-and-code-quality.md) - Quality gates, tool details (Prettier, ESLint, Husky, PSScriptAnalyzer, SonarCloud)
 - [Parallel Claude Code Sessions](parallel-claude-sessions.md) - Multi-session workflow
 - [ci-cd Skill](../../.claude/skills/ci-cd/SKILL.md) - Full skill documentation
 - [push-to-github Skill](../../.claude/skills/push-to-github/SKILL.md) - Git workflow skill
@@ -727,4 +904,4 @@ No secrets required - runs in read-only mode.
 
 ---
 
-*Last updated: January 6, 2026*
+*Last updated: March 13, 2026*

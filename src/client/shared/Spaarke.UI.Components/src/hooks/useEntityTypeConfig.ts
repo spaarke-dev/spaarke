@@ -31,8 +31,8 @@
  * ```
  */
 
-import * as React from "react";
-import { getXrm } from "../utils/xrmContext";
+import * as React from 'react';
+import { getXrm } from '../utils/xrmContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -76,9 +76,7 @@ export interface UseEntityTypeConfigResult<TConfig> {
  * @param options - Configuration for which entity/field to read
  * @returns Loading state, error, and parsed config
  */
-export function useEntityTypeConfig<TConfig>(
-  options: UseEntityTypeConfigOptions
-): UseEntityTypeConfigResult<TConfig> {
+export function useEntityTypeConfig<TConfig>(options: UseEntityTypeConfigOptions): UseEntityTypeConfigResult<TConfig> {
   const { entityName, recordId, configFieldName, selectFields } = options;
 
   const [isLoading, setIsLoading] = React.useState(false);
@@ -105,19 +103,15 @@ export function useEntityTypeConfig<TConfig>(
       try {
         const xrm = getXrm();
         if (!xrm?.WebApi) {
-          setError("Xrm.WebApi not available");
+          setError('Xrm.WebApi not available');
           setIsLoading(false);
           return;
         }
 
         // Normalize GUID (remove braces, lowercase)
-        const normalizedId = recordId!.replace(/[{}]/g, "").toLowerCase();
+        const normalizedId = recordId!.replace(/[{}]/g, '').toLowerCase();
 
-        const record = await xrm.WebApi.retrieveRecord(
-          entityName,
-          normalizedId,
-          `?$select=${selectFields}`
-        );
+        const record = await xrm.WebApi.retrieveRecord(entityName, normalizedId, `?$select=${selectFields}`);
 
         if (cancelled) return;
 
@@ -125,10 +119,7 @@ export function useEntityTypeConfig<TConfig>(
         const configJson = (record[configFieldName] as string) ?? null;
 
         // Extract name field (convention: look for common name patterns)
-        const nameValue =
-          (record["sprk_name"] as string) ??
-          (record["name"] as string) ??
-          null;
+        const nameValue = (record['sprk_name'] as string) ?? (record['name'] as string) ?? null;
         setTypeName(nameValue);
 
         if (!configJson) {
@@ -143,10 +134,7 @@ export function useEntityTypeConfig<TConfig>(
           const parsed = JSON.parse(configJson) as TConfig;
           setConfig(parsed);
         } catch (parseError) {
-          console.error(
-            `[useEntityTypeConfig] Invalid JSON in ${entityName}.${configFieldName}:`,
-            parseError
-          );
+          console.error(`[useEntityTypeConfig] Invalid JSON in ${entityName}.${configFieldName}:`, parseError);
           setError(`Invalid configuration JSON for ${entityName}`);
           setConfig(null);
         }

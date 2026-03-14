@@ -179,15 +179,8 @@ export interface ICreateRecordWizardProps {
       options?: string,
       maxPageSize?: number
     ): Promise<{ entities: Record<string, unknown>[]; nextLink?: string }>;
-    retrieveRecord(
-      entityLogicalName: string,
-      id: string,
-      options?: string
-    ): Promise<Record<string, unknown>>;
-    createRecord(
-      entityLogicalName: string,
-      data: Record<string, unknown>
-    ): Promise<{ id: string }>;
+    retrieveRecord(entityLogicalName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+    createRecord(entityLogicalName: string, data: Record<string, unknown>): Promise<{ id: string }>;
   };
   /** Entity-specific wizard configuration. */
   config: ICreateRecordWizardConfig;

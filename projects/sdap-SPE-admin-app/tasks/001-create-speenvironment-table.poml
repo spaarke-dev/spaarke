@@ -1,0 +1,41 @@
+<task id="SPE-001" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create sprk_speenvironment Dataverse Table Schema</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>dataverse, schema, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Create the sprk_speenvironment Dataverse table that stores SharePoint Embedded environment configurations. This table is the foundational entity for the SPE Admin App, holding tenant-level settings that other tables (container type configs, audit logs) will reference via lookups.</prompt>
+  <role>Dataverse Platform Engineer</role>
+  <goal>The sprk_speenvironment table exists in Dataverse with all required columns and is added to the solution.</goal>
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins — no HTTP/Graph calls in plugins; keep execution under 50ms p95.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App manages SharePoint Embedded container types across multiple tenants and business units. The sprk_speenvironment table stores the tenant-level configuration (tenant ID, root site URL, Graph endpoint) that each container type config references. A boolean "is default" flag identifies the primary environment.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define table schema">Define the sprk_speenvironment table with columns: sprk_name (Primary Name, string), sprk_tenantid (string), sprk_tenantname (string), sprk_rootsiteurl (URL), sprk_graphendpoint (URL), sprk_isdefault (boolean), sprk_status (optionset: Active/Inactive).</step>
+    <step order="2" name="Create table in Dataverse">Create the table in the Dataverse development environment using the defined schema.</step>
+    <step order="3" name="Configure table properties">Set display name, plural name, primary column, ownership type (Organization), and enable auditing.</step>
+    <step order="4" name="Add to solution">Add the sprk_speenvironment table and all columns to the target unmanaged solution.</step>
+    <step order="5" name="Verify creation">Confirm the table appears in the solution with all columns, correct data types, and proper display names.</step>
+  </steps>
+  <outputs>
+    <output type="dataverse-table">sprk_speenvironment table with all columns</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">sprk_speenvironment table exists in Dataverse with columns: sprk_name, sprk_tenantid, sprk_tenantname, sprk_rootsiteurl, sprk_graphendpoint, sprk_isdefault, sprk_status.</criterion>
+    <criterion testable="true">Table is added to the target unmanaged solution.</criterion>
+    <criterion testable="true">sprk_status optionset contains Active and Inactive values.</criterion>
+    <criterion testable="true">sprk_isdefault defaults to false.</criterion>
+  </acceptance-criteria>
+</task>

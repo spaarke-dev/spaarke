@@ -1,5 +1,1 @@
-export {
-  AiSummaryPopover,
-  type IAiSummaryPopoverProps,
-  type ISummaryData,
-} from "./AiSummaryPopover";
+export { AiSummaryPopover, type IAiSummaryPopoverProps, type ISummaryData } from './AiSummaryPopover';

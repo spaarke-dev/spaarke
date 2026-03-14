@@ -1,0 +1,97 @@
+<task id="PRODENV-031" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create deploy-bff-api.yml (push trigger, staging → swap → rollback)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <parallel-group>P4-A</parallel-group>
+    <tags>github-actions, ci-cd, bff-api, deployment</tags>
+  </metadata>
+
+  <prompt>
+    Create GitHub Actions workflow deploy-bff-api.yml that triggers on push to master
+    (paths: src/server/api/**), builds the BFF API, deploys to staging slot, verifies
+    health, swaps to production, and supports rollback.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with GitHub Actions, .NET CI/CD, and zero-downtime deployments.
+  </role>
+
+  <goal>
+    An automated CI/CD pipeline that builds, tests, and deploys the BFF API to production
+    via staging slot with health verification and rollback capability.
+  </goal>
+
+  <inputs>
+    <file purpose="existing-ci">.github/workflows/sdap-ci.yml</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-09">Auto-trigger on push to master for src/server/api/**</constraint>
+    <constraint source="NFR-02">Zero-downtime via staging slot swap</constraint>
+    <constraint source="NFR-06">Rollback via slot swap-back on failure</constraint>
+    <constraint source="ADR-001">Health check at /healthz must pass</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GitHub Actions CI/CD for .NET</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/deploy-to-azure.yml</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the primary deployment pipeline. Every push to master that touches
+      API code triggers: build → test → deploy to staging → health check → swap.
+      If health check fails, automatic rollback via swap-back.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-011" status="complete">Deploy-BffApi.ps1 parameterized</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create workflow file">
+      Create .github/workflows/deploy-bff-api.yml with:
+      - Trigger: push to master, paths: src/server/api/**
+      - Jobs: build → test → deploy-staging → verify → swap → verify-production
+      - Build: dotnet restore, build, test, publish
+      - Deploy staging: use Deploy-BffApi.ps1 targeting staging slot
+      - Verify staging: curl /healthz on staging URL
+      - Swap: az webapp deployment slot swap
+      - Verify production: curl /healthz on production URL
+      - Rollback: swap-back if production verify fails
+    </step>
+    <step order="2" name="Add environment protection">
+      Staging environment: auto-approve. Production environment: required reviewers.
+    </step>
+    <step order="3" name="Add rollback job">
+      On failure of production verification, automatically swap back to previous version.
+    </step>
+    <step order="4" name="Validate workflow">
+      Check YAML syntax and job dependencies.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/deploy-bff-api.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow triggers on push to master for src/server/api/**</criterion>
+    <criterion testable="true">Build and test jobs run before deployment</criterion>
+    <criterion testable="true">Staging deployment with health verification before swap</criterion>
+    <criterion testable="true">Automatic rollback on production health check failure</criterion>
+    <criterion testable="true">Environment protection rules for production</criterion>
+    <criterion testable="true">Valid YAML syntax</criterion>
+  </acceptance-criteria>
+</task>

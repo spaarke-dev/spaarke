@@ -9,14 +9,7 @@
  * @see CreateRecordWizard — pre-fills emailSubject/emailBody from config
  */
 import * as React from 'react';
-import {
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
@@ -140,8 +133,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           {title}
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Compose an introductory email. It will be created as an email activity
-          in Dataverse, linked to this record.
+          Compose an introductory email. It will be created as an email activity in Dataverse, linked to this record.
         </Text>
       </div>
 
@@ -160,7 +152,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
           <Field label="CC">
             <Input
               value={emailCc ?? ''}
-              onChange={(e) => onEmailCcChange(e.target.value)}
+              onChange={e => onEmailCcChange(e.target.value)}
               placeholder="CC email addresses (separate with ;)"
               aria-label="CC"
             />
@@ -170,7 +162,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
@@ -179,7 +171,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={15}
             resize="vertical"
@@ -188,8 +180,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         </Field>
 
         <Text size={100} className={styles.infoNote}>
-          This email will be saved as a draft activity on the record. You can
-          review and send it from there.
+          This email will be saved as a draft activity on the record. You can review and send it from there.
         </Text>
       </div>
     </div>

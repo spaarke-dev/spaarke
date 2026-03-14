@@ -36,7 +36,7 @@ describe('useAnnounce', () => {
   afterEach(() => {
     jest.useRealTimers();
     // Clean up any live regions created by tests
-    document.querySelectorAll('.sr-only').forEach((el) => el.remove());
+    document.querySelectorAll('.sr-only').forEach(el => el.remove());
   });
 
   describe('initialization', () => {
@@ -72,7 +72,7 @@ describe('useAnnounce', () => {
       const liveRegions = document.querySelectorAll('.sr-only');
       expect(liveRegions.length).toBe(2);
 
-      liveRegions.forEach((region) => {
+      liveRegions.forEach(region => {
         const style = (region as HTMLElement).style;
         expect(style.position).toBe('absolute');
         expect(style.width).toBe('1px');
@@ -271,7 +271,7 @@ describe('useAnnounceOnChange', () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    document.querySelectorAll('.sr-only').forEach((el) => el.remove());
+    document.querySelectorAll('.sr-only').forEach(el => el.remove());
   });
 
   it('does not announce on initial render', () => {
@@ -287,11 +287,14 @@ describe('useAnnounceOnChange', () => {
   it('announces when dependency changes', async () => {
     let value = 'First';
 
-    const { rerender } = renderHook(({ message, deps }) => {
-      useAnnounceOnChange(message, deps);
-    }, {
-      initialProps: { message: value, deps: [value] },
-    });
+    const { rerender } = renderHook(
+      ({ message, deps }) => {
+        useAnnounceOnChange(message, deps);
+      },
+      {
+        initialProps: { message: value, deps: [value] },
+      }
+    );
 
     // Initial render - no announcement
     expect(document.querySelector('[aria-live="polite"]')?.textContent || '').toBe('');
@@ -313,11 +316,18 @@ describe('useAnnounceOnChange', () => {
   it('uses assertive mode when specified', async () => {
     let value = 'First';
 
-    const { rerender } = renderHook(({ message, deps, mode }) => {
-      useAnnounceOnChange(message, deps, mode);
-    }, {
-      initialProps: { message: value, deps: [value], mode: 'assertive' as const },
-    });
+    const { rerender } = renderHook(
+      ({ message, deps, mode }) => {
+        useAnnounceOnChange(message, deps, mode);
+      },
+      {
+        initialProps: {
+          message: value,
+          deps: [value],
+          mode: 'assertive' as const,
+        },
+      }
+    );
 
     // Change the value
     value = 'Error!';
@@ -336,11 +346,14 @@ describe('useAnnounceOnChange', () => {
   it('does not announce when message is null', async () => {
     let message: string | null = 'First';
 
-    const { rerender } = renderHook(({ msg, deps }) => {
-      useAnnounceOnChange(msg, deps);
-    }, {
-      initialProps: { msg: message, deps: [message] },
-    });
+    const { rerender } = renderHook(
+      ({ msg, deps }) => {
+        useAnnounceOnChange(msg, deps);
+      },
+      {
+        initialProps: { msg: message, deps: [message] },
+      }
+    );
 
     // Change to null
     message = null;
@@ -357,11 +370,14 @@ describe('useAnnounceOnChange', () => {
   it('does not announce when message is undefined', async () => {
     let message: string | undefined = 'First';
 
-    const { rerender } = renderHook(({ msg, deps }) => {
-      useAnnounceOnChange(msg, deps);
-    }, {
-      initialProps: { msg: message, deps: [message] },
-    });
+    const { rerender } = renderHook(
+      ({ msg, deps }) => {
+        useAnnounceOnChange(msg, deps);
+      },
+      {
+        initialProps: { msg: message, deps: [message] },
+      }
+    );
 
     // Change to undefined
     message = undefined;

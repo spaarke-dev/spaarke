@@ -30,12 +30,7 @@ import {
   MessageBarBody,
   Badge,
 } from '@fluentui/react-components';
-import {
-  Search20Regular,
-  Copy20Regular,
-  DocumentMultiple20Regular,
-  Dismiss20Regular,
-} from '@fluentui/react-icons';
+import { Search20Regular, Copy20Regular, DocumentMultiple20Regular, Dismiss20Regular } from '@fluentui/react-icons';
 import { useTemplateStore, type PlaybookTemplate } from '../../stores/templateStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,26 +130,14 @@ export interface TemplateLibraryDialogProps {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
-  open,
-  onClose,
-  onCloneSuccess,
-}) => {
+export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({ open, onClose, onCloneSuccess }) => {
   const styles = useStyles();
   const [searchTerm, setSearchTerm] = useState('');
   const [cloningId, setCloningId] = useState<string | null>(null);
 
   // Store state
-  const {
-    templates,
-    isLoading,
-    error,
-    isCloning,
-    cloneError,
-    fetchTemplates,
-    clonePlaybook,
-    clearError,
-  } = useTemplateStore();
+  const { templates, isLoading, error, isCloning, cloneError, fetchTemplates, clonePlaybook, clearError } =
+    useTemplateStore();
 
   // Fetch templates when dialog opens
   useEffect(() => {
@@ -253,9 +236,7 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
                   No templates found
                 </Text>
                 <Text size={300}>
-                  {searchTerm
-                    ? 'Try adjusting your search terms'
-                    : 'No playbook templates are available yet'}
+                  {searchTerm ? 'Try adjusting your search terms' : 'No playbook templates are available yet'}
                 </Text>
               </div>
             )}
@@ -263,17 +244,13 @@ export const TemplateLibraryDialog: React.FC<TemplateLibraryDialogProps> = ({
             {/* Template grid */}
             {!isLoading && templates.length > 0 && (
               <div className={styles.grid}>
-                {templates.map((template) => (
+                {templates.map(template => (
                   <Card key={template.id} className={styles.card}>
                     <CardHeader
                       header={
                         <div className={styles.titleContainer}>
                           <Text weight="semibold">{template.name}</Text>
-                          <Badge
-                            appearance="filled"
-                            size="small"
-                            className={styles.templateBadge}
-                          >
+                          <Badge appearance="filled" size="small" className={styles.templateBadge}>
                             Template
                           </Badge>
                         </div>

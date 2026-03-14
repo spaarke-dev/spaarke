@@ -1,0 +1,55 @@
+LEGAL ANALYSIS MEMORANDUM
+NON-COMPETE CLAUSE ENFORCEABILITY
+
+Prepared for: Adventure Works Employment Dispute (MTR-2026-004)
+Date: March 5, 2026
+Prepared by: Legal Analysis Team
+Confidentiality: Attorney-Client Privileged
+
+EXECUTIVE SUMMARY
+
+This memorandum analyzes the enforceability of the non-compete clause in the
+employment agreement between Adventure Works and the departing employee. We
+examine the applicable law in three relevant jurisdictions: Washington State,
+California, and New York.
+
+KEY FINDINGS
+
+1. WASHINGTON STATE
+   - Non-compete agreements enforceable under RCW 49.62 (effective 2020)
+   - Employee must earn > $116,594/year (2026 threshold, adjusted annually)
+   - Maximum duration: 18 months
+   - Employer must provide independent consideration if signed after start date
+   - Garden leave required during non-compete period
+   - ANALYSIS: The clause is likely enforceable given employee's salary of
+     $185,000 and the 12-month restriction period. However, the geographic
+     scope ("worldwide") may be narrowed by a court to the Pacific Northwest.
+
+2. CALIFORNIA
+   - Business and Professions Code Section 16600: Non-competes generally void
+   - Narrow exceptions: sale of business goodwill, dissolution of partnership
+   - AB 1076 (2024) codifies broad prohibition
+   - ANALYSIS: The non-compete clause is unenforceable in California.
+     If the employee relocates to California, the clause cannot be enforced
+     regardless of choice-of-law provisions.
+
+3. NEW YORK
+   - Common law framework: enforceability based on reasonableness test
+   - Factors: duration, geographic scope, hardship to employee, public interest
+   - Recent trend toward stricter scrutiny (pending legislation)
+   - Blue pencil doctrine: courts may modify overbroad restrictions
+   - ANALYSIS: The 12-month duration is reasonable. The non-solicitation
+     component is likely enforceable. The non-competition component depends
+     on whether the employee had access to trade secrets.
+
+RECOMMENDATIONS
+
+1. If proceeding to arbitration: Focus on Washington State law as most favorable.
+2. Consider settlement in the range of 6-9 months of restricted activity with
+   continued salary (garden leave).
+3. If employee has relocated to California: Re-evaluate enforcement strategy.
+4. Preserve all evidence of trade secret access for potential litigation.
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All company names, persons, and details are fictitious.

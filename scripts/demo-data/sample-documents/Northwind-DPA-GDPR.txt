@@ -1,0 +1,73 @@
+DATA PROCESSING AGREEMENT
+GDPR Article 28 Compliant
+
+Between:
+  Data Controller: Spaarke Legal Services ("Controller")
+  Data Processor: Northwind Traders ("Processor")
+
+Effective Date: February 15, 2026
+DPA Reference: DPA-2026-NW-003
+
+1. DEFINITIONS
+   "Personal Data" means any information relating to an identified or identifiable
+   natural person as defined in GDPR Article 4(1).
+   "Processing" means any operation performed on Personal Data as defined in
+   GDPR Article 4(2).
+   "Sub-processor" means any third party engaged by the Processor to process
+   Personal Data on behalf of the Controller.
+
+2. SUBJECT MATTER AND DURATION
+   2.1 This DPA covers the processing of Personal Data in connection with the
+       services provided under the Master Services Agreement dated January 2026.
+   2.2 Categories of data subjects: Employees, customers, and business contacts.
+   2.3 Types of personal data: Names, email addresses, phone numbers, job titles,
+       transaction records, and communication logs.
+   2.4 Duration: Co-terminus with the Master Services Agreement.
+
+3. PROCESSOR OBLIGATIONS
+   3.1 Process Personal Data only on documented instructions from the Controller.
+   3.2 Ensure persons authorized to process data are bound by confidentiality.
+   3.3 Implement appropriate technical and organizational security measures.
+   3.4 Assist the Controller with data subject access requests within 72 hours.
+   3.5 Delete or return all Personal Data at the end of the processing period.
+
+4. SECURITY MEASURES
+   4.1 Encryption: AES-256 for data at rest, TLS 1.3 for data in transit.
+   4.2 Access controls: Role-based access with multi-factor authentication.
+   4.3 Logging: All access to Personal Data logged with 90-day retention.
+   4.4 Penetration testing: Annual third-party penetration test required.
+   4.5 SOC 2 Type II certification maintained throughout the term.
+
+5. SUB-PROCESSORS
+   5.1 Current approved sub-processors listed in Annex B.
+   5.2 Processor must notify Controller 30 days before engaging new sub-processors.
+   5.3 Controller has the right to object to new sub-processors within 14 days.
+   5.4 Processor remains fully liable for sub-processor compliance.
+
+6. DATA BREACH NOTIFICATION
+   6.1 Processor shall notify Controller within 24 hours of discovering a breach.
+   6.2 Notification shall include: nature of breach, categories affected,
+       approximate number of records, likely consequences, and measures taken.
+   6.3 Processor shall cooperate fully with Controller's breach response.
+
+7. DATA TRANSFERS
+   7.1 No transfer of Personal Data outside the EEA without prior written consent.
+   7.2 If transfer is approved, Standard Contractual Clauses (Module 2) shall apply.
+   7.3 Transfer impact assessment required for each new destination country.
+
+8. AUDIT RIGHTS
+   8.1 Controller may audit Processor's compliance with this DPA annually.
+   8.2 Processor shall provide access to relevant documentation within 10 business days.
+   8.3 Audit costs borne by Controller unless non-compliance is found.
+
+ANNEX A - TECHNICAL AND ORGANIZATIONAL MEASURES
+[See attached security controls document]
+
+ANNEX B - APPROVED SUB-PROCESSORS
+1. Azure Cloud Services (Microsoft) - Cloud hosting - US West Region
+2. SendGrid (Twilio) - Email delivery - US
+3. Datadog - Application monitoring - US/EU
+
+---
+This is a SAMPLE document for demonstration purposes only.
+All company names, persons, and details are fictitious.

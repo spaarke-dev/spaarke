@@ -5,9 +5,9 @@ import {
   SilentRequest,
   InteractionRequiredAuthError,
   PopupRequest,
-} from "@azure/msal-browser";
-import { msalConfig, validateMsalConfig } from "./msalConfig";
-import { IAuthProvider, TokenCacheEntry } from "../../types/auth";
+} from '@azure/msal-browser';
+import { msalConfig, validateMsalConfig } from './msalConfig';
+import { IAuthProvider, TokenCacheEntry } from '../../types/auth';
 
 /**
  * @deprecated This file is deprecated and will be removed in a future version.
@@ -24,7 +24,7 @@ import { IAuthProvider, TokenCacheEntry } from "../../types/auth";
  * Provides SSO authentication for the visualization API.
  */
 export class MsalAuthProvider implements IAuthProvider {
-  private static readonly CACHE_KEY_PREFIX = "msal.token.";
+  private static readonly CACHE_KEY_PREFIX = 'msal.token.';
   private static readonly EXPIRATION_BUFFER_MS = 5 * 60 * 1000;
   private static instance: MsalAuthProvider;
   private msalInstance: PublicClientApplication | null = null;
@@ -44,11 +44,11 @@ export class MsalAuthProvider implements IAuthProvider {
 
   public async initialize(): Promise<void> {
     if (this.isInitialized) {
-      console.warn("[MsalAuthProvider] Already initialized, skipping");
+      console.warn('[MsalAuthProvider] Already initialized, skipping');
       return;
     }
 
-    console.info("[MsalAuthProvider] Initializing MSAL...");
+    console.info('[MsalAuthProvider] Initializing MSAL...');
 
     try {
       validateMsalConfig();
@@ -69,9 +69,9 @@ export class MsalAuthProvider implements IAuthProvider {
       }
 
       this.isInitialized = true;
-      console.info("[MsalAuthProvider] Initialization complete");
+      console.info('[MsalAuthProvider] Initialization complete');
     } catch (error) {
-      console.error("[MsalAuthProvider] Initialization failed", error);
+      console.error('[MsalAuthProvider] Initialization failed', error);
       throw new Error(`MSAL initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -82,11 +82,11 @@ export class MsalAuthProvider implements IAuthProvider {
 
   public async getToken(scopes: string[]): Promise<string> {
     if (!this.isInitialized || !this.msalInstance) {
-      throw new Error("MSAL not initialized. Call initialize() first.");
+      throw new Error('MSAL not initialized. Call initialize() first.');
     }
 
     if (!scopes || scopes.length === 0) {
-      throw new Error("Scopes parameter is required and must not be empty.");
+      throw new Error('Scopes parameter is required and must not be empty.');
     }
 
     const cachedToken = this.getCachedToken(scopes);
@@ -94,49 +94,45 @@ export class MsalAuthProvider implements IAuthProvider {
       return cachedToken;
     }
 
-    console.info(`[MsalAuthProvider] Acquiring token for scopes: ${scopes.join(", ")}`);
+    console.info(`[MsalAuthProvider] Acquiring token for scopes: ${scopes.join(', ')}`);
 
     try {
       const tokenResponse = await this.acquireTokenSilent(scopes);
-      console.info("[MsalAuthProvider] Token acquired successfully via silent flow");
+      console.info('[MsalAuthProvider] Token acquired successfully via silent flow');
 
       if (tokenResponse.expiresOn) {
         this.setCachedToken(tokenResponse.accessToken, tokenResponse.expiresOn, scopes);
       }
 
       return tokenResponse.accessToken;
-
     } catch (error) {
       if (error instanceof InteractionRequiredAuthError) {
-        console.warn("[MsalAuthProvider] Silent token acquisition failed, falling back to popup...");
+        console.warn('[MsalAuthProvider] Silent token acquisition failed, falling back to popup...');
 
         try {
           const tokenResponse = await this.acquireTokenPopup(scopes);
-          console.info("[MsalAuthProvider] Token acquired successfully via popup");
+          console.info('[MsalAuthProvider] Token acquired successfully via popup');
 
           if (tokenResponse.expiresOn) {
             this.setCachedToken(tokenResponse.accessToken, tokenResponse.expiresOn, scopes);
           }
 
           return tokenResponse.accessToken;
-
         } catch (popupError) {
-          console.error("[MsalAuthProvider] Popup token acquisition failed", popupError);
+          console.error('[MsalAuthProvider] Popup token acquisition failed', popupError);
           throw new Error(
-            `Failed to acquire token via popup: ${popupError instanceof Error ? popupError.message : "Unknown error"}`
+            `Failed to acquire token via popup: ${popupError instanceof Error ? popupError.message : 'Unknown error'}`
           );
         }
       }
 
-      console.error("[MsalAuthProvider] Token acquisition failed", error);
-      throw new Error(
-        `Failed to acquire token: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
+      console.error('[MsalAuthProvider] Token acquisition failed', error);
+      throw new Error(`Failed to acquire token: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   public clearCache(): void {
-    console.info("[MsalAuthProvider] Clearing token cache");
+    console.info('[MsalAuthProvider] Clearing token cache');
 
     this.refreshPromises.clear();
 
@@ -150,16 +146,16 @@ export class MsalAuthProvider implements IAuthProvider {
       }
       keysToRemove.forEach(key => sessionStorage.removeItem(key));
     } catch (error) {
-      console.warn("[MsalAuthProvider] Failed to clear sessionStorage cache", error);
+      console.warn('[MsalAuthProvider] Failed to clear sessionStorage cache', error);
     }
 
     this.currentAccount = null;
-    console.info("[MsalAuthProvider] Token cache cleared");
+    console.info('[MsalAuthProvider] Token cache cleared');
   }
 
   private async acquireTokenSilent(scopes: string[]): Promise<AuthenticationResult> {
     if (!this.msalInstance) {
-      throw new Error("MSAL instance not initialized");
+      throw new Error('MSAL instance not initialized');
     }
 
     if (this.currentAccount) {
@@ -171,7 +167,7 @@ export class MsalAuthProvider implements IAuthProvider {
       try {
         return await this.msalInstance.acquireTokenSilent(silentRequest);
       } catch {
-        console.debug("[MsalAuthProvider] acquireTokenSilent failed, trying ssoSilent");
+        console.debug('[MsalAuthProvider] acquireTokenSilent failed, trying ssoSilent');
       }
     }
 
@@ -187,7 +183,7 @@ export class MsalAuthProvider implements IAuthProvider {
 
   private async acquireTokenPopup(scopes: string[]): Promise<AuthenticationResult> {
     if (!this.msalInstance) {
-      throw new Error("MSAL instance not initialized");
+      throw new Error('MSAL instance not initialized');
     }
 
     const popupRequest: PopupRequest = {
@@ -203,14 +199,13 @@ export class MsalAuthProvider implements IAuthProvider {
       }
 
       return tokenResponse;
-
     } catch (error) {
       if (error instanceof Error) {
-        if (error.message.includes("user_cancelled") || error.message.includes("popup_window_closed")) {
-          throw new Error("Authentication cancelled by user");
+        if (error.message.includes('user_cancelled') || error.message.includes('popup_window_closed')) {
+          throw new Error('Authentication cancelled by user');
         }
-        if (error.message.includes("popup_window_error") || error.message.includes("BrowserAuthError")) {
-          throw new Error("Popup blocked. Please allow popups for this site and try again.");
+        if (error.message.includes('popup_window_error') || error.message.includes('BrowserAuthError')) {
+          throw new Error('Popup blocked. Please allow popups for this site and try again.');
         }
       }
       throw error;
@@ -240,9 +235,8 @@ export class MsalAuthProvider implements IAuthProvider {
       }
 
       return cacheEntry.token;
-
     } catch (error) {
-      console.warn("[MsalAuthProvider] Failed to read cached token", error);
+      console.warn('[MsalAuthProvider] Failed to read cached token', error);
       return null;
     }
   }
@@ -257,7 +251,7 @@ export class MsalAuthProvider implements IAuthProvider {
       };
       sessionStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
     } catch (error) {
-      console.warn("[MsalAuthProvider] Failed to cache token", error);
+      console.warn('[MsalAuthProvider] Failed to cache token', error);
     }
   }
 
@@ -266,13 +260,13 @@ export class MsalAuthProvider implements IAuthProvider {
       const cacheKey = this.getCacheKey(scopes);
       sessionStorage.removeItem(cacheKey);
     } catch (error) {
-      console.warn("[MsalAuthProvider] Failed to remove cached token", error);
+      console.warn('[MsalAuthProvider] Failed to remove cached token', error);
     }
   }
 
   private getCacheKey(scopes: string[]): string {
     const sortedScopes = scopes.slice().sort();
-    return MsalAuthProvider.CACHE_KEY_PREFIX + sortedScopes.join(",");
+    return MsalAuthProvider.CACHE_KEY_PREFIX + sortedScopes.join(',');
   }
 
   private scopesMatch(scopes1: string[], scopes2: string[]): boolean {

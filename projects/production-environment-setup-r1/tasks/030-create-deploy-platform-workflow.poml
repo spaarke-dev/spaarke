@@ -1,0 +1,91 @@
+<task id="PRODENV-030" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create deploy-platform.yml (manual dispatch, what-if + deploy)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>4</phase>
+    <parallel-group>P4-A</parallel-group>
+    <tags>github-actions, ci-cd, infrastructure</tags>
+  </metadata>
+
+  <prompt>
+    Create GitHub Actions workflow deploy-platform.yml for deploying shared platform
+    infrastructure. Manual dispatch trigger with what-if preview option and actual
+    deployment option with environment protection.
+  </prompt>
+
+  <role>
+    DevOps engineer experienced with GitHub Actions workflows and Azure deployments.
+  </role>
+
+  <goal>
+    A GitHub Actions workflow that deploys platform infrastructure with what-if preview,
+    environment approval gates, and deployment verification.
+  </goal>
+
+  <inputs>
+    <file purpose="existing-workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="deploy-script">scripts/Deploy-Platform.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-09">Environment protection rules required</constraint>
+    <constraint source="NFR-05">Audit trail for all deployments</constraint>
+    <constraint source="project">Manual dispatch only (not auto-triggered)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GitHub Actions and Azure deployment workflows</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/deploy-to-azure.yml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Platform infrastructure deployment is intentionally manual-triggered since it
+      changes shared resources. The workflow supports what-if mode for reviewing
+      changes before applying them.
+    </background>
+    <dependencies>
+      <dependency task="PRODENV-010" status="complete">Deploy-Platform.ps1 exists</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing workflows">
+      Read sdap-ci.yml and deploy-to-azure.yml for patterns.
+    </step>
+    <step order="2" name="Create deploy-platform.yml">
+      Create .github/workflows/deploy-platform.yml with:
+      - workflow_dispatch trigger with inputs: mode (what-if/deploy), environment
+      - Azure login step (OIDC or service principal)
+      - Conditional: what-if step OR deploy step based on mode
+      - Post-deployment verification step
+      - Deployment summary as job output
+    </step>
+    <step order="3" name="Add environment protection">
+      Reference 'production' environment with required reviewers.
+    </step>
+    <step order="4" name="Validate workflow syntax">
+      Check YAML syntax and GitHub Actions schema compliance.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/deploy-platform.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow file exists and is valid YAML</criterion>
+    <criterion testable="true">Manual dispatch with mode (what-if/deploy) input</criterion>
+    <criterion testable="true">Uses Deploy-Platform.ps1 for deployment</criterion>
+    <criterion testable="true">References production environment with protection rules</criterion>
+    <criterion testable="true">Post-deployment verification step included</criterion>
+  </acceptance-criteria>
+</task>

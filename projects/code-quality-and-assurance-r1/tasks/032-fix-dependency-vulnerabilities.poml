@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Fix Dependency Vulnerabilities</title>
+    <phase>4: Remediation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005, 008</dependencies>
+    <blocks>043</blocks>
+    <tags>remediation, dependencies, security</tags>
+  </metadata>
+
+  <prompt>
+    Fix dependency vulnerabilities identified in the audit. Update packages with known vulnerabilities
+    including MimeKit 4.14.0 and any others identified by the audit. Run dotnet list --vulnerable and
+    npm audit after fixes to verify resolution. Document any vulnerabilities that cannot be fixed (such
+    as transitive dependencies not directly controllable). Build and test after each package update to
+    catch breaking changes immediately.
+  </prompt>
+
+  <role>
+    Security-conscious .NET and TypeScript developer specializing in dependency management and
+    vulnerability remediation. Expert in NuGet and npm package versioning, semantic versioning
+    compatibility, and transitive dependency analysis.
+  </role>
+
+  <goal>
+    All directly controllable dependency vulnerabilities resolved. A vulnerability resolution report
+    documents what was fixed, what version resolved it, and any vulnerabilities that remain due to
+    transitive dependency constraints (unfixable without breaking changes). The build and all tests
+    pass after all updates.
+  </goal>
+
+  <context>
+    <background>
+      The dependency audit (task 005) identified vulnerable packages across the .NET and npm
+      dependency trees. The audit report at projects/code-quality-and-assurance-r1/notes/audit-dependencies.md
+      contains the full inventory.
+
+      Known vulnerable package: MimeKit 4.14.0 — check the current version and update to latest
+      stable if a fix is available.
+
+      Approach:
+      - For .NET: `dotnet list src/ package --vulnerable --include-transitive` to get current vulnerable packages.
+        Update directly-referenced packages with `dotnet add {project} package {name} --version {fixed-version}`.
+        For transitive vulnerabilities, add a direct reference at the fixed version to override the transitive pull.
+      - For npm: `npm audit --json` in each client workspace to get current vulnerabilities.
+        `npm audit fix` for automatic fixes. Manual version overrides in package.json for cases where
+        `npm audit fix` cannot resolve (use `overrides` field in package.json).
+
+      Priority order: Critical vulnerabilities first, then High, then Medium. Stop at Low if all
+      Critical and High are resolved — Low-severity vulnerabilities in dev-only dependencies are
+      acceptable to leave documented.
+
+      Breaking changes: Some package updates introduce API changes. After each major version bump,
+      run `dotnet build` immediately to detect breaking changes. If a package update causes build
+      errors and the fix is not straightforward, revert the update and document it as an unfixable
+      vulnerability with the reason.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (modify — update vulnerable NuGet packages)</file>
+      <file>src/server/shared/ (modify — update vulnerable packages in shared libraries if present)</file>
+      <file>package.json (modify — update vulnerable npm packages, add overrides if needed)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md (read — vulnerability inventory from task 005)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must NOT introduce breaking changes. Run `dotnet build` after each NuGet update and `npm run build` after each npm update. If a package update causes build failures and the fix is not within 15 minutes of effort, revert and document as unfixable.</constraint>
+    <constraint source="spec">Run `dotnet test` after all NuGet updates are complete to verify no test regressions from package changes.</constraint>
+    <constraint source="spec">For transitive vulnerabilities that cannot be fixed by updating the direct reference, add an explicit direct reference at the patched version. Document in the resolution report which packages required this approach.</constraint>
+    <constraint source="spec">Do not update packages that are not vulnerable to avoid introducing unnecessary risk. Targeted updates only — not a general upgrade pass.</constraint>
+    <constraint source="spec">Create a vulnerability resolution report regardless of outcome. Even if all vulnerabilities are resolved, the report documents what was done and provides an audit trail.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r1/notes/audit-dependencies.md to get the full vulnerability inventory from the initial audit. Note all packages and their CVE/advisory references.</step>
+    <step order="2">Run `dotnet list src/ package --vulnerable --include-transitive` to get the current state of .NET vulnerabilities (may differ from audit if packages were updated since the audit).</step>
+    <step order="3">Run `npm audit --json` in each npm workspace directory (src/client/pcf, src/client/code-pages, src/client/shared, etc.) to get current npm vulnerability state.</step>
+    <step order="4">Prioritize the vulnerability list by severity: Critical first, then High, then Medium. Build the fix plan: for each vulnerability, identify the minimum version that resolves it and whether it is a major/minor/patch bump.</step>
+    <step order="5">Fix .NET vulnerabilities: for each directly-referenced vulnerable package (starting with Critical), run `dotnet add {project}.csproj package {PackageName} --version {fixed-version}`. Run `dotnet build src/server/api/Sprk.Bff.Api/` after each update. Revert and document if build breaks.</step>
+    <step order="6">Fix .NET transitive vulnerabilities: for packages where the vulnerability is in a transitive dependency, add an explicit `PackageReference` at the patched version in the affected .csproj file. Document this approach in the resolution report.</step>
+    <step order="7">Fix npm vulnerabilities: run `npm audit fix` in each workspace that has vulnerabilities. For packages that cannot be auto-fixed, manually update package.json with the patched version or add to the `overrides` field. Run `npm run build` after fixes.</step>
+    <step order="8">Re-run `dotnet list src/ package --vulnerable --include-transitive` and `npm audit` in all workspaces to verify the final vulnerability state.</step>
+    <step order="9">Run `dotnet test` to verify all tests pass after dependency updates.</step>
+    <step order="10">Create the vulnerability resolution report at projects/code-quality-and-assurance-r1/notes/vulnerability-resolution.md. Include: initial vulnerability count by severity, packages updated (name, old version, new version, CVE), remaining vulnerabilities (with reason unfixable), final vulnerability count.</step>
+    <step order="11">Update TASK-INDEX.md: change task 032 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (updated package versions)</output>
+    <output type="file">package.json files (updated npm package versions)</output>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/vulnerability-resolution.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All Critical and High severity vulnerabilities are resolved or documented as unfixable with justification</criterion>
+    <criterion>vulnerability-resolution.md exists with initial count, packages updated, and final count</criterion>
+    <criterion>Each updated package entry includes: package name, old version, new version, and CVE/advisory resolved</criterion>
+    <criterion>Remaining (unfixable) vulnerabilities are documented with reason (transitive, no fix available, breaking change)</criterion>
+    <criterion>`dotnet build` passes with zero errors after all NuGet updates</criterion>
+    <criterion>`dotnet test` passes after all updates</criterion>
+    <criterion>`npm run build` passes in all affected client workspaces</criterion>
+    <criterion>`dotnet list src/ package --vulnerable` output is included in the resolution report (final state)</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

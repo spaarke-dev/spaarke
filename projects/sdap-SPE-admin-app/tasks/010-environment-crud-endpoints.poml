@@ -1,0 +1,51 @@
+<task id="SPE-010" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Implement Environment CRUD Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-009, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement the full set of CRUD endpoints for SPE environments under /api/spe/environments. These endpoints allow administrators to list, create, update, and delete SharePoint Embedded environment configurations. All mutation operations must be audit-logged via SpeAuditService, and all error responses must use ProblemDetails.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>All four CRUD endpoints (GET list, POST create, PUT update, DELETE) work correctly for /api/spe/environments with input validation, audit logging, and ProblemDetails error responses.</goal>
+  <constraints>
+    <constraint source="ADR-001">Minimal API — use lambda or static method handlers, not controllers.</constraint>
+    <constraint source="ADR-019">All error responses must use ProblemDetails format with correlation IDs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>SPE environments represent tenant-level configurations that container type configs reference. Admins need to manage these environments through the API: listing all environments, creating new ones, updating settings (root site URL, Graph endpoint, default flag), and deleting unused environments. The "is default" flag should enforce uniqueness — only one environment can be marked as default at a time. All mutations are logged to the audit table for compliance.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define request/response models">Create DTOs for environment create/update requests and list/detail responses.</step>
+    <step order="2" name="Implement GET /api/spe/environments">Add endpoint to list all environments from Dataverse, returning an array of environment DTOs.</step>
+    <step order="3" name="Implement GET /api/spe/environments/{id}">Add endpoint to retrieve a single environment by ID.</step>
+    <step order="4" name="Implement POST /api/spe/environments">Add endpoint to create a new environment with input validation (required fields, URL format). Log to audit.</step>
+    <step order="5" name="Implement PUT /api/spe/environments/{id}">Add endpoint to update an existing environment. Enforce "is default" uniqueness. Log to audit.</step>
+    <step order="6" name="Implement DELETE /api/spe/environments/{id}">Add endpoint to delete an environment. Check for referencing configs before allowing deletion. Log to audit.</step>
+    <step order="7" name="Add validation">Validate required fields, URL formats, and business rules (e.g., cannot delete environment referenced by active configs).</step>
+    <step order="8" name="Verify compilation and test">Run dotnet build and manually test endpoints if possible.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/EnvironmentEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/SpeAdmin/EnvironmentDtos.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/environments returns a list of all environments.</criterion>
+    <criterion testable="true">GET /api/spe/environments/{id} returns a single environment or 404.</criterion>
+    <criterion testable="true">POST /api/spe/environments creates a new environment and returns 201.</criterion>
+    <criterion testable="true">PUT /api/spe/environments/{id} updates an environment and returns 200.</criterion>
+    <criterion testable="true">DELETE /api/spe/environments/{id} deletes an environment or returns 409 if referenced.</criterion>
+    <criterion testable="true">All mutation operations are logged via SpeAuditService.</criterion>
+    <criterion testable="true">Invalid input returns ProblemDetails with appropriate status codes.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit PowerShell Scripts Quality</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 016</blocks>
+    <tags>audit, powershell, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive code quality audit of all PowerShell scripts in the scripts/ directory
+    (approximately 114 .ps1 files). Install PSScriptAnalyzer if not present, run analysis across
+    all scripts, assess pattern consistency, error handling quality, duplicated authentication
+    patterns, parameter documentation (CmdletBinding, param blocks), and idempotency. Produce
+    a structured audit report with findings and an overall letter grade.
+  </prompt>
+
+  <role>
+    Senior PowerShell developer and DevOps engineer. Expert in PowerShell best practices,
+    PSScriptAnalyzer rules, Azure CLI automation, and Spaarke deployment scripts.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-powershell.md
+    covering PSScriptAnalyzer violations, pattern inconsistencies, error handling gaps, auth
+    pattern duplication, parameter documentation quality, and idempotency issues. Report includes
+    an overall letter grade (A-F) for the PowerShell area and a prioritized remediation list
+    feeding task 007 (scorecard) and task 008 (remediation plan).
+  </goal>
+
+  <context>
+    <background>
+      The Spaarke scripts/ directory contains approximately 114 PowerShell scripts across several
+      categories: deployment scripts (Deploy-*.ps1), utility scripts, PAC (Power Apps CLI) scripts,
+      Azure CLI scripts, and quality scripts. These scripts have grown over multiple AI-generated
+      development cycles and may contain:
+
+      - Inconsistent error handling (some use try/catch, some use -ErrorAction Stop, some have none)
+      - Duplicated authentication patterns (az login, pac auth, Connect-* calls that could be
+        centralized into shared helper functions)
+      - Missing CmdletBinding and param block documentation (no [Parameter(Mandatory)] attributes)
+      - Non-idempotent operations (scripts that fail if run twice due to "already exists" errors)
+      - Inconsistent patterns for checking prerequisites (az, pac, dotnet, npm tool presence)
+      - Variable naming inconsistencies (camelCase vs PascalCase vs SCREAMING_CASE)
+      - Hard-coded environment values that should be parameters
+
+      PSScriptAnalyzer is the standard static analysis tool for PowerShell — equivalent to dotnet
+      format + Roslyn analyzers for C#. It must be installed and run as part of this audit, and
+      its configuration will be used in Phase 2 (task 016) for ongoing enforcement.
+
+      The scripts/README.md provides context on script organization and usage conventions.
+    </background>
+    <relevant-files>
+      <file>scripts/ (read — all PowerShell scripts)</file>
+      <file>scripts/README.md (read — script organization reference)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-powershell.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Install PSScriptAnalyzer via `Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force` if not already installed. Verify installation before running analysis.</constraint>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any script files during this task. Document findings only.</constraint>
+    <constraint source="spec">PSScriptAnalyzer configuration and remediation is task 016 — this task only runs the default ruleset and documents violations.</constraint>
+    <constraint source="spec">Focus on patterns that indicate systemic quality issues, not just individual script violations.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check if PSScriptAnalyzer is installed: `Get-Module -ListAvailable PSScriptAnalyzer`. If not installed, run: `Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force`</step>
+    <step order="2">Run PSScriptAnalyzer across all scripts: `Invoke-ScriptAnalyzer -Path scripts/ -Recurse -Severity Warning,Error` — capture total error and warning counts, group by rule name</step>
+    <step order="3">Identify the top 10 most frequent PSScriptAnalyzer violations — these are the systemic patterns to address</step>
+    <step order="4">Audit error handling patterns: search for scripts missing try/catch, using Write-Error without -ErrorAction Stop, or catching exceptions but continuing silently</step>
+    <step order="5">Identify duplicated authentication patterns: search for repeated az login, pac auth create, Connect-* calls across scripts — flag opportunities for shared auth helper functions</step>
+    <step order="6">Audit parameter documentation: check each script for [CmdletBinding()], param() blocks, [Parameter(Mandatory=$true)] annotations, and .SYNOPSIS/.DESCRIPTION comment blocks</step>
+    <step order="7">Assess idempotency: identify scripts that create resources without checking if they already exist (az group create vs. check-then-create, pac solution import without version check)</step>
+    <step order="8">Check naming consistency: tabulate variable naming conventions used (PascalCase, camelCase, UPPER_CASE) and flag scripts that mix conventions</step>
+    <step order="9">Identify hard-coded values: search for environment URLs, resource names, tenant IDs, and similar values that should be parameters instead</step>
+    <step order="10">Check prerequisite validation patterns: identify which scripts validate required tools (az, pac, dotnet) at startup and which proceed without validation</step>
+    <step order="11">Compile all findings into the audit report — group by category and severity, assign overall letter grade (A-F), list top 5 remediation priorities</step>
+    <step order="12">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-powershell.md</step>
+    <step order="13">Update TASK-INDEX.md: change task 003 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-powershell.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-powershell.md exists and covers all six audit areas: PSScriptAnalyzer violations, pattern consistency, error handling, duplicated auth patterns, parameter documentation, idempotency</criterion>
+    <criterion>PSScriptAnalyzer installation confirmed and total violation count reported (errors and warnings separately)</criterion>
+    <criterion>Top 10 most frequent PSScriptAnalyzer rule violations listed with counts</criterion>
+    <criterion>Scripts missing error handling explicitly listed with file paths</criterion>
+    <criterion>Duplicated authentication patterns identified with list of affected scripts</criterion>
+    <criterion>Scripts missing CmdletBinding/param documentation listed</criterion>
+    <criterion>Non-idempotent scripts identified with the specific non-idempotent operation noted</criterion>
+    <criterion>Hard-coded values (URLs, resource names, tenant IDs) listed with file paths</criterion>
+    <criterion>Overall letter grade (A-F) assigned to PowerShell area with justification</criterion>
+    <criterion>Top 5 remediation priorities listed with estimated effort</criterion>
+    <criterion>No script files were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

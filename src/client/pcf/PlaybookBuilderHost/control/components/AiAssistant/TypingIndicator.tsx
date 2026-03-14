@@ -9,13 +9,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-  Text,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, mergeClasses, Text } from '@fluentui/react-components';
 import { Bot20Regular } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,9 +146,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
         <div className={mergeClasses(styles.dot, styles.dot2)} />
         <div className={mergeClasses(styles.dot, styles.dot3)} />
       </div>
-      {label && (
-        <Text className={styles.label}>{label}</Text>
-      )}
+      {label && <Text className={styles.label}>{label}</Text>}
     </div>
   );
 };

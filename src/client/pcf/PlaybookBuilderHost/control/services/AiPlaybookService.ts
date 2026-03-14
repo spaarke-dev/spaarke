@@ -17,11 +17,7 @@
  * @version 1.0.0
  */
 
-import type {
-  SseEventType,
-  CanvasPatch,
-  ChatMessage,
-} from '../stores/aiAssistantStore';
+import type { SseEventType, CanvasPatch, ChatMessage } from '../stores/aiAssistantStore';
 
 // ============================================================================
 // API Request Types (matches BFF API's BuilderRequest model)
@@ -157,11 +153,11 @@ export interface ClarificationEventData {
  */
 export interface PlanPreviewEventData {
   summary: string;
-  steps: Array<{
+  steps: {
     step: number;
     operation: string;
     description: string;
-  }>;
+  }[];
   estimatedNodes: number;
 }
 
@@ -240,10 +236,7 @@ export class AiPlaybookService {
    * Build playbook canvas via SSE streaming.
    * Returns a promise that resolves when the stream is complete.
    */
-  async buildPlaybookCanvas(
-    request: BuildPlaybookCanvasRequest,
-    handlers: AiPlaybookEventHandlers
-  ): Promise<void> {
+  async buildPlaybookCanvas(request: BuildPlaybookCanvasRequest, handlers: AiPlaybookEventHandlers): Promise<void> {
     // Abort any existing request
     this.abort();
 
@@ -316,10 +309,7 @@ export class AiPlaybookService {
   /**
    * Process the SSE stream.
    */
-  private async processStream(
-    body: ReadableStream<Uint8Array>,
-    handlers: AiPlaybookEventHandlers
-  ): Promise<void> {
+  private async processStream(body: ReadableStream<Uint8Array>, handlers: AiPlaybookEventHandlers): Promise<void> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -341,7 +331,12 @@ export class AiPlaybookService {
         // Process complete events from buffer
         const events = this.parseEventsFromBuffer(buffer);
         buffer = events.remaining;
-        console.debug('[AiPlaybookService] Parsed events:', events.parsed.length, 'remaining:', JSON.stringify(events.remaining));
+        console.debug(
+          '[AiPlaybookService] Parsed events:',
+          events.parsed.length,
+          'remaining:',
+          JSON.stringify(events.remaining)
+        );
 
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
@@ -358,7 +353,10 @@ export class AiPlaybookService {
       if (buffer.trim()) {
         console.info('[AiPlaybookService] Processing remaining buffer:', JSON.stringify(buffer));
         const events = this.parseEventsFromBuffer(buffer + '\n\n');
-        console.info('[AiPlaybookService] Final parsed events:', events.parsed.map(e => e.type));
+        console.info(
+          '[AiPlaybookService] Final parsed events:',
+          events.parsed.map(e => e.type)
+        );
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
         }
@@ -391,7 +389,12 @@ export class AiPlaybookService {
       try {
         // Check if this event is complete (followed by double newline or end)
         const afterMatch = buffer.slice(lastIndex);
-        console.debug('[AiPlaybookService] Parsing event:', eventType, 'afterMatch:', JSON.stringify(afterMatch.substring(0, 50)));
+        console.debug(
+          '[AiPlaybookService] Parsing event:',
+          eventType,
+          'afterMatch:',
+          JSON.stringify(afterMatch.substring(0, 50))
+        );
         if (!afterMatch.startsWith('\n') && afterMatch.length > 0 && !afterMatch.startsWith('\nevent:')) {
           // Event might be incomplete, stop here
           console.debug('[AiPlaybookService] Event incomplete, stopping parse');
@@ -467,9 +470,7 @@ export class AiPlaybookService {
 /**
  * Create an AiPlaybookService instance.
  */
-export function createAiPlaybookService(
-  config: AiPlaybookServiceConfig
-): AiPlaybookService {
+export function createAiPlaybookService(config: AiPlaybookServiceConfig): AiPlaybookService {
   return new AiPlaybookService(config);
 }
 

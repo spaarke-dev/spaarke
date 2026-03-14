@@ -16,13 +16,7 @@
 
 import * as React from 'react';
 import { useCallback, useState, useRef, useEffect } from 'react';
-import {
-  Textarea,
-  Button,
-  makeStyles,
-  tokens,
-  shorthands,
-} from '@fluentui/react-components';
+import { Textarea, Button, makeStyles, tokens, shorthands } from '@fluentui/react-components';
 import { Send20Regular } from '@fluentui/react-icons';
 import { useAiAssistantStore } from '../../stores/aiAssistantStore';
 import { CommandPalette } from './CommandPalette';
@@ -166,27 +160,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [message, isDisabled, onSendMessage]);
 
   // Handle command selection from palette
-  const handleCommandSelect = useCallback((command: SlashCommand, _args: string) => {
-    // Build the command text
-    const commandText = `/${command.name}`;
-    // If command expects arguments, just insert and let user complete
-    if (command.argsHint) {
-      setMessage(commandText + ' ');
-      setShowPalette(false);
-      setCommandFilter('');
-      // Focus textarea
-      textareaRef.current?.focus();
-    } else {
-      // No args needed - execute immediately
-      const result = command.execute('');
-      if (result && onSendMessage) {
-        onSendMessage(result);
+  const handleCommandSelect = useCallback(
+    (command: SlashCommand, _args: string) => {
+      // Build the command text
+      const commandText = `/${command.name}`;
+      // If command expects arguments, just insert and let user complete
+      if (command.argsHint) {
+        setMessage(commandText + ' ');
+        setShowPalette(false);
+        setCommandFilter('');
+        // Focus textarea
+        textareaRef.current?.focus();
+      } else {
+        // No args needed - execute immediately
+        const result = command.execute('');
+        if (result && onSendMessage) {
+          onSendMessage(result);
+        }
+        setMessage('');
+        setShowPalette(false);
+        setCommandFilter('');
       }
-      setMessage('');
-      setShowPalette(false);
-      setCommandFilter('');
-    }
-  }, [onSendMessage]);
+    },
+    [onSendMessage]
+  );
 
   // Handle palette close
   const handlePaletteClose = useCallback(() => {
@@ -220,10 +217,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   // Handle text change
   const handleChange = useCallback(
-    (
-      _: React.ChangeEvent<HTMLTextAreaElement>,
-      data: { value: string }
-    ) => {
+    (_: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
       if (data.value.length <= maxLength) {
         setMessage(data.value);
         checkForSlashCommand(data.value);
@@ -242,8 +236,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const handleClickOutside = (e: MouseEvent) => {
       if (showPalette) {
         const target = e.target as HTMLElement;
-        if (!target.closest('[data-command-palette]') &&
-            !target.closest('textarea')) {
+        if (!target.closest('[data-command-palette]') && !target.closest('textarea')) {
           setShowPalette(false);
           setCommandFilter('');
         }
@@ -296,9 +289,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       </div>
 
       {/* Hint text */}
-      <div className={styles.hint}>
-        Type / for commands, Enter to send, Shift+Enter for new line
-      </div>
+      <div className={styles.hint}>Type / for commands, Enter to send, Shift+Enter for new line</div>
 
       {/* Hidden hint for screen readers */}
       <span id="chat-input-hint" hidden>

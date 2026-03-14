@@ -1,0 +1,115 @@
+<task id="PRODENV-001" project="Production Environment Setup R1">
+  <metadata>
+    <title>Create platform.bicep from existing modules</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>1</phase>
+    <parallel-group>P1-A</parallel-group>
+    <tags>bicep, infrastructure, platform</tags>
+  </metadata>
+
+  <prompt>
+    Create the shared platform Bicep template (platform.bicep) that deploys all shared
+    infrastructure resources to rg-spaarke-platform-prod. Compose from existing reusable
+    Bicep modules in infrastructure/bicep/modules/. This is the "deploy once" template
+    for the shared platform that all customers share.
+  </prompt>
+
+  <role>
+    Azure infrastructure engineer experienced with Bicep templates and modular IaC patterns.
+  </role>
+
+  <goal>
+    A working platform.bicep that orchestrates existing modules to deploy: App Service Plan +
+    App Service (P1v3, staging slot), Azure OpenAI, AI Search Standard2, Document Intelligence S0,
+    App Insights + Log Analytics (180-day retention), and Platform Key Vault — all following
+    the spaarke-/sprk- naming standard.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/production-environment-setup-r1/spec.md</file>
+    <file purpose="project-plan">projects/production-environment-setup-r1/plan.md</file>
+    <file purpose="naming-convention">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    <file purpose="reference-template">infrastructure/bicep/model2-full.bicep</file>
+    <file purpose="reference-template">infrastructure/bicep/model1-shared.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Single App Service deployment — no Azure Functions</constraint>
+    <constraint source="FR-08">All secrets in Key Vault — no plaintext secrets in parameters</constraint>
+    <constraint source="FR-10">Template must be idempotent — multiple runs produce same result</constraint>
+    <constraint source="FR-11">All resources follow sprk_/spaarke- naming standard</constraint>
+    <constraint source="FR-01">Must deploy to westus2 region</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Bicep infrastructure-as-code</topic>
+    <files>
+      <file>infrastructure/bicep/modules/app-service.bicep</file>
+      <file>infrastructure/bicep/modules/app-service-plan.bicep</file>
+      <file>infrastructure/bicep/modules/openai.bicep</file>
+      <file>infrastructure/bicep/modules/ai-search.bicep</file>
+      <file>infrastructure/bicep/modules/doc-intelligence.bicep</file>
+      <file>infrastructure/bicep/modules/monitoring.bicep</file>
+      <file>infrastructure/bicep/modules/key-vault.bicep</file>
+      <file>infrastructure/bicep/model2-full.bicep</file>
+      <file>infrastructure/bicep/model1-shared.bicep</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The shared platform is deployed once and hosts resources used by all customers.
+      Per-customer resources are handled by customer.bicep (task 002). Existing model1
+      and model2 templates serve as references but the new platform.bicep follows a
+      hybrid approach — shared platform + per-customer data isolation.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing modules">
+      Read all Bicep modules in infrastructure/bicep/modules/ to understand parameters,
+      outputs, and composition patterns. Study model1-shared.bicep and model2-full.bicep
+      for orchestration patterns.
+    </step>
+    <step order="2" name="Design parameter structure">
+      Define parameters: environmentName, location, appServicePlanSku, openAiModels,
+      aiSearchReplicas, logRetentionDays. Use naming convention from spec.
+    </step>
+    <step order="3" name="Create platform.bicep">
+      Create infrastructure/bicep/platform.bicep composing modules:
+      - App Service Plan (P1v3)
+      - App Service with staging slot and health check at /healthz
+      - Azure OpenAI with GPT-4o, GPT-4o-mini, text-embedding-3-large deployments
+      - AI Search Standard2 with 2 replicas
+      - Document Intelligence S0
+      - App Insights + Log Analytics (180-day retention)
+      - Platform Key Vault (sprk-platform-{env}-kv)
+    </step>
+    <step order="4" name="Add outputs">
+      Export key resource IDs and endpoints needed by customer.bicep and deployment scripts.
+    </step>
+    <step order="5" name="Validate syntax">
+      Run az bicep build to validate template syntax.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for Bicep validation</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/platform.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">platform.bicep exists and passes az bicep build validation</criterion>
+    <criterion testable="true">Template references all 7 resource types (App Service Plan, App Service, OpenAI, AI Search, Doc Intelligence, Monitoring, Key Vault)</criterion>
+    <criterion testable="true">All resource names follow spaarke-/sprk- naming convention</criterion>
+    <criterion testable="true">Parameters are externalized (no hardcoded environment-specific values)</criterion>
+    <criterion testable="true">Staging deployment slot is configured on App Service</criterion>
+    <criterion testable="true">Health check path set to /healthz on App Service</criterion>
+  </acceptance-criteria>
+</task>

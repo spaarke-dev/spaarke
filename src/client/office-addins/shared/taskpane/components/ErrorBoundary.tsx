@@ -1,13 +1,5 @@
 import React, { Component, ErrorInfo } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Title3,
-  Body1,
-  Card,
-  CardHeader,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Button, Title3, Body1, Card, CardHeader } from '@fluentui/react-components';
 import { ErrorCircleRegular, ArrowResetRegular } from '@fluentui/react-icons';
 
 /**
@@ -102,13 +94,17 @@ const ErrorFallback: React.FC<{
         />
         <div className={styles.content}>
           <Body1>
-            We encountered an unexpected error. Please try again or contact
-            support if the problem persists.
+            We encountered an unexpected error. Please try again or contact support if the problem persists.
           </Body1>
 
           {showDetails && error && (
             <details>
-              <summary style={{ cursor: 'pointer', color: tokens.colorNeutralForeground3 }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  color: tokens.colorNeutralForeground3,
+                }}
+              >
                 Error details
               </summary>
               <div className={styles.errorDetails}>
@@ -125,18 +121,11 @@ const ErrorFallback: React.FC<{
 
           <div className={styles.actions}>
             {onReset && (
-              <Button
-                appearance="primary"
-                icon={<ArrowResetRegular />}
-                onClick={onReset}
-              >
+              <Button appearance="primary" icon={<ArrowResetRegular />} onClick={onReset}>
                 Try again
               </Button>
             )}
-            <Button
-              appearance="secondary"
-              onClick={() => window.location.reload()}
-            >
+            <Button appearance="secondary" onClick={() => window.location.reload()}>
               Reload add-in
             </Button>
           </div>
@@ -146,10 +135,7 @@ const ErrorFallback: React.FC<{
   );
 };
 
-export class ErrorBoundary extends Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
-> {
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = {
@@ -217,7 +203,7 @@ export const withErrorBoundary = <P extends object>(
   WrappedComponent: React.ComponentType<P>,
   errorBoundaryProps?: Omit<ErrorBoundaryProps, 'children'>
 ): React.FC<P> => {
-  const WithErrorBoundary: React.FC<P> = (props) => (
+  const WithErrorBoundary: React.FC<P> = props => (
     <ErrorBoundary {...errorBoundaryProps}>
       <WrappedComponent {...props} />
     </ErrorBoundary>

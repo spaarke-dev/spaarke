@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Configure Claude Code Action for Architecture-Aware PR Review</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>017</blocks>
+    <tags>tooling, ai-review, claude-code-action, github-actions</tags>
+  </metadata>
+
+  <prompt>
+    Create a GitHub Actions workflow using anthropics/claude-code-action that performs architecture-aware PR review on every pull request. The workflow system prompt must reference CLAUDE.md and the applicable ADRs so Claude understands Spaarke-specific constraints. The Anthropic API key must be stored in GitHub Secrets only — never committed to the repository. The workflow must complete in under 3 minutes and post its findings as a PR comment. Review mode is advisory-only and must not block merges.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in CI/CD pipelines and AI tooling integration with GitHub Actions.
+  </role>
+
+  <goal>
+    A GitHub Actions workflow at .github/workflows/claude-code-review.yml that triggers on pull_request events, invokes anthropics/claude-code-action with a Spaarke-specific system prompt, and posts architecture review findings as a PR comment. The workflow completes in under 3 minutes and never blocks PR merges.
+  </goal>
+
+  <context>
+    <background>
+      FR-04 requires Claude Code to review each PR for ADR compliance and post findings as a PR comment. The anthropics/claude-code-action GitHub Action allows running Claude Code non-interactively in a GitHub Actions context. Unlike CodeRabbit (line-by-line review), Claude Code Action performs higher-level architectural review: checking ADR compliance, detecting pattern drift, identifying abstraction violations, and surfacing AI-generated code smells. The system prompt must include key context from CLAUDE.md and concise ADR summaries so Claude understands what to look for. The Anthropic API key must be a GitHub Secret (ANTHROPIC_API_KEY) and must never appear in workflow files. Per spec.md unresolved questions, we need to verify whether claude-code-action runs on standard GitHub-hosted Ubuntu runners.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/claude-code-review.yml (create)</file>
+      <file>.github/workflows/sdap-ci.yml (read-only - understand existing workflow structure for consistency)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-04">Claude Code Action MUST NOT block PR merges. The workflow job must use continue-on-error: true or an advisory-only output mechanism. This is mandatory until Phase 3 graduation.</constraint>
+    <constraint source="spec.md NFR-06">Anthropic API key MUST be stored in GitHub Secrets only (secret name: ANTHROPIC_API_KEY). Never include API keys in workflow files, comments, or repository files.</constraint>
+    <constraint source="spec.md NFR-01">The PR quality pipeline (all jobs combined) must complete in under 5 minutes. This workflow must complete in under 3 minutes to leave headroom for other jobs.</constraint>
+    <constraint source="spec.md NFR-07">API cost must stay within the overall $100/month budget. Use claude-sonnet model (not opus) for routine PR reviews to control cost. Reserve opus for nightly deep reviews.</constraint>
+    <constraint source="spec.md">Must preserve existing sdap-ci.yml pipeline — do not modify sdap-ci.yml in this task. Create a separate workflow file.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .github/workflows/sdap-ci.yml to understand the existing workflow structure, runner type (ubuntu-latest vs self-hosted), and any reusable patterns to follow.</step>
+    <step order="2">Verify anthropics/claude-code-action is available and check its current version/syntax on GitHub Marketplace. Confirm it runs on ubuntu-latest GitHub-hosted runners.</step>
+    <step order="3">Create .github/workflows/claude-code-review.yml. Set trigger: pull_request (types: opened, synchronize, reopened). Set runs-on: ubuntu-latest.</step>
+    <step order="4">Add permissions block to the workflow: contents: read, pull-requests: write (needed to post PR comments).</step>
+    <step order="5">Configure the claude-code-action step with: model: claude-sonnet-4-5 (or latest Sonnet), api-key: ${{ secrets.ANTHROPIC_API_KEY }}, and a system-prompt that summarizes Spaarke ADR constraints (ADR-001: no Azure Functions, ADR-010: DI minimalism ≤15, ADR-021: Fluent v9 only, ADR-022: PCF React 16 only, ADR-008: endpoint filters not global middleware). The prompt should instruct Claude to review the PR diff for ADR violations and report findings as a markdown list.</step>
+    <step order="6">Set continue-on-error: true on the claude-code-action step so workflow failures (e.g., API quota exceeded) do not block the PR.</step>
+    <step order="7">Add a step to post the Claude review output as a PR comment using the GitHub Actions API or a comment action. Label the comment with a header: "## Claude Code Architecture Review (Advisory)".</step>
+    <step order="8">Verify ANTHROPIC_API_KEY is configured as a repository secret in GitHub Settings > Secrets and variables > Actions. If not set, document the manual step required and flag it.</step>
+    <step order="9">Test the workflow by opening or updating a PR. Confirm the workflow runs, completes in under 3 minutes, and posts a review comment. Confirm no merge blocking occurs.</step>
+    <step order="10">Update TASK-INDEX.md to mark task 014 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>.github/workflows/claude-code-review.yml — GitHub Actions workflow for Claude architecture review on PRs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Workflow triggers on pull_request events (opened, synchronize, reopened)</criterion>
+    <criterion>Anthropic API key is referenced only as ${{ secrets.ANTHROPIC_API_KEY }} — no hardcoded keys anywhere</criterion>
+    <criterion>Workflow uses continue-on-error: true so failures do not block PR merges</criterion>
+    <criterion>System prompt includes ADR-001, ADR-010, ADR-021, ADR-022, ADR-008 constraints</criterion>
+    <criterion>Claude posts review findings as a PR comment labeled "Claude Code Architecture Review (Advisory)"</criterion>
+    <criterion>Workflow completes in under 3 minutes on a typical PR</criterion>
+    <criterion>Claude Code Action does NOT appear as a required status check in branch protection</criterion>
+  </acceptance-criteria>
+</task>

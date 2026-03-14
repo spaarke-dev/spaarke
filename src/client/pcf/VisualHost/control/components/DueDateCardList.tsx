@@ -4,27 +4,15 @@
  * Supports context filtering and "View List" navigation.
  */
 
-import * as React from "react";
-import { useState, useEffect, useCallback } from "react";
-import {
-  Spinner,
-  makeStyles,
-  tokens,
-  Text,
-  Link,
-  MessageBar,
-  MessageBarBody,
-} from "@fluentui/react-components";
-import { EventDueDateCard, type IEventDueDateCardProps } from "./EventDueDateCard";
-import { ChevronRight20Regular } from "@fluentui/react-icons";
-import type { IChartDefinition } from "../types";
-import type { IConfigWebApi } from "../services/ConfigurationLoader";
-import {
-  resolveQuery,
-  injectContextFilter,
-  type ISubstitutionParams,
-} from "../services/ViewDataService";
-import { logger } from "../utils/logger";
+import * as React from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { Spinner, makeStyles, tokens, Text, Link, MessageBar, MessageBarBody } from '@fluentui/react-components';
+import { EventDueDateCard, type IEventDueDateCardProps } from './EventDueDateCard';
+import { ChevronRight20Regular } from '@fluentui/react-icons';
+import type { IChartDefinition } from '../types';
+import type { IConfigWebApi } from '../services/ConfigurationLoader';
+import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
+import { logger } from '../utils/logger';
 
 export interface IDueDateCardListVisualProps {
   chartDefinition: IChartDefinition;
@@ -37,32 +25,32 @@ export interface IDueDateCardListVisualProps {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     gap: tokens.spacingVerticalS,
   },
   cardList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   viewListLink: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalXS,
     padding: tokens.spacingVerticalXS,
   },
   loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100px',
   },
   empty: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
     padding: tokens.spacingVerticalL,
   },
 });
@@ -70,7 +58,10 @@ const useStyles = makeStyles({
 /**
  * Calculate days until due date from today
  */
-function calculateDaysUntilDue(dueDate: Date): { daysUntilDue: number; isOverdue: boolean } {
+function calculateDaysUntilDue(dueDate: Date): {
+  daysUntilDue: number;
+  isOverdue: boolean;
+} {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const due = new Date(dueDate);
@@ -84,27 +75,26 @@ function calculateDaysUntilDue(dueDate: Date): { daysUntilDue: number; isOverdue
  * Map a Dataverse event record to EventDueDateCard props
  */
 function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  const dueDate = record.sprk_duedate
-    ? new Date(record.sprk_duedate as string)
-    : new Date();
+  const dueDate = record.sprk_duedate ? new Date(record.sprk_duedate as string) : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
   // Event type from FetchXML link-entity alias or formatted value
-  const eventTypeColor = (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
-  const eventTypeName = (record["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] as string)
-    || (record["eventtype.sprk_name"] as string)
-    || "Event";
+  const eventTypeColor = (record['eventtype.sprk_eventtypecolor'] as string) || undefined;
+  const eventTypeName =
+    (record['_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'] as string) ||
+    (record['eventtype.sprk_name'] as string) ||
+    'Event';
 
   return {
-    eventId: (record.sprk_eventid as string) || "",
-    eventName: (record.sprk_eventname as string) || "Untitled Event",
+    eventId: (record.sprk_eventid as string) || '',
+    eventName: (record.sprk_eventname as string) || 'Untitled Event',
     eventTypeName,
     dueDate,
     daysUntilDue,
     isOverdue,
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
-    assignedTo: (record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] as string) || undefined,
+    assignedTo: (record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] as string) || undefined,
   };
 }
 
@@ -148,32 +138,27 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         webApi,
       });
 
-      if (resolved.source !== "directEntity" && resolved.fetchXml) {
+      if (resolved.source !== 'directEntity' && resolved.fetchXml) {
         // Inject context filter if configured (filters to current record's related events)
         let fetchXml = resolved.fetchXml;
         if (chartDefinition.sprk_contextfieldname && contextRecordId) {
-          const filterField = chartDefinition.sprk_contextfieldname
-            .replace(/^_/, "")
-            .replace(/_value$/, "");
-          const cleanId = contextRecordId.replace(/[{}]/g, "");
+          const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, '').replace(/_value$/, '');
+          const cleanId = contextRecordId.replace(/[{}]/g, '');
           fetchXml = injectContextFilter(fetchXml, filterField, cleanId);
         }
 
         // Execute the resolved FetchXML (from override, custom, or view)
         const encodedFetchXml = encodeURIComponent(fetchXml);
-        const result = await webApi.retrieveMultipleRecords(
-          resolved.entityName,
-          `?fetchXml=${encodedFetchXml}`
-        );
+        const result = await webApi.retrieveMultipleRecords(resolved.entityName, `?fetchXml=${encodedFetchXml}`);
         setCards(result.entities.map(mapEventToCardProps));
       } else {
         // Fallback: FetchXML query with link-entity for event type
         // Uses attribute names (not navigation property names) for reliable cross-environment support
-        const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
-        let contextCondition = "";
+        const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
+        let contextCondition = '';
         if (chartDefinition.sprk_contextfieldname && contextRecordId) {
-          const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, "").replace(/_value$/, "");
-          const cleanId = contextRecordId.replace(/[{}]/g, "");
+          const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, '').replace(/_value$/, '');
+          const cleanId = contextRecordId.replace(/[{}]/g, '');
           contextCondition = `<condition attribute="${filterField}" operator="eq" value="${cleanId}" />`;
         }
 
@@ -191,10 +176,12 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
           `      <attribute name="sprk_eventtypecolor" />`,
           `    </link-entity>`,
           `    <order attribute="sprk_duedate" />`,
-          contextCondition ? `    <filter type="and">${contextCondition}</filter>` : "",
+          contextCondition ? `    <filter type="and">${contextCondition}</filter>` : '',
           `  </entity>`,
           `</fetch>`,
-        ].filter(Boolean).join("");
+        ]
+          .filter(Boolean)
+          .join('');
 
         const encodedFallback = encodeURIComponent(fallbackFetchXml);
         const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFallback}`);
@@ -202,43 +189,46 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("DueDateCardListVisual", "Failed to fetch events", err);
+      logger.error('DueDateCardListVisual', 'Failed to fetch events', err);
       setError(`Failed to load events: ${msg}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCardClick = useCallback(async (eventId: string) => {
-    if (navigatingId) return;
-    setNavigatingId(eventId);
-    try {
-      const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
+  const handleCardClick = useCallback(
+    async (eventId: string) => {
+      if (navigatingId) return;
+      setNavigatingId(eventId);
+      try {
+        const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (window as any).Xrm;
 
-      if (xrm?.Navigation?.navigateTo) {
-        // Open event record form as a modal dialog
-        await xrm.Navigation.navigateTo(
-          { pageType: "entityrecord", entityName, entityId: eventId },
-          {
-            target: 2,
-            position: 1,
-            width: { value: 80, unit: "%" },
-            height: { value: 80, unit: "%" },
-          }
-        );
-      } else if (onClickAction) {
-        // Fallback to generic click action if Xrm not available
-        const record = cards.find(c => c.eventId === eventId);
-        await onClickAction(eventId, entityName, record as unknown as Record<string, unknown>);
+        if (xrm?.Navigation?.navigateTo) {
+          // Open event record form as a modal dialog
+          await xrm.Navigation.navigateTo(
+            { pageType: 'entityrecord', entityName, entityId: eventId },
+            {
+              target: 2,
+              position: 1,
+              width: { value: 80, unit: '%' },
+              height: { value: 80, unit: '%' },
+            }
+          );
+        } else if (onClickAction) {
+          // Fallback to generic click action if Xrm not available
+          const record = cards.find(c => c.eventId === eventId);
+          await onClickAction(eventId, entityName, record as unknown as Record<string, unknown>);
+        }
+      } catch (err) {
+        logger.error('DueDateCardListVisual', 'Failed to open event form dialog', err);
+      } finally {
+        setNavigatingId(null);
       }
-    } catch (err) {
-      logger.error("DueDateCardListVisual", "Failed to open event form dialog", err);
-    } finally {
-      setNavigatingId(null);
-    }
-  }, [navigatingId, chartDefinition, onClickAction, cards]);
+    },
+    [navigatingId, chartDefinition, onClickAction, cards]
+  );
 
   if (loading) {
     return (
@@ -267,7 +257,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
   return (
     <div className={styles.container}>
       <div className={styles.cardList}>
-        {cards.map((card) => (
+        {cards.map(card => (
           <EventDueDateCard
             key={card.eventId}
             {...card}

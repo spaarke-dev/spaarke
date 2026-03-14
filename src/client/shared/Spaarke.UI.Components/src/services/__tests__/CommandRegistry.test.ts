@@ -111,7 +111,7 @@ describe('CommandRegistry', () => {
       const privileges = createMockEntityPrivileges({
         canCreate: false,
         canRead: true,
-        canDelete: true
+        canDelete: true,
       });
 
       const commands = CommandRegistry.getCommands(['create', 'open', 'delete'], privileges);
@@ -124,7 +124,7 @@ describe('CommandRegistry', () => {
       const privileges = createMockEntityPrivileges({
         canCreate: true,
         canRead: true,
-        canDelete: false
+        canDelete: false,
       });
 
       const commands = CommandRegistry.getCommands(['create', 'open', 'delete'], privileges);
@@ -137,7 +137,7 @@ describe('CommandRegistry', () => {
       const privileges = createMockEntityPrivileges({
         canCreate: true,
         canRead: false,
-        canDelete: true
+        canDelete: true,
       });
 
       const commands = CommandRegistry.getCommands(['create', 'open', 'refresh'], privileges);
@@ -150,7 +150,7 @@ describe('CommandRegistry', () => {
     it('should allow upload command with canCreate privilege', () => {
       const privileges = createMockEntityPrivileges({
         canCreate: true,
-        canAppend: false
+        canAppend: false,
       });
 
       const commands = CommandRegistry.getCommands(['upload'], privileges);
@@ -162,7 +162,7 @@ describe('CommandRegistry', () => {
     it('should allow upload command with canAppend privilege', () => {
       const privileges = createMockEntityPrivileges({
         canCreate: false,
-        canAppend: true
+        canAppend: true,
       });
 
       const commands = CommandRegistry.getCommands(['upload'], privileges);
@@ -179,18 +179,14 @@ describe('CommandRegistry', () => {
 
     it('should include custom commands from entity configuration', () => {
       const mockCustomCommand = {
-        label: "Upload Document",
-        actionType: "customapi" as const,
-        actionName: "sprk_UploadDocument"
+        label: 'Upload Document',
+        actionType: 'customapi' as const,
+        actionName: 'sprk_UploadDocument',
       };
 
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockReturnValue(mockCustomCommand);
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockReturnValue(mockCustomCommand);
 
-      const commands = CommandRegistry.getCommandsWithCustom(
-        ['create', 'open', 'customUpload'],
-        'sprk_document'
-      );
+      const commands = CommandRegistry.getCommandsWithCustom(['create', 'open', 'customUpload'], 'sprk_document');
 
       expect(commands).toHaveLength(3);
       expect(commands[0].key).toBe('create');
@@ -200,13 +196,12 @@ describe('CommandRegistry', () => {
 
     it('should prioritize built-in commands over custom commands', () => {
       const mockCustomCommand = {
-        label: "Custom Create",
-        actionType: "action" as const,
-        actionName: "CustomCreate"
+        label: 'Custom Create',
+        actionType: 'action' as const,
+        actionName: 'CustomCreate',
       };
 
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockReturnValue(mockCustomCommand);
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockReturnValue(mockCustomCommand);
 
       const commands = CommandRegistry.getCommandsWithCustom(
         ['create'], // Built-in command
@@ -219,35 +214,26 @@ describe('CommandRegistry', () => {
 
     it('should filter custom commands by privilege (canWrite)', () => {
       const mockCustomCommand = {
-        label: "Custom Action",
-        actionType: "action" as const,
-        actionName: "CustomAction"
+        label: 'Custom Action',
+        actionType: 'action' as const,
+        actionName: 'CustomAction',
       };
 
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockReturnValue(mockCustomCommand);
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockReturnValue(mockCustomCommand);
 
       const privileges = createMockEntityPrivileges({
-        canWrite: false
+        canWrite: false,
       });
 
-      const commands = CommandRegistry.getCommandsWithCustom(
-        ['customAction'],
-        'account',
-        privileges
-      );
+      const commands = CommandRegistry.getCommandsWithCustom(['customAction'], 'account', privileges);
 
       expect(commands).toHaveLength(0); // Filtered out due to no write privilege
     });
 
     it('should return only built-in when custom command not found', () => {
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockReturnValue(undefined);
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockReturnValue(undefined);
 
-      const commands = CommandRegistry.getCommandsWithCustom(
-        ['create', 'nonExistentCustom'],
-        'account'
-      );
+      const commands = CommandRegistry.getCommandsWithCustom(['create', 'nonExistentCustom'], 'account');
 
       expect(commands).toHaveLength(1);
       expect(commands[0].key).toBe('create');
@@ -255,23 +241,22 @@ describe('CommandRegistry', () => {
 
     it('should mix built-in and custom commands', () => {
       const mockUploadCommand = {
-        label: "Upload to SPE",
-        actionType: "customapi" as const,
-        actionName: "sprk_UploadDocument"
+        label: 'Upload to SPE',
+        actionType: 'customapi' as const,
+        actionName: 'sprk_UploadDocument',
       };
 
       const mockDownloadCommand = {
-        label: "Download",
-        actionType: "customapi" as const,
-        actionName: "sprk_DownloadDocument"
+        label: 'Download',
+        actionType: 'customapi' as const,
+        actionName: 'sprk_DownloadDocument',
       };
 
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockImplementation((entity: string, key: string) => {
-          if (key === 'uploadCustom') return mockUploadCommand;
-          if (key === 'downloadCustom') return mockDownloadCommand;
-          return undefined;
-        });
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockImplementation((entity: string, key: string) => {
+        if (key === 'uploadCustom') return mockUploadCommand;
+        if (key === 'downloadCustom') return mockDownloadCommand;
+        return undefined;
+      });
 
       const commands = CommandRegistry.getCommandsWithCustom(
         ['open', 'uploadCustom', 'delete', 'downloadCustom'],
@@ -287,18 +272,14 @@ describe('CommandRegistry', () => {
 
     it('should return all commands when no privileges provided', () => {
       const mockCustomCommand = {
-        label: "Custom Command",
-        actionType: "action" as const,
-        actionName: "CustomAction"
+        label: 'Custom Command',
+        actionType: 'action' as const,
+        actionName: 'CustomAction',
       };
 
-      (EntityConfigurationService.getCustomCommand as jest.Mock)
-        .mockReturnValue(mockCustomCommand);
+      (EntityConfigurationService.getCustomCommand as jest.Mock).mockReturnValue(mockCustomCommand);
 
-      const commands = CommandRegistry.getCommandsWithCustom(
-        ['create', 'customCmd'],
-        'account'
-      );
+      const commands = CommandRegistry.getCommandsWithCustom(['create', 'customCmd'], 'account');
 
       expect(commands).toHaveLength(2);
     });

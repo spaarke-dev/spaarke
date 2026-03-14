@@ -218,19 +218,12 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
   // Full MessageBar version
   return (
     <div className={mergeClasses(styles.container, className)}>
-      <MessageBar
-        intent={intent}
-        className={styles.messageBar}
-        role="alert"
-        aria-live="polite"
-      >
+      <MessageBar intent={intent} className={styles.messageBar} role="alert" aria-live="polite">
         <MessageBarBody>
           <MessageBarTitle>{title}</MessageBarTitle>
           <Text>{error.message}</Text>
 
-          {error.detail && (
-            <Text className={styles.detail}>{error.detail}</Text>
-          )}
+          {error.detail && <Text className={styles.detail}>{error.detail}</Text>}
 
           {(error.correlationId || error.timestamp) && (
             <div className={styles.metadata}>
@@ -241,7 +234,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
                   role="button"
                   tabIndex={0}
                   aria-label={`Copy correlation ID: ${error.correlationId}`}
-                  onKeyDown={(e) => {
+                  onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       handleCopyCorrelationId();
                     }
@@ -251,11 +244,7 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
                   <Text size={100}>ID: {error.correlationId.slice(0, 8)}...</Text>
                 </span>
               )}
-              {error.timestamp && (
-                <Text size={100}>
-                  {error.timestamp.toLocaleTimeString()}
-                </Text>
-              )}
+              {error.timestamp && <Text size={100}>{error.timestamp.toLocaleTimeString()}</Text>}
             </div>
           )}
         </MessageBarBody>

@@ -28,8 +28,8 @@
  * ```
  */
 
-import * as React from "react";
-import type { RichTextEditorRef } from "../components/RichTextEditor";
+import * as React from 'react';
+import type { RichTextEditorRef } from '../components/RichTextEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

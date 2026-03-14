@@ -1,0 +1,50 @@
+<task id="SPE-066" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SearchPage</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-029, SPE-057, SPE-058</dependencies>
+  </metadata>
+  <prompt>Create the SearchPage component that provides a unified search interface for finding containers and items across the SharePoint Embedded environment. This enables administrators to quickly locate specific resources using full-text search powered by the Microsoft Graph search API.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working SearchPage with search input and tabbed results for containers and items, integrated with the app shell navigation.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use shared UI components from @spaarke/ui-components</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SearchPage is a central discovery tool for administrators managing a SharePoint Embedded environment with many containers and items. It provides full-text search with results separated into two tabs — Container Results and Item Results — allowing admins to find resources regardless of where they are stored. Search uses the Microsoft Graph search API under the hood.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-search-page">Create components/search/SearchPage.tsx with search input field and submit button</step>
+    <step order="2" name="add-tab-layout">Add Fluent UI v9 TabList with Container Results and Item Results tabs</step>
+    <step order="3" name="add-search-handler">Implement search handler that calls both POST /api/spe/search/containers and POST /api/spe/search/items in parallel</step>
+    <step order="4" name="add-result-counts">Show result counts on each tab label</step>
+    <step order="5" name="add-empty-states">Add empty state for no results and initial state before first search</step>
+    <step order="6" name="add-navigation-route">Register SearchPage in app shell navigation/routing</step>
+    <step order="7" name="add-loading-states">Add loading indicators during search</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/search/SearchPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SearchPage renders with search input and submit button</criterion>
+    <criterion testable="true">Tab layout shows Container Results and Item Results tabs</criterion>
+    <criterion testable="true">Search executes both container and item searches in parallel</criterion>
+    <criterion testable="true">Result counts display on tab labels</criterion>
+    <criterion testable="true">Empty state shows appropriate message when no results found</criterion>
+    <criterion testable="true">Loading indicator shows during search</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

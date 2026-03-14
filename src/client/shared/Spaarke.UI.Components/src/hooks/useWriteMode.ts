@@ -33,17 +33,17 @@
  * ```
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** Presentation mode for AI-generated content. */
-export type WriteMode = "stream" | "diff";
+export type WriteMode = 'stream' | 'diff';
 
 /** Source of the current write mode decision. */
-export type WriteModeSource = "auto" | "user-override";
+export type WriteModeSource = 'auto' | 'user-override';
 
 /**
  * Type of AI operation, used for automatic mode resolution.
@@ -54,44 +54,39 @@ export type WriteModeSource = "auto" | "user-override";
  * - `reanalysis` - Full document re-analysis with complete replacement
  * - `unknown` - Unrecognized operation (defaults to stream)
  */
-export type OperationType =
-    | "addition"
-    | "revision"
-    | "selection-revision"
-    | "reanalysis"
-    | "unknown";
+export type OperationType = 'addition' | 'revision' | 'selection-revision' | 'reanalysis' | 'unknown';
 
 /** Options for the useWriteMode hook. */
 export interface UseWriteModeOptions {
-    /** Default write mode when no auto-detection or override is active. Defaults to "stream". */
-    defaultMode?: WriteMode;
-    /** Chat session ID. Used to key sessionStorage persistence of user overrides. */
-    sessionId?: string;
+  /** Default write mode when no auto-detection or override is active. Defaults to "stream". */
+  defaultMode?: WriteMode;
+  /** Chat session ID. Used to key sessionStorage persistence of user overrides. */
+  sessionId?: string;
 }
 
 /** Return type for the useWriteMode hook. */
 export interface UseWriteModeResult {
-    /** Current write mode. Reflects user override if set, otherwise the default. */
-    mode: WriteMode;
-    /** Whether the current mode was determined automatically or by user override. */
-    source: WriteModeSource;
-    /**
-     * Set a user override for write mode. Persists to sessionStorage for the
-     * current session. Subsequent calls to resolveMode() will return this
-     * override until resetToAuto() is called.
-     */
-    setMode: (mode: WriteMode) => void;
-    /** Clear the user override and revert to automatic detection. */
-    resetToAuto: () => void;
-    /**
-     * Resolve the write mode for a given operation type.
-     * Returns the user override if set, otherwise auto-detects from the
-     * operation type.
-     *
-     * @param operationType - The type of AI operation being performed
-     * @returns The write mode to use for this operation
-     */
-    resolveMode: (operationType: OperationType) => WriteMode;
+  /** Current write mode. Reflects user override if set, otherwise the default. */
+  mode: WriteMode;
+  /** Whether the current mode was determined automatically or by user override. */
+  source: WriteModeSource;
+  /**
+   * Set a user override for write mode. Persists to sessionStorage for the
+   * current session. Subsequent calls to resolveMode() will return this
+   * override until resetToAuto() is called.
+   */
+  setMode: (mode: WriteMode) => void;
+  /** Clear the user override and revert to automatic detection. */
+  resetToAuto: () => void;
+  /**
+   * Resolve the write mode for a given operation type.
+   * Returns the user override if set, otherwise auto-detects from the
+   * operation type.
+   *
+   * @param operationType - The type of AI operation being performed
+   * @returns The write mode to use for this operation
+   */
+  resolveMode: (operationType: OperationType) => WriteMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,16 +99,16 @@ export interface UseWriteModeResult {
  * with the action menu system.
  */
 export interface WriteModeCommand {
-    /** Command identifier (e.g., "mode_stream") */
-    id: string;
-    /** Display label in the action menu */
-    label: string;
-    /** Description shown in the action menu */
-    description: string;
-    /** The slash command text that triggers this command */
-    command: string;
-    /** Category for action menu grouping */
-    category: "settings";
+  /** Command identifier (e.g., "mode_stream") */
+  id: string;
+  /** Display label in the action menu */
+  label: string;
+  /** Description shown in the action menu */
+  description: string;
+  /** The slash command text that triggers this command */
+  command: string;
+  /** Category for action menu grouping */
+  category: 'settings';
 }
 
 /**
@@ -126,27 +121,27 @@ export interface WriteModeCommand {
  * - `/mode auto` - Revert to automatic detection
  */
 export const WRITE_MODE_COMMANDS: ReadonlyArray<WriteModeCommand> = [
-    {
-        id: "mode_stream",
-        label: "Mode: Stream",
-        description: "Stream AI output directly into the editor in real-time",
-        command: "/mode stream",
-        category: "settings",
-    },
-    {
-        id: "mode_diff",
-        label: "Mode: Diff Review",
-        description: "Show AI revisions in a side-by-side diff view for review",
-        command: "/mode diff",
-        category: "settings",
-    },
-    {
-        id: "mode_auto",
-        label: "Mode: Auto",
-        description: "Automatically choose stream or diff based on the operation type",
-        command: "/mode auto",
-        category: "settings",
-    },
+  {
+    id: 'mode_stream',
+    label: 'Mode: Stream',
+    description: 'Stream AI output directly into the editor in real-time',
+    command: '/mode stream',
+    category: 'settings',
+  },
+  {
+    id: 'mode_diff',
+    label: 'Mode: Diff Review',
+    description: 'Show AI revisions in a side-by-side diff view for review',
+    command: '/mode diff',
+    category: 'settings',
+  },
+  {
+    id: 'mode_auto',
+    label: 'Mode: Auto',
+    description: 'Automatically choose stream or diff based on the operation type',
+    command: '/mode auto',
+    category: 'settings',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -154,7 +149,7 @@ export const WRITE_MODE_COMMANDS: ReadonlyArray<WriteModeCommand> = [
 // ---------------------------------------------------------------------------
 
 /** sessionStorage key prefix for persisting user write mode overrides. */
-const STORAGE_KEY_PREFIX = "sprk-write-mode-override";
+const STORAGE_KEY_PREFIX = 'sprk-write-mode-override';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -165,9 +160,7 @@ const STORAGE_KEY_PREFIX = "sprk-write-mode-override";
  * Falls back to a global key when no session ID is provided.
  */
 function buildStorageKey(sessionId: string | undefined): string {
-    return sessionId
-        ? `${STORAGE_KEY_PREFIX}:${sessionId}`
-        : STORAGE_KEY_PREFIX;
+  return sessionId ? `${STORAGE_KEY_PREFIX}:${sessionId}` : STORAGE_KEY_PREFIX;
 }
 
 /**
@@ -175,32 +168,32 @@ function buildStorageKey(sessionId: string | undefined): string {
  * Returns null if no override is stored or sessionStorage is unavailable.
  */
 function readPersistedOverride(sessionId: string | undefined): WriteMode | null {
-    try {
-        const key = buildStorageKey(sessionId);
-        const stored = sessionStorage.getItem(key);
-        if (stored === "stream" || stored === "diff") {
-            return stored;
-        }
-    } catch {
-        // sessionStorage may be unavailable in some environments (e.g., sandboxed iframes)
+  try {
+    const key = buildStorageKey(sessionId);
+    const stored = sessionStorage.getItem(key);
+    if (stored === 'stream' || stored === 'diff') {
+      return stored;
     }
-    return null;
+  } catch {
+    // sessionStorage may be unavailable in some environments (e.g., sandboxed iframes)
+  }
+  return null;
 }
 
 /**
  * Persist a user override to sessionStorage, or remove it when null.
  */
 function persistOverride(sessionId: string | undefined, mode: WriteMode | null): void {
-    try {
-        const key = buildStorageKey(sessionId);
-        if (mode === null) {
-            sessionStorage.removeItem(key);
-        } else {
-            sessionStorage.setItem(key, mode);
-        }
-    } catch {
-        // sessionStorage may be unavailable — fail silently
+  try {
+    const key = buildStorageKey(sessionId);
+    if (mode === null) {
+      sessionStorage.removeItem(key);
+    } else {
+      sessionStorage.setItem(key, mode);
     }
+  } catch {
+    // sessionStorage may be unavailable — fail silently
+  }
 }
 
 /**
@@ -215,19 +208,19 @@ function persistOverride(sessionId: string | undefined, mode: WriteMode | null):
  * | unknown             | stream     | Safe default for unrecognized operations  |
  */
 export function resolveAutoMode(operationType: OperationType): WriteMode {
-    switch (operationType) {
-        case "addition":
-            return "stream";
-        case "revision":
-            return "diff";
-        case "selection-revision":
-            return "diff";
-        case "reanalysis":
-            return "stream";
-        case "unknown":
-        default:
-            return "stream";
-    }
+  switch (operationType) {
+    case 'addition':
+      return 'stream';
+    case 'revision':
+      return 'diff';
+    case 'selection-revision':
+      return 'diff';
+    case 'reanalysis':
+      return 'stream';
+    case 'unknown':
+    default:
+      return 'stream';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -264,72 +257,72 @@ export function resolveAutoMode(operationType: OperationType): WriteMode {
  * ```
  */
 export function useWriteMode(options: UseWriteModeOptions = {}): UseWriteModeResult {
-    const { defaultMode = "stream", sessionId } = options;
+  const { defaultMode = 'stream', sessionId } = options;
 
-    // Read persisted override on initial render only
-    const [userOverride, setUserOverride] = useState<WriteMode | null>(() => {
-        return readPersistedOverride(sessionId);
-    });
+  // Read persisted override on initial render only
+  const [userOverride, setUserOverride] = useState<WriteMode | null>(() => {
+    return readPersistedOverride(sessionId);
+  });
 
-    // Track the sessionId so we can detect changes
-    const prevSessionIdRef = useRef<string | undefined>(sessionId);
+  // Track the sessionId so we can detect changes
+  const prevSessionIdRef = useRef<string | undefined>(sessionId);
 
-    // If sessionId changes, re-read the persisted override for the new session.
-    // This handles the case where the user switches sessions within the same
-    // component lifecycle.
-    if (prevSessionIdRef.current !== sessionId) {
-        prevSessionIdRef.current = sessionId;
-        const newOverride = readPersistedOverride(sessionId);
-        if (newOverride !== userOverride) {
-            setUserOverride(newOverride);
-        }
+  // If sessionId changes, re-read the persisted override for the new session.
+  // This handles the case where the user switches sessions within the same
+  // component lifecycle.
+  if (prevSessionIdRef.current !== sessionId) {
+    prevSessionIdRef.current = sessionId;
+    const newOverride = readPersistedOverride(sessionId);
+    if (newOverride !== userOverride) {
+      setUserOverride(newOverride);
     }
+  }
 
-    // Derive the current mode and source
-    const mode: WriteMode = userOverride ?? defaultMode;
-    const source: WriteModeSource = userOverride !== null ? "user-override" : "auto";
+  // Derive the current mode and source
+  const mode: WriteMode = userOverride ?? defaultMode;
+  const source: WriteModeSource = userOverride !== null ? 'user-override' : 'auto';
 
-    /**
-     * Set a user override for write mode.
-     * Persists to sessionStorage for cross-render continuity within the session.
-     */
-    const setMode = useCallback(
-        (newMode: WriteMode): void => {
-            setUserOverride(newMode);
-            persistOverride(sessionId, newMode);
-        },
-        [sessionId]
-    );
+  /**
+   * Set a user override for write mode.
+   * Persists to sessionStorage for cross-render continuity within the session.
+   */
+  const setMode = useCallback(
+    (newMode: WriteMode): void => {
+      setUserOverride(newMode);
+      persistOverride(sessionId, newMode);
+    },
+    [sessionId]
+  );
 
-    /**
-     * Clear the user override and revert to automatic detection.
-     * Removes the persisted value from sessionStorage.
-     */
-    const resetToAuto = useCallback((): void => {
-        setUserOverride(null);
-        persistOverride(sessionId, null);
-    }, [sessionId]);
+  /**
+   * Clear the user override and revert to automatic detection.
+   * Removes the persisted value from sessionStorage.
+   */
+  const resetToAuto = useCallback((): void => {
+    setUserOverride(null);
+    persistOverride(sessionId, null);
+  }, [sessionId]);
 
-    /**
-     * Resolve the write mode for a specific operation type.
-     * Returns the user override if set, otherwise auto-detects from the
-     * operation type using deterministic mapping.
-     */
-    const resolveMode = useCallback(
-        (operationType: OperationType): WriteMode => {
-            if (userOverride !== null) {
-                return userOverride;
-            }
-            return resolveAutoMode(operationType);
-        },
-        [userOverride]
-    );
+  /**
+   * Resolve the write mode for a specific operation type.
+   * Returns the user override if set, otherwise auto-detects from the
+   * operation type using deterministic mapping.
+   */
+  const resolveMode = useCallback(
+    (operationType: OperationType): WriteMode => {
+      if (userOverride !== null) {
+        return userOverride;
+      }
+      return resolveAutoMode(operationType);
+    },
+    [userOverride]
+  );
 
-    return {
-        mode,
-        source,
-        setMode,
-        resetToAuto,
-        resolveMode,
-    };
+  return {
+    mode,
+    source,
+    setMode,
+    resetToAuto,
+    resolveMode,
+  };
 }

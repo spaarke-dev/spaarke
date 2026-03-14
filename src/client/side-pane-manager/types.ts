@@ -17,40 +17,40 @@ declare const Xrm: any;
 
 /** Options for Xrm.App.sidePanes.createPane() */
 interface SidePaneCreateOptions {
-    paneId: string;
-    title: string;
-    imageSrc?: string;
-    canClose: boolean;
-    width: number;
-    isSelected?: boolean;
-    hideHeader?: boolean;
-    badge?: boolean;
-    alwaysRender?: boolean;
+  paneId: string;
+  title: string;
+  imageSrc?: string;
+  canClose: boolean;
+  width: number;
+  isSelected?: boolean;
+  hideHeader?: boolean;
+  badge?: boolean;
+  alwaysRender?: boolean;
 }
 
 /** Side pane instance returned by createPane() */
 interface SidePane {
-    paneId: string;
-    title?: string;
-    close(): void;
-    select(): void;
-    navigate(pageInput: SidePanePageInput): Promise<void>;
+  paneId: string;
+  title?: string;
+  close(): void;
+  select(): void;
+  navigate(pageInput: SidePanePageInput): Promise<void>;
 }
 
 /** Page input for pane.navigate() — web resource variant */
 interface SidePanePageInput {
-    pageType: "webresource";
-    webresourceName: string;
-    data?: string;
+  pageType: 'webresource';
+  webresourceName: string;
+  data?: string;
 }
 
 /** Xrm.App.sidePanes API */
 interface AppSidePanes {
-    state: 0 | 1;
-    createPane(options: SidePaneCreateOptions): Promise<SidePane>;
-    getPane(paneId: string): SidePane | undefined;
-    getSelectedPane(): SidePane | undefined;
-    getAllPanes(): SidePane[];
+  state: 0 | 1;
+  createPane(options: SidePaneCreateOptions): Promise<SidePane>;
+  getPane(paneId: string): SidePane | undefined;
+  getSelectedPane(): SidePane | undefined;
+  getAllPanes(): SidePane[];
 }
 
 // ============================================================================
@@ -64,27 +64,27 @@ interface AppSidePanes {
  * to the platform requires only adding a PaneConfig entry and recompiling.
  */
 interface PaneConfig {
-    /** Unique ID for singleton behavior (e.g., "sprk-chat") */
-    paneId: string;
+  /** Unique ID for singleton behavior (e.g., "sprk-chat") */
+  paneId: string;
 
-    /** Display title in pane header and launcher tooltip */
-    title: string;
+  /** Display title in pane header and launcher tooltip */
+  title: string;
 
-    /** Web resource path for side pane launcher icon (e.g., "WebResources/sprk_Icon.svg") */
-    icon: string;
+  /** Web resource path for side pane launcher icon (e.g., "WebResources/sprk_Icon.svg") */
+  icon: string;
 
-    /** Code Page web resource name (e.g., "sprk_SprkChatPane") */
-    webResource: string;
+  /** Code Page web resource name (e.g., "sprk_SprkChatPane") */
+  webResource: string;
 
-    /** Panel width in pixels (min 300, recommended 350-450) */
-    width: number;
+  /** Panel width in pixels (min 300, recommended 350-450) */
+  width: number;
 
-    /** false = always present in launcher (like Copilot); true = user can close */
-    canClose: boolean;
+  /** false = always present in launcher (like Copilot); true = user can close */
+  canClose: boolean;
 
-    /** true = keeps React state alive when user switches to another pane tab */
-    alwaysRender: boolean;
+  /** true = keeps React state alive when user switches to another pane tab */
+  alwaysRender: boolean;
 
-    /** true = passes current entity type/ID via URL params on navigate */
-    contextAware: boolean;
+  /** true = passes current entity type/ID via URL params on navigate */
+  contextAware: boolean;
 }

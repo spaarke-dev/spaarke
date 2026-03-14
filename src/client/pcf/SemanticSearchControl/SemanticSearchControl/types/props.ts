@@ -4,164 +4,164 @@
  * @see spec.md for component architecture
  */
 
-import { SearchFilters, SearchResult, SearchScope, DateRange } from "./search";
-import { IInputs } from "../generated/ManifestTypes";
+import { SearchFilters, SearchResult, SearchScope, DateRange } from './search';
+import { IInputs } from '../generated/ManifestTypes';
 
 /**
  * Props for the main SemanticSearchControl component
  */
 export interface ISemanticSearchControlProps {
-    context: ComponentFramework.Context<IInputs>;
-    notifyOutputChanged: () => void;
-    onDocumentSelect: (documentId: string) => void;
-    /** Whether the resolved Fluent theme is dark mode (from PCF context) */
-    isDarkMode?: boolean;
+  context: ComponentFramework.Context<IInputs>;
+  notifyOutputChanged: () => void;
+  onDocumentSelect: (documentId: string) => void;
+  /** Whether the resolved Fluent theme is dark mode (from PCF context) */
+  isDarkMode?: boolean;
 }
 
 /**
  * Props for SearchInput component
  */
 export interface ISearchInputProps {
-    value: string;
-    placeholder: string;
-    disabled: boolean;
-    onValueChange: (value: string) => void;
-    onSearch: () => void;
-    onAddDocument: () => void;
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  onValueChange: (value: string) => void;
+  onSearch: () => void;
+  onAddDocument: () => void;
 }
 
 /**
  * Props for FilterPanel component
  */
 export interface IFilterPanelProps {
-    filters: SearchFilters;
-    searchScope: SearchScope;
-    scopeId: string | null;
-    onFiltersChange: (filters: SearchFilters) => void;
-    onApply?: () => void;
-    disabled: boolean;
-    onCollapse?: () => void;
+  filters: SearchFilters;
+  searchScope: SearchScope;
+  scopeId: string | null;
+  onFiltersChange: (filters: SearchFilters) => void;
+  onApply?: () => void;
+  disabled: boolean;
+  onCollapse?: () => void;
 }
 
 /**
  * Filter option for dropdowns
  */
 export interface FilterOption {
-    key: string;
-    label: string;
+  key: string;
+  label: string;
 }
 
 /**
  * Props for FilterDropdown component
  */
 export interface IFilterDropdownProps {
-    label: string;
-    options: FilterOption[];
-    selectedKeys: string[];
-    onSelectionChange: (keys: string[]) => void;
-    disabled: boolean;
-    multiSelect?: boolean;
+  label: string;
+  options: FilterOption[];
+  selectedKeys: string[];
+  onSelectionChange: (keys: string[]) => void;
+  disabled: boolean;
+  multiSelect?: boolean;
 }
 
 /**
  * Props for DateRangeFilter component
  */
 export interface IDateRangeFilterProps {
-    label: string;
-    value: DateRange | null;
-    onChange: (range: DateRange | null) => void;
-    disabled: boolean;
+  label: string;
+  value: DateRange | null;
+  onChange: (range: DateRange | null) => void;
+  disabled: boolean;
 }
 
 /**
  * Props for ResultsList component
  */
 export interface IResultsListProps {
-    results: SearchResult[];
-    isLoading: boolean;
-    isLoadingMore: boolean;
-    hasMore: boolean;
-    totalCount: number;
-    /** Minimum score threshold (0-100). Results below this are hidden. */
-    threshold: number;
-    onLoadMore: () => void;
-    onResultClick: (result: SearchResult) => void;
-    onOpenFile: (result: SearchResult, mode: "web" | "desktop") => void;
-    onOpenRecord: (result: SearchResult, inModal: boolean) => void;
-    onFindSimilar: (result: SearchResult) => void;
-    onPreview: (result: SearchResult) => Promise<string | null>;
-    onSummary: (result: SearchResult) => Promise<SummaryData>;
-    onEmailDocument: (result: SearchResult) => void;
-    onCopyLink: (result: SearchResult) => void;
-    onToggleWorkspace: (result: SearchResult) => void;
-    /** Check if a document is in the workspace. */
-    isInWorkspace: (result: SearchResult) => boolean;
-    onViewAll: () => void;
-    onReload: () => void;
-    compactMode: boolean;
+  results: SearchResult[];
+  isLoading: boolean;
+  isLoadingMore: boolean;
+  hasMore: boolean;
+  totalCount: number;
+  /** Minimum score threshold (0-100). Results below this are hidden. */
+  threshold: number;
+  onLoadMore: () => void;
+  onResultClick: (result: SearchResult) => void;
+  onOpenFile: (result: SearchResult, mode: 'web' | 'desktop') => void;
+  onOpenRecord: (result: SearchResult, inModal: boolean) => void;
+  onFindSimilar: (result: SearchResult) => void;
+  onPreview: (result: SearchResult) => Promise<string | null>;
+  onSummary: (result: SearchResult) => Promise<SummaryData>;
+  onEmailDocument: (result: SearchResult) => void;
+  onCopyLink: (result: SearchResult) => void;
+  onToggleWorkspace: (result: SearchResult) => void;
+  /** Check if a document is in the workspace. */
+  isInWorkspace: (result: SearchResult) => boolean;
+  onViewAll: () => void;
+  onReload: () => void;
+  compactMode: boolean;
 }
 
 /**
  * Summary data fetched from Dataverse
  */
 export interface SummaryData {
-    summary: string | null;
-    tldr: string | null;
+  summary: string | null;
+  tldr: string | null;
 }
 
 /**
  * Props for ResultCard component
  */
 export interface IResultCardProps {
-    result: SearchResult;
-    onClick: () => void;
-    onOpenFile: (mode: "web" | "desktop") => void;
-    onOpenRecord: (inModal: boolean) => void;
-    onFindSimilar: () => void;
-    onPreview: () => Promise<string | null>;
-    onSummary: () => Promise<SummaryData>;
-    onEmailDocument: () => void;
-    onCopyLink: () => void;
-    onToggleWorkspace: () => void;
-    isInWorkspace: boolean;
-    compactMode: boolean;
+  result: SearchResult;
+  onClick: () => void;
+  onOpenFile: (mode: 'web' | 'desktop') => void;
+  onOpenRecord: (inModal: boolean) => void;
+  onFindSimilar: () => void;
+  onPreview: () => Promise<string | null>;
+  onSummary: () => Promise<SummaryData>;
+  onEmailDocument: () => void;
+  onCopyLink: () => void;
+  onToggleWorkspace: () => void;
+  isInWorkspace: boolean;
+  compactMode: boolean;
 }
 
 /**
  * Props for SimilarityBadge component
  */
 export interface ISimilarityBadgeProps {
-    score: number;
+  score: number;
 }
 
 /**
  * Props for HighlightedSnippet component
  */
 export interface IHighlightedSnippetProps {
-    text: string;
-    maxLength?: number;
+  text: string;
+  maxLength?: number;
 }
 
 /**
  * Props for EmptyState component
  */
 export interface IEmptyStateProps {
-    query: string;
-    hasFilters: boolean;
+  query: string;
+  hasFilters: boolean;
 }
 
 /**
  * Props for ErrorState component
  */
 export interface IErrorStateProps {
-    message: string;
-    retryable: boolean;
-    onRetry: () => void;
+  message: string;
+  retryable: boolean;
+  onRetry: () => void;
 }
 
 /**
  * Props for LoadingState component
  */
 export interface ILoadingStateProps {
-    count: number;
+  count: number;
 }

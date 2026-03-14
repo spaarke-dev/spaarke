@@ -39,10 +39,7 @@ import {
   Code20Regular,
   DocumentText20Regular,
 } from '@fluentui/react-icons';
-import {
-  useAiAssistantStore,
-  type TestNodeProgress,
-} from '../../stores/aiAssistantStore';
+import { useAiAssistantStore, type TestNodeProgress } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -245,10 +242,7 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
             <Text size={200} weight="semibold">
               Output
             </Text>
-            <Tooltip
-              content={copySuccess ? 'Copied!' : 'Copy to clipboard'}
-              relationship="label"
-            >
+            <Tooltip content={copySuccess ? 'Copied!' : 'Copy to clipboard'} relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
@@ -282,9 +276,7 @@ const NodeResult: React.FC<NodeResultProps> = ({ node, onCopy }) => {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
-  onDownload,
-}) => {
+export const TestResultPreview: React.FC<TestResultPreviewProps> = ({ onDownload }) => {
   const styles = useStyles();
 
   // Store state
@@ -293,7 +285,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
   // Filter nodes with results (completed, failed, or skipped)
   const nodesWithResults = useMemo(() => {
     return testExecution.nodesProgress.filter(
-      (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
+      n => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
     );
   }, [testExecution.nodesProgress]);
 
@@ -305,7 +297,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
       totalDurationMs: testExecution.totalDurationMs,
       reportUrl: testExecution.reportUrl,
       completedAt: new Date().toISOString(),
-      nodes: testExecution.nodesProgress.map((n) => ({
+      nodes: testExecution.nodesProgress.map(n => ({
         nodeId: n.nodeId,
         label: n.label,
         status: n.status,
@@ -365,7 +357,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
     if (nodesWithResults.length > 0) {
       items.push(nodesWithResults[0].nodeId);
     }
-    nodesWithResults.forEach((n) => {
+    nodesWithResults.forEach(n => {
       if (n.status === 'failed' && !items.includes(n.nodeId)) {
         items.push(n.nodeId);
       }
@@ -384,12 +376,7 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
             {nodesWithResults.length} nodes
           </Badge>
         </div>
-        <Button
-          appearance="secondary"
-          size="small"
-          icon={<ArrowDownload20Regular />}
-          onClick={handleDownload}
-        >
+        <Button appearance="secondary" size="small" icon={<ArrowDownload20Regular />} onClick={handleDownload}>
           Download JSON
         </Button>
       </div>
@@ -402,13 +389,8 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({
       )}
 
       {/* Node results accordion */}
-      <Accordion
-        className={styles.accordion}
-        multiple
-        collapsible
-        defaultOpenItems={defaultOpenItems}
-      >
-        {nodesWithResults.map((node) => (
+      <Accordion className={styles.accordion} multiple collapsible defaultOpenItems={defaultOpenItems}>
+        {nodesWithResults.map(node => (
           <AccordionItem key={node.nodeId} value={node.nodeId}>
             <AccordionHeader size="small">
               <div className={styles.nodeHeader}>

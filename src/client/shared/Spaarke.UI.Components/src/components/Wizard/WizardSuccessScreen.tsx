@@ -26,13 +26,7 @@
  */
 
 import * as React from 'react';
-import {
-  Text,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import type { IWizardSuccessConfig } from './wizardShellTypes';
 
 // ---------------------------------------------------------------------------
@@ -113,14 +107,10 @@ export const WizardSuccessScreen: React.FC<Props> = ({ config }) => {
       </Text>
 
       {/* Body */}
-      <div className={styles.body}>
-        {config.body}
-      </div>
+      <div className={styles.body}>{config.body}</div>
 
       {/* Action buttons */}
-      <div className={styles.actionsRow}>
-        {config.actions}
-      </div>
+      <div className={styles.actionsRow}>{config.actions}</div>
 
       {/* Warnings */}
       {hasWarnings && (

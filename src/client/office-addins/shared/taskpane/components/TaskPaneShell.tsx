@@ -99,9 +99,7 @@ export interface TaskPaneShellProps {
  * Hook to detect task pane width and determine compact mode.
  */
 function useResponsiveLayout(): { isCompact: boolean; width: number } {
-  const [width, setWidth] = useState<number>(
-    typeof window !== 'undefined' ? window.innerWidth : 400
-  );
+  const [width, setWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 400);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -151,9 +149,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   const { isCompact } = useResponsiveLayout();
 
   // Internal state for uncontrolled navigation
-  const [internalSelectedTab, setInternalSelectedTab] = useState<NavigationTab>(() =>
-    getDefaultTab(hostType)
-  );
+  const [internalSelectedTab, setInternalSelectedTab] = useState<NavigationTab>(() => getDefaultTab(hostType));
 
   // Use controlled or uncontrolled tab state
   const selectedTab = controlledSelectedTab ?? internalSelectedTab;
@@ -173,12 +169,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   if (isLoading) {
     return (
       <div className={styles.shell}>
-        <LoadingSkeleton
-          showHeader={true}
-          showNavigation={showNavigation}
-          showFooter={true}
-          contentCards={2}
-        />
+        <LoadingSkeleton showHeader={true} showNavigation={showNavigation} showFooter={true} contentCards={2} />
       </div>
     );
   }

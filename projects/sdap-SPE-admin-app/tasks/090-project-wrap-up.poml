@@ -1,0 +1,57 @@
+<task id="SPE-090" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>documentation, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-085</dependencies>
+  </metadata>
+  <prompt>Complete the project wrap-up activities: update project status to complete, document lessons learned, archive project artifacts, and run repository cleanup. This ensures the project is properly closed with all documentation current and the repository in a clean state for future maintenance.</prompt>
+  <role>Project Lead with documentation and repository management experience</role>
+  <goal>Project is marked complete with lessons learned documented, artifacts archived, and repository cleaned up.</goal>
+  <constraints>
+    <constraint source="project-lifecycle">Follow the standard project wrap-up procedure from the development lifecycle</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/sdap-SPE-admin-app/README.md</file>
+      <file>projects/sdap-SPE-admin-app/plan.md</file>
+      <file>projects/sdap-SPE-admin-app/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SDAP SPE Admin App project has completed all three phases: Phase 1 (core infrastructure, container management, app shell), Phase 2 (container types, search, recycle bin, security), and Phase 3 (eDiscovery, retention, multi-tenant, bulk operations, multi-app support). The project needs to be formally closed with proper documentation of what was built, what was learned, and any maintenance considerations for the future.</background>
+  </context>
+  <steps>
+    <step order="1" name="update-readme">Update projects/sdap-SPE-admin-app/README.md status to "Complete" with final feature summary</step>
+    <step order="2" name="update-task-index">Verify all tasks in TASK-INDEX.md are marked complete</step>
+    <step order="3" name="create-lessons-learned">Create projects/sdap-SPE-admin-app/lessons-learned.md documenting: what went well, what could be improved, key technical decisions and their outcomes, reusable patterns discovered</step>
+    <step order="4" name="archive-notes">Move any ephemeral working files from notes/ to archive or delete</step>
+    <step order="5" name="update-project-claude">Update projects/sdap-SPE-admin-app/CLAUDE.md to reflect completed state</step>
+    <step order="6" name="run-repo-cleanup">Run /repo-cleanup to validate repository structure</step>
+    <step order="7" name="final-commit">Create final commit with all wrap-up changes</step>
+  </steps>
+  <outputs>
+    <output type="code">projects/sdap-SPE-admin-app/README.md</output>
+    <output type="code">projects/sdap-SPE-admin-app/lessons-learned.md</output>
+    <output type="code">projects/sdap-SPE-admin-app/CLAUDE.md</output>
+    <output type="code">projects/sdap-SPE-admin-app/tasks/TASK-INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">README.md status is updated to "Complete"</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md are marked with checkmark status</criterion>
+    <criterion testable="true">lessons-learned.md exists with meaningful content covering successes and improvements</criterion>
+    <criterion testable="true">No ephemeral working files remain in notes/ directory</criterion>
+    <criterion testable="true">CLAUDE.md reflects completed project state</criterion>
+    <criterion testable="true">/repo-cleanup passes without issues</criterion>
+    <criterion testable="true">Final commit is clean with descriptive message</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-03-14 by task-execute skill (MINIMAL protocol — documentation task).
+    All 7 steps completed. All acceptance criteria verified.
+    Repo-cleanup surfaced critical finding: 55+ untracked source files across src/ and tests/.
+    All SPE Admin implementation files staged and committed in final wrap-up commit (176 files, 42109 insertions).
+    Working tree clean after wrap-up. Branch ahead of origin by 8 commits — ready for push-to-github / merge-to-master.
+  </notes>
+</task>

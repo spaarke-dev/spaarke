@@ -1,12 +1,5 @@
 // Types
-export type {
-  IAuthConfig,
-  ITokenResult,
-  ITokenStrategy,
-  IProblemDetails,
-  TokenCacheEntry,
-  TokenSource,
-} from './types';
+export type { IAuthConfig, ITokenResult, ITokenStrategy, IProblemDetails, TokenCacheEntry, TokenSource } from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';

@@ -5,34 +5,34 @@
  * The nodeTypes map must be defined outside the component to avoid re-renders.
  */
 
-import type { NodeTypes } from "@xyflow/react";
+import type { NodeTypes } from '@xyflow/react';
 
 // Base component
-export { BaseNode, nodeColorSchemes } from "./BaseNode";
+export { BaseNode, nodeColorSchemes } from './BaseNode';
 
 // Node implementations
-export { StartNode } from "./StartNode";
-export { AiAnalysisNode } from "./AiAnalysisNode";
-export { AiCompletionNode } from "./AiCompletionNode";
-export { ConditionNode } from "./ConditionNode";
-export { DeliverOutputNode } from "./DeliverOutputNode";
-export { DeliverToIndexNode } from "./DeliverToIndexNode";
-export { UpdateRecordNode } from "./UpdateRecordNode";
-export { CreateTaskNode } from "./CreateTaskNode";
-export { SendEmailNode } from "./SendEmailNode";
-export { WaitNode } from "./WaitNode";
+export { StartNode } from './StartNode';
+export { AiAnalysisNode } from './AiAnalysisNode';
+export { AiCompletionNode } from './AiCompletionNode';
+export { ConditionNode } from './ConditionNode';
+export { DeliverOutputNode } from './DeliverOutputNode';
+export { DeliverToIndexNode } from './DeliverToIndexNode';
+export { UpdateRecordNode } from './UpdateRecordNode';
+export { CreateTaskNode } from './CreateTaskNode';
+export { SendEmailNode } from './SendEmailNode';
+export { WaitNode } from './WaitNode';
 
 // Import components for registry
-import { StartNode } from "./StartNode";
-import { AiAnalysisNode } from "./AiAnalysisNode";
-import { AiCompletionNode } from "./AiCompletionNode";
-import { ConditionNode } from "./ConditionNode";
-import { DeliverOutputNode } from "./DeliverOutputNode";
-import { DeliverToIndexNode } from "./DeliverToIndexNode";
-import { UpdateRecordNode } from "./UpdateRecordNode";
-import { CreateTaskNode } from "./CreateTaskNode";
-import { SendEmailNode } from "./SendEmailNode";
-import { WaitNode } from "./WaitNode";
+import { StartNode } from './StartNode';
+import { AiAnalysisNode } from './AiAnalysisNode';
+import { AiCompletionNode } from './AiCompletionNode';
+import { ConditionNode } from './ConditionNode';
+import { DeliverOutputNode } from './DeliverOutputNode';
+import { DeliverToIndexNode } from './DeliverToIndexNode';
+import { UpdateRecordNode } from './UpdateRecordNode';
+import { CreateTaskNode } from './CreateTaskNode';
+import { SendEmailNode } from './SendEmailNode';
+import { WaitNode } from './WaitNode';
 
 /**
  * Node type registry for @xyflow/react v12.
@@ -42,14 +42,14 @@ import { WaitNode } from "./WaitNode";
  * unnecessary re-renders per React Flow documentation.
  */
 export const nodeTypes: NodeTypes = {
-    start: StartNode,
-    aiAnalysis: AiAnalysisNode,
-    aiCompletion: AiCompletionNode,
-    condition: ConditionNode,
-    deliverOutput: DeliverOutputNode,
-    deliverToIndex: DeliverToIndexNode,
-    updateRecord: UpdateRecordNode,
-    createTask: CreateTaskNode,
-    sendEmail: SendEmailNode,
-    wait: WaitNode,
+  start: StartNode,
+  aiAnalysis: AiAnalysisNode,
+  aiCompletion: AiCompletionNode,
+  condition: ConditionNode,
+  deliverOutput: DeliverOutputNode,
+  deliverToIndex: DeliverToIndexNode,
+  updateRecord: UpdateRecordNode,
+  createTask: CreateTaskNode,
+  sendEmail: SendEmailNode,
+  wait: WaitNode,
 };

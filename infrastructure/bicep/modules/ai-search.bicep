@@ -52,4 +52,4 @@ output searchServiceName string = searchService.name
 output searchServiceEndpoint string = 'https://${searchServiceName}.search.windows.net'
 #disable-next-line outputs-should-not-contain-secrets
 output searchServiceAdminKey string = searchService.listAdminKeys().primaryKey
-output searchServiceQueryKey string = searchService.listQueryKeys()[0].key
+output searchServiceQueryKey string = searchService.listQueryKeys().value[0].key

@@ -2,7 +2,7 @@
  * Service for checking user privileges on entities using Dataverse Web API
  */
 
-import { IEntityPrivileges, AccessRights } from "../types/CommandTypes";
+import { IEntityPrivileges, AccessRights } from '../types/CommandTypes';
 
 /**
  * Query user's privileges for a specific entity
@@ -38,11 +38,7 @@ export class PrivilegeService {
       const roles = await this.getUserSecurityRoles(webAPI, userId);
 
       // Query entity privileges for those roles
-      const privileges = await this.getEntityPrivilegesFromRoles(
-        webAPI,
-        entityLogicalName,
-        roles
-      );
+      const privileges = await this.getEntityPrivilegesFromRoles(webAPI, entityLogicalName, roles);
 
       return privileges;
     } catch (error) {
@@ -85,10 +81,7 @@ export class PrivilegeService {
    * Execute a bound function using the Web API endpoint
    * This is a workaround since PCF WebAPI doesn't expose executeFunction
    */
-  private static async executeBoundFunction(
-    webAPI: ComponentFramework.WebApi,
-    functionUrl: string
-  ): Promise<any> {
+  private static async executeBoundFunction(webAPI: ComponentFramework.WebApi, functionUrl: string): Promise<any> {
     // Since PCF WebAPI doesn't expose executeFunction, we need to use window.fetch
     // Get the organization URL from the webAPI context
     const context = (webAPI as any)._context || (webAPI as any).context;
@@ -97,14 +90,14 @@ export class PrivilegeService {
     const fullUrl = `${apiUrl}/api/data/v9.2/${functionUrl}`;
 
     const response = await fetch(fullUrl, {
-      method: "GET",
+      method: 'GET',
       headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "OData-MaxVersion": "4.0",
-        "OData-Version": "4.0"
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
       },
-      credentials: "same-origin"
+      credentials: 'same-origin',
     });
 
     if (!response.ok) {
@@ -124,18 +117,15 @@ export class PrivilegeService {
       // In PCF context, we can access the user context directly
 
       // Fallback: Use the userSettings API
-      const userSettings = await webAPI.retrieveMultipleRecords(
-        "usersettings",
-        "?$select=systemuserid&$top=1"
-      );
+      const userSettings = await webAPI.retrieveMultipleRecords('usersettings', '?$select=systemuserid&$top=1');
 
       if (userSettings.entities && userSettings.entities.length > 0) {
         return { UserId: userSettings.entities[0].systemuserid };
       }
 
-      throw new Error("Could not retrieve current user ID");
+      throw new Error('Could not retrieve current user ID');
     } catch (error) {
-      console.error("WhoAmI failed:", error);
+      console.error('WhoAmI failed:', error);
       throw error;
     }
   }
@@ -143,19 +133,16 @@ export class PrivilegeService {
   /**
    * Get security roles for a user
    */
-  private static async getUserSecurityRoles(
-    webAPI: ComponentFramework.WebApi,
-    userId: string
-  ): Promise<string[]> {
+  private static async getUserSecurityRoles(webAPI: ComponentFramework.WebApi, userId: string): Promise<string[]> {
     try {
       const response = await webAPI.retrieveMultipleRecords(
-        "systemuserroles",
+        'systemuserroles',
         `?$select=roleid&$filter=systemuserid eq ${userId}`
       );
 
       return response.entities.map(e => e.roleid);
     } catch (error) {
-      console.warn("Could not retrieve user roles:", error);
+      console.warn('Could not retrieve user roles:', error);
       return [];
     }
   }
@@ -176,7 +163,7 @@ export class PrivilegeService {
     try {
       // Step 1: Get entity metadata to find privileges associated with this entity
       const entityMetadata = await webAPI.retrieveMultipleRecords(
-        "entitydefinition",
+        'entitydefinition',
         `?$select=logicalname,objecttypecode&$filter=logicalname eq '${entityLogicalName}'`
       );
 
@@ -187,10 +174,10 @@ export class PrivilegeService {
 
       // Step 2: Query privileges for this entity type
       // We need to find privilege GUIDs for Create, Read, Write, Delete, Append, AppendTo
-      const privilegeFilter = roleIds.map(id => `_roleid_value eq ${id}`).join(" or ");
+      const privilegeFilter = roleIds.map(id => `_roleid_value eq ${id}`).join(' or ');
 
       const rolePrivileges = await webAPI.retrieveMultipleRecords(
-        "roleprivileges",
+        'roleprivileges',
         `?$select=privilegedepthmask&$expand=privilegeid($select=name,accessright)&$filter=(${privilegeFilter})`
       );
 
@@ -211,7 +198,7 @@ export class PrivilegeService {
 
       return this.parseAccessRights(aggregateRights);
     } catch (error) {
-      console.warn("Could not retrieve role privileges:", error);
+      console.warn('Could not retrieve role privileges:', error);
 
       // Fallback: Return read-only
       return this.getNoPrivileges();
@@ -224,15 +211,15 @@ export class PrivilegeService {
   private static parseAccessRights(accessRightsValue: string | number): IEntityPrivileges {
     let rights = 0;
 
-    if (typeof accessRightsValue === "string") {
+    if (typeof accessRightsValue === 'string') {
       // Parse comma-separated string like "ReadAccess,WriteAccess,CreateAccess"
-      const rightsArray = accessRightsValue.split(",").map(r => r.trim());
+      const rightsArray = accessRightsValue.split(',').map(r => r.trim());
       rightsArray.forEach(right => {
         if (AccessRights[right as keyof typeof AccessRights] !== undefined) {
           rights |= AccessRights[right as keyof typeof AccessRights];
         }
       });
-    } else if (typeof accessRightsValue === "number") {
+    } else if (typeof accessRightsValue === 'number') {
       rights = accessRightsValue;
     }
 

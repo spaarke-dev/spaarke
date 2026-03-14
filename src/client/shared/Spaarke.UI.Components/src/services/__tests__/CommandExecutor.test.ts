@@ -18,7 +18,7 @@ describe('CommandExecutor', () => {
       key: 'test',
       label: 'Test Command',
       requiresSelection: false,
-      handler: mockHandler
+      handler: mockHandler,
     };
 
     mockContext = createMockCommandContext();
@@ -61,7 +61,7 @@ describe('CommandExecutor', () => {
       mockCommand.multiSelectSupport = false;
       mockContext.selectedRecords = [
         { id: '1', entityName: 'account' },
-        { id: '2', entityName: 'account' }
+        { id: '2', entityName: 'account' },
       ];
 
       const result = CommandExecutor.canExecute(mockCommand, mockContext);
@@ -74,7 +74,7 @@ describe('CommandExecutor', () => {
       mockCommand.multiSelectSupport = true;
       mockContext.selectedRecords = [
         { id: '1', entityName: 'account' },
-        { id: '2', entityName: 'account' }
+        { id: '2', entityName: 'account' },
       ];
 
       const result = CommandExecutor.canExecute(mockCommand, mockContext);

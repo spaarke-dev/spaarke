@@ -178,7 +178,16 @@ export function getBffApiScopes(config: Partial<NaaAuthConfig> = {}): string[] {
  * @returns SilentRequest for acquireTokenSilent
  */
 export function createSilentRequest(
-  account: { homeAccountId: string; environment: string; tenantId: string; username: string; localAccountId: string; name?: string; idTokenClaims?: object; nativeAccountId?: string },
+  account: {
+    homeAccountId: string;
+    environment: string;
+    tenantId: string;
+    username: string;
+    localAccountId: string;
+    name?: string;
+    idTokenClaims?: object;
+    nativeAccountId?: string;
+  },
   config: Partial<NaaAuthConfig> = {}
 ): SilentRequest {
   return {
