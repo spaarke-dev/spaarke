@@ -161,12 +161,13 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, CancellationToken cancellationToken = default)
+    public async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
     {
         var queryParams = new List<string>();
         if (filter != null) queryParams.Add($"$filter={filter}");
         if (select != null) queryParams.Add($"$select={select}");
         if (top != null) queryParams.Add($"$top={top}");
+        if (skip != null && skip > 0) queryParams.Add($"$skip={skip}");
 
         var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
         var url = $"{entitySetName}{query}";

@@ -45,9 +45,13 @@ public static class SpeAdminEndpoints
         group.MapDashboardEndpoints();               // SPE-022
         RecycleBinEndpoints.MapRecycleBinEndpoints(group); // SPE-059
         group.MapContainerTypeEndpoints();           // SPE-050
+        group.MapContainerTypeSettingsEndpoints();  // SPE-052
+        group.MapContainerTypePermissionEndpoints(); // SPE-054
         group.MapSearchContainersEndpoints();        // SPE-057
         group.MapSearchItemsEndpoints();             // SPE-058
         group.MapSecurityEndpoints();               // SPE-060
+        group.MapConsumingTenantEndpoints();        // SPE-082
+        BulkOperationEndpoints.MapBulkOperationEndpoints(group); // SPE-083
 
         return app;
     }

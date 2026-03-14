@@ -30,13 +30,37 @@ public sealed class SpeAdminGraphService
     // Domain models (ADR-007: no Graph SDK types in public API surface)
     // -------------------------------------------------------------------------
 
-    /// <summary>Represents a resolved container type configuration from Dataverse.</summary>
+    /// <summary>
+    /// Represents a resolved container type configuration from Dataverse.
+    ///
+    /// Phase 1 fields (ClientId, TenantId, SecretKeyVaultName) identify the managing/admin app
+    /// registration used for app-only Graph API calls.
+    ///
+    /// Phase 3 / Multi-App fields (OwningAppId, OwningAppTenantId, OwningAppSecretName) identify
+    /// the owning app registration. When present, SpeAdminTokenProvider acquires tokens on behalf
+    /// of the owning app via OBO (user token → owning app token) for delegated operations.
+    /// When absent, the managing app identity is used (backward-compatible single-app mode).
+    /// </summary>
     public sealed record ContainerTypeConfig(
         Guid ConfigId,
         string ContainerTypeId,
         string ClientId,
         string TenantId,
-        string SecretKeyVaultName);
+        string SecretKeyVaultName,
+        // Multi-App fields (Phase 3 — optional; null = single-app mode)
+        string? OwningAppId = null,
+        string? OwningAppTenantId = null,
+        string? OwningAppSecretName = null)
+    {
+        /// <summary>
+        /// Returns true when this config specifies a distinct owning app registration
+        /// (i.e., all three owning app fields are non-empty).
+        /// </summary>
+        public bool HasOwningApp =>
+            !string.IsNullOrWhiteSpace(OwningAppId) &&
+            !string.IsNullOrWhiteSpace(OwningAppTenantId) &&
+            !string.IsNullOrWhiteSpace(OwningAppSecretName);
+    }
 
     /// <summary>Summarised container data returned from Graph API.</summary>
     public sealed record SpeContainerSummary(
@@ -128,6 +152,25 @@ public sealed class SpeAdminGraphService
         string? Description,
         string? BillingClassification,
         DateTimeOffset CreatedDateTime);
+
+    /// <summary>
+    /// An application permission entry on an SPE container type, returned from the Graph
+    /// applicationPermissions endpoint.
+    /// All Graph SDK types are mapped here — callers receive only this domain model (ADR-007).
+    /// </summary>
+    /// <param name="AppId">Azure AD application (client) ID of the consuming application.</param>
+    /// <param name="DelegatedPermissions">
+    /// Delegated permission scopes granted to the app for this container type.
+    /// Empty when no delegated permissions have been granted.
+    /// </param>
+    /// <param name="ApplicationPermissions">
+    /// Application permission scopes granted to the app for this container type.
+    /// Empty when no application permissions have been granted.
+    /// </param>
+    public sealed record SpeContainerTypePermission(
+        string AppId,
+        IReadOnlyList<string> DelegatedPermissions,
+        IReadOnlyList<string> ApplicationPermissions);
 
     /// <summary>
     /// A container permission entry returned from the Graph permissions API.
@@ -270,8 +313,20 @@ public sealed class SpeAdminGraphService
     private readonly ILogger<SpeAdminGraphService> _logger;
     private readonly TimeSpan _cacheTtl;
 
-    /// <summary>Thread-safe cache: configId → (GraphServiceClient, expiry).</summary>
+    /// <summary>
+    /// Token provider for multi-app OBO flows (Phase 3).
+    /// Null when SpeAdminTokenProvider is not registered — falls back to single-app mode.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? _tokenProvider;
+
+    /// <summary>Thread-safe cache: configId → (GraphServiceClient, expiry) for app-only clients.</summary>
     private readonly ConcurrentDictionary<Guid, CachedClient> _clientCache = new();
+
+    /// <summary>
+    /// Thread-safe cache for owning-app OBO Graph clients.
+    /// Key: "{configId}:{sha256(userToken)}" — prevents cross-app and cross-user contamination.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, CachedClient> _oboClientCache = new();
 
     // Throttling: exponential backoff constants
     private const int MaxRetries = 4;
@@ -286,7 +341,8 @@ public sealed class SpeAdminGraphService
         SecretClient secretClient,
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
-        ILogger<SpeAdminGraphService> logger)
+        ILogger<SpeAdminGraphService> logger,
+        Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? tokenProvider = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(secretClient);
@@ -298,13 +354,17 @@ public sealed class SpeAdminGraphService
         _secretClient = secretClient;
         _dataverseClient = dataverseClient;
         _logger = logger;
+        _tokenProvider = tokenProvider; // Optional: null = single-app mode only
 
         // TTL is configurable; default 30 minutes. IConfiguration is not stored — value is resolved once.
         var ttlMinutes = configuration.GetValue<int>("SpeAdmin:GraphClientCacheTtlMinutes", defaultValue: 30);
         _cacheTtl = TimeSpan.FromMinutes(ttlMinutes > 0 ? ttlMinutes : 30);
 
         _logger.LogInformation(
-            "SpeAdminGraphService initialized. Graph client cache TTL: {TtlMinutes} minutes", ttlMinutes);
+            "SpeAdminGraphService initialized. Graph client cache TTL: {TtlMinutes} minutes. " +
+            "Multi-app (OBO) mode: {MultiAppEnabled}",
+            ttlMinutes,
+            tokenProvider != null);
     }
 
     // =========================================================================
@@ -368,6 +428,75 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// Returns a GraphServiceClient authenticated as the owning app registration for the given
+    /// BU config, using OBO (On-Behalf-Of) token exchange with the admin user's token.
+    ///
+    /// When the config does not specify a separate owning app (<see cref="ContainerTypeConfig.HasOwningApp"/> = false),
+    /// falls back to <see cref="GetClientForConfigAsync"/> (single-app mode — backward compatible).
+    ///
+    /// The returned client is cached per (configId + sha256(userToken)) with 55-minute TTL,
+    /// matching the OBO token lifetime (auth constraint: 5-minute buffer before token expiry).
+    /// </summary>
+    /// <param name="config">Resolved container type config.</param>
+    /// <param name="userAccessToken">
+    /// Admin user's incoming Bearer token. Exchanged for owning-app-scoped token via OBO.
+    /// Required for multi-app mode; ignored in single-app fallback.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Graph client authenticated as owning app (or managing app in single-app mode).</returns>
+    public async Task<GraphServiceClient> GetClientForOwningAppAsync(
+        ContainerTypeConfig config,
+        string userAccessToken,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        // Single-app fallback: no owning app configured OR token provider not registered
+        if (!config.HasOwningApp || _tokenProvider is null)
+        {
+            _logger.LogDebug(
+                "No owning app config for configId {ConfigId} or token provider unavailable. " +
+                "Using single-app mode (managing app identity).",
+                config.ConfigId);
+            return await GetClientForConfigAsync(config, ct);
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(userAccessToken);
+
+        // OBO flow: compute cache key using SHA256 of user token (auth constraint: MUST hash tokens)
+        var tokenHash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(userAccessToken));
+        var cacheKey = $"{config.ConfigId}:{Convert.ToHexString(tokenHash).ToLowerInvariant()}";
+
+        // Check OBO client cache
+        if (_oboClientCache.TryGetValue(cacheKey, out var cached) &&
+            cached.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            _logger.LogDebug(
+                "OBO Graph client cache HIT for configId {ConfigId}. Expires: {ExpiresAt}",
+                config.ConfigId, cached.ExpiresAt);
+            return cached.Client;
+        }
+
+        // Acquire OBO token from token provider (provider manages its own token cache)
+        var oboToken = await _tokenProvider.AcquireOwningAppTokenAsync(config, userAccessToken, ct);
+
+        // Create Graph client using the OBO token via BearerTokenCredential pattern
+        // The OBO token is a bearer token scoped to the owning app's Graph permissions
+        var graphClient = CreateGraphClientFromBearerToken(oboToken);
+
+        // Cache OBO Graph client with 55-minute TTL (matching OBO token TTL)
+        var oboTtl = TimeSpan.FromMinutes(55);
+        _oboClientCache[cacheKey] = new CachedClient(graphClient, DateTimeOffset.UtcNow.Add(oboTtl));
+
+        _logger.LogInformation(
+            "OBO Graph client created and cached for configId {ConfigId}, owningAppId {OwningAppId}. TTL: {Ttl}",
+            config.ConfigId, config.OwningAppId, oboTtl);
+
+        return graphClient;
+    }
+
+    /// <summary>
     /// Resolves a <see cref="ContainerTypeConfig"/> from Dataverse by configId.
     /// Reads the sprk_specontainertypeconfig record to get app registration credentials.
     /// Returns null when the record is not found.
@@ -376,7 +505,10 @@ public sealed class SpeAdminGraphService
     {
         _logger.LogDebug("Resolving container type config for configId {ConfigId}", configId);
 
-        const string select = "sprk_specontainertypeconfigid,sprk_containertypeid,sprk_clientid,sprk_tenantid,sprk_keyvaultsecretname";
+        // Include owning app fields (Phase 3) in addition to the Phase 1 managing app fields.
+        const string select =
+            "sprk_specontainertypeconfigid,sprk_containertypeid,sprk_clientid,sprk_tenantid," +
+            "sprk_keyvaultsecretname,sprk_owningappid,sprk_owningapptenantid,sprk_owningappsecretname";
 
         try
         {
@@ -394,7 +526,10 @@ public sealed class SpeAdminGraphService
                 ContainerTypeId: record.Sprk_containertypeid ?? string.Empty,
                 ClientId: record.Sprk_clientid ?? string.Empty,
                 TenantId: record.Sprk_tenantid ?? string.Empty,
-                SecretKeyVaultName: record.Sprk_keyvaultsecretname ?? string.Empty);
+                SecretKeyVaultName: record.Sprk_keyvaultsecretname ?? string.Empty,
+                OwningAppId: record.Sprk_owningappid,
+                OwningAppTenantId: record.Sprk_owningapptenantid,
+                OwningAppSecretName: record.Sprk_owningappsecretname);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
@@ -412,10 +547,16 @@ public sealed class SpeAdminGraphService
     // Property names match Dataverse column logical names (lowercase).
     private sealed class DataverseConfigDto
     {
+        // Phase 1: Managing / admin app registration fields
         public string? Sprk_containertypeid { get; init; }
         public string? Sprk_clientid { get; init; }
         public string? Sprk_tenantid { get; init; }
         public string? Sprk_keyvaultsecretname { get; init; }
+
+        // Phase 3: Owning app registration fields (optional)
+        public string? Sprk_owningappid { get; init; }
+        public string? Sprk_owningapptenantid { get; init; }
+        public string? Sprk_owningappsecretname { get; init; }
     }
 
     /// <summary>
@@ -1135,8 +1276,10 @@ public sealed class SpeAdminGraphService
     /// Uses the Graph container GET endpoint with a select for customProperties:
     ///   GET /storage/fileStorage/containers/{id}?$select=id,customProperties
     ///
-    /// Custom properties are stored as a dictionary of key → { value, isSearchable } on the container.
-    /// This method flattens that structure into a list of <see cref="Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto"/>.
+    /// The Graph SDK models <c>customProperties</c> as
+    /// <see cref="Microsoft.Graph.Models.FileStorageContainerCustomPropertyDictionary"/>,
+    /// which stores its entries in <c>AdditionalData</c> (keyed by property name).
+    /// Each value serializes as: <c>{ "value": "&lt;string&gt;", "isSearchable": &lt;bool&gt; }</c>.
     ///
     /// Returns an empty list when the container has no custom properties.
     /// Returns <c>null</c> when the container is not found (Graph 404).
@@ -1145,7 +1288,7 @@ public sealed class SpeAdminGraphService
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
-    /// List of custom properties, or <c>null</c> when the container is not found.
+    /// List of custom properties ordered by name (case-insensitive), or <c>null</c> when the container is not found.
     /// </returns>
     /// <remarks>
     /// ADR-007: Returns domain DTOs only — no Graph SDK types exposed to callers.
@@ -1177,22 +1320,45 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            // Map Graph SDK dictionary to flat list of domain DTOs.
-            // CustomProperties may be null when the container has no custom properties.
-            if (container.CustomProperties is null || container.CustomProperties.Count == 0)
+            // The SDK stores each custom property entry in CustomProperties.AdditionalData.
+            // Each entry value is a Kiota UntypedObject with "value" and "isSearchable" fields.
+            var customPropsAdditional = container.CustomProperties?.AdditionalData;
+            if (customPropsAdditional is null || customPropsAdditional.Count == 0)
             {
-                _logger.LogInformation(
-                    "Container {ContainerId} has no custom properties", containerId);
+                _logger.LogInformation("Container {ContainerId} has no custom properties", containerId);
                 return Array.Empty<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>();
             }
 
-            var result = container.CustomProperties
-                .Select(kvp => new Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto(
-                    Name: kvp.Key,
-                    Value: kvp.Value?.Value ?? string.Empty,
-                    IsSearchable: kvp.Value?.IsSearchable ?? false))
-                .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var result = new List<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>(customPropsAdditional.Count);
+
+            foreach (var kvp in customPropsAdditional)
+            {
+                var propName = kvp.Key;
+                var propValue = string.Empty;
+                var isSearchable = false;
+
+                // Kiota deserializes untyped JSON objects as UntypedObject nodes.
+                if (kvp.Value is Microsoft.Kiota.Abstractions.Serialization.UntypedObject untypedObj)
+                {
+                    var fields = untypedObj.GetValue();
+
+                    if (fields.TryGetValue("value", out var valNode) &&
+                        valNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString valStr)
+                    {
+                        propValue = valStr.GetValue() ?? string.Empty;
+                    }
+
+                    if (fields.TryGetValue("isSearchable", out var searchNode) &&
+                        searchNode is Microsoft.Kiota.Abstractions.Serialization.UntypedBoolean searchBool)
+                    {
+                        isSearchable = searchBool.GetValue();
+                    }
+                }
+
+                result.Add(new Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto(propName, propValue, isSearchable));
+            }
+
+            result.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
 
             _logger.LogInformation(
                 "Retrieved {Count} custom properties for container {ContainerId}", result.Count, containerId);
@@ -1215,7 +1381,7 @@ public sealed class SpeAdminGraphService
     ///   Body: { "customProperties": { "Key": { "value": "...", "isSearchable": false }, ... } }
     ///
     /// This is a full-replace operation: any properties not included in <paramref name="properties"/>
-    /// will be removed. To clear all properties, pass an empty list.
+    /// will be removed. Pass an empty list to clear all custom properties.
     ///
     /// Returns the updated list of custom properties after the PATCH (re-reads from Graph).
     /// Returns <c>null</c> when the container is not found (Graph 404).
@@ -1229,8 +1395,12 @@ public sealed class SpeAdminGraphService
     /// </returns>
     /// <remarks>
     /// ADR-007: Returns domain DTOs only — no Graph SDK types exposed to callers.
-    /// The re-read after PATCH ensures the caller receives the authoritative server state,
-    /// including any transformations Graph applies (e.g., normalisation of keys).
+    ///
+    /// Custom properties are sent via <see cref="Microsoft.Graph.Models.Entity.AdditionalData"/>
+    /// rather than via <see cref="Microsoft.Graph.Models.FileStorageContainerCustomPropertyDictionary"/>
+    /// because the SDK type does not expose a public add-entry API compatible with strongly-typed
+    /// per-property construction in Graph SDK v5.x. Using AdditionalData produces the correct
+    /// OData PATCH body through Kiota's JSON serializer.
     /// </remarks>
     public async Task<IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>?> UpdateCustomPropertiesAsync(
         GraphServiceClient graphClient,
@@ -1245,19 +1415,24 @@ public sealed class SpeAdminGraphService
         _logger.LogInformation(
             "Updating {Count} custom properties on container {ContainerId}", properties.Count, containerId);
 
-        // Build the Graph SDK customProperties dictionary.
-        // Each entry: key → FileStorageContainerCustomPropertyValue { Value, IsSearchable }
-        var customProperties = properties.ToDictionary(
-            p => p.Name,
-            p => new Microsoft.Graph.Models.FileStorageContainerCustomPropertyValue
+        // Build the customProperties payload via AdditionalData.
+        // Kiota will serialize this as: { "customProperties": { "KeyName": { "value": "...", "isSearchable": false } } }
+        var customPropertiesDict = new Dictionary<string, object>(properties.Count);
+        foreach (var prop in properties)
+        {
+            customPropertiesDict[prop.Name] = new Dictionary<string, object>
             {
-                Value = p.Value,
-                IsSearchable = p.IsSearchable
-            });
+                ["value"] = prop.Value,
+                ["isSearchable"] = (object)prop.IsSearchable
+            };
+        }
 
         var patch = new Microsoft.Graph.Models.FileStorageContainer
         {
-            CustomProperties = customProperties
+            AdditionalData = new Dictionary<string, object>
+            {
+                ["customProperties"] = customPropertiesDict
+            }
         };
 
         try
@@ -2599,26 +2774,47 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Evicts all expired entries from the client cache.
+    /// Evicts all expired entries from the client cache (app-only clients and OBO clients).
     /// Should be called periodically (e.g., from the dashboard sync background service).
     /// </summary>
     public void EvictExpiredClients()
     {
         var now = DateTimeOffset.UtcNow;
-        var expired = _clientCache
+
+        // Evict expired app-only clients
+        var expiredAppOnly = _clientCache
             .Where(kvp => kvp.Value.ExpiresAt <= now)
             .Select(kvp => kvp.Key)
             .ToList();
 
-        foreach (var key in expired)
+        foreach (var key in expiredAppOnly)
         {
             _clientCache.TryRemove(key, out _);
         }
 
-        if (expired.Count > 0)
+        if (expiredAppOnly.Count > 0)
         {
-            _logger.LogDebug("Evicted {Count} expired Graph client cache entries", expired.Count);
+            _logger.LogDebug("Evicted {Count} expired Graph client cache entries (app-only).", expiredAppOnly.Count);
         }
+
+        // Evict expired OBO clients
+        var expiredObo = _oboClientCache
+            .Where(kvp => kvp.Value.ExpiresAt <= now)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (var key in expiredObo)
+        {
+            _oboClientCache.TryRemove(key, out _);
+        }
+
+        if (expiredObo.Count > 0)
+        {
+            _logger.LogDebug("Evicted {Count} expired Graph client cache entries (OBO).", expiredObo.Count);
+        }
+
+        // Also evict token provider's OBO tokens (keeps token cache in sync with client cache)
+        _tokenProvider?.EvictExpiredTokens();
     }
 
     // =========================================================================
@@ -2733,6 +2929,80 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// Creates a new SharePoint Embedded container type via the Graph API.
+    ///
+    /// POSTs to <c>/storage/fileStorage/containerTypes</c> with the specified name and billing
+    /// classification. The container type is identified by a GUID assigned by Graph on creation.
+    ///
+    /// Returns a <see cref="SpeContainerTypeSummary"/> domain record — no Graph SDK types exposed (ADR-007).
+    /// </summary>
+    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="displayName">
+    ///   Human-readable name for the container type. Maps to Graph SDK <c>FileStorageContainerType.Name</c>
+    ///   (Graph uses "Name", not "DisplayName", for the containerType resource).
+    /// </param>
+    /// <param name="billingClassification">
+    ///   Billing classification string ("standard" or "premium"). When null, Graph defaults to "standard".
+    ///   Parsed to <c>FileStorageContainerTypeBillingClassification</c> enum for the SDK request body.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The created container type as a domain record.</returns>
+    /// <exception cref="InvalidOperationException">
+    ///   Thrown when Graph API returns null for the created container type (unexpected API behaviour).
+    /// </exception>
+    public async Task<SpeContainerTypeSummary> CreateContainerTypeAsync(
+        GraphServiceClient graphClient,
+        string displayName,
+        string? billingClassification,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        _logger.LogInformation(
+            "Creating SPE container type '{DisplayName}' with billingClassification '{BillingClassification}'",
+            displayName, billingClassification ?? "standard");
+
+        // Parse billingClassification string to the Graph SDK enum.
+        // FileStorageContainerBillingClassification values: Standard, Premium (case-insensitive parse).
+        // Invalid values will be rejected by the endpoint before reaching here.
+        Microsoft.Graph.Models.FileStorageContainerBillingClassification? billingEnum = null;
+        if (!string.IsNullOrWhiteSpace(billingClassification) &&
+            Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
+                billingClassification,
+                ignoreCase: true,
+                out var parsed))
+        {
+            billingEnum = parsed;
+        }
+
+        // Build the Graph SDK request body.
+        // NOTE: FileStorageContainerType uses "Name" (not "DisplayName") as the display label.
+        var body = new Microsoft.Graph.Models.FileStorageContainerType
+        {
+            Name = displayName,
+            BillingClassification = billingEnum
+        };
+
+        var created = await ExecuteWithRetryAsync(
+            () => graphClient.Storage.FileStorage.ContainerTypes.PostAsync(body, cancellationToken: ct),
+            ct);
+
+        if (created is null)
+        {
+            throw new InvalidOperationException(
+                $"Graph API returned null when creating container type '{displayName}'. " +
+                "The container type may not have been created.");
+        }
+
+        _logger.LogInformation(
+            "SPE container type created: Id={ContainerTypeId}, Name='{Name}', BillingClassification={BillingClassification}",
+            created.Id, created.Name, created.BillingClassification?.ToString() ?? "null");
+
+        return MapContainerType(created);
+    }
+
+    /// <summary>
     /// Maps a Graph SDK FileStorageContainerType to the SpeContainerTypeSummary domain record.
     ///
     /// Property mapping notes:
@@ -2742,9 +3012,15 @@ public sealed class SpeAdminGraphService
     /// </summary>
     private static SpeContainerTypeSummary MapContainerType(Microsoft.Graph.Models.FileStorageContainerType ct)
     {
-        // BillingClassification is a typed enum property in Graph SDK v5.100+ (FileStorageContainerTypeBillingClassification).
-        // Convert to string; null when not returned by Graph.
-        var billingClassification = ct.BillingClassification?.ToString();
+        // BillingClassification: Graph SDK 5.101.0 does not include the typed enum
+        // FileStorageContainerTypeBillingClassification in the installed version.
+        // Extract the raw string value from AdditionalData as a fallback.
+        string? billingClassification = null;
+        if (ct.AdditionalData != null &&
+            ct.AdditionalData.TryGetValue("billingClassification", out var billingObj))
+        {
+            billingClassification = billingObj?.ToString();
+        }
 
         // FileStorageContainerType uses "Name" (not "DisplayName") as the display label in Graph SDK.
         // There is no Description property on the containerType Graph API resource.
@@ -2754,6 +3030,701 @@ public sealed class SpeAdminGraphService
             Description: null,
             BillingClassification: billingClassification,
             CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow);
+    }
+
+    // =========================================================================
+    // Consuming tenant management operations (SPE-082)
+    // =========================================================================
+
+    /// <summary>
+    /// Represents a consuming application registration for an SPE container type.
+    ///
+    /// In multi-tenant SPE scenarios, a single container type (owned by one app) can be consumed
+    /// by multiple applications from different tenants. Each consuming app registration defines the
+    /// permissions granted to the consuming application.
+    ///
+    /// ADR-007: No Graph SDK types in public API surface — callers receive only this domain record.
+    /// </summary>
+    /// <param name="AppId">Azure AD application (client) ID of the consuming application.</param>
+    /// <param name="DisplayName">Display name of the consuming application. May be null.</param>
+    /// <param name="TenantId">Home tenant ID of the consuming application. May be null.</param>
+    /// <param name="DelegatedPermissions">Delegated permission scopes granted to the consuming app.</param>
+    /// <param name="ApplicationPermissions">Application permission scopes granted to the consuming app.</param>
+    public sealed record SpeConsumingTenant(
+        string AppId,
+        string? DisplayName,
+        string? TenantId,
+        IReadOnlyList<string> DelegatedPermissions,
+        IReadOnlyList<string> ApplicationPermissions);
+
+    /// <summary>
+    /// Lists all consuming application registrations for the specified SPE container type.
+    ///
+    /// Uses the Graph API applicationPermissions endpoint to retrieve all registered consuming
+    /// applications and their permission grants.
+    ///
+    /// Returns null when the container type is not found (Graph 404).
+    /// Returns an empty list when the container type has no consuming app registrations.
+    ///
+    /// ADR-007: No Graph SDK types exposed — callers receive <see cref="SpeConsumingTenant"/> domain records.
+    /// </summary>
+    public async Task<IReadOnlyList<SpeConsumingTenant>?> ListConsumingTenantsAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+
+        _logger.LogInformation(
+            "Listing consuming tenants for container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            var response = await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants
+                    .GetAsync(cancellationToken: ct),
+                ct);
+
+            var results = new List<SpeConsumingTenant>();
+
+            while (response != null)
+            {
+                if (response.Value != null)
+                {
+                    foreach (var perm in response.Value)
+                    {
+                        results.Add(MapPermissionGrantToConsumingTenant(perm));
+                    }
+                }
+
+                if (response.OdataNextLink == null) break;
+
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants
+                        .WithUrl(response.OdataNextLink)
+                        .GetAsync(cancellationToken: ct),
+                    ct);
+            }
+
+            _logger.LogInformation(
+                "Listed {Count} consuming tenants for container type {ContainerTypeId}",
+                results.Count, containerTypeId);
+
+            return results;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} not found when listing consuming tenants (404)", containerTypeId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Registers a new consuming application for the specified SPE container type.
+    ///
+    /// Creates a new ApplicationPermissionGrant entry granting the specified delegated and
+    /// application permissions to the consuming application.
+    ///
+    /// Returns null when the container type is not found (Graph 404).
+    /// Throws ODataError with 409 status when the app is already registered.
+    ///
+    /// ADR-007: No Graph SDK types exposed — callers receive <see cref="SpeConsumingTenant"/> domain record.
+    /// </summary>
+    public async Task<SpeConsumingTenant?> RegisterConsumingTenantAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        string appId,
+        string? tenantId,
+        IReadOnlyList<string> delegatedPermissions,
+        IReadOnlyList<string> applicationPermissions,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        _logger.LogInformation(
+            "Registering consuming app {AppId} for container type {ContainerTypeId}", appId, containerTypeId);
+
+        try
+        {
+            // Build the permission grant body using the first permission from each list
+            var primaryDelegated = delegatedPermissions.FirstOrDefault();
+            var primaryApplication = applicationPermissions.FirstOrDefault();
+
+            // Build the grant body using AdditionalData for permission strings.
+            // SpePermissionLevel enum is not available in Graph SDK 5.99; use string values via AdditionalData.
+            var additionalData = new Dictionary<string, object> { ["appId"] = appId };
+            if (primaryDelegated is not null)
+                additionalData["delegatedPermissions"] = primaryDelegated;
+            if (primaryApplication is not null)
+                additionalData["applicationPermissions"] = primaryApplication;
+
+            var grantBody = new Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant
+            {
+                AppId = appId,
+                AdditionalData = additionalData
+            };
+
+            await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants
+                    .PostAsync(grantBody, cancellationToken: ct),
+                ct);
+
+            _logger.LogInformation(
+                "Registered consuming app {AppId} for container type {ContainerTypeId}", appId, containerTypeId);
+
+            return new SpeConsumingTenant(
+                AppId: appId,
+                DisplayName: null, // Graph API does not return display name on POST
+                TenantId: tenantId,
+                DelegatedPermissions: delegatedPermissions,
+                ApplicationPermissions: applicationPermissions);
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} not found when registering consuming app {AppId} (404)",
+                containerTypeId, appId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Updates permissions for an existing consuming application registration.
+    ///
+    /// Finds the existing grant for the specified appId, then PATCHes the permission grant
+    /// to replace permissions. Returns null when the container type or consuming app is not found.
+    ///
+    /// ADR-007: No Graph SDK types exposed — callers receive <see cref="SpeConsumingTenant"/> domain record.
+    /// </summary>
+    public async Task<SpeConsumingTenant?> UpdateConsumingTenantAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        string appId,
+        IReadOnlyList<string> delegatedPermissions,
+        IReadOnlyList<string> applicationPermissions,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        _logger.LogInformation(
+            "Updating consuming app {AppId} for container type {ContainerTypeId}", appId, containerTypeId);
+
+        try
+        {
+            // Verify the consuming app exists by listing current registrations
+            var existing = await ListConsumingTenantsAsync(graphClient, containerTypeId, ct);
+            if (existing is null)
+            {
+                return null; // Container type not found
+            }
+
+            var existingGrant = existing.FirstOrDefault(c =>
+                string.Equals(c.AppId, appId, StringComparison.OrdinalIgnoreCase));
+
+            if (existingGrant is null)
+            {
+                _logger.LogInformation(
+                    "Consuming app {AppId} not found in container type {ContainerTypeId} for update",
+                    appId, containerTypeId);
+                return null;
+            }
+
+            // PATCH the permission grant with updated permissions.
+            // SpePermissionLevel enum is not available in Graph SDK 5.99; use string values via AdditionalData.
+            var primaryDelegated = delegatedPermissions.FirstOrDefault();
+            var primaryApplication = applicationPermissions.FirstOrDefault();
+
+            var patchAdditionalData = new Dictionary<string, object> { ["appId"] = appId };
+            if (primaryDelegated is not null)
+                patchAdditionalData["delegatedPermissions"] = primaryDelegated;
+            if (primaryApplication is not null)
+                patchAdditionalData["applicationPermissions"] = primaryApplication;
+
+            var patchBody = new Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant
+            {
+                AppId = appId,
+                AdditionalData = patchAdditionalData
+            };
+
+            await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants[appId]
+                    .PatchAsync(patchBody, cancellationToken: ct),
+                ct);
+
+            _logger.LogInformation(
+                "Updated consuming app {AppId} for container type {ContainerTypeId}", appId, containerTypeId);
+
+            return new SpeConsumingTenant(
+                AppId: appId,
+                DisplayName: existingGrant.DisplayName,
+                TenantId: existingGrant.TenantId,
+                DelegatedPermissions: delegatedPermissions,
+                ApplicationPermissions: applicationPermissions);
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} or consuming app {AppId} not found for update (404)",
+                containerTypeId, appId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Removes a consuming application registration from the specified SPE container type.
+    ///
+    /// Deletes the permission grant for the specified consuming application.
+    /// Returns true when the deletion was successful; false when not found (Graph 404).
+    ///
+    /// ADR-007: No Graph SDK types exposed — callers receive a boolean result.
+    /// </summary>
+    public async Task<bool> RemoveConsumingTenantAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        string appId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        _logger.LogInformation(
+            "Removing consuming app {AppId} from container type {ContainerTypeId}", appId, containerTypeId);
+
+        try
+        {
+            await graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants[appId]
+                .DeleteAsync(cancellationToken: ct);
+
+            _logger.LogInformation(
+                "Removed consuming app {AppId} from container type {ContainerTypeId}", appId, containerTypeId);
+
+            return true;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} or consuming app {AppId} not found when removing (404)",
+                containerTypeId, appId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Maps a Graph SDK FileStorageContainerTypeAppPermissionGrant to the SpeConsumingTenant domain record.
+    /// ADR-007: No Graph SDK types in public surface.
+    /// </summary>
+    private static SpeConsumingTenant MapPermissionGrantToConsumingTenant(
+        Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
+    {
+        var delegated = perm.DelegatedPermissions is not null
+            ? (IReadOnlyList<string>)[perm.DelegatedPermissions.ToString()!]
+            : (IReadOnlyList<string>)[];
+
+        var application = perm.ApplicationPermissions is not null
+            ? (IReadOnlyList<string>)[perm.ApplicationPermissions.ToString()!]
+            : (IReadOnlyList<string>)[];
+
+        return new SpeConsumingTenant(
+            AppId: perm.AppId ?? string.Empty,
+            DisplayName: null, // Graph API does not return display name on permission grants
+            TenantId: null,    // Graph API does not return tenant ID on permission grants
+            DelegatedPermissions: delegated,
+            ApplicationPermissions: application);
+    }
+
+    // =========================================================================
+    // Container type permission operations (SPE-054)
+    // =========================================================================
+
+    /// <summary>
+    /// Retrieves all application permissions registered for a SharePoint Embedded container type.
+    ///
+    /// Calls the Graph beta endpoint:
+    ///   GET /storage/fileStorage/containerTypes/{containerTypeId}/applicationPermissions
+    ///
+    /// Returns an empty list when no permissions have been registered.
+    /// Returns null when the container type is not found (Graph 404).
+    /// Returns domain records only — no Graph SDK types exposed (ADR-007).
+    /// </summary>
+    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// List of application permission entries, or <c>null</c> when the container type was not found.
+    /// </returns>
+    public async Task<IReadOnlyList<SpeContainerTypePermission>?> GetContainerTypePermissionsAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+
+        _logger.LogInformation(
+            "Retrieving application permissions for container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            var response = await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants
+                    .GetAsync(cancellationToken: ct),
+                ct);
+
+            var results = new List<SpeContainerTypePermission>();
+
+            while (response != null)
+            {
+                if (response.Value != null)
+                {
+                    foreach (var perm in response.Value)
+                    {
+                        results.Add(MapContainerTypePermission(perm));
+                    }
+                }
+
+                if (response.OdataNextLink == null) break;
+
+                _logger.LogDebug(
+                    "Following nextLink for container type permissions pagination: {ContainerTypeId}",
+                    containerTypeId);
+
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.ContainerTypeRegistrations[containerTypeId].ApplicationPermissionGrants
+                        .WithUrl(response.OdataNextLink)
+                        .GetAsync(cancellationToken: ct),
+                    ct);
+            }
+
+            _logger.LogInformation(
+                "Retrieved {Count} application permissions for container type {ContainerTypeId}",
+                results.Count, containerTypeId);
+
+            return results;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} not found in Graph when retrieving permissions (404)",
+                containerTypeId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Maps a Graph SDK FileStorageContainerTypeAppPermissionGrant to the
+    /// SpeContainerTypePermission domain record.
+    ///
+    /// DelegatedPermissions and ApplicationPermissions are enum values on the Graph SDK type.
+    /// They are converted to their string representation for the domain model.
+    /// Null values are normalized to empty lists (ADR-007: no Graph SDK types in public surface).
+    /// </summary>
+    private static SpeContainerTypePermission MapContainerTypePermission(
+        Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
+    {
+        // DelegatedPermissions and ApplicationPermissions are typed enums in the Graph SDK.
+        // Convert to string list for the domain model, filtering out null/empty values.
+        var delegated = perm.DelegatedPermissions is not null
+            ? [perm.DelegatedPermissions.ToString()!]
+            : (IReadOnlyList<string>)[];
+
+        var application = perm.ApplicationPermissions is not null
+            ? [perm.ApplicationPermissions.ToString()!]
+            : (IReadOnlyList<string>)[];
+
+        return new SpeContainerTypePermission(
+            AppId: perm.AppId ?? string.Empty,
+            DelegatedPermissions: delegated,
+            ApplicationPermissions: application);
+    }
+
+    // =========================================================================
+    // Container type settings operations (SPE-052)
+    // =========================================================================
+
+    /// <summary>
+    /// The set of valid sharing capability values accepted by the Graph API for container type settings.
+    /// These map to the allowed values for the <c>allowedRoles</c> or equivalent Graph property.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ValidSharingCapabilities =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "disabled",
+            "view",
+            "edit",
+            "full"
+        };
+
+    /// <summary>
+    /// Result returned by <see cref="UpdateContainerTypeSettingsAsync"/> after a successful PATCH.
+    /// Contains the updated container type fields echoed back from the Graph API response.
+    /// All Graph SDK types are stripped — callers receive only this domain record (ADR-007).
+    /// </summary>
+    /// <param name="Id">Container type GUID.</param>
+    /// <param name="DisplayName">Human-readable display name for the container type.</param>
+    /// <param name="BillingClassification">Billing classification string (e.g., "standard"). Null when not returned.</param>
+    /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
+    public sealed record ContainerTypeSettingsResult(
+        string Id,
+        string DisplayName,
+        string? BillingClassification,
+        DateTimeOffset CreatedDateTime);
+
+    /// <summary>
+    /// Updates settings on an SPE container type via PATCH /storage/fileStorage/containerTypes/{typeId}.
+    ///
+    /// Only non-null fields from the request are included in the PATCH body. The Graph API
+    /// applies partial updates (merge-patch semantics) — fields not included are left unchanged.
+    ///
+    /// Settings patched:
+    ///   - SharingCapability (via AdditionalData as "allowedRoles" property)
+    ///   - Versioning (via AdditionalData as "isMajorVersionLimitEnabled"/"majorVersionLimit")
+    ///   - StorageUsedInBytes (via AdditionalData as "quota"/"storagePlanInformation")
+    ///
+    /// Returns <c>null</c> when Graph responds with 404 (container type not found).
+    /// Returns <see cref="ContainerTypeSettingsResult"/> on success.
+    /// Returns domain record only — no Graph SDK types exposed (ADR-007).
+    /// </summary>
+    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
+    /// <param name="sharingCapability">New sharing capability ("disabled", "view", "edit", "full"). Null = no change.</param>
+    /// <param name="isVersioningEnabled">Enable or disable versioning. Null = no change.</param>
+    /// <param name="majorVersionLimit">Max major versions to retain. Null = no change.</param>
+    /// <param name="storageUsedInBytes">Storage quota limit in bytes. Null = no change.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Updated container type summary, or <c>null</c> if the container type was not found.</returns>
+    public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsAsync(
+        GraphServiceClient graphClient,
+        string containerTypeId,
+        string? sharingCapability,
+        bool? isVersioningEnabled,
+        int? majorVersionLimit,
+        long? storageUsedInBytes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+
+        _logger.LogInformation(
+            "Updating SPE container type settings for {ContainerTypeId}. " +
+            "SharingCapability: {SharingCapability}, IsVersioningEnabled: {IsVersioningEnabled}, " +
+            "MajorVersionLimit: {MajorVersionLimit}, StorageUsedInBytes: {StorageUsedInBytes}",
+            containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes);
+
+        // Build the PATCH body using AdditionalData for settings not represented
+        // as typed properties in the Graph SDK FileStorageContainerType model.
+        var patchBody = new Microsoft.Graph.Models.FileStorageContainerType
+        {
+            AdditionalData = new Dictionary<string, object>()
+        };
+
+        if (!string.IsNullOrWhiteSpace(sharingCapability))
+        {
+            // Graph API accepts sharingCapability as a string value on the container type resource.
+            patchBody.AdditionalData["sharingCapability"] = sharingCapability.ToLowerInvariant();
+        }
+
+        if (isVersioningEnabled.HasValue)
+        {
+            patchBody.AdditionalData["isVersioningEnabled"] = isVersioningEnabled.Value;
+        }
+
+        if (majorVersionLimit.HasValue)
+        {
+            patchBody.AdditionalData["majorVersionLimit"] = majorVersionLimit.Value;
+        }
+
+        if (storageUsedInBytes.HasValue)
+        {
+            patchBody.AdditionalData["storageUsedInBytes"] = storageUsedInBytes.Value;
+        }
+
+        try
+        {
+            // PATCH /storage/fileStorage/containerTypes/{typeId}
+            var updated = await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]
+                    .PatchAsync(patchBody, cancellationToken: ct),
+                ct);
+
+            if (updated is null)
+            {
+                // Graph returned null — treat as not found
+                _logger.LogWarning(
+                    "Graph returned null for PATCH container type {ContainerTypeId} — treating as not found",
+                    containerTypeId);
+                return null;
+            }
+
+            var billingClassification = updated.BillingClassification?.ToString();
+
+            _logger.LogInformation(
+                "Successfully updated container type settings for {ContainerTypeId}", containerTypeId);
+
+            return new ContainerTypeSettingsResult(
+                Id: updated.Id ?? containerTypeId,
+                DisplayName: updated.Name ?? string.Empty,
+                BillingClassification: billingClassification,
+                CreatedDateTime: updated.CreatedDateTime ?? DateTimeOffset.UtcNow);
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container type {ContainerTypeId} not found in Graph (404) during settings update",
+                containerTypeId);
+            return null;
+        }
+    }
+
+    // =========================================================================
+    // Container type registration (SPE-053)
+    // =========================================================================
+
+    /// <summary>
+    /// Result returned by <see cref="RegisterContainerTypeAsync"/> after a successful registration.
+    /// All SharePoint REST API types are stripped — callers receive only this domain record (ADR-007).
+    /// </summary>
+    /// <param name="ContainerTypeId">The container type GUID that was registered.</param>
+    /// <param name="AppId">The Azure AD application (client) ID that was granted permissions.</param>
+    /// <param name="DelegatedPermissions">Delegated permissions that were granted.</param>
+    /// <param name="ApplicationPermissions">Application permissions that were granted.</param>
+    public sealed record RegisterContainerTypeResult(
+        string ContainerTypeId,
+        string AppId,
+        IReadOnlyList<string> DelegatedPermissions,
+        IReadOnlyList<string> ApplicationPermissions);
+
+    /// <summary>
+    /// Registers a container type by granting the consuming application the specified permissions
+    /// via the SharePoint REST API.
+    ///
+    /// Calls: PUT {sharePointAdminUrl}/_api/v2.1/storageContainerTypes/{containerTypeId}/applicationPermissions
+    ///
+    /// Registration is a critical security operation: it enables the consuming app (identified by appId)
+    /// to create and manage containers of the given type. Without registration, the container type exists
+    /// but cannot be used.
+    ///
+    /// Authentication: Uses ClientSecretCredential to acquire a SharePoint-scoped access token
+    /// (scope: {sharePointHost}/.default) with the same credentials stored in the container type config.
+    ///
+    /// ADR-007: Returns domain model only — no SharePoint REST or Graph SDK types exposed.
+    /// ADR-001: Calls are made via HttpClient (not Graph SDK) since SharePoint REST is required.
+    /// </summary>
+    /// <param name="config">Resolved container type configuration (provides clientId, tenantId, secret).</param>
+    /// <param name="containerTypeId">The SPE container type GUID to register.</param>
+    /// <param name="sharePointAdminUrl">
+    ///   SharePoint Admin Center URL (e.g., https://contoso-admin.sharepoint.com).
+    ///   Used as the base URL for the SharePoint REST API call.
+    /// </param>
+    /// <param name="appId">Azure AD application (client) ID of the consuming app to grant permissions to.</param>
+    /// <param name="delegatedPermissions">Delegated permission names to grant (may be empty).</param>
+    /// <param name="applicationPermissions">Application permission names to grant (may be empty).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Domain result with the registered container type ID, app ID, and granted permissions.</returns>
+    /// <exception cref="HttpRequestException">Thrown when the SharePoint REST API returns a non-success status.</exception>
+    public async Task<RegisterContainerTypeResult> RegisterContainerTypeAsync(
+        ContainerTypeConfig config,
+        string containerTypeId,
+        string sharePointAdminUrl,
+        string appId,
+        IReadOnlyList<string> delegatedPermissions,
+        IReadOnlyList<string> applicationPermissions,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sharePointAdminUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        _logger.LogInformation(
+            "Registering container type {ContainerTypeId} for app {AppId} via SharePoint REST API. " +
+            "DelegatedPermissions: [{Delegated}], ApplicationPermissions: [{Application}]",
+            containerTypeId, appId,
+            string.Join(", ", delegatedPermissions),
+            string.Join(", ", applicationPermissions));
+
+        // 1. Acquire a SharePoint-scoped access token using the config's app registration credentials.
+        //    The scope must target the SharePoint admin host (not graph.microsoft.com).
+        var clientSecret = await FetchKeyVaultSecretAsync(config.SecretKeyVaultName, ct);
+        var credential = new ClientSecretCredential(config.TenantId, config.ClientId, clientSecret);
+
+        // Normalize the SharePoint admin URL and derive the scope host.
+        // Build the admin host string from scheme+host explicitly to avoid the double-slash that
+        // Uri.ToString() produces for root URIs (e.g., new Uri("https://host").ToString() == "https://host/").
+        var adminBaseUri = new Uri(sharePointAdminUrl.TrimEnd('/'));
+        var adminHost = $"{adminBaseUri.Scheme}://{adminBaseUri.Host}";
+        var scope = $"{adminHost}/.default";
+
+        _logger.LogDebug(
+            "Acquiring SharePoint access token for scope '{Scope}' (containerTypeId: {ContainerTypeId})",
+            scope, containerTypeId);
+
+        var tokenContext = new Azure.Core.TokenRequestContext(new[] { scope });
+        var accessToken = await credential.GetTokenAsync(tokenContext, ct);
+
+        // 2. Build the SharePoint REST API request body.
+        //    PUT /_api/v2.1/storageContainerTypes/{containerTypeId}/applicationPermissions
+        var requestUrl = $"{adminHost}/_api/v2.1/storageContainerTypes/{containerTypeId}/applicationPermissions";
+
+        var requestPayload = new
+        {
+            value = new[]
+            {
+                new
+                {
+                    appId,
+                    delegatedPermissions = delegatedPermissions.ToArray(),
+                    applicationPermissions = applicationPermissions.ToArray()
+                }
+            }
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(requestPayload);
+        using var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        // 3. Send the PUT request using a shared HttpClient.
+        var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+
+        using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Put, requestUrl);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken.Token);
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        request.Content = content;
+
+        _logger.LogInformation(
+            "Sending PUT to SharePoint REST API: {RequestUrl} (containerTypeId: {ContainerTypeId}, appId: {AppId})",
+            requestUrl, containerTypeId, appId);
+
+        var response = await httpClient.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "SharePoint REST API registration failed. Status: {StatusCode}. URL: {Url}. Body: {ErrorBody}",
+                (int)response.StatusCode, requestUrl, errorBody);
+
+            throw new HttpRequestException(
+                $"SharePoint REST API registration failed with status {(int)response.StatusCode}: {errorBody}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
+        _logger.LogInformation(
+            "Successfully registered container type {ContainerTypeId} for app {AppId}. " +
+            "SharePoint status: {StatusCode}",
+            containerTypeId, appId, (int)response.StatusCode);
+
+        return new RegisterContainerTypeResult(
+            ContainerTypeId: containerTypeId,
+            AppId: appId,
+            DelegatedPermissions: delegatedPermissions,
+            ApplicationPermissions: applicationPermissions);
     }
 
     // =========================================================================
@@ -2822,6 +3793,48 @@ public sealed class SpeAdminGraphService
 
         // Beta endpoint required for SPE FileStorage container APIs
         return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+    }
+
+    /// <summary>
+    /// Creates a <see cref="GraphServiceClient"/> using a pre-acquired bearer token (OBO flow).
+    /// Used for multi-app mode where the token was obtained via MSAL OBO exchange.
+    /// Uses the shared "GraphApiClient" HttpClient for resilience.
+    /// </summary>
+    private GraphServiceClient CreateGraphClientFromBearerToken(string bearerToken)
+    {
+        // BaseBearerTokenAuthenticationProvider injects the token as the Authorization header.
+        // The token was acquired via MSAL OBO and is already scoped to the owning app.
+        var authProvider = new Microsoft.Kiota.Abstractions.Authentication.BaseBearerTokenAuthenticationProvider(
+            new StaticBearerTokenProvider(bearerToken));
+
+        var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+
+        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+    }
+
+    /// <summary>
+    /// Simple Kiota IAccessTokenProvider that returns a pre-acquired static bearer token.
+    /// Used for OBO Graph clients where the token has already been exchanged via MSAL.
+    /// </summary>
+    private sealed class StaticBearerTokenProvider
+        : Microsoft.Kiota.Abstractions.Authentication.IAccessTokenProvider
+    {
+        private readonly string _token;
+
+        public StaticBearerTokenProvider(string token)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(token);
+            _token = token;
+        }
+
+        public Task<string> GetAuthorizationTokenAsync(
+            Uri uri,
+            Dictionary<string, object>? additionalAuthenticationContext = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(_token);
+
+        public Microsoft.Kiota.Abstractions.Authentication.AllowedHostsValidator AllowedHostsValidator { get; }
+            = new(new[] { "graph.microsoft.com" });
     }
 
     /// <summary>
@@ -3255,6 +4268,58 @@ public sealed class SpeAdminGraphService
         double? AverageScore);
 
     // =========================================================================
+    // Bulk Operations (SPE-083)
+    // =========================================================================
+
+    /// <summary>
+    /// Soft-deletes (moves to recycle bin) an active SPE container.
+    ///
+    /// Calls <c>DELETE /storage/fileStorage/containers/{id}</c>, which moves the container
+    /// into the recycle bin rather than permanently destroying it.
+    /// Returns <c>true</c> when the container was successfully soft-deleted.
+    /// Returns <c>false</c> when the container was not found (Graph 404).
+    ///
+    /// ADR-007: No Graph SDK types exposed — boolean result only.
+    /// </summary>
+    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="containerId">The Graph FileStorageContainer ID to soft-delete.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><c>true</c> if soft-deleted; <c>false</c> if not found.</returns>
+    public async Task<bool> SoftDeleteContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        _logger.LogInformation("Soft-deleting (recycle bin) container {ContainerId}", containerId);
+
+        try
+        {
+            // DELETE /storage/fileStorage/containers/{id}
+            // This moves the container to the recycle bin (soft delete / recoverable).
+            await ExecuteWithRetryAsync(
+                async () =>
+                {
+                    await graphClient.Storage.FileStorage.Containers[containerId]
+                        .DeleteAsync(cancellationToken: ct);
+                    return (object?)null;
+                },
+                ct);
+
+            _logger.LogInformation("Container {ContainerId} moved to recycle bin (soft delete)", containerId);
+            return true;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container {ContainerId} not found (404 on soft delete)", containerId);
+            return false;
+        }
+    }
+
+    // =========================================================================
     // Private helpers
     // =========================================================================
 
@@ -3389,7 +4454,7 @@ public sealed class SpeAdminGraphService
         };
 
         var response = await ExecuteWithRetryAsync(
-            () => graphClient.Search.Query.PostAsync(searchRequest, cancellationToken: ct),
+            () => graphClient.Search.Query.PostAsQueryPostResponseAsync(searchRequest, cancellationToken: ct),
             ct);
 
         var results = new List<SpeSearchItemResult>();

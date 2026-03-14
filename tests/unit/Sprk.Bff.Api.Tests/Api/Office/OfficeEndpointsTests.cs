@@ -507,6 +507,12 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
                 ["GraphResilience:RetryDelay"] = "00:00:01",
                 ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
                 ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // SpeAdmin options (required by SpeAdminModule — added to Program.cs)
+                ["SpeAdmin:KeyVaultUri"] = "https://test.vault.azure.net/",
+
+                // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
+                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
             };
             config.AddInMemoryCollection(dict!);
         });

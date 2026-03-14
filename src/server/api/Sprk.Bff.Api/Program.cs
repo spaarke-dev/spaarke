@@ -41,6 +41,9 @@ builder.Services.AddFinanceModule(builder.Configuration);
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
 
+// SPE Admin module (environments, container type configs, Graph service, audit logging, dashboard sync)
+builder.Services.AddSpeAdminModule(builder.Configuration);
+
 // Office Service Bus client and workers
 builder.Services.AddOfficeServiceBus(builder.Configuration);
 builder.Services.AddOfficeWorkers();

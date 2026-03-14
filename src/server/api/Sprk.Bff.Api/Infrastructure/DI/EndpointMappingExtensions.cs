@@ -150,6 +150,14 @@ public static class EndpointMappingExtensions
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
+
+        // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
+        app.MapSpeAdminEndpoints();
+
+        // SPE container item endpoints (/api/spe/containers/{id}/items, /upload, /content, /preview, /versions, /thumbnails, /sharing, /folders)
+        // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
+        // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
+        app.MapContainerItemEndpoints();
     }
 
     private static void MapSpaFallback(WebApplication app)
