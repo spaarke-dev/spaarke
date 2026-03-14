@@ -7,24 +7,24 @@
  * @xyflow/react v12: Uses Node<T> and Edge<T> typed generics.
  */
 
-import type { Node, Edge } from "@xyflow/react";
-import type { PromptSchema } from "./promptSchema";
+import type { Node, Edge } from '@xyflow/react';
+import type { PromptSchema } from './promptSchema';
 
 /**
  * All supported playbook node types.
  * Maps 1:1 to the nodeTypes registry keys and the canvas store.
  */
 export type PlaybookNodeType =
-    | "start"
-    | "aiAnalysis"
-    | "aiCompletion"
-    | "condition"
-    | "deliverOutput"
-    | "deliverToIndex"
-    | "updateRecord"
-    | "createTask"
-    | "sendEmail"
-    | "wait";
+  | 'start'
+  | 'aiAnalysis'
+  | 'aiCompletion'
+  | 'condition'
+  | 'deliverOutput'
+  | 'deliverToIndex'
+  | 'updateRecord'
+  | 'createTask'
+  | 'sendEmail'
+  | 'wait';
 
 /**
  * Data payload for all playbook nodes.
@@ -38,40 +38,40 @@ export type PlaybookNodeType =
  *   actionId     -> sprk_actionid (lookup)
  */
 export interface PlaybookNodeData {
-    /** Display label shown in the node header */
-    label: string;
-    /** Node type discriminator */
-    type: PlaybookNodeType;
-    /** Optional Dataverse action record ID linked to this node */
-    actionId?: string;
-    /** Output variable name for downstream node references */
-    outputVariable?: string;
-    /** Serialized node-specific configuration (maps to sprk_configjson) */
-    configJson?: string;
-    /** Whether the node has been fully configured */
-    isConfigured?: boolean;
-    /** Validation error messages (empty = valid) */
-    validationErrors?: string[];
-    /** Arbitrary config bag for node-specific settings */
-    config?: Record<string, unknown>;
-    /** Timeout in seconds (for wait nodes, AI nodes) */
-    timeoutSeconds?: number;
-    /** Retry count for recoverable failures */
-    retryCount?: number;
-    /** Condition expression JSON (for condition nodes) */
-    conditionJson?: string;
-    /** Selected AI skill IDs (N:N relationship) */
-    skillIds?: string[];
-    /** Selected knowledge source IDs (N:N relationship) */
-    knowledgeIds?: string[];
-    /** Selected tool IDs (N:N relationship) */
-    toolIds?: string[];
-    /** AI model deployment ID (for aiAnalysis, aiCompletion nodes) */
-    modelDeploymentId?: string;
-    /** JSON Prompt Schema for AI nodes (aiAnalysis, aiCompletion) */
-    promptSchema?: PromptSchema;
-    /** Index signature for React Flow v12 compatibility */
-    [key: string]: unknown;
+  /** Display label shown in the node header */
+  label: string;
+  /** Node type discriminator */
+  type: PlaybookNodeType;
+  /** Optional Dataverse action record ID linked to this node */
+  actionId?: string;
+  /** Output variable name for downstream node references */
+  outputVariable?: string;
+  /** Serialized node-specific configuration (maps to sprk_configjson) */
+  configJson?: string;
+  /** Whether the node has been fully configured */
+  isConfigured?: boolean;
+  /** Validation error messages (empty = valid) */
+  validationErrors?: string[];
+  /** Arbitrary config bag for node-specific settings */
+  config?: Record<string, unknown>;
+  /** Timeout in seconds (for wait nodes, AI nodes) */
+  timeoutSeconds?: number;
+  /** Retry count for recoverable failures */
+  retryCount?: number;
+  /** Condition expression JSON (for condition nodes) */
+  conditionJson?: string;
+  /** Selected AI skill IDs (N:N relationship) */
+  skillIds?: string[];
+  /** Selected knowledge source IDs (N:N relationship) */
+  knowledgeIds?: string[];
+  /** Selected tool IDs (N:N relationship) */
+  toolIds?: string[];
+  /** AI model deployment ID (for aiAnalysis, aiCompletion nodes) */
+  modelDeploymentId?: string;
+  /** JSON Prompt Schema for AI nodes (aiAnalysis, aiCompletion) */
+  promptSchema?: PromptSchema;
+  /** Index signature for React Flow v12 compatibility */
+  [key: string]: unknown;
 }
 
 /**
@@ -79,12 +79,12 @@ export interface PlaybookNodeData {
  * Stored in Edge<ConditionEdgeData>.data.
  */
 export interface ConditionEdgeData {
-    /** Which branch this edge represents */
-    branch: "true" | "false";
-    /** Optional human-readable condition label */
-    conditionLabel?: string;
-    /** Index signature for React Flow v12 compatibility */
-    [key: string]: unknown;
+  /** Which branch this edge represents */
+  branch: 'true' | 'false';
+  /** Optional human-readable condition label */
+  conditionLabel?: string;
+  /** Index signature for React Flow v12 compatibility */
+  [key: string]: unknown;
 }
 
 /**
@@ -101,9 +101,9 @@ export type PlaybookEdge = Edge<ConditionEdgeData>;
  * Canvas JSON structure persisted to sprk_canvaslayoutjson.
  */
 export interface CanvasJson {
-    nodes: PlaybookNode[];
-    edges: PlaybookEdge[];
-    version: number;
+  nodes: PlaybookNode[];
+  edges: PlaybookEdge[];
+  version: number;
 }
 
 /** Current canvas JSON schema version */

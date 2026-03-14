@@ -14,8 +14,8 @@ import type {
   IColumnDefinition,
   IFilterGroup,
   IFilterCondition,
-} from "../types/FetchXmlTypes";
-import type { XrmContext } from "../utils/xrmContext";
+} from '../types/FetchXmlTypes';
+import type { XrmContext } from '../utils/xrmContext';
 
 /**
  * Service for executing FetchXML queries and parsing layout XML.
@@ -44,21 +44,10 @@ export class FetchXmlService {
     fetchXml: string,
     options: IFetchXmlOptions = {}
   ): Promise<IFetchXmlResult<T>> {
-    const {
-      pageSize = 50,
-      pageNumber = 1,
-      pagingCookie,
-      returnTotalRecordCount = false,
-      maxPageSize,
-    } = options;
+    const { pageSize = 50, pageNumber = 1, pagingCookie, returnTotalRecordCount = false, maxPageSize } = options;
 
     // Apply pagination to FetchXML
-    let paginatedFetchXml = this.applyPagination(
-      fetchXml,
-      pageSize,
-      pageNumber,
-      pagingCookie
-    );
+    let paginatedFetchXml = this.applyPagination(fetchXml, pageSize, pageNumber, pagingCookie);
 
     // Apply count attribute if total count requested
     if (returnTotalRecordCount) {
@@ -75,21 +64,18 @@ export class FetchXmlService {
       const entities = (result.entities || []) as T[];
 
       // Respect maxPageSize if specified
-      const limitedEntities = maxPageSize
-        ? entities.slice(0, maxPageSize)
-        : entities;
+      const limitedEntities = maxPageSize ? entities.slice(0, maxPageSize) : entities;
 
       return {
         entities: limitedEntities,
-        totalRecordCount: result["@Microsoft.Dynamics.CRM.totalrecordcount"],
-        pagingCookie: result["@Microsoft.Dynamics.CRM.fetchxmlpagingcookie"],
+        totalRecordCount: result['@Microsoft.Dynamics.CRM.totalrecordcount'],
+        pagingCookie: result['@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'],
         moreRecords:
-          result["@odata.nextLink"] !== undefined ||
-          (result["@Microsoft.Dynamics.CRM.morerecords"] ?? false),
+          result['@odata.nextLink'] !== undefined || (result['@Microsoft.Dynamics.CRM.morerecords'] ?? false),
         fetchXml: paginatedFetchXml,
       };
     } catch (error) {
-      console.error("[FetchXmlService] Execute failed:", error);
+      console.error('[FetchXmlService] Execute failed:', error);
       throw error;
     }
   }
@@ -106,23 +92,23 @@ export class FetchXmlService {
 
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(layoutXml, "text/xml");
+      const doc = parser.parseFromString(layoutXml, 'text/xml');
 
       // Check for parse errors
-      const parseError = doc.querySelector("parsererror");
+      const parseError = doc.querySelector('parsererror');
       if (parseError) {
-        console.error("[FetchXmlService] Layout XML parse error:", parseError.textContent);
+        console.error('[FetchXmlService] Layout XML parse error:', parseError.textContent);
         return [];
       }
 
       // Find all cell elements (columns)
-      const cells = doc.querySelectorAll("cell");
+      const cells = doc.querySelectorAll('cell');
       const columns: IColumnDefinition[] = [];
 
       cells.forEach((cell, index) => {
-        const name = cell.getAttribute("name");
-        const widthAttr = cell.getAttribute("width");
-        const isPrimaryAttr = cell.getAttribute("isfirstcell") === "true";
+        const name = cell.getAttribute('name');
+        const widthAttr = cell.getAttribute('width');
+        const isPrimaryAttr = cell.getAttribute('isfirstcell') === 'true';
 
         if (name) {
           columns.push({
@@ -136,7 +122,7 @@ export class FetchXmlService {
 
       return columns;
     } catch (error) {
-      console.error("[FetchXmlService] parseLayoutXml error:", error);
+      console.error('[FetchXmlService] parseLayoutXml error:', error);
       return [];
     }
   }
@@ -148,18 +134,18 @@ export class FetchXmlService {
    * @returns Modified FetchXML with merged filters
    */
   mergeFetchXmlFilter(fetchXml: string, filterGroup: IFilterGroup): string {
-    if (!fetchXml || !filterGroup.conditions.length && !filterGroup.filters?.length) {
+    if (!fetchXml || (!filterGroup.conditions.length && !filterGroup.filters?.length)) {
       return fetchXml;
     }
 
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, "text/xml");
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
 
       // Find entity element
-      const entityElement = doc.querySelector("entity");
+      const entityElement = doc.querySelector('entity');
       if (!entityElement) {
-        console.warn("[FetchXmlService] No entity element found in FetchXML");
+        console.warn('[FetchXmlService] No entity element found in FetchXML');
         return fetchXml;
       }
 
@@ -167,12 +153,12 @@ export class FetchXmlService {
       const filterXml = this.buildFilterXml(doc, filterGroup);
 
       // Find existing filter or create new one
-      let existingFilter = entityElement.querySelector(":scope > filter");
+      let existingFilter = entityElement.querySelector(':scope > filter');
 
       if (existingFilter) {
         // Wrap existing filter and new filter in an AND group
-        const andFilter = doc.createElement("filter");
-        andFilter.setAttribute("type", "and");
+        const andFilter = doc.createElement('filter');
+        andFilter.setAttribute('type', 'and');
 
         // Clone existing filter content
         const existingClone = existingFilter.cloneNode(true);
@@ -189,7 +175,7 @@ export class FetchXmlService {
       const serializer = new XMLSerializer();
       return serializer.serializeToString(doc);
     } catch (error) {
-      console.error("[FetchXmlService] mergeFetchXmlFilter error:", error);
+      console.error('[FetchXmlService] mergeFetchXmlFilter error:', error);
       return fetchXml;
     }
   }
@@ -202,9 +188,9 @@ export class FetchXmlService {
   getEntityFromFetchXml(fetchXml: string): string | undefined {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, "text/xml");
-      const entityElement = doc.querySelector("entity");
-      return entityElement?.getAttribute("name") ?? undefined;
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      const entityElement = doc.querySelector('entity');
+      return entityElement?.getAttribute('name') ?? undefined;
     } catch {
       return undefined;
     }
@@ -218,12 +204,12 @@ export class FetchXmlService {
   getAttributesFromFetchXml(fetchXml: string): string[] {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, "text/xml");
-      const attributes = doc.querySelectorAll("attribute");
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      const attributes = doc.querySelectorAll('attribute');
       const names: string[] = [];
 
-      attributes.forEach((attr) => {
-        const name = attr.getAttribute("name");
+      attributes.forEach(attr => {
+        const name = attr.getAttribute('name');
         if (name) {
           names.push(name);
         }
@@ -242,23 +228,18 @@ export class FetchXmlService {
   /**
    * Apply pagination attributes to FetchXML
    */
-  private applyPagination(
-    fetchXml: string,
-    pageSize: number,
-    pageNumber: number,
-    pagingCookie?: string
-  ): string {
+  private applyPagination(fetchXml: string, pageSize: number, pageNumber: number, pagingCookie?: string): string {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, "text/xml");
-      const fetchElement = doc.querySelector("fetch");
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      const fetchElement = doc.querySelector('fetch');
 
       if (fetchElement) {
-        fetchElement.setAttribute("count", String(pageSize));
-        fetchElement.setAttribute("page", String(pageNumber));
+        fetchElement.setAttribute('count', String(pageSize));
+        fetchElement.setAttribute('page', String(pageNumber));
 
         if (pagingCookie) {
-          fetchElement.setAttribute("paging-cookie", pagingCookie);
+          fetchElement.setAttribute('paging-cookie', pagingCookie);
         }
       }
 
@@ -275,11 +256,11 @@ export class FetchXmlService {
   private applyReturnTotalRecordCount(fetchXml: string): string {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, "text/xml");
-      const fetchElement = doc.querySelector("fetch");
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      const fetchElement = doc.querySelector('fetch');
 
       if (fetchElement) {
-        fetchElement.setAttribute("returntotalrecordcount", "true");
+        fetchElement.setAttribute('returntotalrecordcount', 'true');
       }
 
       const serializer = new XMLSerializer();
@@ -293,8 +274,8 @@ export class FetchXmlService {
    * Build filter XML element from filter group
    */
   private buildFilterXml(doc: Document, filterGroup: IFilterGroup): Element {
-    const filterElement = doc.createElement("filter");
-    filterElement.setAttribute("type", filterGroup.type);
+    const filterElement = doc.createElement('filter');
+    filterElement.setAttribute('type', filterGroup.type);
 
     // Add conditions
     for (const condition of filterGroup.conditions) {
@@ -317,18 +298,18 @@ export class FetchXmlService {
    * Build condition XML element
    */
   private buildConditionXml(doc: Document, condition: IFilterCondition): Element {
-    const conditionElement = doc.createElement("condition");
-    conditionElement.setAttribute("attribute", condition.attribute);
-    conditionElement.setAttribute("operator", condition.operator);
+    const conditionElement = doc.createElement('condition');
+    conditionElement.setAttribute('attribute', condition.attribute);
+    conditionElement.setAttribute('operator', condition.operator);
 
     if (condition.value !== undefined && condition.value !== null) {
-      conditionElement.setAttribute("value", this.formatConditionValue(condition.value));
+      conditionElement.setAttribute('value', this.formatConditionValue(condition.value));
     }
 
     // Handle 'in' operator with multiple values
     if (condition.values && condition.values.length > 0) {
       for (const value of condition.values) {
-        const valueElement = doc.createElement("value");
+        const valueElement = doc.createElement('value');
         valueElement.textContent = String(value);
         conditionElement.appendChild(valueElement);
       }
@@ -356,4 +337,4 @@ export type {
   IFilterGroup,
   IFilterCondition,
   ColumnDataType,
-} from "../types/FetchXmlTypes";
+} from '../types/FetchXmlTypes';

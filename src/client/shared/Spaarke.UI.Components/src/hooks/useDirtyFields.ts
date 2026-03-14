@@ -23,7 +23,7 @@
  * ```
  */
 
-import * as React from "react";
+import * as React from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -117,15 +117,9 @@ export function useDirtyFields(
     [original, current, editableFields]
   );
 
-  const isDirty = React.useMemo(
-    () => hasDirtyFields(dirtyFields),
-    [dirtyFields]
-  );
+  const isDirty = React.useMemo(() => hasDirtyFields(dirtyFields), [dirtyFields]);
 
-  const dirtyFieldNames = React.useMemo(
-    () => Object.keys(dirtyFields),
-    [dirtyFields]
-  );
+  const dirtyFieldNames = React.useMemo(() => Object.keys(dirtyFields), [dirtyFields]);
 
   return {
     dirtyFields,

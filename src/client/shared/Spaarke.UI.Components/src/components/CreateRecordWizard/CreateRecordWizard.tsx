@@ -26,31 +26,17 @@
  * @see ADR-012 — Shared Component Library
  */
 import * as React from 'react';
-import {
-  MessageBar,
-  MessageBarBody,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 
-import type {
-  ICreateRecordWizardProps,
-  FollowOnActionId,
-  IRecipientItem,
-} from './types';
+import type { ICreateRecordWizardProps, FollowOnActionId, IRecipientItem } from './types';
 
 import {
   NextStepsStep,
@@ -82,12 +68,8 @@ type FileAction =
 function fileReducer(state: IFileState, action: FileAction): IFileState {
   switch (action.type) {
     case 'ADD_FILES': {
-      const existing = new Set(
-        state.uploadedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
-      );
-      const newFiles = action.files.filter(
-        (f) => !existing.has(`${f.name}::${f.sizeBytes}`)
-      );
+      const existing = new Set(state.uploadedFiles.map(f => `${f.name}::${f.sizeBytes}`));
+      const newFiles = action.files.filter(f => !existing.has(`${f.name}::${f.sizeBytes}`));
       return {
         ...state,
         uploadedFiles: [...state.uploadedFiles, ...newFiles],
@@ -97,7 +79,7 @@ function fileReducer(state: IFileState, action: FileAction): IFileState {
     case 'REMOVE_FILE':
       return {
         ...state,
-        uploadedFiles: state.uploadedFiles.filter((f) => f.id !== action.fileId),
+        uploadedFiles: state.uploadedFiles.filter(f => f.id !== action.fileId),
       };
     case 'SET_VALIDATION_ERRORS':
       return { ...state, validationErrors: action.errors };
@@ -138,11 +120,7 @@ const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
 // CreateRecordWizard
 // ---------------------------------------------------------------------------
 
-export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
-  open,
-  onClose,
-  config,
-}) => {
+export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, onClose, config }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
@@ -179,7 +157,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   React.useEffect(() => {
     if (open && config.resolveSpeContainerId) {
-      config.resolveSpeContainerId().then((id) => setSpeContainerId(id));
+      config.resolveSpeContainerId().then(id => setSpeContainerId(id));
     }
   }, [open, config]);
 
@@ -246,27 +224,18 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
 
   // ── Assign Resources change handlers ────────────────────────────────────
-  const handleAttorneyChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setAssignedAttorneyId(item?.id ?? '');
-      setAssignedAttorneyName(item?.name ?? '');
-    },
-    []
-  );
-  const handleParalegalChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setAssignedParalegalId(item?.id ?? '');
-      setAssignedParalegalName(item?.name ?? '');
-    },
-    []
-  );
-  const handleOutsideCounselChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setAssignedOutsideCounselId(item?.id ?? '');
-      setAssignedOutsideCounselName(item?.name ?? '');
-    },
-    []
-  );
+  const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignedAttorneyId(item?.id ?? '');
+    setAssignedAttorneyName(item?.name ?? '');
+  }, []);
+  const handleParalegalChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignedParalegalId(item?.id ?? '');
+    setAssignedParalegalName(item?.name ?? '');
+  }, []);
+  const handleOutsideCounselChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignedOutsideCounselId(item?.id ?? '');
+    setAssignedOutsideCounselName(item?.name ?? '');
+  }, []);
 
   // ── Sync dynamic steps with selected action cards ───────────────────────
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
@@ -275,7 +244,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
     const prev = prevSelectedActionsRef.current;
     const next = selectedActions;
 
-    next.forEach((actionId) => {
+    next.forEach(actionId => {
       if (!prev.includes(actionId)) {
         const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
         const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
@@ -296,13 +265,22 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
           renderContent: () => {
             if (stepId === 'followon-assign-counsel') {
               const attVal: ILookupItem | null = assignedAttorneyIdRef.current
-                ? { id: assignedAttorneyIdRef.current, name: assignedAttorneyNameRef.current }
+                ? {
+                    id: assignedAttorneyIdRef.current,
+                    name: assignedAttorneyNameRef.current,
+                  }
                 : null;
               const paraVal: ILookupItem | null = assignedParalegalIdRef.current
-                ? { id: assignedParalegalIdRef.current, name: assignedParalegalNameRef.current }
+                ? {
+                    id: assignedParalegalIdRef.current,
+                    name: assignedParalegalNameRef.current,
+                  }
                 : null;
               const ocVal: ILookupItem | null = assignedOutsideCounselIdRef.current
-                ? { id: assignedOutsideCounselIdRef.current, name: assignedOutsideCounselNameRef.current }
+                ? {
+                    id: assignedOutsideCounselIdRef.current,
+                    name: assignedOutsideCounselNameRef.current,
+                  }
                 : null;
 
               return (
@@ -356,7 +334,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       }
     });
 
-    prev.forEach((actionId) => {
+    prev.forEach(actionId => {
       if (!next.includes(actionId)) {
         shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
       }
@@ -379,9 +357,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
     if (selectedActions.includes('send-email') && !emailSubject) {
       const entityName = config.getEntityName?.() ?? '';
       if (entityName) {
-        const subject = config.buildEmailSubject
-          ? config.buildEmailSubject(entityName)
-          : `New Record: ${entityName}`;
+        const subject = config.buildEmailSubject ? config.buildEmailSubject(entityName) : `New Record: ${entityName}`;
         setEmailSubject(subject);
 
         const fields = config.getFormFields?.() ?? {};
@@ -399,18 +375,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
     []
   );
   const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) =>
-      fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
+    (errors: IFileValidationError[]) => fileDispatch({ type: 'SET_VALIDATION_ERRORS', errors }),
     []
   );
-  const handleRemoveFile = React.useCallback(
-    (fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }),
-    []
-  );
-  const handleClearErrors = React.useCallback(
-    () => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }),
-    []
-  );
+  const handleRemoveFile = React.useCallback((fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }), []);
+  const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
 
   // ── Finish handler ──────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
@@ -437,8 +406,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   }, [config]);
 
   // ── Step configurations ─────────────────────────────────────────────────
-  const filesStepSubtitle = config.filesStepSubtitle ??
-    'Upload documents for AI analysis, or click Next to skip.';
+  const filesStepSubtitle = config.filesStepSubtitle ?? 'Upload documents for AI analysis, or click Next to skip.';
 
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
     () => [
@@ -459,11 +427,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
             </div>
 
             {fileState.validationErrors.length > 0 && (
-              <MessageBar
-                intent="error"
-                className={styles.errorBar}
-                onMouseEnter={handleClearErrors}
-              >
+              <MessageBar intent="error" className={styles.errorBar} onMouseEnter={handleClearErrors}>
                 <MessageBarBody>
                   {fileState.validationErrors.map((err, i) => (
                     <div key={i}>
@@ -474,16 +438,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
               </MessageBar>
             )}
 
-            <FileUploadZone
-              onFilesAccepted={handleFilesAccepted}
-              onValidationErrors={handleValidationErrors}
-            />
+            <FileUploadZone onFilesAccepted={handleFilesAccepted} onValidationErrors={handleValidationErrors} />
 
             {fileState.uploadedFiles.length > 0 && (
-              <UploadedFileList
-                files={fileState.uploadedFiles}
-                onRemove={handleRemoveFile}
-              />
+              <UploadedFileList files={fileState.uploadedFiles} onRemove={handleRemoveFile} />
             )}
           </>
         ),

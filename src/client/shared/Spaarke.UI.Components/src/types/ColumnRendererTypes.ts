@@ -2,8 +2,8 @@
  * Column renderer types for different Dataverse attribute types
  */
 
-import * as React from "react";
-import { IDatasetColumn, IDatasetRecord } from "./DatasetTypes";
+import * as React from 'react';
+import { IDatasetColumn, IDatasetRecord } from './DatasetTypes';
 
 /**
  * Column renderer function signature
@@ -20,39 +20,39 @@ export type ColumnRenderer = (
  */
 export enum DataverseAttributeType {
   // String types
-  SingleLineText = "SingleLine.Text",
-  MultipleLineText = "Multiple",
-  Email = "SingleLine.Email",
-  Phone = "SingleLine.Phone",
-  Url = "SingleLine.URL",
-  TickerSymbol = "SingleLine.Ticker",
+  SingleLineText = 'SingleLine.Text',
+  MultipleLineText = 'Multiple',
+  Email = 'SingleLine.Email',
+  Phone = 'SingleLine.Phone',
+  Url = 'SingleLine.URL',
+  TickerSymbol = 'SingleLine.Ticker',
 
   // Number types
-  WholeNumber = "Whole.None",
-  DecimalNumber = "Decimal.Number",
-  FloatingPoint = "FP",
-  Money = "Currency",
+  WholeNumber = 'Whole.None',
+  DecimalNumber = 'Decimal.Number',
+  FloatingPoint = 'FP',
+  Money = 'Currency',
 
   // Date/Time
-  DateAndTime = "DateAndTime.DateAndTime",
-  DateOnly = "DateAndTime.DateOnly",
+  DateAndTime = 'DateAndTime.DateAndTime',
+  DateOnly = 'DateAndTime.DateOnly',
 
   // Choice types
-  TwoOptions = "TwoOptions",
-  OptionSet = "OptionSet",
-  MultiSelectOptionSet = "MultiSelectOptionSet",
+  TwoOptions = 'TwoOptions',
+  OptionSet = 'OptionSet',
+  MultiSelectOptionSet = 'MultiSelectOptionSet',
 
   // Lookup
-  Lookup = "Lookup.Simple",
-  Customer = "Lookup.Customer",
-  Owner = "Lookup.Owner",
-  PartyList = "Lookup.PartyList",
-  Regarding = "Lookup.Regarding",
+  Lookup = 'Lookup.Simple',
+  Customer = 'Lookup.Customer',
+  Owner = 'Lookup.Owner',
+  PartyList = 'Lookup.PartyList',
+  Regarding = 'Lookup.Regarding',
 
   // Other
-  Boolean = "Boolean",
-  Image = "Image",
-  File = "File"
+  Boolean = 'Boolean',
+  Image = 'Image',
+  File = 'File',
 }
 
 /**

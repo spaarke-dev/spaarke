@@ -76,7 +76,7 @@ async function init() {
         reject(new Error('Office.js initialization timeout (10s)'));
       }, 10000);
 
-      Office.onReady((info) => {
+      Office.onReady(info => {
         clearTimeout(timeout);
         console.log('[Spaarke] Office.js ready:', info);
         resolve();
@@ -140,12 +140,7 @@ async function init() {
     reactRoot = createRoot(container);
     reactRoot.render(
       <React.StrictMode>
-        <App
-          hostAdapter={hostAdapter}
-          title="Spaarke for Outlook"
-          version={APP_VERSION}
-          buildDate={BUILD_DATE}
-        />
+        <App hostAdapter={hostAdapter} title="Spaarke for Outlook" version={APP_VERSION} buildDate={BUILD_DATE} />
       </React.StrictMode>
     );
     console.log('[Spaarke] React app rendered successfully');
@@ -156,7 +151,7 @@ async function init() {
 }
 
 // Start initialization
-init().catch((error) => {
+init().catch(error => {
   console.error('[Spaarke] Initialization failed:', error);
   // Error already rendered by renderError() in init stages
 });

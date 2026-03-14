@@ -13,12 +13,7 @@
 
 import * as React from 'react';
 import { useMemo } from 'react';
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Button,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, Button } from '@fluentui/react-components';
 import {
   Add20Regular,
   ArrowRight20Regular,
@@ -57,10 +52,7 @@ const useStyles = makeStyles({
   suggestionButton: {
     minWidth: 'auto',
     fontSize: tokens.fontSizeBase200,
-    ...shorthands.padding(
-      tokens.spacingVerticalXXS,
-      tokens.spacingHorizontalS
-    ),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
   },
 });
 
@@ -90,16 +82,13 @@ export interface SuggestionBarProps {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SuggestionBar: React.FC<SuggestionBarProps> = ({
-  onSelectSuggestion,
-  isVisible = true,
-}) => {
+export const SuggestionBar: React.FC<SuggestionBarProps> = ({ onSelectSuggestion, isVisible = true }) => {
   const styles = useStyles();
 
   // Get canvas state
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
-  const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
+  const nodes = useCanvasStore(state => state.nodes);
+  const edges = useCanvasStore(state => state.edges);
+  const selectedNodeId = useCanvasStore(state => state.selectedNodeId);
 
   // Generate contextual suggestions based on state
   const suggestions = useMemo((): Suggestion[] => {
@@ -116,15 +105,13 @@ export const SuggestionBar: React.FC<SuggestionBarProps> = ({
           id: 'help',
           label: 'What can I build?',
           icon: <Lightbulb20Regular />,
-          message:
-            'What types of playbooks can I build? Show me some examples.',
+          message: 'What types of playbooks can I build? Show me some examples.',
         },
         {
           id: 'template',
           label: 'Use a template',
           icon: <Add20Regular />,
-          message:
-            'Show me playbook templates I can use as a starting point',
+          message: 'Show me playbook templates I can use as a starting point',
         },
       ];
     }
@@ -155,7 +142,7 @@ export const SuggestionBar: React.FC<SuggestionBarProps> = ({
 
     // Node is selected - suggest configuration
     if (selectedNodeId) {
-      const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+      const selectedNode = nodes.find(n => n.id === selectedNodeId);
       const nodeType = selectedNode?.type || 'node';
 
       return [
@@ -183,7 +170,7 @@ export const SuggestionBar: React.FC<SuggestionBarProps> = ({
     // Has workflow - suggest next steps
     if (nodes.length > 0 && edges.length > 0) {
       // Check if workflow has an output node
-      const hasOutput = nodes.some((n) => n.type === 'deliverOutput');
+      const hasOutput = nodes.some(n => n.type === 'deliverOutput');
 
       if (!hasOutput) {
         return [
@@ -257,7 +244,7 @@ export const SuggestionBar: React.FC<SuggestionBarProps> = ({
         <span>Suggestions</span>
       </div>
       <div className={styles.suggestions}>
-        {suggestions.map((suggestion) => (
+        {suggestions.map(suggestion => (
           <Button
             key={suggestion.id}
             appearance="subtle"

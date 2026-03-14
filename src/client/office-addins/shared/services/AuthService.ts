@@ -90,11 +90,14 @@ class AuthService implements IAuthService {
         const bufferMs = 5 * 60 * 1000; // 5 minutes
 
         // Only restore if token is still valid (with buffer)
-        if ((expiryTime - bufferMs) > now) {
+        if (expiryTime - bufferMs > now) {
           this.cachedAccessToken = token;
           this.tokenExpiresAt = expiryTime;
-          console.log('[AuthService] Restored token from storage (expires in',
-            Math.round((expiryTime - now) / 1000 / 60), 'minutes)');
+          console.log(
+            '[AuthService] Restored token from storage (expires in',
+            Math.round((expiryTime - now) / 1000 / 60),
+            'minutes)'
+          );
         } else {
           console.log('[AuthService] Stored token expired, will need re-auth');
           this.clearStorage();
@@ -189,7 +192,7 @@ class AuthService implements IAuthService {
         // Return a minimal result - the token will be fetched via getAccessToken when needed
         return {
           account: this.currentAccount,
-          accessToken: '',  // Token fetched separately via dialog
+          accessToken: '', // Token fetched separately via dialog
           scopes,
           expiresOn: null,
           tenantId: AUTH_CONFIG.tenantId,
@@ -285,13 +288,14 @@ class AuthService implements IAuthService {
       // Check if token is still valid (with 5 minute buffer for clock skew)
       const now = Date.now();
       const bufferMs = 5 * 60 * 1000; // 5 minutes
-      const isTokenValid = this.cachedAccessToken &&
-        this.tokenExpiresAt &&
-        (this.tokenExpiresAt - bufferMs) > now;
+      const isTokenValid = this.cachedAccessToken && this.tokenExpiresAt && this.tokenExpiresAt - bufferMs > now;
 
       if (isTokenValid) {
-        console.log('[AuthService] Returning cached access token (expires in',
-          Math.round((this.tokenExpiresAt! - now) / 1000 / 60), 'minutes)');
+        console.log(
+          '[AuthService] Returning cached access token (expires in',
+          Math.round((this.tokenExpiresAt! - now) / 1000 / 60),
+          'minutes)'
+        );
         return this.cachedAccessToken;
       }
 
@@ -368,7 +372,7 @@ class AuthService implements IAuthService {
       Office.context.ui.displayDialogAsync(
         `${window.location.origin}/auth-dialog.html`,
         { height: 60, width: 40 },
-        (result) => {
+        result => {
           if (result.status === Office.AsyncResultStatus.Failed) {
             reject(new Error(result.error.message));
             return;
@@ -386,9 +390,7 @@ class AuthService implements IAuthService {
                 try {
                   // Handle both string and object message formats
                   // Outlook web returns object, desktop may return string
-                  const message = typeof arg.message === 'string'
-                    ? JSON.parse(arg.message)
-                    : arg.message;
+                  const message = typeof arg.message === 'string' ? JSON.parse(arg.message) : arg.message;
                   console.log('[AuthService] Parsed message:', message);
                   if (message.success) {
                     // Token received from dialog - construct proper AccountInfo
@@ -404,16 +406,19 @@ class AuthService implements IAuthService {
                     this.cachedAccessToken = message.accessToken || null;
                     // Parse expiration - message.expiresOn can be Date string or Unix timestamp
                     if (message.expiresOn) {
-                      this.tokenExpiresAt = typeof message.expiresOn === 'number'
-                        ? message.expiresOn
-                        : new Date(message.expiresOn).getTime();
+                      this.tokenExpiresAt =
+                        typeof message.expiresOn === 'number'
+                          ? message.expiresOn
+                          : new Date(message.expiresOn).getTime();
                     } else {
                       // Default to 1 hour from now if not provided
-                      this.tokenExpiresAt = Date.now() + (60 * 60 * 1000);
+                      this.tokenExpiresAt = Date.now() + 60 * 60 * 1000;
                     }
                     console.log('[AuthService] Account set:', this.currentAccount);
-                    console.log('[AuthService] Access token cached, expires at:',
-                      new Date(this.tokenExpiresAt).toLocaleTimeString());
+                    console.log(
+                      '[AuthService] Access token cached, expires at:',
+                      new Date(this.tokenExpiresAt).toLocaleTimeString()
+                    );
 
                     // Persist to sessionStorage for add-in reloads
                     this.saveToStorage();

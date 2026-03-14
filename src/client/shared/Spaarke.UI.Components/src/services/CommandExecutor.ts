@@ -2,17 +2,13 @@
  * CommandExecutor - Executes commands with error handling
  */
 
-import { ICommand, ICommandContext } from "../types/CommandTypes";
+import { ICommand, ICommandContext } from '../types/CommandTypes';
 
 export class CommandExecutor {
-
   /**
    * Execute a command with error handling and confirmation
    */
-  static async execute(
-    command: ICommand,
-    context: ICommandContext
-  ): Promise<void> {
+  static async execute(command: ICommand, context: ICommandContext): Promise<void> {
     try {
       // Validation: Check if selection required
       if (command.requiresSelection && context.selectedRecords.length === 0) {
@@ -34,7 +30,6 @@ export class CommandExecutor {
 
       // Execute command
       await command.handler(context);
-
     } catch (error) {
       console.error(`Command '${command.key}' failed:`, error);
       throw error; // Re-throw for caller to handle

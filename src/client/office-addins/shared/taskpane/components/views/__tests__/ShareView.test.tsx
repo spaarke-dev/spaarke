@@ -130,9 +130,9 @@ describe('ShareView', () => {
     });
 
     it('shows loading state during search', async () => {
-      const handleSearch = jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(() => resolve([]), 1000))
-      );
+      const handleSearch = jest
+        .fn()
+        .mockImplementation(() => new Promise(resolve => setTimeout(() => resolve([]), 1000)));
 
       renderWithProvider(<ShareView onSearch={handleSearch} isLoading />);
 
@@ -169,9 +169,7 @@ describe('ShareView', () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/abc123');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Perform search
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -189,7 +187,9 @@ describe('ShareView', () => {
       await waitFor(() => {
         expect(screen.getByText('Generate Sharing Link')).toBeInTheDocument();
       });
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
       await waitFor(() => {
@@ -212,9 +212,7 @@ describe('ShareView', () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/abc123');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Search and select
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -232,19 +230,21 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
-      expect(handleGenerateLink).toHaveBeenCalledWith('doc-1', { type: 'view' });
+      expect(handleGenerateLink).toHaveBeenCalledWith('doc-1', {
+        type: 'view',
+      });
     });
 
     it('allows changing permission type before generating', async () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/edit123');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Search and select
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -269,19 +269,21 @@ describe('ShareView', () => {
       await userEvent.click(editOption);
 
       // Generate link
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
-      expect(handleGenerateLink).toHaveBeenCalledWith('doc-1', { type: 'edit' });
+      expect(handleGenerateLink).toHaveBeenCalledWith('doc-1', {
+        type: 'edit',
+      });
     });
 
     it('displays generated link', async () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/xyz789');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Search and select
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -299,7 +301,9 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
       await waitFor(() => {
@@ -313,9 +317,7 @@ describe('ShareView', () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/copy123');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Search, select, and generate
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -332,7 +334,9 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
       await waitFor(() => {
@@ -350,9 +354,7 @@ describe('ShareView', () => {
       const handleSearch = jest.fn().mockResolvedValue(mockSearchResults);
       const handleGenerateLink = jest.fn().mockResolvedValue('https://share.spaarke.com/feedback');
 
-      renderWithProvider(
-        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />
-      );
+      renderWithProvider(<ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} />);
 
       // Search, select, and generate
       const input = screen.getByPlaceholderText('Search by name or path...');
@@ -369,7 +371,9 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
       await waitFor(() => {
@@ -400,11 +404,7 @@ describe('ShareView', () => {
       const handleInsertLink = jest.fn().mockResolvedValue(undefined);
 
       renderWithProvider(
-        <ShareView
-          onSearch={handleSearch}
-          onGenerateLink={handleGenerateLink}
-          onInsertLink={handleInsertLink}
-        />
+        <ShareView onSearch={handleSearch} onGenerateLink={handleGenerateLink} onInsertLink={handleInsertLink} />
       );
 
       // Search, select, and generate
@@ -422,7 +422,9 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       await userEvent.click(generateButton);
 
       await waitFor(() => {
@@ -490,7 +492,9 @@ describe('ShareView', () => {
         expect(screen.getByRole('button', { name: /generate link/i })).toBeInTheDocument();
       });
 
-      const generateButton = screen.getByRole('button', { name: /generate link/i });
+      const generateButton = screen.getByRole('button', {
+        name: /generate link/i,
+      });
       expect(generateButton).toBeDisabled();
     });
   });

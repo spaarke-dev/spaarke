@@ -7,8 +7,7 @@ const DEFAULT_CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
 const DEFAULT_AUTHORITY = 'https://login.microsoftonline.com/organizations';
 
 /** Default BFF API scope for user impersonation. */
-const DEFAULT_BFF_SCOPE =
-  'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation';
+const DEFAULT_BFF_SCOPE = 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation';
 
 /** Buffer (ms) before token expiry to consider it stale. */
 export const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
@@ -21,21 +20,13 @@ export function resolveConfig(userConfig?: IAuthConfig): Required<IAuthConfig> {
   return {
     clientId:
       userConfig?.clientId ??
-      (typeof window !== 'undefined'
-        ? window.__SPAARKE_MSAL_CLIENT_ID__
-        : undefined) ??
+      (typeof window !== 'undefined' ? window.__SPAARKE_MSAL_CLIENT_ID__ : undefined) ??
       DEFAULT_CLIENT_ID,
     authority: userConfig?.authority ?? DEFAULT_AUTHORITY,
-    redirectUri:
-      userConfig?.redirectUri ??
-      (typeof window !== 'undefined' ? window.location.origin : ''),
+    redirectUri: userConfig?.redirectUri ?? (typeof window !== 'undefined' ? window.location.origin : ''),
     bffApiScope: userConfig?.bffApiScope ?? DEFAULT_BFF_SCOPE,
     bffBaseUrl:
-      userConfig?.bffBaseUrl ??
-      (typeof window !== 'undefined'
-        ? window.__SPAARKE_BFF_URL__
-        : undefined) ??
-      '',
+      userConfig?.bffBaseUrl ?? (typeof window !== 'undefined' ? window.__SPAARKE_BFF_URL__ : undefined) ?? '',
     proactiveRefresh: userConfig?.proactiveRefresh ?? false,
     requireXrm: userConfig?.requireXrm ?? false,
   };

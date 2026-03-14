@@ -10,7 +10,7 @@
  * @version 1.0.0
  */
 
-import { IFieldRule } from "./FieldVisibilityHandler";
+import { IFieldRule } from './FieldVisibilityHandler';
 
 /** Currently active field rules */
 let currentRules: IFieldRule[] = [];
@@ -19,15 +19,15 @@ let currentRules: IFieldRule[] = [];
 let saveHandlerRegistered = false;
 
 /** Unique notification ID for validation errors */
-const VALIDATION_NOTIFICATION_ID = "requiredFieldsValidation";
+const VALIDATION_NOTIFICATION_ID = 'requiredFieldsValidation';
 
 /**
  * Gets the Xrm form context from the window or parent window
  * Uses legacy Xrm.Page API for compatibility with current Dataverse forms
  */
 function getFormContext(): any | null {
-    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-    return xrm?.Page || null;
+  const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
+  return xrm?.Page || null;
 }
 
 /**
@@ -37,24 +37,24 @@ function getFormContext(): any | null {
  * @param rules - Array of field rules defining which fields are required/visible
  */
 export function registerSaveHandler(rules: IFieldRule[]): void {
-    currentRules = rules;
+  currentRules = rules;
 
-    if (!saveHandlerRegistered) {
-        const formContext = getFormContext();
-        if (formContext?.data?.entity) {
-            try {
-                formContext.data.entity.addOnSave(onSaveHandler);
-                saveHandlerRegistered = true;
-                console.log("[SaveValidationHandler] Save handler registered");
-            } catch (err) {
-                console.error("[SaveValidationHandler] Failed to register save handler:", err);
-            }
-        } else {
-            console.warn("[SaveValidationHandler] Xrm.Page.data.entity not available");
-        }
+  if (!saveHandlerRegistered) {
+    const formContext = getFormContext();
+    if (formContext?.data?.entity) {
+      try {
+        formContext.data.entity.addOnSave(onSaveHandler);
+        saveHandlerRegistered = true;
+        console.log('[SaveValidationHandler] Save handler registered');
+      } catch (err) {
+        console.error('[SaveValidationHandler] Failed to register save handler:', err);
+      }
     } else {
-        console.log("[SaveValidationHandler] Save handler rules updated");
+      console.warn('[SaveValidationHandler] Xrm.Page.data.entity not available');
     }
+  } else {
+    console.log('[SaveValidationHandler] Save handler rules updated');
+  }
 }
 
 /**
@@ -62,36 +62,36 @@ export function registerSaveHandler(rules: IFieldRule[]): void {
  * Called during control cleanup
  */
 export function unregisterSaveHandler(): void {
-    if (saveHandlerRegistered) {
-        const formContext = getFormContext();
-        if (formContext?.data?.entity) {
-            try {
-                formContext.data.entity.removeOnSave(onSaveHandler);
-                saveHandlerRegistered = false;
-                currentRules = [];
-                console.log("[SaveValidationHandler] Save handler unregistered");
-            } catch (err) {
-                console.error("[SaveValidationHandler] Failed to unregister save handler:", err);
-            }
-        }
+  if (saveHandlerRegistered) {
+    const formContext = getFormContext();
+    if (formContext?.data?.entity) {
+      try {
+        formContext.data.entity.removeOnSave(onSaveHandler);
+        saveHandlerRegistered = false;
+        currentRules = [];
+        console.log('[SaveValidationHandler] Save handler unregistered');
+      } catch (err) {
+        console.error('[SaveValidationHandler] Failed to unregister save handler:', err);
+      }
     }
+  }
 
-    // Clear any validation notifications
-    clearValidationNotification();
+  // Clear any validation notifications
+  clearValidationNotification();
 }
 
 /**
  * Clears the validation error notification from the form
  */
 export function clearValidationNotification(): void {
-    const formContext = getFormContext();
-    if (formContext?.ui) {
-        try {
-            formContext.ui.clearFormNotification(VALIDATION_NOTIFICATION_ID);
-        } catch (err) {
-            // Ignore errors clearing notifications
-        }
+  const formContext = getFormContext();
+  if (formContext?.ui) {
+    try {
+      formContext.ui.clearFormNotification(VALIDATION_NOTIFICATION_ID);
+    } catch (err) {
+      // Ignore errors clearing notifications
     }
+  }
 }
 
 /**
@@ -101,17 +101,17 @@ export function clearValidationNotification(): void {
  * @param message - The notification message
  */
 function setFieldNotification(fieldName: string, message: string): void {
-    const formContext = getFormContext();
-    if (!formContext) return;
+  const formContext = getFormContext();
+  if (!formContext) return;
 
-    const control = formContext.getControl(fieldName);
-    if (control && typeof control.setNotification === "function") {
-        try {
-            control.setNotification(message, VALIDATION_NOTIFICATION_ID);
-        } catch (err) {
-            console.warn(`[SaveValidationHandler] Could not set notification on ${fieldName}:`, err);
-        }
+  const control = formContext.getControl(fieldName);
+  if (control && typeof control.setNotification === 'function') {
+    try {
+      control.setNotification(message, VALIDATION_NOTIFICATION_ID);
+    } catch (err) {
+      console.warn(`[SaveValidationHandler] Could not set notification on ${fieldName}:`, err);
     }
+  }
 }
 
 /**
@@ -120,17 +120,17 @@ function setFieldNotification(fieldName: string, message: string): void {
  * @param fieldName - The schema name of the field
  */
 function clearFieldNotification(fieldName: string): void {
-    const formContext = getFormContext();
-    if (!formContext) return;
+  const formContext = getFormContext();
+  if (!formContext) return;
 
-    const control = formContext.getControl(fieldName);
-    if (control && typeof control.clearNotification === "function") {
-        try {
-            control.clearNotification(VALIDATION_NOTIFICATION_ID);
-        } catch (err) {
-            // Ignore errors clearing notifications
-        }
+  const control = formContext.getControl(fieldName);
+  if (control && typeof control.clearNotification === 'function') {
+    try {
+      control.clearNotification(VALIDATION_NOTIFICATION_ID);
+    } catch (err) {
+      // Ignore errors clearing notifications
     }
+  }
 }
 
 /**
@@ -140,16 +140,16 @@ function clearFieldNotification(fieldName: string): void {
  * @returns true if the value is considered empty
  */
 function isFieldValueEmpty(value: any): boolean {
-    if (value === null || value === undefined) {
-        return true;
-    }
-    if (typeof value === "string" && value.trim() === "") {
-        return true;
-    }
-    if (Array.isArray(value) && value.length === 0) {
-        return true;
-    }
-    return false;
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return true;
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -160,29 +160,29 @@ function isFieldValueEmpty(value: any): boolean {
  * @returns User-friendly field name
  */
 function getFieldDisplayName(fieldName: string, displayName?: string): string {
-    if (displayName) {
-        return displayName;
-    }
+  if (displayName) {
+    return displayName;
+  }
 
-    // Try to get display name from form control
-    const formContext = getFormContext();
-    if (formContext) {
-        const control = formContext.getControl(fieldName);
-        if (control && typeof control.getLabel === "function") {
-            try {
-                const label = control.getLabel();
-                if (label) return label;
-            } catch {
-                // Fall through to default
-            }
-        }
+  // Try to get display name from form control
+  const formContext = getFormContext();
+  if (formContext) {
+    const control = formContext.getControl(fieldName);
+    if (control && typeof control.getLabel === 'function') {
+      try {
+        const label = control.getLabel();
+        if (label) return label;
+      } catch {
+        // Fall through to default
+      }
     }
+  }
 
-    // Format schema name as display name (sprk_fieldname -> Fieldname)
-    return fieldName
-        .replace(/^sprk_/, "")
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase());
+  // Format schema name as display name (sprk_fieldname -> Fieldname)
+  return fieldName
+    .replace(/^sprk_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
 }
 
 /**
@@ -191,70 +191,70 @@ function getFieldDisplayName(fieldName: string, displayName?: string): string {
  * @param context - The save event context
  */
 function onSaveHandler(context: any): void {
-    // Only validate required fields that are visible
-    const requiredFields = currentRules.filter((r) => r.isRequired && r.isVisible);
+  // Only validate required fields that are visible
+  const requiredFields = currentRules.filter(r => r.isRequired && r.isVisible);
 
-    if (requiredFields.length === 0) {
-        // No required fields to validate - allow save
-        clearValidationNotification();
-        return;
+  if (requiredFields.length === 0) {
+    // No required fields to validate - allow save
+    clearValidationNotification();
+    return;
+  }
+
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[SaveValidationHandler] Xrm.Page not available during save');
+    return;
+  }
+
+  const emptyRequiredFields: string[] = [];
+
+  for (const field of requiredFields) {
+    const attr = formContext.getAttribute(field.fieldName);
+
+    // Clear any previous field notification first
+    clearFieldNotification(field.fieldName);
+
+    if (attr) {
+      const value = attr.getValue();
+      if (isFieldValueEmpty(value)) {
+        const displayName = getFieldDisplayName(field.fieldName, field.displayName);
+        emptyRequiredFields.push(displayName);
+
+        // Set inline notification on the field
+        setFieldNotification(field.fieldName, `${displayName} is required`);
+      }
+    }
+  }
+
+  if (emptyRequiredFields.length > 0) {
+    // Prevent save
+    if (context?.getEventArgs && typeof context.getEventArgs === 'function') {
+      const eventArgs = context.getEventArgs();
+      if (eventArgs && typeof eventArgs.preventDefault === 'function') {
+        eventArgs.preventDefault();
+      }
     }
 
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[SaveValidationHandler] Xrm.Page not available during save");
-        return;
+    // Show form notification with all missing fields
+    const message =
+      emptyRequiredFields.length === 1
+        ? `Please fill in required field: ${emptyRequiredFields[0]}`
+        : `Please fill in required fields: ${emptyRequiredFields.join(', ')}`;
+
+    if (formContext.ui && typeof formContext.ui.setFormNotification === 'function') {
+      try {
+        formContext.ui.setFormNotification(message, 'ERROR', VALIDATION_NOTIFICATION_ID);
+      } catch (err) {
+        console.error('[SaveValidationHandler] Failed to set form notification:', err);
+      }
     }
 
-    const emptyRequiredFields: string[] = [];
-
-    for (const field of requiredFields) {
-        const attr = formContext.getAttribute(field.fieldName);
-
-        // Clear any previous field notification first
-        clearFieldNotification(field.fieldName);
-
-        if (attr) {
-            const value = attr.getValue();
-            if (isFieldValueEmpty(value)) {
-                const displayName = getFieldDisplayName(field.fieldName, field.displayName);
-                emptyRequiredFields.push(displayName);
-
-                // Set inline notification on the field
-                setFieldNotification(field.fieldName, `${displayName} is required`);
-            }
-        }
-    }
-
-    if (emptyRequiredFields.length > 0) {
-        // Prevent save
-        if (context?.getEventArgs && typeof context.getEventArgs === "function") {
-            const eventArgs = context.getEventArgs();
-            if (eventArgs && typeof eventArgs.preventDefault === "function") {
-                eventArgs.preventDefault();
-            }
-        }
-
-        // Show form notification with all missing fields
-        const message =
-            emptyRequiredFields.length === 1
-                ? `Please fill in required field: ${emptyRequiredFields[0]}`
-                : `Please fill in required fields: ${emptyRequiredFields.join(", ")}`;
-
-        if (formContext.ui && typeof formContext.ui.setFormNotification === "function") {
-            try {
-                formContext.ui.setFormNotification(message, "ERROR", VALIDATION_NOTIFICATION_ID);
-            } catch (err) {
-                console.error("[SaveValidationHandler] Failed to set form notification:", err);
-            }
-        }
-
-        console.log(`[SaveValidationHandler] Save blocked - missing required fields: ${emptyRequiredFields.join(", ")}`);
-    } else {
-        // Clear any previous validation notification - all required fields are filled
-        clearValidationNotification();
-        console.log("[SaveValidationHandler] Validation passed - save proceeding");
-    }
+    console.log(`[SaveValidationHandler] Save blocked - missing required fields: ${emptyRequiredFields.join(', ')}`);
+  } else {
+    // Clear any previous validation notification - all required fields are filled
+    clearValidationNotification();
+    console.log('[SaveValidationHandler] Validation passed - save proceeding');
+  }
 }
 
 /**
@@ -265,29 +265,29 @@ function onSaveHandler(context: any): void {
  * @returns true if field is valid, false if required and empty
  */
 export function validateField(fieldName: string): boolean {
-    const rule = currentRules.find((r) => r.fieldName === fieldName);
+  const rule = currentRules.find(r => r.fieldName === fieldName);
 
-    // If no rule or not required, field is valid
-    if (!rule || !rule.isRequired || !rule.isVisible) {
-        clearFieldNotification(fieldName);
-        return true;
-    }
-
-    const formContext = getFormContext();
-    if (!formContext) return true;
-
-    const attr = formContext.getAttribute(fieldName);
-    if (!attr) return true;
-
-    const value = attr.getValue();
-    if (isFieldValueEmpty(value)) {
-        const displayName = getFieldDisplayName(fieldName, rule.displayName);
-        setFieldNotification(fieldName, `${displayName} is required`);
-        return false;
-    }
-
+  // If no rule or not required, field is valid
+  if (!rule || !rule.isRequired || !rule.isVisible) {
     clearFieldNotification(fieldName);
     return true;
+  }
+
+  const formContext = getFormContext();
+  if (!formContext) return true;
+
+  const attr = formContext.getAttribute(fieldName);
+  if (!attr) return true;
+
+  const value = attr.getValue();
+  if (isFieldValueEmpty(value)) {
+    const displayName = getFieldDisplayName(fieldName, rule.displayName);
+    setFieldNotification(fieldName, `${displayName} is required`);
+    return false;
+  }
+
+  clearFieldNotification(fieldName);
+  return true;
 }
 
 /**
@@ -296,7 +296,7 @@ export function validateField(fieldName: string): boolean {
  * @returns true if save handler is registered
  */
 export function isSaveHandlerRegistered(): boolean {
-    return saveHandlerRegistered;
+  return saveHandlerRegistered;
 }
 
 /**
@@ -305,5 +305,5 @@ export function isSaveHandlerRegistered(): boolean {
  * @returns Array of current field rules
  */
 export function getCurrentRules(): IFieldRule[] {
-    return [...currentRules];
+  return [...currentRules];
 }

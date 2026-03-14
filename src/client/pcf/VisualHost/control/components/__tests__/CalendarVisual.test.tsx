@@ -4,11 +4,7 @@ import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-com
 import { CalendarVisual, ICalendarEvent } from '../CalendarVisual';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
-  return render(
-    <FluentProvider theme={theme}>
-      {component}
-    </FluentProvider>
-  );
+  return render(<FluentProvider theme={theme}>{component}</FluentProvider>);
 };
 
 const createEvents = (): ICalendarEvent[] => {
@@ -28,9 +24,7 @@ describe('CalendarVisual', () => {
   describe('rendering', () => {
     it('renders with required props', () => {
       const events = createEvents();
-      renderWithTheme(
-        <CalendarVisual events={events} />
-      );
+      renderWithTheme(<CalendarVisual events={events} />);
 
       // Should render weekday headers
       expect(screen.getByText('Sun')).toBeInTheDocument();
@@ -44,17 +38,13 @@ describe('CalendarVisual', () => {
 
     it('renders with title', () => {
       const events = createEvents();
-      renderWithTheme(
-        <CalendarVisual events={events} title="Deadlines" />
-      );
+      renderWithTheme(<CalendarVisual events={events} title="Deadlines" />);
 
       expect(screen.getByText('Deadlines')).toBeInTheDocument();
     });
 
     it('renders empty calendar when no events', () => {
-      renderWithTheme(
-        <CalendarVisual events={[]} />
-      );
+      renderWithTheme(<CalendarVisual events={[]} />);
 
       // Calendar grid should still render
       expect(screen.getByText('Sun')).toBeInTheDocument();
@@ -62,9 +52,7 @@ describe('CalendarVisual', () => {
 
     it('shows days with event counts', () => {
       const events = createEvents();
-      const { container } = renderWithTheme(
-        <CalendarVisual events={events} />
-      );
+      const { container } = renderWithTheme(<CalendarVisual events={events} />);
 
       // Calendar should have badges for events
       const badges = container.querySelectorAll('.fui-Badge');
@@ -73,9 +61,7 @@ describe('CalendarVisual', () => {
 
     it('renders navigation buttons by default', () => {
       const events = createEvents();
-      renderWithTheme(
-        <CalendarVisual events={events} />
-      );
+      renderWithTheme(<CalendarVisual events={events} />);
 
       expect(screen.getByLabelText('Previous month')).toBeInTheDocument();
       expect(screen.getByLabelText('Next month')).toBeInTheDocument();
@@ -83,9 +69,7 @@ describe('CalendarVisual', () => {
 
     it('hides navigation when showNavigation is false', () => {
       const events = createEvents();
-      renderWithTheme(
-        <CalendarVisual events={events} showNavigation={false} />
-      );
+      renderWithTheme(<CalendarVisual events={events} showNavigation={false} />);
 
       expect(screen.queryByLabelText('Previous month')).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Next month')).not.toBeInTheDocument();
@@ -96,9 +80,7 @@ describe('CalendarVisual', () => {
     it('navigates to previous month when clicking prev button', () => {
       const events = createEvents();
 
-      renderWithTheme(
-        <CalendarVisual events={events} />
-      );
+      renderWithTheme(<CalendarVisual events={events} />);
 
       // Click previous
       fireEvent.click(screen.getByLabelText('Previous month'));
@@ -110,9 +92,7 @@ describe('CalendarVisual', () => {
     it('navigates to next month when clicking next button', () => {
       const events = createEvents();
 
-      renderWithTheme(
-        <CalendarVisual events={events} />
-      );
+      renderWithTheme(<CalendarVisual events={events} />);
 
       fireEvent.click(screen.getByLabelText('Next month'));
 
@@ -126,13 +106,7 @@ describe('CalendarVisual', () => {
       const mockDrill = jest.fn();
       const events = createEvents();
 
-      renderWithTheme(
-        <CalendarVisual
-          events={events}
-          onDrillInteraction={mockDrill}
-          drillField="duedate"
-        />
-      );
+      renderWithTheme(<CalendarVisual events={events} onDrillInteraction={mockDrill} drillField="duedate" />);
 
       // Should have many clickable day buttons
       const allButtons = screen.getAllByRole('button');
@@ -143,12 +117,7 @@ describe('CalendarVisual', () => {
       const mockDrill = jest.fn();
       const events = createEvents();
 
-      renderWithTheme(
-        <CalendarVisual
-          events={events}
-          onDrillInteraction={mockDrill}
-        />
-      );
+      renderWithTheme(<CalendarVisual events={events} onDrillInteraction={mockDrill} />);
 
       // Only navigation buttons should be buttons
       const navButtons = screen.getAllByRole('button');
@@ -159,10 +128,7 @@ describe('CalendarVisual', () => {
   describe('theme support', () => {
     it('renders correctly in dark theme', () => {
       const events = createEvents();
-      renderWithTheme(
-        <CalendarVisual events={events} title="Dark Calendar" />,
-        webDarkTheme
-      );
+      renderWithTheme(<CalendarVisual events={events} title="Dark Calendar" />, webDarkTheme);
 
       expect(screen.getByText('Dark Calendar')).toBeInTheDocument();
     });
@@ -173,9 +139,7 @@ describe('CalendarVisual', () => {
       const events: ICalendarEvent[] = [];
       const january2025 = new Date(2025, 0, 1);
 
-      renderWithTheme(
-        <CalendarVisual events={events} initialMonth={january2025} />
-      );
+      renderWithTheme(<CalendarVisual events={events} initialMonth={january2025} />);
 
       expect(screen.getByText(/January/)).toBeInTheDocument();
     });

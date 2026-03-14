@@ -5,15 +5,15 @@
  * @see FR-06 (cancel mid-stream undo), FR-07 (max 20 snapshots)
  */
 
-import { renderHook, act } from "@testing-library/react";
-import { useDocumentHistory } from "../useDocumentHistory";
-import type { RichTextEditorRef } from "../../components/RichTextEditor";
+import { renderHook, act } from '@testing-library/react';
+import { useDocumentHistory } from '../useDocumentHistory';
+import type { RichTextEditorRef } from '../../components/RichTextEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createMockEditorRef(initialHtml: string = ""): {
+function createMockEditorRef(initialHtml: string = ''): {
   ref: React.RefObject<RichTextEditorRef | null>;
   mock: RichTextEditorRef;
 } {
@@ -37,15 +37,15 @@ function createMockEditorRef(initialHtml: string = ""): {
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("useDocumentHistory", () => {
+describe('useDocumentHistory', () => {
   afterEach(() => {
     jest.clearAllMocks();
   });
 
   // ── Empty stack behavior ──────────────────────────────────────────────────
 
-  describe("empty stack", () => {
-    it("should initialize with canUndo=false, canRedo=false, historyLength=0", () => {
+  describe('empty stack', () => {
+    it('should initialize with canUndo=false, canRedo=false, historyLength=0', () => {
       const { ref } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
@@ -54,7 +54,7 @@ describe("useDocumentHistory", () => {
       expect(result.current.historyLength).toBe(0);
     });
 
-    it("should be a no-op when undo is called on empty stack", () => {
+    it('should be a no-op when undo is called on empty stack', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
@@ -66,7 +66,7 @@ describe("useDocumentHistory", () => {
       expect(result.current.canUndo).toBe(false);
     });
 
-    it("should be a no-op when redo is called on empty stack", () => {
+    it('should be a no-op when redo is called on empty stack', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
@@ -81,9 +81,9 @@ describe("useDocumentHistory", () => {
 
   // ── pushVersion ───────────────────────────────────────────────────────────
 
-  describe("pushVersion", () => {
-    it("should capture the current editor HTML", () => {
-      const { ref, mock } = createMockEditorRef("<p>Hello</p>");
+  describe('pushVersion', () => {
+    it('should capture the current editor HTML', () => {
+      const { ref, mock } = createMockEditorRef('<p>Hello</p>');
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       act(() => {
@@ -94,8 +94,8 @@ describe("useDocumentHistory", () => {
       expect(result.current.historyLength).toBe(1);
     });
 
-    it("should set canUndo=false after first push (only one version, nothing to undo to)", () => {
-      const { ref } = createMockEditorRef("<p>v1</p>");
+    it('should set canUndo=false after first push (only one version, nothing to undo to)', () => {
+      const { ref } = createMockEditorRef('<p>v1</p>');
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       act(() => {
@@ -107,16 +107,16 @@ describe("useDocumentHistory", () => {
       expect(result.current.canRedo).toBe(false);
     });
 
-    it("should set canUndo=true after two pushes", () => {
+    it('should set canUndo=true after two pushes', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -126,8 +126,10 @@ describe("useDocumentHistory", () => {
       expect(result.current.historyLength).toBe(2);
     });
 
-    it("should not push if editorRef.current is null", () => {
-      const ref = { current: null } as React.RefObject<RichTextEditorRef | null>;
+    it('should not push if editorRef.current is null', () => {
+      const ref = {
+        current: null,
+      } as React.RefObject<RichTextEditorRef | null>;
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       act(() => {
@@ -140,19 +142,19 @@ describe("useDocumentHistory", () => {
 
   // ── Undo / Redo cycle ─────────────────────────────────────────────────────
 
-  describe("undo/redo cycle", () => {
-    it("should undo to the previous version", () => {
+  describe('undo/redo cycle', () => {
+    it('should undo to the previous version', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       // Push v1
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
 
       // Push v2
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -162,21 +164,21 @@ describe("useDocumentHistory", () => {
         result.current.undo();
       });
 
-      expect(mock.setHtml).toHaveBeenCalledWith("<p>v1</p>");
+      expect(mock.setHtml).toHaveBeenCalledWith('<p>v1</p>');
       expect(result.current.canUndo).toBe(false);
       expect(result.current.canRedo).toBe(true);
     });
 
-    it("should redo to the next version after undo", () => {
+    it('should redo to the next version after undo', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -191,25 +193,25 @@ describe("useDocumentHistory", () => {
         result.current.redo();
       });
 
-      expect(mock.setHtml).toHaveBeenCalledWith("<p>v2</p>");
+      expect(mock.setHtml).toHaveBeenCalledWith('<p>v2</p>');
       expect(result.current.canUndo).toBe(true);
       expect(result.current.canRedo).toBe(false);
     });
 
-    it("should support multiple undo steps", () => {
+    it('should support multiple undo steps', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       // Push v1, v2, v3
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v3</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v3</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -220,27 +222,27 @@ describe("useDocumentHistory", () => {
       act(() => {
         result.current.undo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v2</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v2</p>');
 
       act(() => {
         result.current.undo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v1</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v1</p>');
 
       expect(result.current.canUndo).toBe(false);
       expect(result.current.canRedo).toBe(true);
     });
 
-    it("should not undo past the first version", () => {
+    it('should not undo past the first version', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -262,11 +264,11 @@ describe("useDocumentHistory", () => {
       expect(result.current.canUndo).toBe(false);
     });
 
-    it("should not redo past the latest version", () => {
+    it('should not redo past the latest version', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -283,21 +285,21 @@ describe("useDocumentHistory", () => {
 
   // ── Push after undo truncates forward history ─────────────────────────────
 
-  describe("push after undo truncates forward history", () => {
-    it("should truncate forward history when a new version is pushed after undo", () => {
+  describe('push after undo truncates forward history', () => {
+    it('should truncate forward history when a new version is pushed after undo', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       // Push v1, v2, v3
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v3</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v3</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -306,10 +308,10 @@ describe("useDocumentHistory", () => {
       act(() => {
         result.current.undo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v2</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v2</p>');
 
       // Push v4 (should truncate v3)
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v4</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v4</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -322,20 +324,20 @@ describe("useDocumentHistory", () => {
       act(() => {
         result.current.undo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v2</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v2</p>');
 
       // Redo should go to v4 (not v3)
       act(() => {
         result.current.redo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v4</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v4</p>');
     });
   });
 
   // ── Max versions (FR-07) ──────────────────────────────────────────────────
 
-  describe("max versions (FR-07)", () => {
-    it("should enforce max 20 versions by default, discarding oldest", () => {
+  describe('max versions (FR-07)', () => {
+    it('should enforce max 20 versions by default, discarding oldest', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
@@ -357,11 +359,11 @@ describe("useDocumentHistory", () => {
         });
       }
 
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v3</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v3</p>');
       expect(result.current.canUndo).toBe(false);
     });
 
-    it("should respect custom maxVersions parameter", () => {
+    it('should respect custom maxVersions parameter', () => {
       const { ref, mock } = createMockEditorRef();
       const customMax = 5;
       const { result } = renderHook(() => useDocumentHistory(ref, customMax));
@@ -384,15 +386,15 @@ describe("useDocumentHistory", () => {
         });
       }
 
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v3</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v3</p>');
       expect(result.current.canUndo).toBe(false);
     });
   });
 
   // ── canUndo / canRedo flags ───────────────────────────────────────────────
 
-  describe("canUndo and canRedo flags", () => {
-    it("should track flags accurately through a push-undo-redo-push sequence", () => {
+  describe('canUndo and canRedo flags', () => {
+    it('should track flags accurately through a push-undo-redo-push sequence', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
@@ -401,7 +403,7 @@ describe("useDocumentHistory", () => {
       expect(result.current.canRedo).toBe(false);
 
       // After 1st push: can't undo (only one version), can't redo
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -409,7 +411,7 @@ describe("useDocumentHistory", () => {
       expect(result.current.canRedo).toBe(false);
 
       // After 2nd push: can undo, can't redo
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -431,7 +433,7 @@ describe("useDocumentHistory", () => {
       expect(result.current.canRedo).toBe(false);
 
       // After new push (truncates redo): can undo, can't redo
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v3</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v3</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -442,12 +444,12 @@ describe("useDocumentHistory", () => {
 
   // ── Edge cases ────────────────────────────────────────────────────────────
 
-  describe("edge cases", () => {
-    it("should handle getHtml returning empty string", () => {
+  describe('edge cases', () => {
+    it('should handle getHtml returning empty string', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('');
       act(() => {
         result.current.pushVersion();
       });
@@ -456,16 +458,16 @@ describe("useDocumentHistory", () => {
       expect(result.current.historyLength).toBe(1);
     });
 
-    it("should handle rapid push-undo-push cycles", () => {
+    it('should handle rapid push-undo-push cycles', () => {
       const { ref, mock } = createMockEditorRef();
       const { result } = renderHook(() => useDocumentHistory(ref));
 
       // Push v1, v2
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v1</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v1</p>');
       act(() => {
         result.current.pushVersion();
       });
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v2</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v2</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -476,7 +478,7 @@ describe("useDocumentHistory", () => {
       });
 
       // Push v3 (truncates v2)
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v3</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v3</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -487,7 +489,7 @@ describe("useDocumentHistory", () => {
       });
 
       // Push v4 (truncates v3)
-      (mock.getHtml as jest.Mock).mockReturnValueOnce("<p>v4</p>");
+      (mock.getHtml as jest.Mock).mockReturnValueOnce('<p>v4</p>');
       act(() => {
         result.current.pushVersion();
       });
@@ -498,12 +500,12 @@ describe("useDocumentHistory", () => {
       act(() => {
         result.current.undo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v1</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v1</p>');
 
       act(() => {
         result.current.redo();
       });
-      expect(mock.setHtml).toHaveBeenLastCalledWith("<p>v4</p>");
+      expect(mock.setHtml).toHaveBeenLastCalledWith('<p>v4</p>');
     });
   });
 });

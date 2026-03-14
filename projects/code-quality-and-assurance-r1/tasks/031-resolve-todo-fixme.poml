@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Resolve TODO/FIXME Comments Across Codebase</title>
+    <phase>4: Remediation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>008</dependencies>
+    <blocks>043</blocks>
+    <tags>remediation, code-quality, cleanup</tags>
+  </metadata>
+
+  <prompt>
+    Resolve the 96 known TODO/FIXME comments across the codebase. For each comment: if it is actionable
+    and the fix is straightforward, implement the fix; if it tracks future work, convert it to a GitHub
+    issue and remove the comment; if it is obsolete (references removed features or completed work),
+    remove it. Target: fewer than 20 TODO/FIXME comments remaining after this task, with remaining
+    items being legitimate in-progress placeholders.
+  </prompt>
+
+  <role>
+    Senior software developer with expertise in C# and TypeScript codebase cleanup. Skilled at
+    distinguishing actionable technical debt from legitimate work-in-progress markers and at converting
+    informal code comments into trackable GitHub issues.
+  </role>
+
+  <goal>
+    A codebase with fewer than 20 remaining TODO/FIXME comments, where remaining items are legitimate
+    active work-in-progress markers. Resolved items are either fixed in-place, converted to tracked
+    GitHub issues, or removed as obsolete. The audit report documents what was done with each item.
+  </goal>
+
+  <context>
+    <background>
+      The audit (task 008) identified approximately 96 TODO/FIXME comments across the codebase.
+      These fall into three categories:
+
+      1. Actionable and simple: The comment describes a small fix that can be implemented immediately
+         (e.g., "TODO: add null check here", "FIXME: handle empty list case"). These should be fixed
+         in place.
+
+      2. Tracking future work: The comment describes a larger feature or improvement that requires
+         planning (e.g., "TODO: implement retry logic for flaky uploads", "TODO: add caching layer").
+         These should be converted to GitHub issues with appropriate labels and the comment removed.
+
+      3. Obsolete: The comment references functionality that was removed, a refactor that was completed,
+         or a limitation that no longer exists (e.g., "TODO: remove when v2 API is live" and v2 is live,
+         "FIXME: workaround for SDK bug in v1.2" and SDK is now v3.0). These should be removed.
+
+      Process for GitHub issue creation: Use `gh issue create --title "..." --body "..." --label tech-debt`
+      for tracking items. Include the original file path and line number in the issue body so it is
+      findable later.
+
+      Items that are tied to active projects (i.e., there is an open PR or active project folder
+      referencing them) must be converted to issues rather than deleted — they may be intentional
+      placeholders for in-progress work.
+
+      The audit report at projects/code-quality-and-assurance-r1/notes/audit-bff-api.md lists known
+      TODO/FIXME items with file paths and line numbers as a starting point. However, run a fresh
+      grep to catch any items added since the audit.
+    </background>
+    <relevant-files>
+      <file>src/ (modify — fix TODO/FIXME comments across all files)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md (read — starting inventory of TODO/FIXME items)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">TODO/FIXME items tied to active projects or open PRs MUST be converted to GitHub issues, not deleted. Run `gh pr list --state open` and `ls projects/` to identify active work before classifying items.</constraint>
+    <constraint source="spec">Target: fewer than 20 TODO/FIXME comments remaining. If the target cannot be reached without risking behavioral changes (some fixes are too large for this task), create GitHub issues for the remaining items and document them.</constraint>
+    <constraint source="spec">Each fix must be verified: run `dotnet build` (for .cs fixes) or `npx tsc --noEmit` (for .ts/.tsx fixes) after each batch of fixes to catch regressions.</constraint>
+    <constraint source="spec">Do NOT remove TODO comments in test files that mark intentionally incomplete test coverage — these are legitimate markers. Only resolve TODO/FIXME comments in src/ production code.</constraint>
+    <constraint source="spec">Create a resolution log documenting each item and its disposition (fixed/issue-created/removed). This feeds into the quality scorecard comparison in task 090.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `grep -rn "TODO\|FIXME\|HACK" src/ --include="*.cs" --include="*.ts" --include="*.tsx"` to get a fresh, complete inventory of all TODO/FIXME/HACK comments in production code. Record the count.</step>
+    <step order="2">Run `gh pr list --state open` and `ls projects/` to identify active work. Cross-reference the TODO inventory against active project files to identify items that must be preserved as issues.</step>
+    <step order="3">Classify each TODO/FIXME into three buckets: (A) actionable-now — small fix, (B) future-work — needs tracking, (C) obsolete — safe to remove. Document the classification for each item.</step>
+    <step order="4">Process bucket A (actionable-now): implement each fix directly. Keep fixes small and focused — if a fix requires more than 10 lines of new code, reclassify it as future-work (bucket B). Build and verify after each batch of 5-10 fixes.</step>
+    <step order="5">Process bucket B (future-work): for each item, create a GitHub issue using `gh issue create --title "{descriptive title}" --body "Originally tracked as TODO in {file}:{line}.\n\n{original comment text}" --label tech-debt`. Remove the TODO comment after issue is created.</step>
+    <step order="6">Process bucket C (obsolete): remove each TODO/FIXME comment. For comments that are inline (on same line as code), preserve the code line and remove only the comment text. For standalone comment lines, remove the entire line. Build and verify.</step>
+    <step order="7">Re-run the grep from step 1 to get the final TODO/FIXME count. Verify it is under 20. If over 20, review remaining items and reclassify any that were missed in earlier classification.</step>
+    <step order="8">Create the resolution log at projects/code-quality-and-assurance-r1/notes/todo-resolution-log.md. Document: initial count, final count, items fixed (with file and description), items converted to issues (with issue numbers), items removed (with justification).</step>
+    <step order="9">Run `dotnet build` and `dotnet test` to verify the full suite is clean after all changes.</step>
+    <step order="10">Update TASK-INDEX.md: change task 031 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/todo-resolution-log.md</output>
+    <output type="changes">Multiple src/ files (TODO/FIXME resolved)</output>
+    <output type="github-issues">GitHub issues created for future-work items (labeled tech-debt)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Final TODO/FIXME count in src/ is under 20 (verified by grep)</criterion>
+    <criterion>todo-resolution-log.md exists with initial count, final count, and disposition of each item</criterion>
+    <criterion>All items classified as future-work have corresponding GitHub issues with label 'tech-debt'</criterion>
+    <criterion>GitHub issue bodies include the original file path and line number</criterion>
+    <criterion>No TODO/FIXME comments were removed from test files</criterion>
+    <criterion>`dotnet build` passes with zero errors after all changes</criterion>
+    <criterion>`dotnet test` passes after all changes</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

@@ -40,9 +40,7 @@ describe('TaskPaneHeader', () => {
 
   it('shows theme menu when theme button clicked', () => {
     const handleThemeChange = jest.fn();
-    renderWithProvider(
-      <TaskPaneHeader themePreference="auto" onThemeChange={handleThemeChange} />
-    );
+    renderWithProvider(<TaskPaneHeader themePreference="auto" onThemeChange={handleThemeChange} />);
 
     fireEvent.click(screen.getByLabelText('Change theme'));
     expect(screen.getByText('Auto')).toBeInTheDocument();
@@ -52,12 +50,7 @@ describe('TaskPaneHeader', () => {
 
   it('shows user menu when authenticated', () => {
     renderWithProvider(
-      <TaskPaneHeader
-        isAuthenticated={true}
-        userName="John Doe"
-        userEmail="john@example.com"
-        onSignOut={() => {}}
-      />
+      <TaskPaneHeader isAuthenticated={true} userName="John Doe" userEmail="john@example.com" onSignOut={() => {}} />
     );
 
     const userButton = screen.getByLabelText(/signed in as john doe/i);
@@ -72,13 +65,7 @@ describe('TaskPaneHeader', () => {
 
   it('calls onSignOut when sign out clicked', () => {
     const handleSignOut = jest.fn();
-    renderWithProvider(
-      <TaskPaneHeader
-        isAuthenticated={true}
-        userName="John Doe"
-        onSignOut={handleSignOut}
-      />
-    );
+    renderWithProvider(<TaskPaneHeader isAuthenticated={true} userName="John Doe" onSignOut={handleSignOut} />);
 
     // Open user menu
     fireEvent.click(screen.getByLabelText(/signed in as john doe/i));

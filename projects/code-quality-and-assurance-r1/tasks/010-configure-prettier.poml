@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Configure Prettier for TypeScript/React Formatting</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>012, 017, 034</blocks>
+    <tags>tooling, typescript, formatting</tags>
+  </metadata>
+
+  <prompt>
+    Install Prettier and create a root-level .prettierrc.json configuration for the Spaarke repository. Create a .prettierignore to exclude generated and non-source files. The configuration must cover TypeScript, React/TSX, JSON, and YAML files. Verify compatibility with the existing .editorconfig without conflicting on C# formatting rules (which remain owned by dotnet format).
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in TypeScript tooling and frontend build systems.
+  </role>
+
+  <goal>
+    A Prettier configuration that enforces consistent formatting across all TypeScript, React, JSON, and YAML files in the repository. Pre-existing C# formatting rules in .editorconfig must not be affected. Running prettier --check on the repo should produce only expected violations (not config errors).
+  </goal>
+
+  <context>
+    <background>
+      The audit (Task 006) identified inconsistent formatting configuration across PCF and code-page projects. Currently each project has its own tsconfig and ESLint config with no shared Prettier baseline. This task establishes the root-level Prettier configuration that Task 012 (Husky) and Task 034 (apply formatting) will depend on. C# formatting is already handled by dotnet format using .editorconfig rules — Prettier must not interfere with those rules.
+    </background>
+    <relevant-files>
+      <file>.prettierrc.json (create)</file>
+      <file>.prettierignore (create)</file>
+      <file>package.json (modify - add prettier devDependency at root)</file>
+      <file>.editorconfig (read-only - verify no conflicts)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source=".editorconfig">Must not conflict with existing .editorconfig C# formatting rules. Prettier scope must be limited to TypeScript, React, JSON, and YAML file types only.</constraint>
+    <constraint source="spec.md NFR-03">Configuration must support lint-staged execution (per-file, not whole-project) to keep pre-commit hooks under 10 seconds.</constraint>
+    <constraint source="spec.md NFR-08">All configurations must be version-controlled in the repository. No Prettier settings stored in external services.</constraint>
+    <constraint source="ADR-022">Do not format files in src/client/pcf/ with React 18 settings. PCF uses React 16 — verify printWidth and JSX settings are compatible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.editorconfig</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md</file>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .editorconfig to understand existing formatting rules (indent size, line endings, charset) that must be preserved for .cs files.</step>
+    <step order="2">Check if a root-level package.json exists. If not, check where npm workspaces are configured. Determine the correct location for the prettier devDependency.</step>
+    <step order="3">Install Prettier as a devDependency: npm install --save-dev prettier (at root or appropriate workspace level).</step>
+    <step order="4">Create .prettierrc.json at repository root with these settings: printWidth 120, tabWidth 2, semi true, singleQuote true, trailingComma "es5", bracketSpacing true, arrowParens "avoid". Use overrides to apply only to .ts, .tsx, .json, .yaml, .yml files.</step>
+    <step order="5">Create .prettierignore at repository root. Exclude: node_modules/, dist/, build/, out/, .husky/, *.min.js, coverage/, .github/, *.cs, *.csproj, *.sln, *.ps1, src/solutions/ (Dataverse XML), config/coverlet.runsettings.</step>
+    <step order="6">Run prettier --check "src/client/**/*.{ts,tsx}" to baseline the number of files that would be reformatted. Document the count in output notes (this informs Task 034 scope).</step>
+    <step order="7">Run prettier --check "src/client/**/*.json" to verify JSON files parse correctly under the new config.</step>
+    <step order="8">Verify .editorconfig rules are not overridden for .cs files by confirming prettier --check on a .cs file is excluded by .prettierignore.</step>
+    <step order="9">Update TASK-INDEX.md to mark task 010 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>.prettierrc.json — Root Prettier configuration file</output>
+    <output>.prettierignore — File exclusion list for Prettier</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>prettier --check runs without configuration errors on repository root</criterion>
+    <criterion>.prettierrc.json covers TypeScript, TSX, JSON, and YAML overrides</criterion>
+    <criterion>.prettierignore excludes all .cs files, node_modules, dist, and Dataverse XML</criterion>
+    <criterion>Running prettier on a .cs file produces no output (excluded by .prettierignore)</criterion>
+    <criterion>prettier devDependency added to package.json</criterion>
+    <criterion>Baseline violation count documented (used by Task 034)</criterion>
+  </acceptance-criteria>
+</task>

@@ -37,11 +37,7 @@ import {
   Warning16Regular,
   ArrowForward16Regular,
 } from '@fluentui/react-icons';
-import {
-  useAiAssistantStore,
-  type TestNodeProgress,
-  type TestMode,
-} from '../../stores/aiAssistantStore';
+import { useAiAssistantStore, type TestNodeProgress, type TestMode } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -260,7 +256,10 @@ const NodeItem: React.FC<NodeItemProps> = ({ node }) => {
       case 'running':
         return { item: styles.nodeItemRunning, icon: styles.nodeIconRunning };
       case 'completed':
-        return { item: styles.nodeItemCompleted, icon: styles.nodeIconCompleted };
+        return {
+          item: styles.nodeItemCompleted,
+          icon: styles.nodeIconCompleted,
+        };
       case 'failed':
         return { item: styles.nodeItemFailed, icon: styles.nodeIconFailed };
       case 'skipped':
@@ -290,9 +289,7 @@ const NodeItem: React.FC<NodeItemProps> = ({ node }) => {
 
   return (
     <div className={mergeClasses(styles.nodeItem, statusClasses.item)}>
-      <div className={mergeClasses(styles.nodeIcon, statusClasses.icon)}>
-        {getStatusIcon()}
-      </div>
+      <div className={mergeClasses(styles.nodeIcon, statusClasses.icon)}>{getStatusIcon()}</div>
       <Text className={styles.nodeLabel} size={200}>
         {node.label}
       </Text>
@@ -312,11 +309,7 @@ const NodeItem: React.FC<NodeItemProps> = ({ node }) => {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TestProgressView: React.FC<TestProgressViewProps> = ({
-  onCancel,
-  onComplete,
-  compact = false,
-}) => {
+export const TestProgressView: React.FC<TestProgressViewProps> = ({ onCancel, onComplete, compact = false }) => {
   const styles = useStyles();
 
   // Store state
@@ -328,7 +321,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
     if (nodesProgress.length === 0) return 0;
 
     const completed = nodesProgress.filter(
-      (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
+      n => n.status === 'completed' || n.status === 'failed' || n.status === 'skipped'
     ).length;
 
     return completed / nodesProgress.length;
@@ -339,18 +332,18 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
     const { nodesProgress } = testExecution;
     return {
       total: nodesProgress.length,
-      completed: nodesProgress.filter((n) => n.status === 'completed').length,
-      failed: nodesProgress.filter((n) => n.status === 'failed').length,
-      skipped: nodesProgress.filter((n) => n.status === 'skipped').length,
-      pending: nodesProgress.filter((n) => n.status === 'pending').length,
-      running: nodesProgress.filter((n) => n.status === 'running').length,
+      completed: nodesProgress.filter(n => n.status === 'completed').length,
+      failed: nodesProgress.filter(n => n.status === 'failed').length,
+      skipped: nodesProgress.filter(n => n.status === 'skipped').length,
+      pending: nodesProgress.filter(n => n.status === 'pending').length,
+      running: nodesProgress.filter(n => n.status === 'running').length,
     };
   }, [testExecution.nodesProgress]);
 
   // Current node
   const currentNode = useMemo(() => {
     if (!testExecution.currentNodeId) return null;
-    return testExecution.nodesProgress.find((n) => n.nodeId === testExecution.currentNodeId);
+    return testExecution.nodesProgress.find(n => n.nodeId === testExecution.currentNodeId);
   }, [testExecution.currentNodeId, testExecution.nodesProgress]);
 
   // Is test complete?
@@ -386,11 +379,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
             <Checkmark16Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
           )}
           <Text weight="semibold">
-            {testExecution.isActive
-              ? 'Running Test...'
-              : hasError
-              ? 'Test Failed'
-              : 'Test Complete'}
+            {testExecution.isActive ? 'Running Test...' : hasError ? 'Test Failed' : 'Test Complete'}
           </Text>
           <Badge appearance="outline" size="small" className={styles.modeBadge}>
             {getModeLabel(testExecution.mode)}
@@ -429,7 +418,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
       {/* Node list */}
       {!compact && testExecution.nodesProgress.length > 0 && (
         <div className={styles.nodeList}>
-          {testExecution.nodesProgress.map((node) => (
+          {testExecution.nodesProgress.map(node => (
             <NodeItem key={node.nodeId} node={node} />
           ))}
         </div>
@@ -437,12 +426,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
 
       {/* Summary (when complete) */}
       {isComplete && (
-        <div
-          className={mergeClasses(
-            styles.summary,
-            hasError ? styles.summaryFailed : styles.summaryCompleted
-          )}
-        >
+        <div className={mergeClasses(styles.summary, hasError ? styles.summaryFailed : styles.summaryCompleted)}>
           <div className={styles.summaryStats}>
             <div className={styles.statItem}>
               <Text className={styles.statLabel}>Completed:</Text>
@@ -478,11 +462,7 @@ export const TestProgressView: React.FC<TestProgressViewProps> = ({
       {/* Actions */}
       <div className={styles.actions}>
         {testExecution.isActive ? (
-          <Button
-            appearance="secondary"
-            icon={<Stop16Regular />}
-            onClick={handleCancel}
-          >
+          <Button appearance="secondary" icon={<Stop16Regular />} onClick={handleCancel}>
             Cancel
           </Button>
         ) : (

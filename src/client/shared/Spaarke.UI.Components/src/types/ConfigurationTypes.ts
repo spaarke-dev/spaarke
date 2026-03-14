@@ -106,7 +106,7 @@ export interface IRowFormattingRule {
   /** Condition attribute */
   attribute: string;
   /** Condition operator */
-  operator: "eq" | "ne" | "gt" | "lt" | "contains";
+  operator: 'eq' | 'ne' | 'gt' | 'lt' | 'contains';
   /** Condition value */
   value: string | number | boolean;
   /** CSS class to apply */

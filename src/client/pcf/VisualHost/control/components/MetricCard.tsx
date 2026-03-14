@@ -4,23 +4,13 @@
  * Supports click-to-drill for viewing underlying records
  */
 
-import * as React from "react";
-import {
-  Card,
-  CardHeader,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  ArrowUpRegular,
-  ArrowDownRegular,
-} from "@fluentui/react-icons";
-import type { DrillInteraction, ValueFormatType } from "../types";
-import { formatValue as formatValueUtil } from "../utils/valueFormatters";
+import * as React from 'react';
+import { Card, CardHeader, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { ArrowUpRegular, ArrowDownRegular } from '@fluentui/react-icons';
+import type { DrillInteraction, ValueFormatType } from '../types';
+import { formatValue as formatValueUtil } from '../utils/valueFormatters';
 
-export type TrendDirection = "up" | "down" | "neutral";
+export type TrendDirection = 'up' | 'down' | 'neutral';
 
 export interface IMetricCardProps {
   /** The main metric value to display */
@@ -46,7 +36,7 @@ export interface IMetricCardProps {
   /** Fill container width with 3:5 H:W ratio (aspect-ratio: 5/3) */
   fillContainer?: boolean;
   /** Content alignment: left, left-center, center, right-center, right */
-  justification?: "left" | "left-center" | "center" | "right-center" | "right";
+  justification?: 'left' | 'left-center' | 'center' | 'right-center' | 'right';
   /** Explicit width in pixels (overrides fillContainer when both width and height set) */
   explicitWidth?: number;
   /** Explicit height in pixels (overrides fillContainer when both width and height set) */
@@ -69,59 +59,59 @@ export interface IMetricCardProps {
 
 const useStyles = makeStyles({
   card: {
-    cursor: "default",
-    transition: "box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out",
-    position: "relative",
-    overflow: "hidden",
+    cursor: 'default',
+    transition: 'box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out',
+    position: 'relative',
+    overflow: 'hidden',
     minWidth: 0, // Allow card to shrink in narrow form columns
   },
   borderAccent: {
-    position: "absolute",
-    left: "0",
-    top: "0",
-    bottom: "0",
-    width: "4px",
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    bottom: '0',
+    width: '4px',
   },
   cardInteractive: {
-    cursor: "pointer",
-    "&:hover": {
+    cursor: 'pointer',
+    '&:hover': {
       boxShadow: tokens.shadow8,
-      transform: "translateY(-2px)",
+      transform: 'translateY(-2px)',
     },
-    "&:active": {
-      transform: "translateY(0)",
+    '&:active': {
+      transform: 'translateY(0)',
     },
   },
   cardCompact: {
-    minHeight: "80px",
-    minWidth: "150px",
+    minHeight: '80px',
+    minWidth: '150px',
   },
   cardFillContainer: {
-    width: "100%",
-    minWidth: "unset",
-    minHeight: "unset",
+    width: '100%',
+    minWidth: 'unset',
+    minHeight: 'unset',
     flexGrow: 1, // Fill parent flex container width
     flexBasis: 0, // Override content-based sizing
   },
   content: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     padding: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
   },
   contentCenter: {
-    alignItems: "center",
+    alignItems: 'center',
   },
   contentRight: {
-    alignItems: "flex-end",
+    alignItems: 'flex-end',
   },
   contentCompact: {
     padding: tokens.spacingVerticalS,
   },
   valueContainer: {
-    display: "flex",
-    alignItems: "baseline",
+    display: 'flex',
+    alignItems: 'baseline',
     gap: tokens.spacingHorizontalS,
   },
   value: {
@@ -148,8 +138,8 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXXS,
   },
   trendContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightMedium,
@@ -164,19 +154,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   trendIcon: {
-    fontSize: "16px",
+    fontSize: '16px',
   },
   headerWithIcon: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   iconSlot: {
-    fontSize: "28px",
+    fontSize: '28px',
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
@@ -185,15 +175,11 @@ const useStyles = makeStyles({
  * When valueFormat is provided, delegates to the centralized formatter.
  * Otherwise uses legacy K/M formatting.
  */
-const formatDisplayValue = (
-  val: string | number,
-  format?: ValueFormatType,
-  nullText?: string
-): string => {
-  if (format && typeof val === "number") {
+const formatDisplayValue = (val: string | number, format?: ValueFormatType, nullText?: string): string => {
+  if (format && typeof val === 'number') {
     return formatValueUtil(val, format, nullText);
   }
-  if (typeof val === "string") return val;
+  if (typeof val === 'string') return val;
   if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
   if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
   return val.toLocaleString();
@@ -214,7 +200,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   interactive = true,
   compact = false,
   fillContainer = false,
-  justification = "left",
+  justification = 'left',
   explicitWidth,
   explicitHeight,
   valueFormat,
@@ -234,7 +220,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
     if (interactive && onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
-        operator: "eq",
+        operator: 'eq',
         value: drillValue ?? value,
         label: label,
       });
@@ -242,7 +228,7 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (interactive && (e.key === "Enter" || e.key === " ")) {
+    if (interactive && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
       handleClick();
     }
@@ -252,9 +238,9 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
 
   const getTrendStyles = () => {
     switch (trend) {
-      case "up":
+      case 'up':
         return styles.trendUp;
-      case "down":
+      case 'down':
         return styles.trendDown;
       default:
         return styles.trendNeutral;
@@ -262,16 +248,16 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
   };
 
   const renderTrendIndicator = () => {
-    if (!trend || trend === "neutral") return null;
+    if (!trend || trend === 'neutral') return null;
 
-    const TrendIcon = trend === "up" ? ArrowUpRegular : ArrowDownRegular;
+    const TrendIcon = trend === 'up' ? ArrowUpRegular : ArrowDownRegular;
 
     return (
       <div className={mergeClasses(styles.trendContainer, getTrendStyles())}>
         <TrendIcon className={styles.trendIcon} />
         {trendValue !== undefined && (
           <span>
-            {trendValue > 0 ? "+" : ""}
+            {trendValue > 0 ? '+' : ''}
             {trendValue.toFixed(1)}%
           </span>
         )}
@@ -289,34 +275,32 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
         fillContainer && !hasExplicitDimensions && styles.cardFillContainer
       )}
       style={{
-        ...(fillContainer && !hasExplicitDimensions ? { width: "100%", flex: "1 1 0%" } : undefined),
-        ...(hasExplicitDimensions ? {
-          width: `${explicitWidth}px`,
-          height: `${explicitHeight}px`,
-          minWidth: "unset",
-          minHeight: "unset",
-        } : undefined),
+        ...(fillContainer && !hasExplicitDimensions ? { width: '100%', flex: '1 1 0%' } : undefined),
+        ...(hasExplicitDimensions
+          ? {
+              width: `${explicitWidth}px`,
+              height: `${explicitHeight}px`,
+              minWidth: 'unset',
+              minHeight: 'unset',
+            }
+          : undefined),
         ...(cardBackground ? { backgroundColor: cardBackground } : undefined),
       }}
       onClick={isInteractive ? handleClick : undefined}
       onKeyDown={isInteractive ? handleKeyDown : undefined}
       tabIndex={isInteractive ? 0 : undefined}
-      role={isInteractive ? "button" : undefined}
+      role={isInteractive ? 'button' : undefined}
       aria-label={isInteractive ? `${label}: ${value}. Click to view details.` : undefined}
     >
       {/* Color-coded left border accent */}
-      {accentColor && (
-        <div
-          className={styles.borderAccent}
-          style={{ backgroundColor: accentColor }}
-        />
-      )}
+      {accentColor && <div className={styles.borderAccent} style={{ backgroundColor: accentColor }} />}
       <div
         className={mergeClasses(
           styles.content,
           compact && styles.contentCompact,
-          (justification === "center" || justification === "left-center" || justification === "right-center") && styles.contentCenter,
-          justification === "right" && styles.contentRight
+          (justification === 'center' || justification === 'left-center' || justification === 'right-center') &&
+            styles.contentCenter,
+          justification === 'right' && styles.contentRight
         )}
       >
         {IconComponent ? (
@@ -324,34 +308,21 @@ export const MetricCard: React.FC<IMetricCardProps> = ({
             <span className={styles.iconSlot} style={iconColor ? { color: iconColor } : undefined}>
               <IconComponent />
             </span>
-            <Text
-              className={mergeClasses(styles.label, compact && styles.labelCompact)}
-            >
-              {label}
-            </Text>
+            <Text className={mergeClasses(styles.label, compact && styles.labelCompact)}>{label}</Text>
           </div>
         ) : (
-          <Text
-            className={mergeClasses(styles.label, compact && styles.labelCompact)}
-          >
-            {label}
-          </Text>
+          <Text className={mergeClasses(styles.label, compact && styles.labelCompact)}>{label}</Text>
         )}
         <div className={styles.valueContainer}>
           <Text
-            className={mergeClasses(
-              styles.value,
-              compact && styles.valueCompact
-            )}
+            className={mergeClasses(styles.value, compact && styles.valueCompact)}
             style={valueColor ? { color: valueColor } : undefined}
           >
             {formatDisplayValue(value, valueFormat, nullDisplay)}
           </Text>
           {renderTrendIndicator()}
         </div>
-        {description && (
-          <Text className={styles.description}>{description}</Text>
-        )}
+        {description && <Text className={styles.description}>{description}</Text>}
       </div>
     </Card>
   );

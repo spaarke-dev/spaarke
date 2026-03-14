@@ -19,9 +19,7 @@ import {
 import type { INaaAuthService, TokenResult, NaaAuthState } from '../../auth';
 
 // Mock auth service
-function createMockAuthService(
-  overrides?: Partial<INaaAuthService>
-): INaaAuthService {
+function createMockAuthService(overrides?: Partial<INaaAuthService>): INaaAuthService {
   const defaultState: NaaAuthState = {
     isAuthenticating: false,
     isAuthenticated: true,
@@ -54,16 +52,15 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 describe('OfficeApiClient', () => {
-  let client: IOfficeApiClient & { configure: (config: Partial<{ baseUrl: string; timeout: number }>) => void };
+  let client: IOfficeApiClient & {
+    configure: (config: Partial<{ baseUrl: string; timeout: number }>) => void;
+  };
   let mockAuthService: INaaAuthService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockAuthService = createMockAuthService();
-    client = createOfficeApiClient(
-      { baseUrl: 'https://api.test.com', timeout: 5000 },
-      mockAuthService
-    );
+    client = createOfficeApiClient({ baseUrl: 'https://api.test.com', timeout: 5000 }, mockAuthService);
   });
 
   describe('save', () => {
@@ -209,7 +206,13 @@ describe('OfficeApiClient', () => {
         status: 200,
         headers: new Headers({ 'Content-Type': 'application/json' }),
         text: () =>
-          Promise.resolve(JSON.stringify({ jobId: 'job/with/slashes', status: 'Completed', stages: [] })),
+          Promise.resolve(
+            JSON.stringify({
+              jobId: 'job/with/slashes',
+              status: 'Completed',
+              stages: [],
+            })
+          ),
       });
 
       await client.getJobStatus('job/with/slashes');
@@ -270,8 +273,7 @@ describe('OfficeApiClient', () => {
         ok: true,
         status: 200,
         headers: new Headers({ 'Content-Type': 'application/json' }),
-        text: () =>
-          Promise.resolve(JSON.stringify({ results: [], totalCount: 0, hasMore: false })),
+        text: () => Promise.resolve(JSON.stringify({ results: [], totalCount: 0, hasMore: false })),
       });
 
       await client.searchEntities(params);
@@ -380,8 +382,16 @@ describe('OfficeApiClient', () => {
           Promise.resolve(
             JSON.stringify({
               links: [
-                { documentId: 'doc-1', url: 'https://share.link/1', title: 'Doc 1' },
-                { documentId: 'doc-2', url: 'https://share.link/2', title: 'Doc 2' },
+                {
+                  documentId: 'doc-1',
+                  url: 'https://share.link/1',
+                  title: 'Doc 1',
+                },
+                {
+                  documentId: 'doc-2',
+                  url: 'https://share.link/2',
+                  title: 'Doc 2',
+                },
               ],
               invitations: [],
             })
@@ -442,7 +452,12 @@ describe('OfficeApiClient', () => {
           Promise.resolve(
             JSON.stringify({
               recentAssociations: [
-                { id: 'matter-1', entityType: 'Matter', name: 'Recent Matter', lastUsed: '2026-01-20T10:00:00Z' },
+                {
+                  id: 'matter-1',
+                  entityType: 'Matter',
+                  name: 'Recent Matter',
+                  lastUsed: '2026-01-20T10:00:00Z',
+                },
               ],
               recentDocuments: [],
               favorites: [],
@@ -563,10 +578,7 @@ describe('OfficeApiClient', () => {
         isInitialized: jest.fn().mockReturnValue(false),
       });
 
-      const uninitializedClient = createOfficeApiClient(
-        { baseUrl: 'https://api.test.com' },
-        uninitializedAuthService
-      );
+      const uninitializedClient = createOfficeApiClient({ baseUrl: 'https://api.test.com' }, uninitializedAuthService);
 
       await expect(uninitializedClient.getRecent()).rejects.toThrow(OfficeApiError);
 
@@ -609,7 +621,13 @@ describe('OfficeApiClient', () => {
         status: 200,
         headers: new Headers({ 'Content-Type': 'application/json' }),
         text: () =>
-          Promise.resolve(JSON.stringify({ recentAssociations: [], recentDocuments: [], favorites: [] })),
+          Promise.resolve(
+            JSON.stringify({
+              recentAssociations: [],
+              recentDocuments: [],
+              favorites: [],
+            })
+          ),
       });
 
       client.configure({ baseUrl: 'https://new-api.test.com' });
@@ -626,7 +644,13 @@ describe('OfficeApiClient', () => {
         status: 200,
         headers: new Headers({ 'Content-Type': 'application/json' }),
         text: () =>
-          Promise.resolve(JSON.stringify({ recentAssociations: [], recentDocuments: [], favorites: [] })),
+          Promise.resolve(
+            JSON.stringify({
+              recentAssociations: [],
+              recentDocuments: [],
+              favorites: [],
+            })
+          ),
       });
 
       client.configure({ baseUrl: 'https://api.test.com/' });

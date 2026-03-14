@@ -4,8 +4,8 @@
  */
 export { useSseStream } from '@spaarke/ui-components/src/hooks';
 export type {
-    SseStreamStatus,
-    SseDataChunk,
-    UseSseStreamResult,
-    UseSseStreamOptions,
+  SseStreamStatus,
+  SseDataChunk,
+  UseSseStreamResult,
+  UseSseStreamOptions,
 } from '@spaarke/ui-components/src/hooks';

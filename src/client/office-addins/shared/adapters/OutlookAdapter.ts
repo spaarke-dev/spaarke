@@ -49,11 +49,7 @@ type ItemMode = 'read' | 'compose' | 'unknown';
 /**
  * Helper function to create HostAdapterError.
  */
-function createHostAdapterError(
-  code: HostAdapterErrorCode,
-  message: string,
-  innerError?: Error
-): HostAdapterError {
+function createHostAdapterError(code: HostAdapterErrorCode, message: string, innerError?: Error): HostAdapterError {
   return { code, message, innerError };
 }
 
@@ -90,18 +86,12 @@ export class OutlookAdapter implements IHostAdapter {
    */
   private getCurrentItem(): Office.Item {
     if (!this._initialized || !this._mailbox) {
-      throw createHostAdapterError(
-        'NOT_INITIALIZED',
-        'Adapter not initialized. Call initialize() first.'
-      );
+      throw createHostAdapterError('NOT_INITIALIZED', 'Adapter not initialized. Call initialize() first.');
     }
 
     const item = this._mailbox.item;
     if (!item) {
-      throw createHostAdapterError(
-        'NO_ITEM_SELECTED',
-        'No email item is currently selected or available.'
-      );
+      throw createHostAdapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
     }
 
     return item;
@@ -215,26 +205,20 @@ export class OutlookAdapter implements IHostAdapter {
       // In compose mode, we need to get the item ID asynchronously
       const composeItem = item as Office.MessageCompose;
       return new Promise((resolve, reject) => {
-        composeItem.getItemIdAsync((result) => {
+        composeItem.getItemIdAsync(result => {
           if (result.status === Office.AsyncResultStatus.Succeeded) {
             // ItemId may be null for unsaved drafts
             resolve(result.value ?? '');
           } else {
             reject(
-              createHostAdapterError(
-                'CONTENT_RETRIEVAL_FAILED',
-                result.error?.message ?? 'Failed to get item ID'
-              )
+              createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get item ID')
             );
           }
         });
       });
     }
 
-    throw createHostAdapterError(
-      'UNKNOWN_ERROR',
-      'Unable to determine item mode'
-    );
+    throw createHostAdapterError('UNKNOWN_ERROR', 'Unable to determine item mode');
   }
 
   /**
@@ -258,15 +242,12 @@ export class OutlookAdapter implements IHostAdapter {
     if (this._currentMode === 'compose') {
       const composeItem = item as Office.MessageCompose;
       return new Promise((resolve, reject) => {
-        composeItem.subject.getAsync((result) => {
+        composeItem.subject.getAsync(result => {
           if (result.status === Office.AsyncResultStatus.Succeeded) {
             resolve(result.value ?? '');
           } else {
             reject(
-              createHostAdapterError(
-                'CONTENT_RETRIEVAL_FAILED',
-                result.error?.message ?? 'Failed to get subject'
-              )
+              createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get subject')
             );
           }
         });
@@ -282,23 +263,17 @@ export class OutlookAdapter implements IHostAdapter {
   async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
     const item = this.getCurrentItem();
 
-    const coercionType =
-      preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
+    const coercionType = preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
 
     return new Promise((resolve, reject) => {
-      item.body.getAsync(coercionType, (result) => {
+      item.body.getAsync(coercionType, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           resolve({
             content: result.value ?? '',
             type: preferredType,
           });
         } else {
-          reject(
-            createHostAdapterError(
-              'CONTENT_RETRIEVAL_FAILED',
-              result.error?.message ?? 'Failed to get body'
-            )
-          );
+          reject(createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get body'));
         }
       });
     });
@@ -342,7 +317,7 @@ export class OutlookAdapter implements IHostAdapter {
       throw createHostAdapterError(
         'API_NOT_AVAILABLE',
         'Attachment content retrieval requires Mailbox API 1.8 or higher. ' +
-        'The current client does not support this requirement set.'
+          'The current client does not support this requirement set.'
       );
     }
 
@@ -357,17 +332,14 @@ export class OutlookAdapter implements IHostAdapter {
 
     // Find the attachment metadata first
     const attachments = item.attachments;
-    const attachmentMeta = attachments?.find((a) => a.id === attachmentId);
+    const attachmentMeta = attachments?.find(a => a.id === attachmentId);
 
     if (!attachmentMeta) {
-      throw createHostAdapterError(
-        'ATTACHMENT_NOT_FOUND',
-        `Attachment with ID '${attachmentId}' not found.`
-      );
+      throw createHostAdapterError('ATTACHMENT_NOT_FOUND', `Attachment with ID '${attachmentId}' not found.`);
     }
 
     return new Promise((resolve, reject) => {
-      item.getAttachmentContentAsync(attachmentId, (result) => {
+      item.getAttachmentContentAsync(attachmentId, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           const content = result.value;
           resolve({
@@ -483,18 +455,17 @@ export class OutlookAdapter implements IHostAdapter {
   /**
    * Helper to get recipients asynchronously (for compose mode).
    */
-  private async getRecipientsAsync(
-    recipientField: Office.Recipients,
-    type: 'to' | 'cc' | 'bcc'
-  ): Promise<Recipient[]> {
-    return new Promise((resolve) => {
-      recipientField.getAsync((result) => {
+  private async getRecipientsAsync(recipientField: Office.Recipients, type: 'to' | 'cc' | 'bcc'): Promise<Recipient[]> {
+    return new Promise(resolve => {
+      recipientField.getAsync(result => {
         if (result.status === Office.AsyncResultStatus.Succeeded && result.value) {
-          const recipients = result.value.map((r): Recipient => ({
-            email: r.emailAddress,
-            displayName: r.displayName,
-            type,
-          }));
+          const recipients = result.value.map(
+            (r): Recipient => ({
+              email: r.emailAddress,
+              displayName: r.displayName,
+              type,
+            })
+          );
           resolve(recipients);
         } else {
           // If we can't get recipients, return empty array
@@ -549,14 +520,9 @@ export class OutlookAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host !== Office.HostType.Outlook) {
-          reject(
-            createHostAdapterError(
-              'INVALID_HOST',
-              `Expected Outlook host, but got: ${info.host}`
-            )
-          );
+          reject(createHostAdapterError('INVALID_HOST', `Expected Outlook host, but got: ${info.host}`));
           return;
         }
 
@@ -592,32 +558,24 @@ export class OutlookAdapter implements IHostAdapter {
       ? `<a href="${this.escapeHtml(url)}">${this.escapeHtml(displayText)}</a>`
       : `<a href="${this.escapeHtml(url)}">${this.escapeHtml(url)}</a>`;
 
-    return new Promise((resolve) => {
-      item.body.setSelectedDataAsync(
-        linkHtml,
-        { coercionType: Office.CoercionType.Html },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({ success: true });
-          } else {
-            resolve({
-              success: false,
-              errorMessage: result.error?.message ?? 'Failed to insert link',
-            });
-          }
+    return new Promise(resolve => {
+      item.body.setSelectedDataAsync(linkHtml, { coercionType: Office.CoercionType.Html }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({ success: true });
+        } else {
+          resolve({
+            success: false,
+            errorMessage: result.error?.message ?? 'Failed to insert link',
+          });
         }
-      );
+      });
     });
   }
 
   /**
    * @inheritdoc
    */
-  async attachFile(
-    content: string,
-    fileName: string,
-    contentType: string
-  ): Promise<AttachFileResult> {
+  async attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult> {
     if (this._currentMode !== 'compose') {
       return {
         success: false,
@@ -630,32 +588,26 @@ export class OutlookAdapter implements IHostAdapter {
       return {
         success: false,
         errorMessage:
-          'File attachment requires Mailbox API 1.8 or higher. ' +
-          'The current client does not support this feature.',
+          'File attachment requires Mailbox API 1.8 or higher. ' + 'The current client does not support this feature.',
       };
     }
 
     const item = this.getComposeItem();
 
-    return new Promise((resolve) => {
-      item.addFileAttachmentFromBase64Async(
-        content,
-        fileName,
-        { isInline: false, contentType },
-        (result) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            resolve({
-              success: true,
-              attachmentId: result.value,
-            });
-          } else {
-            resolve({
-              success: false,
-              errorMessage: result.error?.message ?? 'Failed to attach file',
-            });
-          }
+    return new Promise(resolve => {
+      item.addFileAttachmentFromBase64Async(content, fileName, { isInline: false, contentType }, result => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          resolve({
+            success: true,
+            attachmentId: result.value,
+          });
+        } else {
+          resolve({
+            success: false,
+            errorMessage: result.error?.message ?? 'Failed to attach file',
+          });
         }
-      );
+      });
     });
   }
 
@@ -836,7 +788,7 @@ export class OutlookAdapter implements IHostAdapter {
       '"': '&quot;',
       "'": '&#039;',
     };
-    return text.replace(/[&<>"']/g, (char) => map[char] ?? char);
+    return text.replace(/[&<>"']/g, char => map[char] ?? char);
   }
 }
 

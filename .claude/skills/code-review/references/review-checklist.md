@@ -152,6 +152,100 @@ grep -rn ": any" --include="*.ts" --include="*.tsx"
 grep -rn "as any" --include="*.ts" --include="*.tsx"
 ```
 
+## AI Code Smells
+
+AI-generated code exhibits five distinctive anti-patterns. Check for these during every review.
+
+### Smell 1: Interface with Single Implementation
+- [ ] **Check**: Are there interfaces with only one implementing class?
+- **ADR**: ADR-010 (DI Minimalism -- register concretes by default)
+- **Detection**: `grep -rn "interface I[A-Z]" {file}` then check implementation count
+- **Exception**: IAccessDataSource and IAuthorizationRule are the only allowed seams
+- **Severity**: Warning
+
+**Example (BAD)**:
+```csharp
+public interface IDocumentProcessor { Task ProcessAsync(Document doc); }
+public class DocumentProcessor : IDocumentProcessor { /* only impl */ }
+services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
+```
+**Fix**: Remove interface, register concrete: `services.AddSingleton<DocumentProcessor>();`
+
+### Smell 2: Try/Catch Log-Rethrow
+- [ ] **Check**: Are there catch blocks that only log and rethrow?
+- **Detection**: `grep -A 3 "catch.*Exception" {file} | grep -B 1 "throw;"`
+- **Severity**: Warning
+
+**Example (BAD)**:
+```csharp
+try { await _store.GetDocumentAsync(id); }
+catch (Exception ex)
+{
+    _logger.LogError(ex, "Failed to get document {Id}", id);
+    throw;  // Redundant -- middleware already logs unhandled exceptions
+}
+```
+**Fix**: Remove try/catch entirely, OR wrap in a domain exception if adding context.
+
+### Smell 3: Null Check on Non-Nullable Type
+- [ ] **Check**: Are there null checks on parameters/variables with non-nullable types?
+- **Relevant**: C# nullable reference types (NRT) are project-wide enabled
+- **Detection**: `grep -n "if.*== *null" {file}` then verify parameter type
+- **Severity**: Suggestion
+
+**Example (BAD)**:
+```csharp
+public async Task<Document> GetAsync(string id)  // string, not string?
+{
+    if (id == null) throw new ArgumentNullException(nameof(id));
+    // Compiler already prevents null here with NRT enabled
+}
+```
+**Fix**: Remove null check. If null IS possible, change type to `string?`.
+
+### Smell 4: Code-Restating Comment
+- [ ] **Check**: Do comments restate what the code already says?
+- **Detection**: Manual review -- does the comment add information beyond the next line?
+- **Severity**: Suggestion
+
+**Example (BAD)**:
+```csharp
+// Get the document by ID
+var document = await _store.GetDocumentAsync(id);
+
+// Return the response
+return Ok(response);
+```
+**Example (GOOD)**:
+```csharp
+// Graph API returns 404 for soft-deleted items; treat as "not found"
+var document = await _store.GetDocumentAsync(id);
+
+// Must return 200 even on empty results -- client polling depends on it
+return Ok(response);
+```
+**Fix**: Remove comment if it restates code. Keep comments that explain WHY, not WHAT.
+
+### Smell 5: Method with More Than Three Responsibilities
+- [ ] **Check**: Does any method handle > 3 distinct concerns?
+- **Detection**: Method name contains "And"/"Or"/"Also"/"Then", or method body has
+  distinct sections (validate, fetch, transform, save, notify, log, error-handle)
+- **Severity**: Warning (>3 responsibilities), Critical (>5)
+
+**Example (BAD)**:
+```csharp
+public async Task<ActionResult> CreateAndProcessDocument(CreateRequest req)
+{
+    if (!ModelState.IsValid) return BadRequest();           // 1. Validation
+    var doc = await _store.CreateAsync(req.ToDocument());   // 2. Create
+    var summary = await _aiService.SummarizeAsync(doc);     // 3. AI process
+    await _dataverse.UpdateAsync(doc.Id, summary);          // 4. Persist
+    await _notifier.NotifyAsync(req.UserId, "Ready");       // 5. Notify
+    return Ok(doc);
+}
+```
+**Fix**: Extract into single-responsibility methods. Use background jobs for async chains.
+
 ## Review Severity Guide
 
 | Finding | Severity | Example |

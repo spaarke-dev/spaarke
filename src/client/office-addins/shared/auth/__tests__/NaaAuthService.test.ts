@@ -21,12 +21,18 @@ jest.mock('@azure/msal-browser', () => ({
     errorCode = 'interaction_required';
   },
   BrowserAuthError: class BrowserAuthError extends Error {
-    constructor(public errorCode: string, message?: string) {
+    constructor(
+      public errorCode: string,
+      message?: string
+    ) {
       super(message);
     }
   },
   AuthError: class AuthError extends Error {
-    constructor(public errorCode: string, public errorMessage: string) {
+    constructor(
+      public errorCode: string,
+      public errorMessage: string
+    ) {
       super(errorMessage);
     }
   },
@@ -381,9 +387,11 @@ describe('NaaAuthService', () => {
 
       authService.onAuthStateChange(listener);
 
-      expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-        isAuthenticated: false,
-      }));
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isAuthenticated: false,
+        })
+      );
     });
 
     it('should call listener on state changes', async () => {
@@ -476,10 +484,7 @@ describe('NaaAuthService', () => {
 
 describe('NaaAuthError', () => {
   it('should create error with code and message', () => {
-    const error = new NaaAuthError(
-      NaaAuthErrorCode.NOT_INITIALIZED,
-      'Service not initialized'
-    );
+    const error = new NaaAuthError(NaaAuthErrorCode.NOT_INITIALIZED, 'Service not initialized');
 
     expect(error.code).toBe(NaaAuthErrorCode.NOT_INITIALIZED);
     expect(error.userMessage).toBe('Service not initialized');
@@ -489,11 +494,7 @@ describe('NaaAuthError', () => {
 
   it('should include original error when provided', () => {
     const originalError = new Error('Original error');
-    const error = new NaaAuthError(
-      NaaAuthErrorCode.UNKNOWN,
-      'Wrapped error',
-      originalError
-    );
+    const error = new NaaAuthError(NaaAuthErrorCode.UNKNOWN, 'Wrapped error', originalError);
 
     expect(error.originalError).toBe(originalError);
   });

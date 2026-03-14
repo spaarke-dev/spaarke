@@ -12,14 +12,14 @@
  *   - bffApiScope: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
  */
 
-import { initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
+import { initAuth, getAuthProvider, authenticatedFetch } from '@spaarke/auth';
 
 /**
  * Initialize authentication. Call once at app startup before rendering.
  * Replaces MsalAuthProvider.getInstance().initialize() from the old local auth.
  */
 export async function initializeAuth(): Promise<void> {
-    await initAuth();
+  await initAuth();
 }
 
 /**
@@ -27,7 +27,7 @@ export async function initializeAuth(): Promise<void> {
  * Drop-in replacement for MsalAuthProvider.getInstance().getToken().
  */
 export async function getToken(): Promise<string> {
-    return getAuthProvider().getAccessToken();
+  return getAuthProvider().getAccessToken();
 }
 
 /**
@@ -35,7 +35,7 @@ export async function getToken(): Promise<string> {
  * Drop-in replacement for MsalAuthProvider.getInstance().clearCache().
  */
 export function clearAuthCache(): void {
-    getAuthProvider().clearCache();
+  getAuthProvider().clearCache();
 }
 
 /**
@@ -43,7 +43,7 @@ export function clearAuthCache(): void {
  * Drop-in replacement for MsalAuthProvider.getInstance().isAuthenticated().
  */
 export function isAuthenticated(): boolean {
-    return getAuthProvider().isAuthenticated();
+  return getAuthProvider().isAuthenticated();
 }
 
 // Re-export authenticatedFetch for convenience

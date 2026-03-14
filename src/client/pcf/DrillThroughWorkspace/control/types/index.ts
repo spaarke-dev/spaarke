@@ -50,7 +50,7 @@ export interface IChartDefinition {
 /**
  * Drill interaction contract
  */
-export type DrillOperator = "eq" | "in" | "between";
+export type DrillOperator = 'eq' | 'in' | 'between';
 
 export interface DrillInteraction {
   field: string;

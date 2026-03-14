@@ -1,24 +1,17 @@
-import type { StorybookConfig } from "@storybook/react-vite";
+import type { StorybookConfig } from '@storybook/react-vite';
 
 const config: StorybookConfig = {
-  stories: [
-    "../control/**/*.stories.@(js|jsx|ts|tsx)",
-    "../stories/**/*.stories.@(js|jsx|ts|tsx)",
-  ],
-  addons: [
-    "@storybook/addon-essentials",
-    "@storybook/addon-themes",
-    "@storybook/addon-actions",
-  ],
+  stories: ['../control/**/*.stories.@(js|jsx|ts|tsx)', '../stories/**/*.stories.@(js|jsx|ts|tsx)'],
+  addons: ['@storybook/addon-essentials', '@storybook/addon-themes', '@storybook/addon-actions'],
   framework: {
-    name: "@storybook/react-vite",
+    name: '@storybook/react-vite',
     options: {},
   },
   typescript: {
     check: false,
-    reactDocgen: "react-docgen-typescript",
+    reactDocgen: 'react-docgen-typescript',
   },
-  viteFinal: async (config) => {
+  viteFinal: async config => {
     // Ensure proper resolution for PCF/React components
     config.resolve = config.resolve || {};
     config.resolve.alias = {

@@ -185,11 +185,7 @@ export interface IHostAdapter {
    * @param contentType - MIME type of the file
    * @returns Promise resolving to the result of the attachment
    */
-  attachFile(
-    content: string,
-    fileName: string,
-    contentType: string
-  ): Promise<AttachFileResult>;
+  attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult>;
 }
 
 /**

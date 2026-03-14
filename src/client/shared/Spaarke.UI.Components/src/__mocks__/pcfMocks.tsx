@@ -8,21 +8,21 @@ import { render, RenderOptions } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 export const createMockWebAPI = (): any => ({
-  createRecord: jest.fn().mockResolvedValue({ id: "new-record-id" }),
+  createRecord: jest.fn().mockResolvedValue({ id: 'new-record-id' }),
   updateRecord: jest.fn().mockResolvedValue(undefined),
   deleteRecord: jest.fn().mockResolvedValue(undefined),
   retrieveRecord: jest.fn().mockResolvedValue({
-    id: "record-id",
-    name: "Test Record"
+    id: 'record-id',
+    name: 'Test Record',
   }),
   retrieveMultipleRecords: jest.fn().mockResolvedValue({
     entities: [
-      { id: "1", name: "Record 1" },
-      { id: "2", name: "Record 2" }
+      { id: '1', name: 'Record 1' },
+      { id: '2', name: 'Record 2' },
     ],
-    nextLink: null
+    nextLink: null,
   }),
-  execute: jest.fn().mockResolvedValue({ Success: true })
+  execute: jest.fn().mockResolvedValue({ Success: true }),
 });
 
 export const createMockNavigation = (): any => ({
@@ -30,7 +30,7 @@ export const createMockNavigation = (): any => ({
   openUrl: jest.fn(),
   openAlertDialog: jest.fn().mockResolvedValue({ confirmed: true }),
   openConfirmDialog: jest.fn().mockResolvedValue({ confirmed: true }),
-  openErrorDialog: jest.fn().mockResolvedValue(undefined)
+  openErrorDialog: jest.fn().mockResolvedValue(undefined),
 });
 
 export const createMockContext = (overrides?: any): any => ({
@@ -38,21 +38,21 @@ export const createMockContext = (overrides?: any): any => ({
   navigation: createMockNavigation(),
   mode: {
     isControlDisabled: false,
-    isVisible: true
+    isVisible: true,
   },
   parameters: {},
   utils: {
     getEntityMetadata: jest.fn().mockResolvedValue({
-      EntitySetName: "accounts",
-      LogicalName: "account",
-      PrimaryIdAttribute: "accountid",
-      PrimaryNameAttribute: "name"
-    })
+      EntitySetName: 'accounts',
+      LogicalName: 'account',
+      PrimaryIdAttribute: 'accountid',
+      PrimaryNameAttribute: 'name',
+    }),
   },
-  ...overrides
+  ...overrides,
 });
 
-export const createMockRecord = (id: string, entityName = "account"): any => ({
+export const createMockRecord = (id: string, entityName = 'account'): any => ({
   id,
   entityName,
   getFormattedValue: jest.fn((column: string) => `Formatted ${column}`),
@@ -60,13 +60,13 @@ export const createMockRecord = (id: string, entityName = "account"): any => ({
   getNamedReference: jest.fn(() => ({
     id: { guid: id },
     name: `Record ${id}`,
-    entityType: entityName
-  }))
+    entityType: entityName,
+  })),
 });
 
 export const createMockDataset = (
-  recordIds = ["1", "2", "3"],
-  entityName = "account"
+  recordIds = ['1', '2', '3'],
+  entityName = 'account'
 ): ComponentFramework.PropertyTypes.DataSet => {
   const records: any = {};
   recordIds.forEach(id => {
@@ -76,26 +76,26 @@ export const createMockDataset = (
   return {
     loading: false,
     error: false,
-    errorMessage: "",
+    errorMessage: '',
     sortedRecordIds: recordIds,
     records,
     columns: [
       {
-        name: "name",
-        displayName: "Name",
-        dataType: "SingleLine.Text",
-        alias: "name",
+        name: 'name',
+        displayName: 'Name',
+        dataType: 'SingleLine.Text',
+        alias: 'name',
         order: 0,
-        visualSizeFactor: 1
+        visualSizeFactor: 1,
       } as any,
       {
-        name: "primarycontactid",
-        displayName: "Primary Contact",
-        dataType: "Lookup.Simple",
-        alias: "primarycontactid",
+        name: 'primarycontactid',
+        displayName: 'Primary Contact',
+        dataType: 'Lookup.Simple',
+        alias: 'primarycontactid',
         order: 1,
-        visualSizeFactor: 1
-      } as any
+        visualSizeFactor: 1,
+      } as any,
     ],
     paging: {
       pageSize: 25,
@@ -105,40 +105,36 @@ export const createMockDataset = (
       loadNextPage: jest.fn(),
       loadPreviousPage: jest.fn(),
       reset: jest.fn(),
-      setPageSize: jest.fn()
+      setPageSize: jest.fn(),
     } as any,
     sorting: [],
     filtering: {
       clearFilter: jest.fn(),
       getFilter: jest.fn(),
-      setFilter: jest.fn()
+      setFilter: jest.fn(),
     } as any,
     linking: {
       addLinkedEntity: jest.fn(),
-      getLinkedEntities: jest.fn().mockReturnValue([])
+      getLinkedEntities: jest.fn().mockReturnValue([]),
     } as any,
     security: {
       editable: true,
       readable: true,
-      secured: false
+      secured: false,
     } as any,
     addColumn: jest.fn(),
     getTargetEntityType: jest.fn().mockReturnValue(entityName),
-    getTitle: jest.fn().mockReturnValue("Test Dataset"),
-    getViewId: jest.fn().mockReturnValue("view-id"),
+    getTitle: jest.fn().mockReturnValue('Test Dataset'),
+    getViewId: jest.fn().mockReturnValue('view-id'),
     openDatasetItem: jest.fn(),
     refresh: jest.fn(),
     clearSelectedRecordIds: jest.fn(),
     getSelectedRecordIds: jest.fn().mockReturnValue([]),
-    setSelectedRecordIds: jest.fn()
+    setSelectedRecordIds: jest.fn(),
   } as any;
 };
 
-export const createMockColumn = (
-  name: string,
-  displayName: string,
-  dataType: string = "SingleLine.Text"
-): any => ({
+export const createMockColumn = (name: string, displayName: string, dataType: string = 'SingleLine.Text'): any => ({
   name,
   displayName,
   dataType,
@@ -146,42 +142,35 @@ export const createMockColumn = (
   order: 0,
   visualSizeFactor: 1,
   isHidden: false,
-  isPrimary: name === "name"
+  isPrimary: name === 'name',
 });
 
-export const createMockEntityPrivileges = (
-  overrides?: Partial<any>
-): any => ({
+export const createMockEntityPrivileges = (overrides?: Partial<any>): any => ({
   canCreate: true,
   canRead: true,
   canWrite: true,
   canDelete: true,
   canAppend: true,
   canAppendTo: true,
-  ...overrides
+  ...overrides,
 });
 
 export const createMockCommandContext = (overrides?: any): any => ({
   selectedRecords: [],
-  entityName: "account",
+  entityName: 'account',
   webAPI: createMockWebAPI(),
   navigation: createMockNavigation(),
   refresh: jest.fn(),
   emitLastAction: jest.fn(),
-  ...overrides
+  ...overrides,
 });
 
 /**
  * Render component with Fluent UI provider
  */
-export const renderWithProviders = (
-  ui: React.ReactElement,
-  options?: Omit<RenderOptions, 'wrapper'>
-) => {
+export const renderWithProviders = (ui: React.ReactElement, options?: Omit<RenderOptions, 'wrapper'>) => {
   const Wrapper = ({ children }: { children: React.ReactNode }) => (
-    <FluentProvider theme={webLightTheme}>
-      {children}
-    </FluentProvider>
+    <FluentProvider theme={webLightTheme}>{children}</FluentProvider>
   );
 
   return render(ui, { wrapper: Wrapper, ...options });

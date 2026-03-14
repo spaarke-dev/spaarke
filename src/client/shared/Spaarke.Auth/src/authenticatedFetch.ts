@@ -23,10 +23,7 @@ const MAX_RETRIES = 3;
  * @throws ApiError for non-2xx responses with ProblemDetails
  * @throws AuthError when token acquisition fails after retries
  */
-export async function authenticatedFetch(
-  url: string,
-  init?: RequestInit,
-): Promise<Response> {
+export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
   const provider = getAuthProvider();
 
   // Resolve relative URLs against the configured BFF base URL
@@ -66,10 +63,7 @@ export async function authenticatedFetch(
   }
 
   if (lastResponse.status === 401) {
-    throw new AuthError(
-      'Authentication failed after all retry attempts',
-      'auth_exhausted',
-    );
+    throw new AuthError('Authentication failed after all retry attempts', 'auth_exhausted');
   }
 
   // Try to parse RFC 7807 ProblemDetails
@@ -77,7 +71,7 @@ export async function authenticatedFetch(
   throw new ApiError(
     problemDetails?.detail ?? problemDetails?.title ?? `HTTP ${lastResponse.status}`,
     lastResponse.status,
-    problemDetails,
+    problemDetails
   );
 }
 
@@ -94,15 +88,10 @@ function resolveUrl(url: string, baseUrl: string): string {
 }
 
 /** Attempt to parse a response body as RFC 7807 ProblemDetails. */
-async function tryParseProblemDetails(
-  response: Response,
-): Promise<IProblemDetails | null> {
+async function tryParseProblemDetails(response: Response): Promise<IProblemDetails | null> {
   try {
     const contentType = response.headers.get('content-type') ?? '';
-    if (
-      contentType.includes('application/json') ||
-      contentType.includes('application/problem+json')
-    ) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const body = await response.json();
       if (body && typeof body === 'object' && ('title' in body || 'status' in body)) {
         return body as IProblemDetails;
@@ -115,5 +104,5 @@ async function tryParseProblemDetails(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

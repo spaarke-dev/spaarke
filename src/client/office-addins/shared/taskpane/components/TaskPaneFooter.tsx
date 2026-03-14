@@ -79,10 +79,7 @@ export interface TaskPaneFooterProps {
 /**
  * Gets the status indicator class based on connection status.
  */
-function getStatusClass(
-  status: ConnectionStatus,
-  styles: ReturnType<typeof useStyles>
-): string {
+function getStatusClass(status: ConnectionStatus, styles: ReturnType<typeof useStyles>): string {
   switch (status) {
     case 'connected':
       return styles.statusIndicator;
@@ -122,9 +119,7 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
 }) => {
   const styles = useStyles();
 
-  const footerClassName = compact
-    ? `${styles.footer} ${styles.footerCompact}`
-    : styles.footer;
+  const footerClassName = compact ? `${styles.footer} ${styles.footerCompact}` : styles.footer;
 
   return (
     <footer className={footerClassName}>
@@ -132,10 +127,7 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
         <span>{appName}</span>
         {connectionStatus && (
           <div className={styles.status}>
-            <span
-              className={getStatusClass(connectionStatus, styles)}
-              aria-hidden="true"
-            />
+            <span className={getStatusClass(connectionStatus, styles)} aria-hidden="true" />
             {!compact && <span>{getStatusText(connectionStatus)}</span>}
           </div>
         )}
@@ -143,16 +135,14 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
 
       <div className={styles.right}>
         {showHelpLink && (
-          <Link
-            href={helpUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.link}
-          >
+          <Link href={helpUrl} target="_blank" rel="noopener noreferrer" className={styles.link}>
             Help
           </Link>
         )}
-        <span>v{version}{buildDate ? ` (${buildDate})` : ''}</span>
+        <span>
+          v{version}
+          {buildDate ? ` (${buildDate})` : ''}
+        </span>
       </div>
     </footer>
   );

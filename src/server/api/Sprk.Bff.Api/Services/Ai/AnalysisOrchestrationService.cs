@@ -449,7 +449,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             CreatedAt = analysis.StartedOn.HasValue
                 ? new DateTimeOffset(analysis.StartedOn.Value, TimeSpan.Zero)
                 : DateTimeOffset.UtcNow,
-            CreatedBy = "User", // TODO: Extract from context when Dataverse integration is complete
+            CreatedBy = "User", // TRACKED: GitHub #233 - Extract from context when Dataverse integration complete
             Options = request.Options
         };
 

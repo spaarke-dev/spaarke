@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Apply Prettier Formatting to TypeScript Codebase</title>
+    <phase>4: Remediation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>008, 010</dependencies>
+    <blocks>035, 043</blocks>
+    <tags>remediation, typescript, formatting, prettier</tags>
+  </metadata>
+
+  <prompt>
+    Apply Prettier formatting to the entire TypeScript codebase as a one-time bulk formatting pass.
+    Run prettier --write on all .ts, .tsx, and .json files in src/client/. This must be committed as
+    a single dedicated formatting commit with no mixed logic changes — keeping the formatting commit
+    isolated makes git history clean and makes future diffs readable. Verify the build passes after
+    formatting.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in codebase formatting and developer tooling. Expert in executing
+    large-scale formatting passes while preserving semantic correctness and maintaining clean git history.
+  </role>
+
+  <goal>
+    The entire TypeScript codebase is formatted to the Prettier standard configured in task 010.
+    Running `prettier --check src/client/**/*.{ts,tsx}` after this task produces zero violations.
+    The formatting is committed as a single isolated commit (no mixed logic changes), preserving a
+    clean and reviewable git history.
+  </goal>
+
+  <context>
+    <background>
+      Task 010 configured Prettier and established the baseline violation count (number of files that
+      need reformatting). This task executes the bulk format. The key requirement is a dedicated
+      formatting commit — this is important for:
+
+      1. Git blame accuracy: future `git blame` on logic lines will not be polluted by formatting
+         changes showing the wrong author/date.
+      2. PR review clarity: formatting-only changes are easy to review (or skip review) when isolated.
+      3. Merge conflict reduction: if formatting is mixed with logic, formatting conflicts obscure
+         logic conflicts in future merges.
+
+      Process:
+      - Stage all current changes (or stash if any work-in-progress) before starting
+      - Run `prettier --write "src/client/**/*.{ts,tsx,json}"` — this formats in place
+      - Run `npm run build` in each client project to verify formatting did not introduce syntax errors
+      - Stage ALL changed files with `git add src/client/`
+      - Create the formatting commit with message: "style: apply Prettier formatting to TypeScript codebase"
+      - Do NOT mix any other changes (no bug fixes, no feature additions) in this commit
+
+      The .prettierignore from task 010 ensures that generated files, node_modules, dist/, and
+      build/ directories are excluded. C# files are excluded by .prettierignore — do not run
+      prettier on .cs files.
+
+      Note: Prettier formatting is purely cosmetic (whitespace, quotes, trailing commas, line length).
+      It does not change runtime behavior. TypeScript's type checking and the build are the verification
+      that behavior is unchanged.
+    </background>
+    <relevant-files>
+      <file>src/client/ (modify — formatting only, all .ts/.tsx/.json files)</file>
+      <file>.prettierrc.json (read — verify config before running)</file>
+      <file>.prettierignore (read — verify exclusions before running)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">This MUST be a single dedicated formatting commit. Zero logic changes, zero configuration changes, zero file additions or deletions — only formatting changes to existing .ts, .tsx, and .json files in src/client/.</constraint>
+    <constraint source="spec">Verify `npm run build` passes in ALL client project workspaces after formatting. Prettier can occasionally introduce syntax errors in edge cases (rare but possible) — build verification catches this.</constraint>
+    <constraint source=".editorconfig">Do NOT run Prettier on .cs files. .prettierignore excludes them — verify the exclusion is working before running the bulk format by checking `prettier --check "src/server/**/*.cs"` returns "ignored" status.</constraint>
+    <constraint source="spec">If any project build fails after formatting, identify the specific file(s) causing the failure, revert just those files with `git checkout -- {file}`, and document the exception in the commit message.</constraint>
+    <constraint source="spec">The git commit message must be exactly: "style: apply Prettier formatting to TypeScript codebase" — this follows the conventional commits format and allows tooling to identify formatting commits.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .prettierrc.json and .prettierignore to confirm the configuration is in place from task 010. Verify C# file exclusions and generated file exclusions are correct.</step>
+    <step order="2">Run `git status` to confirm there are no uncommitted changes that would be mixed into the formatting commit. If changes exist, stash them with `git stash` before proceeding.</step>
+    <step order="3">Run `prettier --check "src/client/**/*.{ts,tsx}"` to see the current violation count and which files will be changed. This is a dry run — no changes yet.</step>
+    <step order="4">Run `prettier --write "src/client/**/*.{ts,tsx,json}"` to apply formatting in-place to all TypeScript, TSX, and JSON files in src/client/.</step>
+    <step order="5">Run `npm run build` in src/client/pcf/ (or the root-level build command for PCF). Verify zero errors. If any build errors appear, identify the specific files and revert them with `git checkout -- {file}`.</step>
+    <step order="6">Run `npm run build` in src/client/code-pages/ and src/client/shared/ (or equivalent build commands). Verify zero errors in each.</step>
+    <step order="7">Run `prettier --check "src/client/**/*.{ts,tsx}"` again to confirm zero remaining violations after the write pass.</step>
+    <step order="8">Run `git add src/client/` to stage all formatting changes. Run `git status` to verify that ONLY src/client/ files are staged and that no .cs files, .csproj files, or files outside src/client/ are included.</step>
+    <step order="9">Create the formatting commit: `git commit -m "style: apply Prettier formatting to TypeScript codebase"`. Verify the commit succeeds.</step>
+    <step order="10">If changes were stashed in step 2, restore them with `git stash pop`. Verify the restored changes are clean.</step>
+    <step order="11">Update TASK-INDEX.md: change task 034 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="git-commit">Single formatting commit: "style: apply Prettier formatting to TypeScript codebase"</output>
+    <output type="changes">src/client/ files (formatting only — whitespace, quotes, trailing commas, line length)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`prettier --check "src/client/**/*.{ts,tsx}"` exits with code 0 after this task</criterion>
+    <criterion>Formatting changes are in a single isolated git commit with message "style: apply Prettier formatting to TypeScript codebase"</criterion>
+    <criterion>The formatting commit contains ONLY formatting changes (no logic, no config, no new files)</criterion>
+    <criterion>No .cs files or files outside src/client/ are included in the formatting commit</criterion>
+    <criterion>`npm run build` passes in all affected client project workspaces after formatting</criterion>
+    <criterion>No behavior changes introduced — formatting is purely cosmetic</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

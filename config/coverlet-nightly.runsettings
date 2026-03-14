@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Nightly coverage configuration for SonarCloud integration.
+
+  Produces BOTH cobertura (for GitHub artifact reporting) AND opencover (for SonarCloud).
+  SonarCloud requires opencover format — see sonar.cs.opencover.reportsPaths in sonar-project.properties.
+
+  Used by: .github/workflows/nightly-quality.yml (test-and-coverage job)
+  Standard CI uses: config/coverlet.runsettings (cobertura only)
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>opencover,cobertura</Format>
+          <Include>[Sprk.Bff.Api]*,[Spaarke.Plugins]*,[Spaarke.Core]*,[Spaarke.Dataverse]*</Include>
+          <Exclude>[*Tests]*,[*]*.Program,[*]*Exception*</Exclude>
+          <ExcludeByFile>**/Program.cs,**/*Tests/**/*</ExcludeByFile>
+          <SingleHit>false</SingleHit>
+          <UseSourceLink>true</UseSourceLink>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

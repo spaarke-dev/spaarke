@@ -14,20 +14,8 @@
 
 import * as React from 'react';
 import { useState, useCallback } from 'react';
-import {
-  Button,
-  Input,
-  Text,
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-} from '@fluentui/react-components';
-import {
-  CheckmarkCircle20Regular,
-  Send20Regular,
-  Edit20Regular,
-} from '@fluentui/react-icons';
+import { Button, Input, Text, makeStyles, tokens, shorthands, mergeClasses } from '@fluentui/react-components';
+import { CheckmarkCircle20Regular, Send20Regular, Edit20Regular } from '@fluentui/react-icons';
 import type { ClarificationData } from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,10 +159,7 @@ export interface ClarificationOptionsProps {
   /** Message ID for responding */
   messageId: string;
   /** Callback when user selects an option */
-  onRespond: (
-    messageId: string,
-    response: { selectedOption: number | 'other'; freeText?: string }
-  ) => void;
+  onRespond: (messageId: string, response: { selectedOption: number | 'other'; freeText?: string }) => void;
   /** Whether the component is disabled (e.g., during streaming) */
   disabled?: boolean;
 }
@@ -222,7 +207,10 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
   const handleOtherSubmit = useCallback(() => {
     if (hasResponded || disabled || !otherText.trim()) return;
 
-    onRespond(messageId, { selectedOption: 'other', freeText: otherText.trim() });
+    onRespond(messageId, {
+      selectedOption: 'other',
+      freeText: otherText.trim(),
+    });
   }, [hasResponded, disabled, otherText, messageId, onRespond]);
 
   // Handle enter key in other input
@@ -252,16 +240,12 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
     return (
       <div className={styles.container}>
         {/* Context if provided */}
-        {clarification.context && (
-          <Text className={styles.contextText}>{clarification.context}</Text>
-        )}
+        {clarification.context && <Text className={styles.contextText}>{clarification.context}</Text>}
 
         {/* Show selected response */}
         <div className={styles.selectedResponse}>
           <CheckmarkCircle20Regular />
-          <Text className={styles.selectedResponseText}>
-            {getSelectedResponseText()}
-          </Text>
+          <Text className={styles.selectedResponseText}>{getSelectedResponseText()}</Text>
         </div>
       </div>
     );
@@ -273,9 +257,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
   return (
     <div className={styles.container} role="group" aria-label="Clarification options">
       {/* Context if provided */}
-      {clarification.context && (
-        <Text className={styles.contextText}>{clarification.context}</Text>
-      )}
+      {clarification.context && <Text className={styles.contextText}>{clarification.context}</Text>}
 
       {/* Options list */}
       {options.length > 0 && (
@@ -295,10 +277,7 @@ export const ClarificationOptions: React.FC<ClarificationOptionsProps> = ({
               role="listitem"
             >
               <span
-                className={mergeClasses(
-                  styles.optionNumber,
-                  selectedOption === index && styles.optionNumberSelected
-                )}
+                className={mergeClasses(styles.optionNumber, selectedOption === index && styles.optionNumberSelected)}
               >
                 {index + 1}
               </span>

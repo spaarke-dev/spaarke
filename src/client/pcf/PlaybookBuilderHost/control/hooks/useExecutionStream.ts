@@ -42,15 +42,13 @@ interface UseExecutionStreamReturn {
  * Hook for managing SSE connection to playbook execution endpoint.
  * Handles connection lifecycle, reconnection, and event dispatching.
  */
-export function useExecutionStream(
-  options: UseExecutionStreamOptions
-): UseExecutionStreamReturn {
+export function useExecutionStream(options: UseExecutionStreamOptions): UseExecutionStreamReturn {
   const { apiBaseUrl, accessToken, playbookId, recordId, onComplete, onError } = options;
 
   const eventSourceRef = useRef<EventSource | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<
-    'disconnected' | 'connecting' | 'connected' | 'error'
-  >('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>(
+    'disconnected'
+  );
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const {
@@ -100,7 +98,7 @@ export function useExecutionStream(
       setConnectionStatus('connected');
     };
 
-    eventSource.onmessage = (event) => {
+    eventSource.onmessage = event => {
       try {
         const data: ExecutionEvent = JSON.parse(event.data);
         console.debug('[useExecutionStream] Received event:', data.eventType);
@@ -132,7 +130,7 @@ export function useExecutionStream(
       }
     };
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = error => {
       console.error('[useExecutionStream] SSE error:', error);
       setConnectionStatus('error');
       setConnectionError('Connection lost. Please try again.');

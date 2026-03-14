@@ -45,12 +45,7 @@ describe('TaskPaneShell', () => {
 
   it('shows navigation tabs when authenticated', () => {
     renderWithProvider(
-      <TaskPaneShell
-        isAuthenticated={true}
-        showNavigation={true}
-        selectedTab="save"
-        onTabChange={() => {}}
-      >
+      <TaskPaneShell isAuthenticated={true} showNavigation={true} selectedTab="save" onTabChange={() => {}}>
         <div>Content</div>
       </TaskPaneShell>
     );
@@ -74,12 +69,7 @@ describe('TaskPaneShell', () => {
     const handleTabChange = jest.fn();
 
     renderWithProvider(
-      <TaskPaneShell
-        isAuthenticated={true}
-        showNavigation={true}
-        selectedTab="save"
-        onTabChange={handleTabChange}
-      >
+      <TaskPaneShell isAuthenticated={true} showNavigation={true} selectedTab="save" onTabChange={handleTabChange}>
         <div>Content</div>
       </TaskPaneShell>
     );
@@ -112,11 +102,7 @@ describe('TaskPaneShell', () => {
     const handleSignOut = jest.fn();
 
     renderWithProvider(
-      <TaskPaneShell
-        isAuthenticated={true}
-        userName="John Doe"
-        onSignOut={handleSignOut}
-      >
+      <TaskPaneShell isAuthenticated={true} userName="John Doe" onSignOut={handleSignOut}>
         <div>Content</div>
       </TaskPaneShell>
     );

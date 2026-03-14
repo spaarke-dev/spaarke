@@ -36,7 +36,7 @@ import {
   ICacheEntry,
   IProfileValidationResult,
   IRuleValidationResult,
-} from "../types/FieldMappingTypes";
+} from '../types/FieldMappingTypes';
 
 /**
  * Default cache TTL: 5 minutes
@@ -51,8 +51,8 @@ const MAX_CASCADING_PASSES = 2;
 /**
  * Dataverse table names for field mapping entities
  */
-const PROFILE_TABLE = "sprk_fieldmappingprofile";
-const RULE_TABLE = "sprk_fieldmappingrule";
+const PROFILE_TABLE = 'sprk_fieldmappingprofile';
+const RULE_TABLE = 'sprk_fieldmappingrule';
 
 /**
  * FieldMappingService - Core service for field mapping operations.
@@ -108,7 +108,7 @@ export class FieldMappingService {
     const { activeOnly = true, sourceEntity, targetEntity, includeRules = false } = options;
 
     // Build cache key
-    const cacheKey = `profiles:${activeOnly}:${sourceEntity ?? "all"}:${targetEntity ?? "all"}`;
+    const cacheKey = `profiles:${activeOnly}:${sourceEntity ?? 'all'}:${targetEntity ?? 'all'}`;
 
     // Check cache
     if (this.enableCache) {
@@ -121,7 +121,7 @@ export class FieldMappingService {
     // Build OData filter
     const filters: string[] = [];
     if (activeOnly) {
-      filters.push("sprk_isactive eq true");
+      filters.push('sprk_isactive eq true');
     }
     if (sourceEntity) {
       filters.push(`sprk_sourceentity eq '${sourceEntity}'`);
@@ -130,9 +130,10 @@ export class FieldMappingService {
       filters.push(`sprk_targetentity eq '${targetEntity}'`);
     }
 
-    const filterString = filters.length > 0 ? `$filter=${filters.join(" and ")}` : "";
-    const selectString = "$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description";
-    const query = [filterString, selectString].filter(Boolean).join("&");
+    const filterString = filters.length > 0 ? `$filter=${filters.join(' and ')}` : '';
+    const selectString =
+      '$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description';
+    const query = [filterString, selectString].filter(Boolean).join('&');
 
     // STUB: [API] - S010-01: Replace with actual Dataverse query when sprk_fieldmappingprofile entity exists (Task 001)
     // For now, return empty array - real implementation would be:
@@ -156,10 +157,7 @@ export class FieldMappingService {
    * @param targetEntity - Target entity logical name (e.g., "sprk_event")
    * @returns Matching profile or null if none found
    */
-  async getProfileForEntityPair(
-    sourceEntity: string,
-    targetEntity: string
-  ): Promise<IFieldMappingProfile | null> {
+  async getProfileForEntityPair(sourceEntity: string, targetEntity: string): Promise<IFieldMappingProfile | null> {
     const profiles = await this.getProfiles({
       activeOnly: true,
       sourceEntity,
@@ -207,8 +205,9 @@ export class FieldMappingService {
     }
 
     const filterString = `$filter=_sprk_fieldmappingprofile_value eq '${profileId}' and sprk_isactive eq true`;
-    const selectString = "$select=sprk_fieldmappingruleid,sprk_name,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
-    const orderString = "$orderby=sprk_executionorder asc";
+    const selectString =
+      '$select=sprk_fieldmappingruleid,sprk_name,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive';
+    const orderString = '$orderby=sprk_executionorder asc';
     const query = `?${filterString}&${selectString}&${orderString}`;
 
     // STUB: [API] - S010-02: Replace with actual Dataverse query when sprk_fieldmappingrule entity exists (Task 002)
@@ -238,16 +237,12 @@ export class FieldMappingService {
    * @param fields - Array of field schema names to retrieve
    * @returns Record of field names to values
    */
-  async getSourceValues(
-    sourceEntity: string,
-    recordId: string,
-    fields: string[]
-  ): Promise<SourceFieldValues> {
+  async getSourceValues(sourceEntity: string, recordId: string, fields: string[]): Promise<SourceFieldValues> {
     if (fields.length === 0) {
       return {};
     }
 
-    const selectString = fields.join(",");
+    const selectString = fields.join(',');
 
     // STUB: [API] - S010-03: Replace with actual Dataverse query (Task 010)
     // const record = await this.webApi.retrieveRecord(sourceEntity, recordId, `?$select=${selectString}`);
@@ -297,7 +292,7 @@ export class FieldMappingService {
     };
 
     // Load rules if not already present
-    const rules = profile.rules ?? await this.getRulesForProfile(profile.id);
+    const rules = profile.rules ?? (await this.getRulesForProfile(profile.id));
     result.totalRules = rules.length;
 
     if (rules.length === 0) {
@@ -305,14 +300,10 @@ export class FieldMappingService {
     }
 
     // Get source field names
-    const sourceFields = rules.map((r) => r.sourceField);
+    const sourceFields = rules.map(r => r.sourceField);
 
     // Fetch source values
-    const sourceValues = await this.getSourceValues(
-      profile.sourceEntity,
-      sourceRecordId,
-      sourceFields
-    );
+    const sourceValues = await this.getSourceValues(profile.sourceEntity, sourceRecordId, sourceFields);
 
     // First pass: apply direct mappings
     const firstPassResult = await this.executePass(
@@ -366,7 +357,7 @@ export class FieldMappingService {
 
     // Set overall success based on required field errors
     result.success = !result.errors.some(
-      (e) => e.code === MappingErrorCode.RequiredFieldEmpty || e.code === MappingErrorCode.TypeMismatch
+      e => e.code === MappingErrorCode.RequiredFieldEmpty || e.code === MappingErrorCode.TypeMismatch
     );
 
     return result;
@@ -423,7 +414,7 @@ export class FieldMappingService {
             ruleId: rule.id,
             sourceField: rule.sourceField,
             targetField: rule.targetField,
-            message: compatibility.errors.join("; "),
+            message: compatibility.errors.join('; '),
             code: MappingErrorCode.TypeMismatch,
           });
           result.skippedRules++;
@@ -435,7 +426,7 @@ export class FieldMappingService {
       const sourceValue = sourceValues[rule.sourceField];
 
       // Handle empty source
-      if (sourceValue === undefined || sourceValue === null || sourceValue === "") {
+      if (sourceValue === undefined || sourceValue === null || sourceValue === '') {
         if (rule.isRequired && !rule.defaultValue) {
           result.errors.push({
             ruleId: rule.id,
@@ -451,10 +442,7 @@ export class FieldMappingService {
         // Use default value or skip optional field
         if (rule.defaultValue) {
           if (!dryRun) {
-            targetRecord[rule.targetField] = this.convertValue(
-              rule.defaultValue,
-              rule.targetFieldType
-            );
+            targetRecord[rule.targetField] = this.convertValue(rule.defaultValue, rule.targetFieldType);
           }
           result.fieldsMapped.push(rule.targetField);
           result.appliedRules++;
@@ -489,11 +477,8 @@ export class FieldMappingService {
    * @param mappedFields - Fields that were mapped in the previous pass
    * @returns Rules to execute in the cascading pass
    */
-  private getCascadingRules(
-    allRules: IFieldMappingRule[],
-    mappedFields: string[]
-  ): IFieldMappingRule[] {
-    return allRules.filter((rule) => {
+  private getCascadingRules(allRules: IFieldMappingRule[], mappedFields: string[]): IFieldMappingRule[] {
+    return allRules.filter(rule => {
       // Check if this rule's source field was mapped in a previous pass
       return mappedFields.includes(rule.sourceField) && rule.isCascadingSource;
     });
@@ -553,14 +538,16 @@ export class FieldMappingService {
     if (mode === CompatibilityMode.Resolve) {
       // STUB: [FEATURE] - S010-04: Implement Resolve mode type resolution (future enhancement)
       result.level = CompatibilityLevel.RequiresResolve;
-      result.warnings.push(`Type resolution from ${FieldType[sourceType]} to ${FieldType[targetType]} is not yet implemented`);
+      result.warnings.push(
+        `Type resolution from ${FieldType[sourceType]} to ${FieldType[targetType]} is not yet implemented`
+      );
       return result;
     }
 
     // Incompatible in Strict mode
     result.errors.push(
       `Cannot convert ${FieldType[sourceType]} to ${FieldType[targetType]} in Strict mode. ` +
-      `Compatible types for ${FieldType[sourceType]}: ${compatibleTypes.map((t) => FieldType[t]).join(", ") || "none"}`
+        `Compatible types for ${FieldType[sourceType]}: ${compatibleTypes.map(t => FieldType[t]).join(', ') || 'none'}`
     );
 
     return result;
@@ -573,11 +560,7 @@ export class FieldMappingService {
    * @returns Validation result
    */
   validateMappingRule(rule: IFieldMappingRule): ITypeCompatibilityResult {
-    return this.validateTypeCompatibility(
-      rule.sourceFieldType,
-      rule.targetFieldType,
-      rule.compatibilityMode
-    );
+    return this.validateTypeCompatibility(rule.sourceFieldType, rule.targetFieldType, rule.compatibilityMode);
   }
 
   /**
@@ -625,10 +608,7 @@ export class FieldMappingService {
    * @param rules - Rules to validate (if not included in profile)
    * @returns Validation result with all incompatible mappings listed
    */
-  validateProfile(
-    profile: IFieldMappingProfile,
-    rules?: IFieldMappingRule[]
-  ): IProfileValidationResult {
+  validateProfile(profile: IFieldMappingProfile, rules?: IFieldMappingRule[]): IProfileValidationResult {
     const rulesToValidate = rules ?? profile.rules ?? [];
 
     const result: IProfileValidationResult = {
@@ -682,11 +662,7 @@ export class FieldMappingService {
    * @param sourceType - Optional source field type (for special handling)
    * @returns Converted value
    */
-  private convertValue(
-    value: unknown,
-    targetType: FieldType,
-    sourceType?: FieldType
-  ): unknown {
+  private convertValue(value: unknown, targetType: FieldType, sourceType?: FieldType): unknown {
     if (value === null || value === undefined) {
       return null;
     }
@@ -700,18 +676,18 @@ export class FieldMappingService {
         return this.convertToText(value, sourceType);
 
       case FieldType.Number:
-        return typeof value === "number" ? value : parseFloat(String(value)) || null;
+        return typeof value === 'number' ? value : parseFloat(String(value)) || null;
 
       case FieldType.Boolean:
-        if (typeof value === "boolean") return value;
-        if (typeof value === "string") {
-          return value.toLowerCase() === "true" || value === "1" || value.toLowerCase() === "yes";
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') {
+          return value.toLowerCase() === 'true' || value === '1' || value.toLowerCase() === 'yes';
         }
         return Boolean(value);
 
       case FieldType.DateTime:
         if (value instanceof Date) return value.toISOString();
-        if (typeof value === "string") return value; // Assume ISO string
+        if (typeof value === 'string') return value; // Assume ISO string
         return null;
 
       case FieldType.Lookup:
@@ -720,8 +696,8 @@ export class FieldMappingService {
 
       case FieldType.OptionSet:
         // OptionSet values are typically integers
-        if (typeof value === "number") return value;
-        if (typeof value === "string") {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
           const parsed = parseInt(value, 10);
           return isNaN(parsed) ? null : parsed;
         }
@@ -741,19 +717,19 @@ export class FieldMappingService {
    */
   private convertToText(value: unknown, sourceType?: FieldType): string {
     if (value === null || value === undefined) {
-      return "";
+      return '';
     }
 
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value;
     }
 
-    if (typeof value === "number") {
+    if (typeof value === 'number') {
       return value.toString();
     }
 
-    if (typeof value === "boolean") {
-      return value ? "Yes" : "No";
+    if (typeof value === 'boolean') {
+      return value ? 'Yes' : 'No';
     }
 
     if (value instanceof Date) {
@@ -761,15 +737,15 @@ export class FieldMappingService {
     }
 
     // For lookup values, try to get the display name
-    if (typeof value === "object" && value !== null) {
+    if (typeof value === 'object' && value !== null) {
       // Dataverse lookup formatted value pattern
       const obj = value as Record<string, unknown>;
-      if ("name" in obj) {
+      if ('name' in obj) {
         return String(obj.name);
       }
       // OData formatted value pattern
       const keys = Object.keys(obj);
-      const formattedKey = keys.find((k) => k.endsWith("@OData.Community.Display.V1.FormattedValue"));
+      const formattedKey = keys.find(k => k.endsWith('@OData.Community.Display.V1.FormattedValue'));
       if (formattedKey) {
         return String(obj[formattedKey]);
       }
@@ -840,10 +816,10 @@ export class FieldMappingService {
    */
   private mapProfileEntity(entity: Record<string, unknown>): IFieldMappingProfile {
     return {
-      id: String(entity.sprk_fieldmappingprofileid ?? ""),
-      name: String(entity.sprk_name ?? ""),
-      sourceEntity: String(entity.sprk_sourceentity ?? ""),
-      targetEntity: String(entity.sprk_targetentity ?? ""),
+      id: String(entity.sprk_fieldmappingprofileid ?? ''),
+      name: String(entity.sprk_name ?? ''),
+      sourceEntity: String(entity.sprk_sourceentity ?? ''),
+      targetEntity: String(entity.sprk_targetentity ?? ''),
       mappingDirection: (entity.sprk_mappingdirection as MappingDirection) ?? MappingDirection.ParentToChild,
       syncMode: (entity.sprk_syncmode as SyncMode) ?? SyncMode.OneTime,
       isActive: Boolean(entity.sprk_isactive),
@@ -857,12 +833,12 @@ export class FieldMappingService {
    */
   private mapRuleEntity(entity: Record<string, unknown>, profileId: string): IFieldMappingRule {
     return {
-      id: String(entity.sprk_fieldmappingruleid ?? ""),
+      id: String(entity.sprk_fieldmappingruleid ?? ''),
       profileId,
       name: entity.sprk_name as string | undefined,
-      sourceField: String(entity.sprk_sourcefield ?? ""),
+      sourceField: String(entity.sprk_sourcefield ?? ''),
       sourceFieldType: (entity.sprk_sourcefieldtype as FieldType) ?? FieldType.Text,
-      targetField: String(entity.sprk_targetfield ?? ""),
+      targetField: String(entity.sprk_targetfield ?? ''),
       targetFieldType: (entity.sprk_targetfieldtype as FieldType) ?? FieldType.Text,
       compatibilityMode: (entity.sprk_compatibilitymode as CompatibilityMode) ?? CompatibilityMode.Strict,
       isRequired: Boolean(entity.sprk_isrequired),
@@ -876,11 +852,9 @@ export class FieldMappingService {
   /**
    * Load rules for multiple profiles.
    */
-  private async loadRulesForProfiles(
-    profiles: IFieldMappingProfile[]
-  ): Promise<IFieldMappingProfile[]> {
+  private async loadRulesForProfiles(profiles: IFieldMappingProfile[]): Promise<IFieldMappingProfile[]> {
     const results = await Promise.all(
-      profiles.map(async (profile) => {
+      profiles.map(async profile => {
         const rules = await this.getRulesForProfile(profile.id);
         return { ...profile, rules };
       })

@@ -3,8 +3,8 @@
  * Main React component for the Visual Host PCF control
  */
 
-import * as React from "react";
-import { useState, useEffect, useCallback } from "react";
+import * as React from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Spinner,
   MessageBar,
@@ -14,78 +14,69 @@ import {
   makeStyles,
   tokens,
   Text,
-} from "@fluentui/react-components";
-import { OpenRegular, SparkleRegular } from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { OpenRegular, SparkleRegular } from '@fluentui/react-icons';
 import {
   AiSummaryPopover,
   type ISummaryData,
-} from "../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover";
-import { IInputs } from "../generated/ManifestTypes";
-import { IChartDefinition, IChartData, DrillInteraction } from "../types";
-import { ChartRenderer } from "./ChartRenderer";
-import type { MatrixJustification } from "./MetricCardMatrix";
-import { logger } from "../utils/logger";
+} from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+import { IInputs } from '../generated/ManifestTypes';
+import { IChartDefinition, IChartData, DrillInteraction } from '../types';
+import { ChartRenderer } from './ChartRenderer';
+import type { MatrixJustification } from './MetricCardMatrix';
+import { logger } from '../utils/logger';
 import {
   loadChartDefinition as loadChartDefinitionFromDataverse,
   ConfigurationNotFoundError,
   ConfigurationLoadError,
-} from "../services/ConfigurationLoader";
-import {
-  fetchAndAggregate,
-  AggregationError,
-} from "../services/DataAggregationService";
-import {
-  parseFieldPivotConfig,
-  fetchAndPivot,
-} from "../services/FieldPivotService";
-import {
-  executeClickAction,
-  hasClickAction,
-} from "../services/ClickActionHandler";
+} from '../services/ConfigurationLoader';
+import { fetchAndAggregate, AggregationError } from '../services/DataAggregationService';
+import { parseFieldPivotConfig, fetchAndPivot } from '../services/FieldPivotService';
+import { executeClickAction, hasClickAction } from '../services/ClickActionHandler';
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     minWidth: 0, // Allow shrinking below intrinsic content width
-    padding: "2px",
-    paddingBottom: "14px", // Minimal space for version badge
-    boxSizing: "border-box",
-    position: "relative",
-    overflow: "hidden", // Prevent content overflow from affecting form column sizing
+    padding: '2px',
+    paddingBottom: '14px', // Minimal space for version badge
+    boxSizing: 'border-box',
+    position: 'relative',
+    overflow: 'hidden', // Prevent content overflow from affecting form column sizing
   },
   toolbar: {
-    display: "flex",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    minHeight: "28px",
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    minHeight: '28px',
     flexShrink: 0,
-    marginBottom: "10px",
-    gap: "10px",
+    marginBottom: '10px',
+    gap: '10px',
   },
   chartContainer: {
-    display: "flex",
-    alignItems: "stretch",
-    width: "100%",
+    display: 'flex',
+    alignItems: 'stretch',
+    width: '100%',
   },
   versionBadge: {
-    position: "absolute",
+    position: 'absolute',
     bottom: 0,
-    left: "4px",
+    left: '4px',
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
     opacity: 0.6,
-    pointerEvents: "none",
+    pointerEvents: 'none',
   },
   placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
 });
 
@@ -97,10 +88,7 @@ interface IVisualHostRootProps {
 /**
  * Visual Host Root - Main component that loads chart definition and renders the appropriate visual
  */
-export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
-  context,
-  notifyOutputChanged,
-}) => {
+export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notifyOutputChanged }) => {
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +103,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   const chartDefinitionId = lookupId || staticId || null;
 
   // Log resolution source for debugging
-  const resolutionSource = lookupId ? "lookup" : staticId ? "static" : "none";
+  const resolutionSource = lookupId ? 'lookup' : staticId ? 'static' : 'none';
 
   // v1.1.0: Context filtering parameters
   const contextFieldName = context.parameters.contextFieldName?.raw?.trim() || null;
@@ -174,16 +162,12 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     }
     try {
       const entityName = chartDefinition.sprk_entitylogicalname;
-      const recordId = contextRecordId.replace(/[{}]/g, "");
-      const record = await context.webAPI.retrieveRecord(
-        entityName,
-        recordId,
-        `?$select=${aiSummaryField}`
-      );
+      const recordId = contextRecordId.replace(/[{}]/g, '');
+      const record = await context.webAPI.retrieveRecord(entityName, recordId, `?$select=${aiSummaryField}`);
       const summaryText = record[aiSummaryField] as string | null;
       return { summary: summaryText || null, tldr: null };
     } catch (err) {
-      logger.error("VisualHostRoot", "Failed to fetch AI summary", err);
+      logger.error('VisualHostRoot', 'Failed to fetch AI summary', err);
       return { summary: null, tldr: null };
     }
   }, [aiSummaryField, chartDefinition, contextRecordId, context.webAPI]);
@@ -193,7 +177,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       setIsLoading(false);
       setError(null);
       setChartDefinition(null);
-      logger.info("VisualHostRoot", "No chart definition configured");
+      logger.info('VisualHostRoot', 'No chart definition configured');
       return;
     }
 
@@ -210,19 +194,16 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       setIsLoading(true);
       setError(null);
 
-      logger.info("VisualHostRoot", `Loading chart definition: ${id} (source: ${source})`, {
+      logger.info('VisualHostRoot', `Loading chart definition: ${id} (source: ${source})`, {
         contextFieldName,
         contextRecordId,
       });
 
       // Load from Dataverse using ConfigurationLoader service
-      const definition = await loadChartDefinitionFromDataverse(
-        { webAPI: context.webAPI },
-        id
-      );
+      const definition = await loadChartDefinitionFromDataverse({ webAPI: context.webAPI }, id);
 
       setChartDefinition(definition);
-      logger.info("VisualHostRoot", `Loaded: ${definition.sprk_name}`, {
+      logger.info('VisualHostRoot', `Loaded: ${definition.sprk_name}`, {
         visualType: definition.sprk_visualtype,
         entity: definition.sprk_entitylogicalname,
       });
@@ -230,7 +211,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       // DueDateCard and DueDateCardList fetch their own data — skip aggregation
       const skipAggregation =
         definition.sprk_visualtype === 100000008 || // DueDateCard
-        definition.sprk_visualtype === 100000009;   // DueDateCardList
+        definition.sprk_visualtype === 100000009; // DueDateCardList
 
       // v1.2.41: Check for field pivot mode — reads multiple fields from
       // the current record and presents each as a card (generic, not KPI-specific)
@@ -238,7 +219,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
 
       if (pivotConfig && definition.sprk_entitylogicalname && contextRecordId) {
         try {
-          logger.info("VisualHostRoot", "Field pivot mode detected", {
+          logger.info('VisualHostRoot', 'Field pivot mode detected', {
             entity: definition.sprk_entitylogicalname,
             fields: pivotConfig.fields.length,
           });
@@ -249,50 +230,53 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
             pivotConfig
           );
           setChartData(data);
-          logger.info("VisualHostRoot", `Field pivot: ${data.dataPoints.length} data points`);
+          logger.info('VisualHostRoot', `Field pivot: ${data.dataPoints.length} data points`);
         } catch (pivotErr) {
-          logger.error("VisualHostRoot", "Field pivot error", pivotErr);
+          logger.error('VisualHostRoot', 'Field pivot error', pivotErr);
           setChartData(null);
         }
       } else if (definition.sprk_entitylogicalname && !skipAggregation) {
         // Existing data aggregation path (VIEW or BASIC mode)
         try {
-          const ctxFilter = contextFieldName && contextRecordId
-            ? { fieldName: contextFieldName, recordId: contextRecordId }
-            : undefined;
-          logger.info("VisualHostRoot", `Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : "(none - no context)"}`);
-
-          const data = await fetchAndAggregate(
-            { webAPI: context.webAPI },
-            definition,
-            {
-              contextFilter: ctxFilter,
-            }
+          const ctxFilter =
+            contextFieldName && contextRecordId
+              ? { fieldName: contextFieldName, recordId: contextRecordId }
+              : undefined;
+          logger.info(
+            'VisualHostRoot',
+            `Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : '(none - no context)'}`
           );
+
+          const data = await fetchAndAggregate({ webAPI: context.webAPI }, definition, {
+            contextFilter: ctxFilter,
+          });
           setChartData(data);
-          logger.info("VisualHostRoot", `Data loaded: ${data.dataPoints.length} data points from ${data.totalRecords} records`);
+          logger.info(
+            'VisualHostRoot',
+            `Data loaded: ${data.dataPoints.length} data points from ${data.totalRecords} records`
+          );
         } catch (aggErr) {
           if (aggErr instanceof AggregationError) {
-            logger.error("VisualHostRoot", "Data aggregation error", aggErr);
+            logger.error('VisualHostRoot', 'Data aggregation error', aggErr);
             setChartData(null);
           } else {
             throw aggErr;
           }
         }
       } else {
-        logger.warn("VisualHostRoot", "No entity configured, skipping data fetch");
+        logger.warn('VisualHostRoot', 'No entity configured, skipping data fetch');
         setChartData(null);
       }
     } catch (err) {
       if (err instanceof ConfigurationNotFoundError) {
-        logger.warn("VisualHostRoot", `Chart definition not found: ${id}`);
+        logger.warn('VisualHostRoot', `Chart definition not found: ${id}`);
         setError(`Chart definition not found. Please verify the ID is correct.`);
       } else if (err instanceof ConfigurationLoadError) {
-        logger.error("VisualHostRoot", "Configuration load error", err);
+        logger.error('VisualHostRoot', 'Configuration load error', err);
         setError(`Failed to load chart: ${err.message}`);
       } else {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        logger.error("VisualHostRoot", "Failed to load chart definition", err);
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        logger.error('VisualHostRoot', 'Failed to load chart definition', err);
         setError(`Failed to load chart: ${errorMessage}`);
       }
       setChartDefinition(null);
@@ -309,11 +293,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     (interaction: DrillInteraction) => {
       if (!enableDrillThrough) return;
 
-      logger.info("VisualHostRoot", "Drill interaction", interaction);
+      logger.info('VisualHostRoot', 'Drill interaction', interaction);
 
-      // TODO: In task 030, navigate to drill-through Custom Page
+      // TRACKED: GitHub #234 - Navigate to drill-through Custom Page
       // For now, log the interaction for debugging
-      console.log("Drill interaction:", interaction);
+      console.log('Drill interaction:', interaction);
 
       // Notify PCF that output has changed (if we add drill output parameter)
       notifyOutputChanged();
@@ -328,16 +312,18 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
    * Otherwise falls back to navigateTo entitylist dialog (unfiltered).
    */
   const handleExpandClick = useCallback(async () => {
-    logger.info("VisualHostRoot", "Expand clicked - navigating to view", { chartDefinitionId });
+    logger.info('VisualHostRoot', 'Expand clicked - navigating to view', {
+      chartDefinitionId,
+    });
 
     if (!chartDefinition) {
-      logger.warn("VisualHostRoot", "No chart definition for drill-through");
+      logger.warn('VisualHostRoot', 'No chart definition for drill-through');
       return;
     }
 
     const entityName = chartDefinition.sprk_entitylogicalname;
     if (!entityName) {
-      logger.warn("VisualHostRoot", "No entity name configured for drill-through");
+      logger.warn('VisualHostRoot', 'No entity name configured for drill-through');
       return;
     }
 
@@ -347,11 +333,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     const xrm = (window.parent as any)?.Xrm || (window as any).Xrm;
 
     if (!xrm?.Navigation?.navigateTo) {
-      logger.warn("VisualHostRoot", "Xrm.Navigation not available");
+      logger.warn('VisualHostRoot', 'Xrm.Navigation not available');
       return;
     }
 
-    logger.info("VisualHostRoot", "Xrm source", {
+    logger.info('VisualHostRoot', 'Xrm source', {
       fromParent: !!(window.parent as any)?.Xrm,
       fromWindow: !!(window as any).Xrm,
     });
@@ -364,9 +350,9 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     let filterField: string | null = null;
     let filterValue: string | null = null;
     if (ctxField && contextRecordId) {
-      filterField = ctxField.replace(/^_/, "").replace(/_value$/, "");
-      filterValue = contextRecordId.replace(/[{}]/g, "");
-      logger.info("VisualHostRoot", "Context filter for drill-through", {
+      filterField = ctxField.replace(/^_/, '').replace(/_value$/, '');
+      filterValue = contextRecordId.replace(/[{}]/g, '');
+      logger.info('VisualHostRoot', 'Context filter for drill-through', {
         filterField,
         filterValue,
       });
@@ -376,24 +362,24 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       if (drillThroughTarget) {
         // Drill-through target is a web resource name (e.g. "sprk_eventspage.html").
         // Use pageType "webresource" to open it in a dialog.
-        logger.info("VisualHostRoot", "Opening web resource drill-through dialog", {
+        logger.info('VisualHostRoot', 'Opening web resource drill-through dialog', {
           webresource: drillThroughTarget,
           entityName,
-          filterField: filterField || "(none)",
-          filterValue: filterValue || "(none)",
+          filterField: filterField || '(none)',
+          filterValue: filterValue || '(none)',
         });
 
         // Build query string to pass context to the web resource
         const params = new URLSearchParams();
-        if (entityName) params.set("entityName", entityName);
-        if (filterField) params.set("filterField", filterField);
-        if (filterValue) params.set("filterValue", filterValue);
-        if (viewId) params.set("viewId", viewId.replace(/[{}]/g, ""));
-        params.set("mode", "dialog");
+        if (entityName) params.set('entityName', entityName);
+        if (filterField) params.set('filterField', filterField);
+        if (filterValue) params.set('filterValue', filterValue);
+        if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+        params.set('mode', 'dialog');
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pageInput: any = {
-          pageType: "webresource",
+          pageType: 'webresource',
           webresourceName: drillThroughTarget,
           data: params.toString(),
         };
@@ -401,43 +387,43 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         const navOptions = {
           target: 2 as const,
           position: 1 as const,
-          width: { value: 90, unit: "%" as const },
-          height: { value: 85, unit: "%" as const },
+          width: { value: 90, unit: '%' as const },
+          height: { value: 85, unit: '%' as const },
         };
 
         try {
           await xrm.Navigation.navigateTo(pageInput, navOptions);
         } catch {
-          logger.info("VisualHostRoot", "Dialog not supported, navigating inline");
+          logger.info('VisualHostRoot', 'Dialog not supported, navigating inline');
           await xrm.Navigation.navigateTo(pageInput, { target: 1 });
         }
       } else {
         // Fallback: entitylist dialog (unfiltered — filterXml not supported by navigateTo)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pageInput: any = { pageType: "entitylist", entityName };
+        const pageInput: any = { pageType: 'entitylist', entityName };
         if (viewId) pageInput.viewId = viewId;
 
-        logger.info("VisualHostRoot", "Opening entity list dialog (no custom page configured)", {
+        logger.info('VisualHostRoot', 'Opening entity list dialog (no custom page configured)', {
           entityName,
-          viewId: viewId || "(default)",
+          viewId: viewId || '(default)',
         });
 
         try {
           await xrm.Navigation.navigateTo(pageInput, {
             target: 2,
             position: 1,
-            width: { value: 90, unit: "%" },
-            height: { value: 85, unit: "%" },
+            width: { value: 90, unit: '%' },
+            height: { value: 85, unit: '%' },
           });
         } catch {
-          logger.info("VisualHostRoot", "Dialog not supported for entity list, navigating full page");
+          logger.info('VisualHostRoot', 'Dialog not supported for entity list, navigating full page');
           await xrm.Navigation.navigateTo(pageInput, { target: 1 });
         }
       }
 
-      logger.info("VisualHostRoot", "Drill-through view opened");
+      logger.info('VisualHostRoot', 'Drill-through view opened');
     } catch (err) {
-      logger.error("VisualHostRoot", "Failed to open drill-through view", err);
+      logger.error('VisualHostRoot', 'Failed to open drill-through view', err);
     }
   }, [chartDefinition, contextFieldName, contextRecordId]);
 
@@ -471,7 +457,9 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     const xrm = (window as any).Xrm;
     const tabName = chartDefinition.sprk_viewlisttabname;
 
-    logger.info("VisualHostRoot", "View List click - navigating to tab", { tabName });
+    logger.info('VisualHostRoot', 'View List click - navigating to tab', {
+      tabName,
+    });
 
     try {
       // Navigate to the configured tab on the current form
@@ -481,11 +469,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         if (tab) {
           tab.setFocus();
         } else {
-          logger.warn("VisualHostRoot", `Tab '${tabName}' not found on current form`);
+          logger.warn('VisualHostRoot', `Tab '${tabName}' not found on current form`);
         }
       }
     } catch (err) {
-      logger.error("VisualHostRoot", "Failed to navigate to tab", err);
+      logger.error('VisualHostRoot', 'Failed to navigate to tab', err);
     }
   }, [chartDefinition]);
 
@@ -497,9 +485,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No chart configured</Text>
-          <Text size={200}>
-            Bind to a lookup column or set Chart Definition ID property
-          </Text>
+          <Text size={200}>Bind to a lookup column or set Chart Definition ID property</Text>
         </div>
       );
     }
@@ -534,7 +520,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
     // so adjacent PCFs visually merge into one cohesive row
     ...(columnPosition === 1 ? { paddingRight: 0 } : {}),
     ...(columnPosition != null && columnPosition >= 2 && columnPosition <= 3
-      ? { paddingLeft: 0, paddingRight: 0 } : {}),
+      ? { paddingLeft: 0, paddingRight: 0 }
+      : {}),
     ...(columnPosition != null && columnPosition >= 4 ? { paddingLeft: 0 } : {}),
   };
 
@@ -547,11 +534,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
             <AiSummaryPopover
               trigger={
                 <Tooltip content="AI Summary" relationship="label">
-                  <Button
-                    appearance="subtle"
-                    icon={<SparkleRegular />}
-                    aria-label="View AI summary"
-                  />
+                  <Button appearance="subtle" icon={<SparkleRegular />} aria-label="View AI summary" />
                 </Tooltip>
               }
               onFetchSummary={handleFetchAiSummary}
@@ -572,9 +555,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && (
-        <span className={styles.versionBadge}>v1.3.5 • 2026-03-10</span>
-      )}
+      {showVersion && <span className={styles.versionBadge}>v1.3.5 • 2026-03-10</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

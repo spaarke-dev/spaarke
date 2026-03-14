@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Final Update to testing-and-code-quality.md Procedure</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+  </metadata>
+
+  <prompt>
+    Perform a final comprehensive update to docs/procedures/testing-and-code-quality.md to ensure it
+    reflects the complete quality system as fully implemented. Verify all new tools (added in task 041)
+    are accurately described, cross-reference with the root CLAUDE.md to ensure AI agent instructions
+    are consistent, and update any sections that reference the old state of the codebase (before this
+    project). This is the final documentation polish pass — the document should be accurate and
+    complete after this task.
+  </prompt>
+
+  <role>
+    Technical writer specializing in developer procedure documentation with expertise in ensuring
+    cross-document consistency across large codebases. Skilled at identifying gaps and inconsistencies
+    between related documentation files.
+  </role>
+
+  <goal>
+    A fully accurate and complete testing-and-code-quality.md that reflects the codebase's quality
+    system post-project. All references to the old state (pre-project) are updated, all new tools are
+    documented, and the document is consistent with the root CLAUDE.md and the new onboarding guide.
+    This document becomes the authoritative reference for the quality system.
+  </goal>
+
+  <context>
+    <background>
+      Task 041 added new tool sections to testing-and-code-quality.md. This task is the final polish
+      pass that ensures the document is cohesive, consistent, and complete:
+
+      Consistency checks to perform:
+      1. Cross-reference with root CLAUDE.md: the Commands section in CLAUDE.md lists build and test
+         commands. Verify they match what is documented in testing-and-code-quality.md. If CLAUDE.md
+         is outdated (does not include the new quality commands), note the discrepancy and optionally
+         update CLAUDE.md's Commands table.
+      2. Cross-reference with onboarding guide (task 042): the "Run Quality Checks Locally" section
+         of the onboarding guide should list the same commands as testing-and-code-quality.md.
+         Verify consistency.
+      3. Outdated references: search for any references to the pre-project state — for example,
+         mentions of "TODO: add linting" or references to only having dotnet test coverage without
+         the new CI checks. Update these to reflect current state.
+      4. Section completeness: verify the document covers the full quality lifecycle:
+         - Pre-commit (Husky hooks)
+         - Pre-push (if applicable)
+         - PR quality gates (CI jobs, their names, what each checks)
+         - Nightly quality (workflow, what it checks)
+         - Weekly quality (summary job, what it aggregates)
+         - Quarterly quality (reference to the runbook)
+      5. ADR references: verify that ADRs cited in the document are referenced correctly and still
+         exist in .claude/adr/ (no references to deleted or renumbered ADRs).
+
+      This task is intentionally narrower than task 041 — task 041 added content, this task audits
+      and polishes the complete document for accuracy and consistency.
+    </background>
+    <relevant-files>
+      <file>docs/procedures/testing-and-code-quality.md (modify — final accuracy and consistency pass)</file>
+      <file>CLAUDE.md (read — verify command consistency)</file>
+      <file>docs/guides/code-quality-onboarding.md (read — verify command consistency with task 042 output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Any changes to CLAUDE.md must be conservative and additive. Do not restructure CLAUDE.md — only update the Commands table if commands are genuinely missing or incorrect. CLAUDE.md is used by all AI sessions and any errors have wide impact.</constraint>
+    <constraint source="spec">Do not re-document content that is already accurate in task 041's additions. This is a consistency and completeness audit, not a rewrite. Changes should be targeted corrections, not wholesale rewrites of task 041 content.</constraint>
+    <constraint source="spec">If inconsistencies are found between testing-and-code-quality.md and the onboarding guide, resolve them in testing-and-code-quality.md (authoritative source) and note the discrepancy for the onboarding guide author to address.</constraint>
+    <constraint source="spec">Document any intentional gaps (things not yet implemented or not yet documented) with a clear "Future: ..." note rather than leaving implicit gaps that suggest the document is complete when it is not.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>CLAUDE.md</file>
+      <file>docs/guides/code-quality-onboarding.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/procedures/testing-and-code-quality.md in full (including task 041's additions) to understand the current complete state of the document.</step>
+    <step order="2">Read the Commands section of root CLAUDE.md to identify any quality-related commands that are listed there but not in testing-and-code-quality.md, or vice versa. Document discrepancies.</step>
+    <step order="3">Read docs/guides/code-quality-onboarding.md (task 042 output) to verify its "Run Locally" commands match testing-and-code-quality.md. Document any discrepancies.</step>
+    <step order="4">Perform an outdated-reference audit of testing-and-code-quality.md: search for phrases like "TODO", "will be", "planned", "not yet implemented" that refer to things now implemented in this project. Update these to describe the current implemented state.</step>
+    <step order="5">Verify section coverage of the quality lifecycle: confirm the document has explicit sections for pre-commit, PR gates, nightly, weekly, and quarterly quality. If any lifecycle stage is missing, add a brief section or reference.</step>
+    <step order="6">Verify ADR references: for each ADR cited in testing-and-code-quality.md, confirm the ADR file exists in .claude/adr/ with the correct number. Fix any references to non-existent or renumbered ADRs.</step>
+    <step order="7">If CLAUDE.md's Commands table is missing quality commands (e.g., `prettier --check` or `npx eslint`), add them to CLAUDE.md's Commands table with appropriate descriptions. Keep additions minimal and consistent with the existing table format.</step>
+    <step order="8">Make all identified corrections to testing-and-code-quality.md. Group related changes and verify the document reads cohesively after all updates.</step>
+    <step order="9">Create a brief audit note at projects/code-quality-and-assurance-r1/notes/documentation-audit.md listing: inconsistencies found, corrections made, and any intentional gaps documented with "Future:" notes.</step>
+    <step order="10">Update TASK-INDEX.md: change task 045 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">docs/procedures/testing-and-code-quality.md (final accuracy and consistency pass)</output>
+    <output type="file">CLAUDE.md (minimal updates to Commands table if needed)</output>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/documentation-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>testing-and-code-quality.md has no outdated references to pre-project state (no "TODO: add" or "will be implemented" for things now implemented)</criterion>
+    <criterion>testing-and-code-quality.md covers all quality lifecycle stages: pre-commit, PR gates, nightly, weekly, quarterly</criterion>
+    <criterion>All ADR references in testing-and-code-quality.md point to files that exist in .claude/adr/</criterion>
+    <criterion>Quality commands in testing-and-code-quality.md are consistent with CLAUDE.md's Commands table</criterion>
+    <criterion>documentation-audit.md exists listing inconsistencies found and corrections made</criterion>
+    <criterion>Any changes to CLAUDE.md are limited to the Commands table and are additive</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

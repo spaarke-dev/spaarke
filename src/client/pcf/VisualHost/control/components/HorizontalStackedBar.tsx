@@ -14,10 +14,10 @@
  *   fill %        = current / total * 100
  */
 
-import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { IAggregatedDataPoint, ICardConfig, ColorTokenSet } from "../types";
-import { formatValue } from "../utils/valueFormatters";
+import * as React from 'react';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { IAggregatedDataPoint, ICardConfig, ColorTokenSet } from '../types';
+import { formatValue } from '../utils/valueFormatters';
 
 // ============= Props =============
 
@@ -45,15 +45,15 @@ const FILL_TRANSITION_MS = 400;
  */
 function getTokenSetColors(tokenSet: ColorTokenSet): { borderAccent?: string } {
   switch (tokenSet) {
-    case "brand":
+    case 'brand':
       return { borderAccent: tokens.colorBrandBackground };
-    case "warning":
+    case 'warning':
       return { borderAccent: tokens.colorPaletteYellowBorderActive };
-    case "danger":
+    case 'danger':
       return { borderAccent: tokens.colorPaletteRedBorderActive };
-    case "success":
+    case 'success':
       return { borderAccent: tokens.colorPaletteGreenBorderActive };
-    case "neutral":
+    case 'neutral':
     default:
       return { borderAccent: tokens.colorNeutralStroke1 };
   }
@@ -78,45 +78,45 @@ function resolveBarColor(fillRatio: number, config?: ICardConfig): string {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
     gap: tokens.spacingVerticalXS,
-    marginTop: "20px",
-    marginBottom: "20px",
+    marginTop: '20px',
+    marginBottom: '20px',
   },
   title: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
   },
   headerRow: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "baseline",
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'baseline',
   },
   barContainer: {
-    width: "100%",
+    width: '100%',
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground3,
   },
   barFill: {
-    height: "100%",
+    height: '100%',
     borderRadius: tokens.borderRadiusMedium,
-    transitionProperty: "width",
+    transitionProperty: 'width',
     transitionDuration: `${FILL_TRANSITION_MS}ms`,
-    transitionTimingFunction: "ease-in-out",
+    transitionTimingFunction: 'ease-in-out',
     minWidth: 0,
   },
   footerRow: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "baseline",
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
   },
   labelText: {
     fontSize: tokens.fontSizeBase200,
@@ -130,9 +130,9 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase300,
   },
   placeholder: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingVerticalM,
   },
@@ -166,8 +166,8 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   }
 
   // --- Resolve values ---
-  const valueFormat = cardConfig?.valueFormat ?? "currency";
-  const nullDisplay = cardConfig?.nullDisplay ?? "\u2014"; // em dash
+  const valueFormat = cardConfig?.valueFormat ?? 'currency';
+  const nullDisplay = cardConfig?.nullDisplay ?? '\u2014'; // em dash
 
   const currentPoint = dataPoints[0];
   const totalPoint = dataPoints.length > 1 ? dataPoints[1] : undefined;
@@ -184,9 +184,9 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   const barColor = resolveBarColor(fillRatio, cardConfig);
 
   // --- Format display values ---
-  const currentLabel = currentPoint.label || "spent";
-  const totalLabel = totalPoint?.label || "budget";
-  const remainingLabel = "remaining";
+  const currentLabel = currentPoint.label || 'spent';
+  const totalLabel = totalPoint?.label || 'budget';
+  const remainingLabel = 'remaining';
 
   const formattedCurrent = formatValue(currentValue, valueFormat, nullDisplay);
   const formattedTotal = hasTotalValue ? formatValue(totalValue, valueFormat, nullDisplay) : null;
@@ -205,7 +205,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
       {hasTotalValue && (
         <div className={styles.headerRow}>
           <Text>
-            <span className={styles.valueText}>{formattedTotal}</span>{" "}
+            <span className={styles.valueText}>{formattedTotal}</span>{' '}
             <span className={styles.labelText}>{totalLabel}</span>
           </Text>
         </div>
@@ -225,7 +225,7 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
           <div
             className={styles.barFill}
             style={{
-              width: hasTotalValue ? `${fillPercent}%` : "100%",
+              width: hasTotalValue ? `${fillPercent}%` : '100%',
               backgroundColor: barColor,
             }}
           />
@@ -235,12 +235,12 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
       {/* Bottom row: spent (left) and remaining (right) */}
       <div className={styles.footerRow}>
         <Text>
-          <span className={styles.valueText}>{formattedCurrent}</span>{" "}
+          <span className={styles.valueText}>{formattedCurrent}</span>{' '}
           <span className={styles.labelText}>{currentLabel}</span>
         </Text>
         {hasTotalValue && formattedRemaining && (
           <Text>
-            <span className={styles.valueText}>{formattedRemaining}</span>{" "}
+            <span className={styles.valueText}>{formattedRemaining}</span>{' '}
             <span className={styles.labelText}>{remainingLabel}</span>
           </Text>
         )}

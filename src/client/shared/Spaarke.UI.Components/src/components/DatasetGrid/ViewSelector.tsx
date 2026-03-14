@@ -8,20 +8,12 @@
  * @see ADR-021 Fluent UI v9 Design System
  */
 
-import * as React from "react";
-import {
-  Dropdown,
-  Option,
-  OptionGroup,
-  Spinner,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import type { DropdownProps } from "@fluentui/react-components";
-import type { IViewDefinition, ViewType } from "../../types/FetchXmlTypes";
-import { ViewService, IGetViewsOptions } from "../../services/ViewService";
-import type { XrmContext } from "../../utils/xrmContext";
+import * as React from 'react';
+import { Dropdown, Option, OptionGroup, Spinner, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import type { DropdownProps } from '@fluentui/react-components';
+import type { IViewDefinition, ViewType } from '../../types/FetchXmlTypes';
+import { ViewService, IGetViewsOptions } from '../../services/ViewService';
+import type { XrmContext } from '../../utils/xrmContext';
 
 /**
  * Props for ViewSelector component
@@ -55,22 +47,22 @@ export interface IViewSelectorProps {
 
 const useStyles = makeStyles({
   selector: {
-    minWidth: "200px",
+    minWidth: '200px',
   },
   selectorCompact: {
-    minWidth: "160px",
+    minWidth: '160px',
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    minWidth: "200px",
+    minWidth: '200px',
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    height: "32px",
+    height: '32px',
     backgroundColor: tokens.colorNeutralBackground1,
-    borderWidth: "1px",
-    borderStyle: "solid",
+    borderWidth: '1px',
+    borderStyle: 'solid',
     borderColor: tokens.colorNeutralStroke1,
     borderRadius: tokens.borderRadiusMedium,
   },
@@ -92,9 +84,9 @@ const useStyles = makeStyles({
  * Group labels for view types
  */
 const VIEW_TYPE_LABELS: Record<ViewType, string> = {
-  savedquery: "System Views",
-  userquery: "Personal Views",
-  custom: "Custom Views",
+  savedquery: 'System Views',
+  userquery: 'Personal Views',
+  custom: 'Custom Views',
 };
 
 /**
@@ -112,7 +104,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
   className,
   compact = false,
   disabled = false,
-  placeholder = "Select a view",
+  placeholder = 'Select a view',
 }) => {
   const styles = useStyles();
   const [views, setViews] = React.useState<IViewDefinition[]>([]);
@@ -144,7 +136,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
 
           // Auto-select default view if no selection
           if (!selectedViewId && fetchedViews.length > 0) {
-            const defaultView = fetchedViews.find((v) => v.isDefault) || fetchedViews[0];
+            const defaultView = fetchedViews.find(v => v.isDefault) || fetchedViews[0];
             if (onViewChange) {
               onViewChange(defaultView);
             }
@@ -152,7 +144,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
         }
       } catch (err) {
         if (mounted) {
-          setError(err instanceof Error ? err.message : "Failed to load views");
+          setError(err instanceof Error ? err.message : 'Failed to load views');
           setLoading(false);
         }
       }
@@ -166,11 +158,11 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
   }, [entityLogicalName, includeCustomViews, includePersonalViews, viewService]);
 
   // Handle selection change
-  const handleSelectionChange: DropdownProps["onOptionSelect"] = React.useCallback(
+  const handleSelectionChange: DropdownProps['onOptionSelect'] = React.useCallback(
     (_event, data) => {
       const viewId = data.optionValue;
       if (viewId && onViewChange) {
-        const selectedView = views.find((v) => v.id === viewId);
+        const selectedView = views.find(v => v.id === viewId);
         if (selectedView) {
           onViewChange(selectedView);
         }
@@ -182,7 +174,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
   // Get selected view name for display
   const selectedViewName = React.useMemo(() => {
     if (selectedViewId) {
-      const view = views.find((v) => v.id === selectedViewId);
+      const view = views.find(v => v.id === selectedViewId);
       return view?.name;
     }
     return defaultViewName;
@@ -210,9 +202,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
     return (
       <div className={mergeClasses(styles.loadingContainer, className)}>
         <Spinner size="tiny" />
-        <span className={styles.loadingText}>
-          {defaultViewName || "Loading views..."}
-        </span>
+        <span className={styles.loadingText}>{defaultViewName || 'Loading views...'}</span>
       </div>
     );
   }
@@ -230,14 +220,10 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
   if (views.length === 0) {
     return (
       <Dropdown
-        className={mergeClasses(
-          styles.selector,
-          compact && styles.selectorCompact,
-          className
-        )}
+        className={mergeClasses(styles.selector, compact && styles.selectorCompact, className)}
         disabled
         placeholder="No views available"
-        size={compact ? "small" : "medium"}
+        size={compact ? 'small' : 'medium'}
       />
     );
   }
@@ -248,13 +234,13 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
       // Render grouped
       return (
         <>
-          {(["savedquery", "custom", "userquery"] as ViewType[]).map((type) => {
+          {(['savedquery', 'custom', 'userquery'] as ViewType[]).map(type => {
             const typeViews = groupedViews[type];
             if (!typeViews || typeViews.length === 0) return null;
 
             return (
               <OptionGroup key={type} label={VIEW_TYPE_LABELS[type]}>
-                {typeViews.map((view) => (
+                {typeViews.map(view => (
                   <Option key={view.id} value={view.id}>
                     {view.name}
                   </Option>
@@ -267,7 +253,7 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
     }
 
     // Render flat list
-    return views.map((view) => (
+    return views.map(view => (
       <Option key={view.id} value={view.id}>
         {view.name}
       </Option>
@@ -276,17 +262,13 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
 
   return (
     <Dropdown
-      className={mergeClasses(
-        styles.selector,
-        compact && styles.selectorCompact,
-        className
-      )}
+      className={mergeClasses(styles.selector, compact && styles.selectorCompact, className)}
       value={selectedViewName}
       selectedOptions={selectedViewId ? [selectedViewId] : []}
       onOptionSelect={handleSelectionChange}
       disabled={disabled}
       placeholder={placeholder}
-      size={compact ? "small" : "medium"}
+      size={compact ? 'small' : 'medium'}
       aria-label={`Select view for ${entityLogicalName}`}
     >
       {renderOptions()}

@@ -75,9 +75,7 @@ const matchesCtrlOrCmd = (event: KeyboardEvent): boolean => {
 /**
  * Format a shortcut for display
  */
-const formatShortcutDisplay = (
-  config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>
-): string => {
+const formatShortcutDisplay = (config: Pick<KeyboardShortcutConfig, 'key' | 'ctrlOrCmd' | 'shift' | 'alt'>): string => {
   const parts: string[] = [];
   const mac = isMac();
 
@@ -115,9 +113,7 @@ const isInputElement = (element: Element | null): boolean => {
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const useKeyboardShortcuts = (
-  options: UseKeyboardShortcutsOptions
-): UseKeyboardShortcutsReturn => {
+export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions): UseKeyboardShortcutsReturn => {
   const { shortcuts, disabled = false } = options;
   const shortcutsRef = useRef<Map<string, KeyboardShortcutConfig>>(new Map());
 
@@ -136,7 +132,7 @@ export const useKeyboardShortcuts = (
   // Register initial shortcuts
   useEffect(() => {
     shortcutsRef.current.clear();
-    shortcuts.forEach((config) => {
+    shortcuts.forEach(config => {
       const key = getShortcutKey(config);
       shortcutsRef.current.set(key, config);
     });

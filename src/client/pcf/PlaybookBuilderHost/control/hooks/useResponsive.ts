@@ -128,23 +128,12 @@ const MODAL_SIZES: Record<string, ModalSize> = {
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const useResponsive = (
-  options: UseResponsiveOptions = {}
-): UseResponsiveReturn => {
-  const {
-    preferredWidth,
-    preferredHeight,
-    containerRef,
-    breakpoints = DEFAULT_BREAKPOINTS,
-  } = options;
+export const useResponsive = (options: UseResponsiveOptions = {}): UseResponsiveReturn => {
+  const { preferredWidth, preferredHeight, containerRef, breakpoints = DEFAULT_BREAKPOINTS } = options;
 
   // Viewport dimensions
-  const [viewportWidth, setViewportWidth] = useState(
-    typeof window !== 'undefined' ? window.innerWidth : 1024
-  );
-  const [viewportHeight, setViewportHeight] = useState(
-    typeof window !== 'undefined' ? window.innerHeight : 768
-  );
+  const [viewportWidth, setViewportWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 768);
 
   // User's preferred size (persisted via props)
   const [userPreferredWidth, setUserPreferredWidth] = useState(preferredWidth);
@@ -165,7 +154,7 @@ export const useResponsive = (
   useEffect(() => {
     if (!containerRef?.current) return;
 
-    const observer = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver(entries => {
       const entry = entries[0];
       if (entry) {
         // Could use container size instead of viewport if needed

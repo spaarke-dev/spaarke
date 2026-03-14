@@ -3,7 +3,7 @@
  * Calculates linear regression slope and trend direction from grade data
  */
 
-import type { TrendDirection } from "../components/TrendCard";
+import type { TrendDirection } from '../components/TrendCard';
 
 /** Threshold for trend direction classification (per spec-r1.md FR-09) */
 const TREND_THRESHOLD = 0.02;
@@ -54,11 +54,11 @@ export function calculateSlope(values: number[]): number {
  *   else           -> "flat" (stable)
  */
 export function getTrendDirection(values: number[]): TrendDirection {
-  if (values.length < 2) return "flat";
+  if (values.length < 2) return 'flat';
 
   const slope = calculateSlope(values);
 
-  if (slope > TREND_THRESHOLD) return "up";
-  if (slope < -TREND_THRESHOLD) return "down";
-  return "flat";
+  if (slope > TREND_THRESHOLD) return 'up';
+  if (slope < -TREND_THRESHOLD) return 'down';
+  return 'flat';
 }

@@ -65,8 +65,10 @@ export interface IChartDefinition {
 /**
  * Parsed chart definition with typed options
  */
-export interface IChartDefinitionParsed<TOptions = IChartOptionsBase>
-  extends Omit<IChartDefinition, "sprk_optionsjson"> {
+export interface IChartDefinitionParsed<TOptions = IChartOptionsBase> extends Omit<
+  IChartDefinition,
+  'sprk_optionsjson'
+> {
   /** Parsed options object */
   options: TOptions;
 }
@@ -88,7 +90,7 @@ export interface IMetricCardOptions extends IChartOptionsBase {
   /** Show trend indicator */
   showTrend?: boolean;
   /** Trend comparison period */
-  trendPeriod?: "day" | "week" | "month" | "quarter" | "year";
+  trendPeriod?: 'day' | 'week' | 'month' | 'quarter' | 'year';
   /** Custom format string for value */
   valueFormat?: string;
   /** Icon name from Fluent icons */
@@ -100,7 +102,7 @@ export interface IMetricCardOptions extends IChartOptionsBase {
  */
 export interface IBarChartOptions extends IChartOptionsBase {
   /** Chart orientation */
-  orientation?: "vertical" | "horizontal";
+  orientation?: 'vertical' | 'horizontal';
   /** Show data labels on bars */
   showDataLabels?: boolean;
   /** Enable stacking for grouped data */
@@ -120,7 +122,7 @@ export interface ILineChartOptions extends IChartOptionsBase {
   /** Fill area under line */
   fillArea?: boolean;
   /** Date grouping for time series */
-  dateGrouping?: "day" | "week" | "month" | "quarter" | "year";
+  dateGrouping?: 'day' | 'week' | 'month' | 'quarter' | 'year';
 }
 
 /**
@@ -132,7 +134,7 @@ export interface IAreaChartOptions extends IChartOptionsBase {
   /** Opacity of fill (0-1) */
   fillOpacity?: number;
   /** Date grouping for time series */
-  dateGrouping?: "day" | "week" | "month" | "quarter" | "year";
+  dateGrouping?: 'day' | 'week' | 'month' | 'quarter' | 'year';
 }
 
 /**
@@ -172,7 +174,7 @@ export interface ICalendarOptions extends IChartOptionsBase {
   /** End date field for ranges (optional) */
   endDateField?: string;
   /** Default view mode */
-  defaultView?: "month" | "week" | "day";
+  defaultView?: 'month' | 'week' | 'day';
   /** Field for item label */
   labelField?: string;
 }
@@ -188,7 +190,7 @@ export interface IMiniTableOptions extends IChartOptionsBase {
   /** Sort field */
   sortField?: string;
   /** Sort direction */
-  sortDirection?: "asc" | "desc";
+  sortDirection?: 'asc' | 'desc';
   /** Show row numbers */
   showRowNumbers?: boolean;
 }
@@ -223,8 +225,9 @@ export interface VisualTypeOptionsMap {
 /**
  * Helper to get typed options based on visual type
  */
-export type OptionsForVisualType<T extends VisualType> =
-  T extends keyof VisualTypeOptionsMap ? VisualTypeOptionsMap[T] : IChartOptionsBase;
+export type OptionsForVisualType<T extends VisualType> = T extends keyof VisualTypeOptionsMap
+  ? VisualTypeOptionsMap[T]
+  : IChartOptionsBase;
 
 /**
  * Aggregated data point for chart rendering
@@ -265,7 +268,7 @@ export interface IChartComponentProps<TOptions extends IChartOptionsBase = IChar
   /** Parsed chart options */
   options: TOptions;
   /** Callback when chart element is clicked (for drill-through) */
-  onDrillInteraction?: (interaction: import("./DrillInteractionTypes").DrillInteraction) => void;
+  onDrillInteraction?: (interaction: import('./DrillInteractionTypes').DrillInteraction) => void;
   /** Width of the chart container */
   width?: number;
   /** Height of the chart container */

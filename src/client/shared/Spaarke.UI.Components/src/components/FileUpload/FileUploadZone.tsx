@@ -33,14 +33,8 @@ const DEFAULT_ACCEPTED_EXTENSIONS: ReadonlySet<string> = new Set(['.pdf', '.docx
 
 const MIME_TO_FILE_TYPE: ReadonlyMap<AcceptedMimeType, UploadedFileType> = new Map([
   ['application/pdf', 'pdf'],
-  [
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'docx',
-  ],
-  [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'xlsx',
-  ],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
 ]);
 
 const EXTENSION_TO_FILE_TYPE: ReadonlyMap<string, UploadedFileType> = new Map([
@@ -155,10 +149,7 @@ function generateFileId(): string {
  * Returns undefined if the file type is not recognized.
  */
 function resolveFileType(mimeType: string, ext: string): UploadedFileType | undefined {
-  return (
-    MIME_TO_FILE_TYPE.get(mimeType as AcceptedMimeType) ??
-    EXTENSION_TO_FILE_TYPE.get(ext)
-  );
+  return MIME_TO_FILE_TYPE.get(mimeType as AcceptedMimeType) ?? EXTENSION_TO_FILE_TYPE.get(ext);
 }
 
 /**
@@ -166,7 +157,7 @@ function resolveFileType(mimeType: string, ext: string): UploadedFileType | unde
  */
 function getAcceptedExtensions(config?: IFileValidationConfig): ReadonlySet<string> {
   if (config?.acceptedExtensions && config.acceptedExtensions.length > 0) {
-    return new Set(config.acceptedExtensions.map((e) => e.toLowerCase()));
+    return new Set(config.acceptedExtensions.map(e => e.toLowerCase()));
   }
   return DEFAULT_ACCEPTED_EXTENSIONS;
 }
@@ -177,7 +168,7 @@ function getAcceptedExtensions(config?: IFileValidationConfig): ReadonlySet<stri
  */
 function validateFile(
   file: File,
-  config?: IFileValidationConfig,
+  config?: IFileValidationConfig
 ): { valid: true; result: IUploadedFile } | { valid: false; error: IFileValidationError } {
   const ext = getExtension(file.name);
   const mimeType = file.type;
@@ -190,7 +181,7 @@ function validateFile(
 
   if (!mimeValid && !extValid) {
     const extList = Array.from(acceptedExtensions)
-      .map((e) => e.replace('.', '').toUpperCase())
+      .map(e => e.replace('.', '').toUpperCase())
       .join(', ');
     return {
       valid: false,
@@ -257,7 +248,7 @@ function validateFile(
  */
 function processFileList(
   fileList: FileList | null,
-  config?: IFileValidationConfig,
+  config?: IFileValidationConfig
 ): {
   accepted: IUploadedFile[];
   errors: IFileValidationError[];
@@ -267,7 +258,7 @@ function processFileList(
 
   if (!fileList) return { accepted, errors };
 
-  Array.from(fileList).forEach((file) => {
+  Array.from(fileList).forEach(file => {
     const result = validateFile(file, config);
     if (result.valid) {
       accepted.push(result.result);
@@ -285,7 +276,7 @@ function processFileList(
 function buildHelpText(config?: IFileValidationConfig): string {
   const extensions = getAcceptedExtensions(config);
   const extList = Array.from(extensions)
-    .map((e) => e.replace('.', '').toUpperCase())
+    .map(e => e.replace('.', '').toUpperCase())
     .join(', ');
   const maxSize = config?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
   return `Supported: ${extList} (max ${formatBytes(maxSize)} each)`;
@@ -321,7 +312,7 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
       e.stopPropagation();
       if (!disabled) setIsDragOver(true);
     },
-    [disabled],
+    [disabled]
   );
 
   const handleDragOver = React.useCallback(
@@ -331,19 +322,16 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
       e.dataTransfer.dropEffect = disabled ? 'none' : 'copy';
       if (!disabled) setIsDragOver(true);
     },
-    [disabled],
+    [disabled]
   );
 
-  const handleDragLeave = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-        setIsDragOver(false);
-      }
-    },
-    [],
-  );
+  const handleDragLeave = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  }, []);
 
   const handleDrop = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -362,7 +350,7 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
         onFilesAccepted(accepted);
       }
     },
-    [onFilesAccepted, onValidationErrors, validationConfig, disabled],
+    [onFilesAccepted, onValidationErrors, validationConfig, disabled]
   );
 
   // -------------------------------------------------------------------------
@@ -381,7 +369,7 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
         fileInputRef.current?.click();
       }
     },
-    [disabled],
+    [disabled]
   );
 
   const handleInputChange = React.useCallback(
@@ -399,24 +387,17 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
       }
 
       // Force a fresh input element so the same file can be re-selected.
-      setInputKey((k) => k + 1);
+      setInputKey(k => k + 1);
     },
-    [onFilesAccepted, onValidationErrors, validationConfig],
+    [onFilesAccepted, onValidationErrors, validationConfig]
   );
 
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
-  const zoneClass = mergeClasses(
-    styles.zone,
-    isDragOver && styles.zoneDragOver,
-    disabled && styles.zoneDisabled,
-  );
-  const iconClass = mergeClasses(
-    styles.uploadIcon,
-    isDragOver && styles.uploadIconActive,
-  );
+  const zoneClass = mergeClasses(styles.zone, isDragOver && styles.zoneDragOver, disabled && styles.zoneDisabled);
+  const iconClass = mergeClasses(styles.uploadIcon, isDragOver && styles.uploadIconActive);
 
   return (
     <>
@@ -451,8 +432,7 @@ export const FileUploadZone: React.FC<IFileUploadZoneProps> = ({
         <ArrowUploadRegular className={iconClass} />
 
         <Text size={300} className={styles.primaryText}>
-          Drop files here or{' '}
-          <span className={styles.linkText}>click to browse</span>
+          Drop files here or <span className={styles.linkText}>click to browse</span>
         </Text>
 
         <Text size={200} className={styles.helpText}>

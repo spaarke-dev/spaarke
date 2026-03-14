@@ -312,13 +312,7 @@ describe('EntityPicker', () => {
         results: [],
       });
 
-      renderWithProvider(
-        <EntityPicker
-          onQuickCreate={handleQuickCreate}
-          showQuickCreate
-          allowedTypes={['Matter']}
-        />
-      );
+      renderWithProvider(<EntityPicker onQuickCreate={handleQuickCreate} showQuickCreate allowedTypes={['Matter']} />);
 
       // The Quick Create option should be visible for allowed types
       const createOption = screen.getByText(/Create new Matter/i);

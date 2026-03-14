@@ -14,16 +14,16 @@
  * String values match the canvas store type identifiers.
  */
 export enum PlaybookNodeType {
-    Start = "start",
-    AiAnalysis = "aiAnalysis",
-    AiCompletion = "aiCompletion",
-    Condition = "condition",
-    DeliverOutput = "deliverOutput",
-    DeliverToIndex = "deliverToIndex",
-    UpdateRecord = "updateRecord",
-    CreateTask = "createTask",
-    SendEmail = "sendEmail",
-    Wait = "wait",
+  Start = 'start',
+  AiAnalysis = 'aiAnalysis',
+  AiCompletion = 'aiCompletion',
+  Condition = 'condition',
+  DeliverOutput = 'deliverOutput',
+  DeliverToIndex = 'deliverToIndex',
+  UpdateRecord = 'updateRecord',
+  CreateTask = 'createTask',
+  SendEmail = 'sendEmail',
+  Wait = 'wait',
 }
 
 // ---------------------------------------------------------------------------
@@ -40,26 +40,26 @@ export enum PlaybookNodeType {
  *   Workflow    — rule-based actions; scope TBD
  */
 export enum DataverseNodeType {
-    AIAnalysis = 100_000_000,
-    Output = 100_000_001,
-    Control = 100_000_002,
-    Workflow = 100_000_003,
+  AIAnalysis = 100_000_000,
+  Output = 100_000_001,
+  Control = 100_000_002,
+  Workflow = 100_000_003,
 }
 
 /**
  * Map canvas PlaybookNodeType → Dataverse sprk_nodetype (coarse category).
  */
 export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = {
-    [PlaybookNodeType.Start]: DataverseNodeType.Control,
-    [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
-    [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
-    [PlaybookNodeType.Condition]: DataverseNodeType.Control,
-    [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
-    [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
-    [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
-    [PlaybookNodeType.Wait]: DataverseNodeType.Control,
+  [PlaybookNodeType.Start]: DataverseNodeType.Control,
+  [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
+  [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
+  [PlaybookNodeType.Condition]: DataverseNodeType.Control,
+  [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
+  [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
+  [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.Wait]: DataverseNodeType.Control,
 };
 
 // ---------------------------------------------------------------------------
@@ -72,38 +72,38 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
  * Stored as __actionType in ConfigJson.
  */
 export enum ActionType {
-    AiAnalysis = 0,
-    AiCompletion = 1,
-    AiEmbedding = 2,
-    RuleEngine = 10,
-    Calculation = 11,
-    DataTransform = 12,
-    CreateTask = 20,
-    SendEmail = 21,
-    UpdateRecord = 22,
-    CallWebhook = 23,
-    SendTeamsMessage = 24,
-    Condition = 30,
-    Parallel = 31,
-    Wait = 32,
-    DeliverOutput = 40,
-    DeliverToIndex = 41,
+  AiAnalysis = 0,
+  AiCompletion = 1,
+  AiEmbedding = 2,
+  RuleEngine = 10,
+  Calculation = 11,
+  DataTransform = 12,
+  CreateTask = 20,
+  SendEmail = 21,
+  UpdateRecord = 22,
+  CallWebhook = 23,
+  SendTeamsMessage = 24,
+  Condition = 30,
+  Parallel = 31,
+  Wait = 32,
+  DeliverOutput = 40,
+  DeliverToIndex = 41,
 }
 
 /**
  * Map canvas PlaybookNodeType → ActionType (specific executor dispatch).
  */
 export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
-    [PlaybookNodeType.Start]: ActionType.Condition,
-    [PlaybookNodeType.AiAnalysis]: ActionType.AiAnalysis,
-    [PlaybookNodeType.AiCompletion]: ActionType.AiCompletion,
-    [PlaybookNodeType.Condition]: ActionType.Condition,
-    [PlaybookNodeType.DeliverOutput]: ActionType.DeliverOutput,
-    [PlaybookNodeType.DeliverToIndex]: ActionType.DeliverToIndex,
-    [PlaybookNodeType.UpdateRecord]: ActionType.UpdateRecord,
-    [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
-    [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
-    [PlaybookNodeType.Wait]: ActionType.Wait,
+  [PlaybookNodeType.Start]: ActionType.Condition,
+  [PlaybookNodeType.AiAnalysis]: ActionType.AiAnalysis,
+  [PlaybookNodeType.AiCompletion]: ActionType.AiCompletion,
+  [PlaybookNodeType.Condition]: ActionType.Condition,
+  [PlaybookNodeType.DeliverOutput]: ActionType.DeliverOutput,
+  [PlaybookNodeType.DeliverToIndex]: ActionType.DeliverToIndex,
+  [PlaybookNodeType.UpdateRecord]: ActionType.UpdateRecord,
+  [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
+  [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
+  [PlaybookNodeType.Wait]: ActionType.Wait,
 };
 
 // ---------------------------------------------------------------------------
@@ -115,22 +115,22 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
  * Field names match Dataverse schema exactly.
  */
 export interface PlaybookNodeRecord {
-    sprk_playbooknodeid: string;
-    sprk_name: string;
-    sprk_nodetype: number;
-    sprk_executionorder: number;
-    sprk_outputvariable?: string;
-    sprk_configjson: string;
-    sprk_position_x?: number;
-    sprk_position_y?: number;
-    sprk_isactive: boolean;
-    sprk_timeoutseconds?: number;
-    sprk_retrycount?: number;
-    sprk_conditionjson?: string;
-    sprk_dependsonjson?: string;
-    _sprk_playbookid_value: string;
-    _sprk_actionid_value?: string;
-    _sprk_modeldeploymentid_value?: string;
+  sprk_playbooknodeid: string;
+  sprk_name: string;
+  sprk_nodetype: number;
+  sprk_executionorder: number;
+  sprk_outputvariable?: string;
+  sprk_configjson: string;
+  sprk_position_x?: number;
+  sprk_position_y?: number;
+  sprk_isactive: boolean;
+  sprk_timeoutseconds?: number;
+  sprk_retrycount?: number;
+  sprk_conditionjson?: string;
+  sprk_dependsonjson?: string;
+  _sprk_playbookid_value: string;
+  _sprk_actionid_value?: string;
+  _sprk_modeldeploymentid_value?: string;
 }
 
 /**
@@ -139,65 +139,65 @@ export interface PlaybookNodeRecord {
  * gets serialized into sprk_configjson by playbookNodeSync.
  */
 export interface PlaybookNodeData {
-    label: string;
-    type: PlaybookNodeType | string;
-    actionId?: string;
-    outputVariable?: string;
-    isActive?: boolean;
-    skillIds?: string[];
-    knowledgeIds?: string[];
-    toolIds?: string[];
-    modelDeploymentId?: string;
-    timeoutSeconds?: number;
-    retryCount?: number;
+  label: string;
+  type: PlaybookNodeType | string;
+  actionId?: string;
+  outputVariable?: string;
+  isActive?: boolean;
+  skillIds?: string[];
+  knowledgeIds?: string[];
+  toolIds?: string[];
+  modelDeploymentId?: string;
+  timeoutSeconds?: number;
+  retryCount?: number;
 
-    // Type-specific config (maps to sprk_configjson)
-    conditionJson?: string;
+  // Type-specific config (maps to sprk_configjson)
+  conditionJson?: string;
 
-    // Deliver Output config
-    deliveryType?: "markdown" | "html" | "text" | "json";
-    template?: string;
-    includeMetadata?: boolean;
-    includeSourceCitations?: boolean;
-    maxOutputLength?: number;
+  // Deliver Output config
+  deliveryType?: 'markdown' | 'html' | 'text' | 'json';
+  template?: string;
+  includeMetadata?: boolean;
+  includeSourceCitations?: boolean;
+  maxOutputLength?: number;
 
-    // Deliver to Index config
-    indexName?: string;
-    indexSource?: "document" | "content";
-    indexContentVariable?: string;
-    indexParentEntityType?: string;
-    indexParentEntityId?: string;
-    indexParentEntityName?: string;
-    indexMetadata?: string;
+  // Deliver to Index config
+  indexName?: string;
+  indexSource?: 'document' | 'content';
+  indexContentVariable?: string;
+  indexParentEntityType?: string;
+  indexParentEntityId?: string;
+  indexParentEntityName?: string;
+  indexMetadata?: string;
 
-    // Send Email config
-    emailTo?: string[];
-    emailCc?: string[];
-    emailSubject?: string;
-    emailBody?: string;
-    emailIsHtml?: boolean;
+  // Send Email config
+  emailTo?: string[];
+  emailCc?: string[];
+  emailSubject?: string;
+  emailBody?: string;
+  emailIsHtml?: boolean;
 
-    // Create Task config
-    taskSubject?: string;
-    taskDescription?: string;
-    taskRegardingType?: string;
-    taskRegardingId?: string;
-    taskOwnerId?: string;
-    taskDueDate?: string;
+  // Create Task config
+  taskSubject?: string;
+  taskDescription?: string;
+  taskRegardingType?: string;
+  taskRegardingId?: string;
+  taskOwnerId?: string;
+  taskDueDate?: string;
 
-    // AI Completion config
-    systemPrompt?: string;
-    userPromptTemplate?: string;
-    temperature?: number;
-    maxTokens?: number;
+  // AI Completion config
+  systemPrompt?: string;
+  userPromptTemplate?: string;
+  temperature?: number;
+  maxTokens?: number;
 
-    // Wait config
-    waitType?: "duration" | "until" | "condition";
-    waitDurationHours?: number;
-    waitUntilDateTime?: string;
+  // Wait config
+  waitType?: 'duration' | 'until' | 'condition';
+  waitDurationHours?: number;
+  waitUntilDateTime?: string;
 
-    // Extensibility: allow additional properties for React Flow compatibility
-    [key: string]: unknown;
+  // Extensibility: allow additional properties for React Flow compatibility
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,71 +209,71 @@ export interface PlaybookNodeData {
  * and node palette components.
  */
 export interface NodeTypeInfo {
-    type: PlaybookNodeType;
-    label: string;
-    description: string;
-    icon: string;
-    category: "ai" | "logic" | "output" | "action";
+  type: PlaybookNodeType;
+  label: string;
+  description: string;
+  icon: string;
+  category: 'ai' | 'logic' | 'output' | 'action';
 }
 
 /**
  * Metadata for all user-facing node types (excludes Start which is auto-created).
  */
 export const NODE_TYPE_INFO: NodeTypeInfo[] = [
-    {
-        type: PlaybookNodeType.AiAnalysis,
-        label: "AI Analysis",
-        description: "Run AI analysis with skills, knowledge, and tools",
-        icon: "BrainCircuit",
-        category: "ai",
-    },
-    {
-        type: PlaybookNodeType.AiCompletion,
-        label: "AI Completion",
-        description: "Generate text with a system prompt and template",
-        icon: "Sparkle",
-        category: "ai",
-    },
-    {
-        type: PlaybookNodeType.Condition,
-        label: "Condition",
-        description: "Branch based on a conditional expression",
-        icon: "ArrowSplit",
-        category: "logic",
-    },
-    {
-        type: PlaybookNodeType.DeliverOutput,
-        label: "Deliver Output",
-        description: "Format and deliver results as markdown, HTML, or text",
-        icon: "DocumentText",
-        category: "output",
-    },
-    {
-        type: PlaybookNodeType.DeliverToIndex,
-        label: "Deliver to Index",
-        description: "Queue document for RAG semantic indexing",
-        icon: "DatabaseSearch",
-        category: "output",
-    },
-    {
-        type: PlaybookNodeType.CreateTask,
-        label: "Create Task",
-        description: "Create a Dataverse task record",
-        icon: "TaskListSquare",
-        category: "action",
-    },
-    {
-        type: PlaybookNodeType.SendEmail,
-        label: "Send Email",
-        description: "Send an email with template variable support",
-        icon: "Mail",
-        category: "action",
-    },
-    {
-        type: PlaybookNodeType.Wait,
-        label: "Wait",
-        description: "Pause execution for a duration or until a condition",
-        icon: "Clock",
-        category: "logic",
-    },
+  {
+    type: PlaybookNodeType.AiAnalysis,
+    label: 'AI Analysis',
+    description: 'Run AI analysis with skills, knowledge, and tools',
+    icon: 'BrainCircuit',
+    category: 'ai',
+  },
+  {
+    type: PlaybookNodeType.AiCompletion,
+    label: 'AI Completion',
+    description: 'Generate text with a system prompt and template',
+    icon: 'Sparkle',
+    category: 'ai',
+  },
+  {
+    type: PlaybookNodeType.Condition,
+    label: 'Condition',
+    description: 'Branch based on a conditional expression',
+    icon: 'ArrowSplit',
+    category: 'logic',
+  },
+  {
+    type: PlaybookNodeType.DeliverOutput,
+    label: 'Deliver Output',
+    description: 'Format and deliver results as markdown, HTML, or text',
+    icon: 'DocumentText',
+    category: 'output',
+  },
+  {
+    type: PlaybookNodeType.DeliverToIndex,
+    label: 'Deliver to Index',
+    description: 'Queue document for RAG semantic indexing',
+    icon: 'DatabaseSearch',
+    category: 'output',
+  },
+  {
+    type: PlaybookNodeType.CreateTask,
+    label: 'Create Task',
+    description: 'Create a Dataverse task record',
+    icon: 'TaskListSquare',
+    category: 'action',
+  },
+  {
+    type: PlaybookNodeType.SendEmail,
+    label: 'Send Email',
+    description: 'Send an email with template variable support',
+    icon: 'Mail',
+    category: 'action',
+  },
+  {
+    type: PlaybookNodeType.Wait,
+    label: 'Wait',
+    description: 'Pause execution for a duration or until a condition',
+    icon: 'Clock',
+    category: 'logic',
+  },
 ];

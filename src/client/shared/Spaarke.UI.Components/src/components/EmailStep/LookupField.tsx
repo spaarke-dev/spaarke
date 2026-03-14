@@ -23,16 +23,7 @@
  */
 
 import * as React from 'react';
-import {
-  Input,
-  Text,
-  Button,
-  Spinner,
-  Field,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Input, Text, Button, Spinner, Field, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
@@ -278,14 +269,10 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev < results.length - 1 ? prev + 1 : 0
-        );
+        setHighlightedIndex(prev => (prev < results.length - 1 ? prev + 1 : 0));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : results.length - 1
-        );
+        setHighlightedIndex(prev => (prev > 0 ? prev - 1 : results.length - 1));
       } else if (e.key === 'Enter' && highlightedIndex >= 0) {
         e.preventDefault();
         handleSelect(results[highlightedIndex]);
@@ -314,11 +301,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     </span>
   );
 
-  const showEmpty =
-    !loading &&
-    !value &&
-    results.length === 0 &&
-    searchTerm.trim().length >= minSearchLength;
+  const showEmpty = !loading && !value && results.length === 0 && searchTerm.trim().length >= minSearchLength;
 
   return (
     <div className={styles.wrapper} ref={wrapperRef}>
@@ -359,11 +342,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
       {/* Results list */}
       {showResults && !value && (
-        <div
-          className={styles.resultsList}
-          role="listbox"
-          aria-label={`${label} search results`}
-        >
+        <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
           {results.map((item, index) => (
             <div
               key={item.id}
@@ -375,7 +354,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
               aria-selected={index === highlightedIndex}
               tabIndex={0}
               onClick={() => handleSelect(item)}
-              onKeyDown={(e) => {
+              onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   handleSelect(item);

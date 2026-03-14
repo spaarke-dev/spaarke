@@ -16,8 +16,20 @@ const mockReadItem = {
   cc: [{ emailAddress: 'cc@example.com', displayName: 'CC Recipient' }],
   bcc: [],
   attachments: [
-    { id: 'att-1', name: 'document.pdf', contentType: 'application/pdf', size: 1024, isInline: false },
-    { id: 'att-2', name: 'image.png', contentType: 'image/png', size: 2048, isInline: true },
+    {
+      id: 'att-1',
+      name: 'document.pdf',
+      contentType: 'application/pdf',
+      size: 1024,
+      isInline: false,
+    },
+    {
+      id: 'att-2',
+      name: 'image.png',
+      contentType: 'image/png',
+      size: 2048,
+      isInline: true,
+    },
   ],
   internetMessageId: '<test-message-id@example.com>',
   conversationId: 'conversation-123',
@@ -26,9 +38,7 @@ const mockReadItem = {
   dateTimeModified: new Date('2026-01-15T10:00:00Z'),
   body: {
     getAsync: jest.fn((coercionType: Office.CoercionType, callback: (result: Office.AsyncResult<string>) => void) => {
-      const content = coercionType === Office.CoercionType.Html
-        ? '<p>Test email body</p>'
-        : 'Test email body';
+      const content = coercionType === Office.CoercionType.Html ? '<p>Test email body</p>' : 'Test email body';
       callback({
         status: Office.AsyncResultStatus.Succeeded,
         value: content,
@@ -40,7 +50,10 @@ const mockReadItem = {
     (attachmentId: string, callback: (result: Office.AsyncResult<Office.AttachmentContentAsync>) => void) => {
       callback({
         status: Office.AsyncResultStatus.Succeeded,
-        value: { content: 'dGVzdCBjb250ZW50', format: Office.MailboxEnums.AttachmentContentFormat.Base64 },
+        value: {
+          content: 'dGVzdCBjb250ZW50',
+          format: Office.MailboxEnums.AttachmentContentFormat.Base64,
+        },
         error: null,
       } as Office.AsyncResult<Office.AttachmentContentAsync>);
     }
@@ -63,41 +76,50 @@ const mockComposeItem = {
     getAsync: jest.fn((callback: (result: Office.AsyncResult<Office.EmailAddressDetails>) => void) => {
       callback({
         status: Office.AsyncResultStatus.Succeeded,
-        value: { emailAddress: 'user@example.com', displayName: 'Current User' },
+        value: {
+          emailAddress: 'user@example.com',
+          displayName: 'Current User',
+        },
         error: null,
       } as Office.AsyncResult<Office.EmailAddressDetails>);
     }),
   },
   to: {
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: [{ emailAddress: 'to@example.com', displayName: 'To Recipient' }],
-        error: null,
-      } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
-    }),
+    getAsync: jest.fn(
+      (callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: [{ emailAddress: 'to@example.com', displayName: 'To Recipient' }],
+          error: null,
+        } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
+      }
+    ),
     setAsync: jest.fn(),
     addAsync: jest.fn(),
   },
   cc: {
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: [],
-        error: null,
-      } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
-    }),
+    getAsync: jest.fn(
+      (callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: [],
+          error: null,
+        } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
+      }
+    ),
     setAsync: jest.fn(),
     addAsync: jest.fn(),
   },
   bcc: {
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: [],
-        error: null,
-      } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
-    }),
+    getAsync: jest.fn(
+      (callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: [],
+          error: null,
+        } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
+      }
+    ),
     setAsync: jest.fn(),
     addAsync: jest.fn(),
   },
@@ -167,8 +189,14 @@ describe('OutlookAdapter', () => {
 
     // Mock Office.onReady for Outlook
     global.Office.onReady = jest.fn().mockImplementation((callback: (info: { host: Office.HostType }) => void) => {
-      callback({ host: Office.HostType.Outlook, platform: Office.PlatformType.OfficeOnline });
-      return Promise.resolve({ host: Office.HostType.Outlook, platform: Office.PlatformType.OfficeOnline });
+      callback({
+        host: Office.HostType.Outlook,
+        platform: Office.PlatformType.OfficeOnline,
+      });
+      return Promise.resolve({
+        host: Office.HostType.Outlook,
+        platform: Office.PlatformType.OfficeOnline,
+      });
     });
   });
 
@@ -197,7 +225,10 @@ describe('OutlookAdapter', () => {
 
     it('should reject if not running in Outlook', async () => {
       global.Office.onReady = jest.fn().mockImplementation((callback: (info: { host: Office.HostType }) => void) => {
-        callback({ host: Office.HostType.Word, platform: Office.PlatformType.OfficeOnline });
+        callback({
+          host: Office.HostType.Word,
+          platform: Office.PlatformType.OfficeOnline,
+        });
       });
 
       await expect(adapter.initialize()).rejects.toMatchObject({
@@ -255,7 +286,11 @@ describe('OutlookAdapter', () => {
       });
 
       it('should return empty array when no attachments', async () => {
-        (global.Office.context.mailbox as unknown as { item: { attachments: never[] } }).item = {
+        (
+          global.Office.context.mailbox as unknown as {
+            item: { attachments: never[] };
+          }
+        ).item = {
           ...mockReadItem,
           attachments: [],
         };

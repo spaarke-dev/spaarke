@@ -119,25 +119,21 @@ export const useModelStore = create<ModelState>(() => ({
 
   // Get active models only
   getActiveModels: () => {
-    return mockModelDeployments.filter((m) => m.isActive);
+    return mockModelDeployments.filter(m => m.isActive);
   },
 
   // Get models by capability
   getModelsByCapability: (capability: AiCapability) => {
-    return mockModelDeployments.filter(
-      (m) => m.isActive && m.capability === capability
-    );
+    return mockModelDeployments.filter(m => m.isActive && m.capability === capability);
   },
 
   // Get chat-capable models (for AI analysis/completion nodes)
   getChatModels: () => {
-    return mockModelDeployments.filter(
-      (m) => m.isActive && m.capability === 'Chat'
-    );
+    return mockModelDeployments.filter(m => m.isActive && m.capability === 'Chat');
   },
 
   // Get model by ID
   getModelById: (id: string) => {
-    return mockModelDeployments.find((m) => m.id === id);
+    return mockModelDeployments.find(m => m.id === id);
   },
 }));

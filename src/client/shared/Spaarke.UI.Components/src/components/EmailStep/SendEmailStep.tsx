@@ -28,14 +28,7 @@
  */
 
 import * as React from 'react';
-import {
-  Field,
-  Input,
-  Textarea,
-  Text,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Field, Input, Textarea, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from './LookupField';
 import { extractEmailFromUserName } from './emailHelpers';
 import type { ILookupItem } from './LookupField';
@@ -212,26 +205,20 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
         />
 
         {/* Subject */}
-        <Field
-          label={renderLabel('Subject', true)}
-          required
-        >
+        <Field label={renderLabel('Subject', true)} required>
           <Input
             value={emailSubject}
-            onChange={(e) => onEmailSubjectChange(e.target.value)}
+            onChange={e => onEmailSubjectChange(e.target.value)}
             placeholder="Email subject"
             aria-label="Subject"
           />
         </Field>
 
         {/* Body */}
-        <Field
-          label={renderLabel('Message', true)}
-          required
-        >
+        <Field label={renderLabel('Message', true)} required>
           <Textarea
             value={emailBody}
-            onChange={(e) => onEmailBodyChange(e.target.value)}
+            onChange={e => onEmailBodyChange(e.target.value)}
             placeholder="Compose your message&hellip;"
             rows={messageRows}
             resize="vertical"

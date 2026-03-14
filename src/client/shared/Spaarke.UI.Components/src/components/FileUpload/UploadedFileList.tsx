@@ -11,20 +11,8 @@
  * All colors via Fluent v9 semantic tokens — zero hardcoded values.
  */
 import * as React from 'react';
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
-import {
-  DocumentPdfRegular,
-  DocumentRegular,
-  TableRegular,
-  DismissRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, Text, Button, Tooltip } from '@fluentui/react-components';
+import { DocumentPdfRegular, DocumentRegular, TableRegular, DismissRegular } from '@fluentui/react-icons';
 import { IUploadedFileListProps, IUploadedFile, UploadedFileType } from './fileUploadTypes';
 
 // ---------------------------------------------------------------------------
@@ -126,30 +114,15 @@ const FileTypeIcon: React.FC<IFileIconProps> = ({ fileType }) => {
   const styles = useStyles();
 
   if (fileType === 'pdf') {
-    return (
-      <DocumentPdfRegular
-        className={mergeClasses(styles.fileIcon, styles.fileIconPdf)}
-        aria-hidden="true"
-      />
-    );
+    return <DocumentPdfRegular className={mergeClasses(styles.fileIcon, styles.fileIconPdf)} aria-hidden="true" />;
   }
 
   if (fileType === 'xlsx') {
-    return (
-      <TableRegular
-        className={mergeClasses(styles.fileIcon, styles.fileIconXlsx)}
-        aria-hidden="true"
-      />
-    );
+    return <TableRegular className={mergeClasses(styles.fileIcon, styles.fileIconXlsx)} aria-hidden="true" />;
   }
 
   // docx (default)
-  return (
-    <DocumentRegular
-      className={mergeClasses(styles.fileIcon, styles.fileIconDocx)}
-      aria-hidden="true"
-    />
-  );
+  return <DocumentRegular className={mergeClasses(styles.fileIcon, styles.fileIconDocx)} aria-hidden="true" />;
 };
 
 // ---------------------------------------------------------------------------
@@ -203,11 +176,7 @@ const FileRow: React.FC<IFileRowProps> = ({ file, onRemove, disabled }) => {
 // UploadedFileList (exported)
 // ---------------------------------------------------------------------------
 
-export const UploadedFileList: React.FC<IUploadedFileListProps> = ({
-  files,
-  onRemove,
-  disabled = false,
-}) => {
+export const UploadedFileList: React.FC<IUploadedFileListProps> = ({ files, onRemove, disabled = false }) => {
   const styles = useStyles();
 
   if (files.length === 0) {
@@ -215,11 +184,8 @@ export const UploadedFileList: React.FC<IUploadedFileListProps> = ({
   }
 
   return (
-    <ol
-      className={styles.list}
-      aria-label={`Uploaded files (${files.length})`}
-    >
-      {files.map((file) => (
+    <ol className={styles.list} aria-label={`Uploaded files (${files.length})`}>
+      {files.map(file => (
         <FileRow key={file.id} file={file} onRemove={onRemove} disabled={disabled} />
       ))}
     </ol>

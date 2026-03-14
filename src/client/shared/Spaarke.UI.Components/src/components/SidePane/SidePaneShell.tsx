@@ -27,12 +27,8 @@
  * ```
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-} from "@fluentui/react-components";
+import * as React from 'react';
+import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -59,28 +55,28 @@ export interface SidePaneShellProps {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
   },
   readOnlyBanner: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    ...shorthands.padding("8px", "16px"),
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shorthands.padding('8px', '16px'),
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    fontStyle: "italic",
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke1),
+    fontStyle: 'italic',
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
   },
   content: {
-    display: "flex",
-    flexDirection: "column",
-    ...shorthands.gap("0"),
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('0'),
     flexGrow: 1,
-    overflowY: "auto",
+    overflowY: 'auto',
   },
 });
 
@@ -93,7 +89,7 @@ export const SidePaneShell: React.FC<SidePaneShellProps> = ({
   footer,
   children,
   isReadOnly = false,
-  readOnlyMessage = "Read-only: You do not have permission to edit this record",
+  readOnlyMessage = 'Read-only: You do not have permission to edit this record',
   contentRef,
 }) => {
   const styles = useStyles();
@@ -102,9 +98,7 @@ export const SidePaneShell: React.FC<SidePaneShellProps> = ({
     <div className={styles.root}>
       {header}
 
-      {isReadOnly && (
-        <div className={styles.readOnlyBanner}>{readOnlyMessage}</div>
-      )}
+      {isReadOnly && <div className={styles.readOnlyBanner}>{readOnlyMessage}</div>}
 
       <main className={styles.content} ref={contentRef}>
         {children}

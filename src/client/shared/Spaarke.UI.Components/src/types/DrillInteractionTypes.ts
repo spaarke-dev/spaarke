@@ -7,7 +7,7 @@
 /**
  * Supported filter operators for drill interactions
  */
-export type DrillOperator = "eq" | "in" | "between";
+export type DrillOperator = 'eq' | 'in' | 'between';
 
 /**
  * Drill interaction contract - emitted when user clicks a chart element
@@ -42,14 +42,7 @@ export interface DrillInteraction {
 /**
  * Value types for drill interactions
  */
-export type DrillValue =
-  | string
-  | number
-  | boolean
-  | Date
-  | null
-  | DrillValueArray
-  | DrillValueRange;
+export type DrillValue = string | number | boolean | Date | null | DrillValueArray | DrillValueRange;
 
 /**
  * Array of values for "in" operator
@@ -88,17 +81,17 @@ export function drillInteractionToFetchXml(interaction: DrillInteraction): strin
   const { field, operator, value } = interaction;
 
   switch (operator) {
-    case "eq":
+    case 'eq':
       return `<condition attribute="${field}" operator="eq" value="${value}" />`;
 
-    case "in":
+    case 'in':
       if (Array.isArray(value)) {
-        const values = value.map((v) => `<value>${v}</value>`).join("");
+        const values = value.map(v => `<value>${v}</value>`).join('');
         return `<condition attribute="${field}" operator="in">${values}</condition>`;
       }
       return `<condition attribute="${field}" operator="eq" value="${value}" />`;
 
-    case "between":
+    case 'between':
       if (Array.isArray(value) && value.length === 2) {
         return `<filter type="and">
           <condition attribute="${field}" operator="ge" value="${value[0]}" />
@@ -122,25 +115,25 @@ export function drillInteractionToOData(interaction: DrillInteraction): string {
   const { field, operator, value } = interaction;
 
   switch (operator) {
-    case "eq":
-      if (typeof value === "string") {
+    case 'eq':
+      if (typeof value === 'string') {
         return `${field} eq '${value}'`;
       }
       return `${field} eq ${value}`;
 
-    case "in":
+    case 'in':
       if (Array.isArray(value)) {
-        const conditions = value.map((v) => {
-          if (typeof v === "string") {
+        const conditions = value.map(v => {
+          if (typeof v === 'string') {
             return `${field} eq '${v}'`;
           }
           return `${field} eq ${v}`;
         });
-        return `(${conditions.join(" or ")})`;
+        return `(${conditions.join(' or ')})`;
       }
       return `${field} eq ${value}`;
 
-    case "between":
+    case 'between':
       if (Array.isArray(value) && value.length === 2) {
         return `(${field} ge ${value[0]} and ${field} le ${value[1]})`;
       }
@@ -155,15 +148,15 @@ export function drillInteractionToOData(interaction: DrillInteraction): string {
  * Type guard to check if a value is a DrillInteraction
  */
 export function isDrillInteraction(value: unknown): value is DrillInteraction {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== 'object' || value === null) {
     return false;
   }
 
   const obj = value as Record<string, unknown>;
-  const validOperators: DrillOperator[] = ["eq", "in", "between"];
+  const validOperators: DrillOperator[] = ['eq', 'in', 'between'];
   return (
-    typeof obj.field === "string" &&
-    typeof obj.operator === "string" &&
+    typeof obj.field === 'string' &&
+    typeof obj.operator === 'string' &&
     validOperators.indexOf(obj.operator as DrillOperator) !== -1 &&
     obj.value !== undefined
   );

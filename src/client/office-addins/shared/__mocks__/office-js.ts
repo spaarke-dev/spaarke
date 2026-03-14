@@ -118,13 +118,8 @@ export function createMockComposeItem(overrides: Partial<MockOfficeItem> = {}): 
 /**
  * Create a mock body object.
  */
-export function createMockBody(
-  contentType: 'html' | 'text' = 'html',
-  isCompose = false
-): MockBody {
-  const content = contentType === 'html'
-    ? '<p>Test email body content</p>'
-    : 'Test email body content';
+export function createMockBody(contentType: 'html' | 'text' = 'html', isCompose = false): MockBody {
+  const content = contentType === 'html' ? '<p>Test email body content</p>' : 'Test email body content';
 
   const body: MockBody = {
     getAsync: jest.fn((coercionType: Office.CoercionType, callback: (result: Office.AsyncResult<string>) => void) => {
@@ -237,13 +232,15 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
 
   // Add Recipients objects with getAsync/setAsync methods
   const createRecipients = (existing: Array<{ emailAddress: string; displayName: string }> = []) => ({
-    getAsync: jest.fn((callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
-      callback({
-        status: Office.AsyncResultStatus.Succeeded,
-        value: existing,
-        error: null,
-      } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
-    }),
+    getAsync: jest.fn(
+      (callback: (result: Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>) => void) => {
+        callback({
+          status: Office.AsyncResultStatus.Succeeded,
+          value: existing,
+          error: null,
+        } as Office.AsyncResult<Array<{ emailAddress: string; displayName: string }>>);
+      }
+    ),
     setAsync: jest.fn(),
     addAsync: jest.fn(),
   });
@@ -257,7 +254,10 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
     getAsync: jest.fn((callback: (result: Office.AsyncResult<Office.EmailAddressDetails>) => void) => {
       callback({
         status: Office.AsyncResultStatus.Succeeded,
-        value: { emailAddress: 'testuser@example.com', displayName: 'Test User' },
+        value: {
+          emailAddress: 'testuser@example.com',
+          displayName: 'Test User',
+        },
         error: null,
       } as Office.AsyncResult<Office.EmailAddressDetails>);
     }),
@@ -377,9 +377,7 @@ export function createMockWordContext(): MockWordContext {
 /**
  * Setup mock dialog display.
  */
-export function setupMockDialog(
-  onDisplayDialog?: (result: { value: MockDialog }) => void
-): MockDialog {
+export function setupMockDialog(onDisplayDialog?: (result: { value: MockDialog }) => void): MockDialog {
   const mockDialog = createMockDialog();
 
   global.Office.context.ui.displayDialogAsync = jest.fn(

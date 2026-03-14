@@ -14,13 +14,13 @@
  * @see ADR-006 - Code Pages for standalone dialogs
  */
 
-import type { HostContext } from "../types";
+import type { HostContext } from '../types';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOG_PREFIX = "[AnalysisWorkspace:HostContext]";
+const LOG_PREFIX = '[AnalysisWorkspace:HostContext]';
 
 // ---------------------------------------------------------------------------
 // Parse URL Parameters
@@ -36,27 +36,25 @@ const LOG_PREFIX = "[AnalysisWorkspace:HostContext]";
  * @returns Parsed HostContext with all available parameters
  */
 export function parseHostContext(): HostContext {
-    const rawUrlParams = new URLSearchParams(window.location.search);
-    const dataEnvelope = rawUrlParams.get("data");
+  const rawUrlParams = new URLSearchParams(window.location.search);
+  const dataEnvelope = rawUrlParams.get('data');
 
-    const params = dataEnvelope
-        ? new URLSearchParams(decodeURIComponent(dataEnvelope))
-        : rawUrlParams;
+  const params = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelope)) : rawUrlParams;
 
-    const context: HostContext = {
-        analysisId: params.get("analysisId") ?? "",
-        documentId: params.get("documentId") ?? "",
-        tenantId: params.get("tenantId") ?? "",
-        theme: params.get("theme") ?? undefined,
-    };
+  const context: HostContext = {
+    analysisId: params.get('analysisId') ?? '',
+    documentId: params.get('documentId') ?? '',
+    tenantId: params.get('tenantId') ?? '',
+    theme: params.get('theme') ?? undefined,
+  };
 
-    if (context.analysisId) {
-        console.info(`${LOG_PREFIX} Parsed context: analysisId=${context.analysisId}, documentId=${context.documentId}`);
-    } else {
-        console.warn(`${LOG_PREFIX} No analysisId found in URL parameters`);
-    }
+  if (context.analysisId) {
+    console.info(`${LOG_PREFIX} Parsed context: analysisId=${context.analysisId}, documentId=${context.documentId}`);
+  } else {
+    console.warn(`${LOG_PREFIX} No analysisId found in URL parameters`);
+  }
 
-    return context;
+  return context;
 }
 
 /**
@@ -66,17 +64,17 @@ export function parseHostContext(): HostContext {
  * @returns An array of validation error messages (empty if valid)
  */
 export function validateHostContext(context: HostContext): string[] {
-    const errors: string[] = [];
+  const errors: string[] = [];
 
-    if (!context.analysisId) {
-        errors.push("Missing required parameter: analysisId");
-    }
+  if (!context.analysisId) {
+    errors.push('Missing required parameter: analysisId');
+  }
 
-    if (!context.documentId) {
-        errors.push("Missing required parameter: documentId");
-    }
+  if (!context.documentId) {
+    errors.push('Missing required parameter: documentId');
+  }
 
-    return errors;
+  return errors;
 }
 
 /**
@@ -91,15 +89,15 @@ let cachedContext: HostContext | null = null;
  * @returns The parsed HostContext
  */
 export function getHostContext(): HostContext {
-    if (!cachedContext) {
-        cachedContext = parseHostContext();
-    }
-    return cachedContext;
+  if (!cachedContext) {
+    cachedContext = parseHostContext();
+  }
+  return cachedContext;
 }
 
 /**
  * Clear the cached host context. Useful for testing or when URL changes.
  */
 export function clearHostContextCache(): void {
-    cachedContext = null;
+  cachedContext = null;
 }

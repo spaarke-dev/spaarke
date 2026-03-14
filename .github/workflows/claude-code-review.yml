@@ -1,0 +1,66 @@
+name: Claude Code Architecture Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  architecture-review:
+    name: Architecture Review (Advisory)
+    runs-on: ubuntu-latest
+    # Advisory only — never blocks PR merges
+    continue-on-error: true
+    # Skip on draft PRs and bot PRs
+    if: github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-sonnet-4-5-20250514
+          timeout_minutes: 3
+          # Use direct_prompt for PR review
+          direct_prompt: |
+            Review this pull request for architecture compliance with Spaarke's ADRs.
+
+            ## Architecture Constraints to Check
+
+            **ADR-001**: Backend uses .NET 8 Minimal API + BackgroundService. NO Azure Functions.
+            **ADR-008**: Use endpoint filters for authorization, NOT global middleware.
+            **ADR-010**: Max 15 non-framework DI registrations. Use concrete types unless a seam is required.
+            **ADR-019**: Use ProblemDetails for ALL error responses. Include correlation IDs.
+            **ADR-021**: Fluent UI v9 only. No hard-coded colors. Dark mode required.
+            **ADR-022**: PCF controls = React 16 (platform-provided). Code Pages = React 18 (bundled).
+
+            ## Review Focus
+
+            1. Check for ADR violations in changed files
+            2. Identify pattern drift from established conventions
+            3. Flag potential security issues (hardcoded secrets, missing auth)
+            4. Note abstraction violations (unnecessary interfaces per ADR-010)
+            5. Check error handling patterns (ProblemDetails per ADR-019)
+
+            ## Output Format
+
+            Post findings as a structured markdown comment:
+            - Critical: ADR violations that MUST be fixed
+            - Warning: Pattern drift or style issues
+            - Info: Suggestions for improvement
+
+            If no issues found, post a brief "No architecture concerns found" message.
+
+            Label your comment: "## Claude Code Architecture Review (Advisory)"

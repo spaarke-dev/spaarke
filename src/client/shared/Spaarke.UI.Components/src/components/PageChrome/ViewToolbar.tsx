@@ -9,7 +9,7 @@
  * @see ADR-021 Fluent UI v9 Design System
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Toolbar,
   ToolbarButton,
@@ -20,12 +20,8 @@ import {
   makeStyles,
   tokens,
   mergeClasses,
-} from "@fluentui/react-components";
-import {
-  Filter20Regular,
-  TableSettings20Regular,
-  ChevronDown20Regular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-components';
+import { Filter20Regular, TableSettings20Regular, ChevronDown20Regular } from '@fluentui/react-icons';
 
 /**
  * Props for ViewToolbar component
@@ -56,54 +52,54 @@ export interface IViewToolbarProps {
 const useStyles = makeStyles({
   toolbar: {
     backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    minHeight: "36px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    minHeight: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   toolbarCompact: {
-    minHeight: "32px",
-    paddingTop: "2px",
-    paddingBottom: "2px",
+    minHeight: '32px',
+    paddingTop: '2px',
+    paddingBottom: '2px',
   },
   leftSection: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     flexGrow: 1,
   },
   rightSection: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   viewNameButton: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    cursor: "pointer",
+    cursor: 'pointer',
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: "transparent",
-    borderWidth: "0",
-    fontFamily: "inherit",
+    backgroundColor: 'transparent',
+    borderWidth: '0',
+    fontFamily: 'inherit',
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    "&:hover": {
+    '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
-    "&:active": {
+    '&:active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
@@ -124,7 +120,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   divider: {
-    height: "20px",
+    height: '20px',
   },
 });
 
@@ -149,11 +145,7 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
 
   return (
     <div
-      className={mergeClasses(
-        styles.toolbar,
-        compact && styles.toolbarCompact,
-        className
-      )}
+      className={mergeClasses(styles.toolbar, compact && styles.toolbarCompact, className)}
       role="toolbar"
       aria-label="View toolbar"
     >
@@ -165,7 +157,7 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
             {children}
             {recordCount !== undefined && (
               <Text className={styles.recordCount}>
-                ({recordCount.toLocaleString()} {recordCount === 1 ? "record" : "records"})
+                ({recordCount.toLocaleString()} {recordCount === 1 ? 'record' : 'records'})
               </Text>
             )}
           </>
@@ -179,11 +171,7 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
           >
             <span className={styles.viewName}>{viewName}</span>
             <ChevronDown20Regular className={styles.chevron} />
-            {recordCount !== undefined && (
-              <Text className={styles.recordCount}>
-                ({recordCount.toLocaleString()})
-              </Text>
-            )}
+            {recordCount !== undefined && <Text className={styles.recordCount}>({recordCount.toLocaleString()})</Text>}
           </button>
         ) : null}
       </div>
@@ -198,16 +186,14 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
                 onClick={onEditFilters}
                 className={styles.actionButton}
                 aria-label="Edit filters"
-                size={compact ? "small" : "medium"}
+                size={compact ? 'small' : 'medium'}
               >
-                {!compact && "Edit filters"}
+                {!compact && 'Edit filters'}
               </ToolbarButton>
             </Tooltip>
           )}
 
-          {showEditFilters && showEditColumns && (
-            <ToolbarDivider className={styles.divider} />
-          )}
+          {showEditFilters && showEditColumns && <ToolbarDivider className={styles.divider} />}
 
           {showEditColumns && (
             <Tooltip content="Edit columns" relationship="label">
@@ -216,9 +202,9 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
                 onClick={onEditColumns}
                 className={styles.actionButton}
                 aria-label="Edit columns"
-                size={compact ? "small" : "medium"}
+                size={compact ? 'small' : 'medium'}
               >
-                {!compact && "Edit columns"}
+                {!compact && 'Edit columns'}
               </ToolbarButton>
             </Tooltip>
           )}

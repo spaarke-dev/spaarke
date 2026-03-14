@@ -1011,7 +1011,7 @@ public class VisualizationService : IVisualizationService
                         ExtractedKeywords = ParseKeywords(entity.Keywords),
                         CreatedOn = entity.CreatedOn,
                         ModifiedOn = entity.ModifiedOn,
-                        // TODO: Add parent entity lookup when available
+                        // TRACKED: GitHub #233 - Add parent entity lookup when available
                         ParentEntityType = null,
                         ParentEntityId = null,
                         ParentEntityName = null
@@ -1105,7 +1105,7 @@ public class VisualizationService : IVisualizationService
                 MaxDepthReached = relatedDocuments.Count > 0 ? 1 : 0,
                 NodesPerLevel = nodesPerLevel,
                 SearchLatencyMs = searchLatencyMs,
-                CacheHit = false // TODO: Track cache hits when implemented
+                CacheHit = false // TRACKED: GitHub #233 - Track cache hits when implemented
             }
         };
     }

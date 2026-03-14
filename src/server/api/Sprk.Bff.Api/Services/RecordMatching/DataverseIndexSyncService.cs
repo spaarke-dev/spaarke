@@ -385,7 +385,7 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
         if (!string.IsNullOrEmpty(reference)) keywordParts.Add(reference);
         document.Keywords = string.Join(" ", keywordParts);
 
-        // TODO: In future, expand lookups to get organization/people names
+        // TRACKED: GitHub #233 - Expand lookups for organization/people names
         // For now, leave Organizations and People empty
 
         return document;

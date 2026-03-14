@@ -92,7 +92,9 @@ describe('SaveView', () => {
     it('hides attachment list when include attachments is unchecked', async () => {
       renderWithProvider(<SaveView hostContext={mockEmailContext} />);
 
-      const checkbox = screen.getByRole('checkbox', { name: /include attachments/i });
+      const checkbox = screen.getByRole('checkbox', {
+        name: /include attachments/i,
+      });
       await userEvent.click(checkbox);
 
       expect(screen.queryByText('document.pdf')).not.toBeInTheDocument();
@@ -101,7 +103,9 @@ describe('SaveView', () => {
     it('allows selecting individual attachments', async () => {
       renderWithProvider(<SaveView hostContext={mockEmailContext} />);
 
-      const pdfCheckbox = screen.getByRole('checkbox', { name: /document\.pdf/i });
+      const pdfCheckbox = screen.getByRole('checkbox', {
+        name: /document\.pdf/i,
+      });
       expect(pdfCheckbox).not.toBeChecked();
 
       await userEvent.click(pdfCheckbox);
@@ -130,11 +134,15 @@ describe('SaveView', () => {
       renderWithProvider(<SaveView hostContext={mockEmailContext} onSave={handleSave} />);
 
       // Select an attachment
-      const pdfCheckbox = screen.getByRole('checkbox', { name: /document\.pdf/i });
+      const pdfCheckbox = screen.getByRole('checkbox', {
+        name: /document\.pdf/i,
+      });
       await userEvent.click(pdfCheckbox);
 
       // Click save
-      const saveButton = screen.getByRole('button', { name: /save to spaarke/i });
+      const saveButton = screen.getByRole('button', {
+        name: /save to spaarke/i,
+      });
       await userEvent.click(saveButton);
 
       expect(handleSave).toHaveBeenCalledWith({
@@ -148,11 +156,15 @@ describe('SaveView', () => {
       renderWithProvider(<SaveView hostContext={mockEmailContext} onSave={handleSave} />);
 
       // Uncheck include attachments
-      const includeCheckbox = screen.getByRole('checkbox', { name: /include attachments/i });
+      const includeCheckbox = screen.getByRole('checkbox', {
+        name: /include attachments/i,
+      });
       await userEvent.click(includeCheckbox);
 
       // Click save
-      const saveButton = screen.getByRole('button', { name: /save to spaarke/i });
+      const saveButton = screen.getByRole('button', {
+        name: /save to spaarke/i,
+      });
       await userEvent.click(saveButton);
 
       expect(handleSave).toHaveBeenCalledWith({
@@ -164,7 +176,9 @@ describe('SaveView', () => {
     it('does not call onSave when not provided', async () => {
       renderWithProvider(<SaveView hostContext={mockEmailContext} />);
 
-      const saveButton = screen.getByRole('button', { name: /save to spaarke/i });
+      const saveButton = screen.getByRole('button', {
+        name: /save to spaarke/i,
+      });
       await userEvent.click(saveButton);
 
       // Should not throw
@@ -203,29 +217,19 @@ describe('SaveView', () => {
 
   describe('status messages', () => {
     it('shows error message when error prop is set', () => {
-      renderWithProvider(
-        <SaveView hostContext={mockEmailContext} error="Failed to save document" />
-      );
+      renderWithProvider(<SaveView hostContext={mockEmailContext} error="Failed to save document" />);
 
       expect(screen.getByText('Failed to save document')).toBeInTheDocument();
     });
 
     it('shows success message when success prop is set', () => {
-      renderWithProvider(
-        <SaveView hostContext={mockEmailContext} success="Document saved successfully!" />
-      );
+      renderWithProvider(<SaveView hostContext={mockEmailContext} success="Document saved successfully!" />);
 
       expect(screen.getByText('Document saved successfully!')).toBeInTheDocument();
     });
 
     it('can show both error and success messages', () => {
-      renderWithProvider(
-        <SaveView
-          hostContext={mockEmailContext}
-          error="Some warning"
-          success="Partial success"
-        />
-      );
+      renderWithProvider(<SaveView hostContext={mockEmailContext} error="Some warning" success="Partial success" />);
 
       expect(screen.getByText('Some warning')).toBeInTheDocument();
       expect(screen.getByText('Partial success')).toBeInTheDocument();

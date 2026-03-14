@@ -229,20 +229,13 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         columnId: 'name',
         compare: (a, b) => a.displayName.localeCompare(b.displayName),
         renderHeaderCell: () => 'Name',
-        renderCell: (item) => (
+        renderCell: item => (
           <TableCellLayout>
             <div className={styles.nameCell}>
-              {onDragStart && (
-                <ReOrderRegular className={styles.dragHandle} aria-hidden="true" />
-              )}
-              <OwnershipBadge
-                ownershipType={item.ownershipType}
-                isImmutable={item.isImmutable}
-              />
+              {onDragStart && <ReOrderRegular className={styles.dragHandle} aria-hidden="true" />}
+              <OwnershipBadge ownershipType={item.ownershipType} isImmutable={item.isImmutable} />
               <span>{item.displayName}</span>
-              {item.parentName && (
-                <Text className={styles.parentBadge}>(extends: {item.parentName})</Text>
-              )}
+              {item.parentName && <Text className={styles.parentBadge}>(extends: {item.parentName})</Text>}
             </div>
           </TableCellLayout>
         ),
@@ -251,7 +244,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         columnId: 'description',
         compare: (a, b) => a.description.localeCompare(b.description),
         renderHeaderCell: () => 'Description',
-        renderCell: (item) => (
+        renderCell: item => (
           <TableCellLayout>
             <Tooltip content={item.description} relationship="label">
               <Text className={styles.descriptionCell}>{item.description}</Text>
@@ -263,7 +256,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
         columnId: 'modifiedOn',
         compare: (a, b) => new Date(a.modifiedOn).getTime() - new Date(b.modifiedOn).getTime(),
         renderHeaderCell: () => 'Modified',
-        renderCell: (item) => (
+        renderCell: item => (
           <TableCellLayout>
             <Text className={styles.dateCell}>{formatDate(item.modifiedOn)}</Text>
           </TableCellLayout>
@@ -272,16 +265,12 @@ export const ScopeList: React.FC<ScopeListProps> = ({
       createTableColumn<ScopeItem>({
         columnId: 'actions',
         renderHeaderCell: () => '',
-        renderCell: (item) => (
+        renderCell: item => (
           <TableCellLayout>
             <div className={styles.actionsCell}>
               <Menu>
                 <MenuTrigger disableButtonEnhancement>
-                  <Button
-                    appearance="subtle"
-                    icon={<MoreHorizontal20Regular />}
-                    aria-label="More actions"
-                  />
+                  <Button appearance="subtle" icon={<MoreHorizontal20Regular />} aria-label="More actions" />
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>
@@ -303,10 +292,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
                     {onDelete && !readOnly && item.ownershipType === 'customer' && (
                       <>
                         <MenuDivider />
-                        <MenuItem
-                          icon={<Delete20Regular />}
-                          onClick={() => onDelete(item)}
-                        >
+                        <MenuItem icon={<Delete20Regular />} onClick={() => onDelete(item)}>
                           Delete
                         </MenuItem>
                       </>
@@ -349,18 +335,10 @@ export const ScopeList: React.FC<ScopeListProps> = ({
 
   return (
     <div className={styles.container}>
-      <DataGrid
-        items={scopes}
-        columns={columns}
-        sortable
-        getRowId={(item) => item.id}
-        className={styles.grid}
-      >
+      <DataGrid items={scopes} columns={columns} sortable getRowId={item => item.id} className={styles.grid}>
         <DataGridHeader>
           <DataGridRow>
-            {({ renderHeaderCell }) => (
-              <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-            )}
+            {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
           </DataGridRow>
         </DataGridHeader>
         <DataGridBody<ScopeItem>>

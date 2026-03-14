@@ -41,7 +41,7 @@ public class ScopeManagementService : IScopeManagementService
 
         _logger.LogInformation("Creating action scope: {Name}", name);
 
-        // TODO: Replace with actual Dataverse Web API call
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API call
         var action = new AnalysisAction
         {
             Id = Guid.NewGuid(),
@@ -78,7 +78,7 @@ public class ScopeManagementService : IScopeManagementService
 
         _logger.LogInformation("Updating action scope: {Id} - {Name}", id, name);
 
-        // TODO: Replace with actual Dataverse Web API call
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API call
         var updated = existing with
         {
             Name = name,
@@ -103,7 +103,7 @@ public class ScopeManagementService : IScopeManagementService
 
         _logger.LogInformation("Deleting action scope: {Id} - {Name}", id, existing.Name);
 
-        // TODO: Replace with actual Dataverse Web API call
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API call
         await Task.CompletedTask;
     }
 
@@ -363,7 +363,7 @@ public class ScopeManagementService : IScopeManagementService
 
     public async Task<AnalysisOutput> UpdateOutputAsync(Guid id, UpdateOutputRequest request, CancellationToken cancellationToken)
     {
-        // TODO: Implement when output listing is available in ScopeResolverService
+        // TRACKED: GitHub #229 - Implement when output listing available
         _logger.LogWarning("UpdateOutputAsync not fully implemented - output listing not available");
 
         await Task.CompletedTask;
@@ -373,7 +373,7 @@ public class ScopeManagementService : IScopeManagementService
 
     public async Task DeleteOutputAsync(Guid id, CancellationToken cancellationToken)
     {
-        // TODO: Implement when output listing is available in ScopeResolverService
+        // TRACKED: GitHub #229 - Implement when output listing available
         _logger.LogWarning("DeleteOutputAsync not fully implemented - output listing not available");
 
         await Task.CompletedTask;
@@ -419,7 +419,7 @@ public class ScopeManagementService : IScopeManagementService
             "Linking scope to playbook via {RelationshipTable}: Playbook {PlaybookId} -> {ScopeType} {ScopeId}",
             relationshipTable, playbookId, scopeType, scopeId);
 
-        // TODO: Replace with actual Dataverse Web API associate call
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API associate call
         // POST /api/data/v9.2/sprk_aianalysisplaybooks({playbookId})/{relationshipName}/$ref
         // Body: { "@odata.id": "sprk_aianalysisactions({scopeId})" }
 
@@ -449,7 +449,7 @@ public class ScopeManagementService : IScopeManagementService
             "Unlinking scope from playbook via {RelationshipTable}: Playbook {PlaybookId} -> {ScopeType} {ScopeId}",
             relationshipTable, playbookId, scopeType, scopeId);
 
-        // TODO: Replace with actual Dataverse Web API disassociate call
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API disassociate call
         // DELETE /api/data/v9.2/sprk_aianalysisplaybooks({playbookId})/{relationshipName}({scopeId})/$ref
 
         bool removed;
@@ -478,7 +478,7 @@ public class ScopeManagementService : IScopeManagementService
     /// <inheritdoc />
     public Task<bool> IsLinkedAsync(Guid playbookId, ScopeType scopeType, Guid scopeId, CancellationToken cancellationToken)
     {
-        // TODO: Replace with actual Dataverse Web API query
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API query
         // GET /api/data/v9.2/sprk_aianalysisplaybooks({playbookId})/{relationshipName}?$filter=...
 
         bool exists;
@@ -494,7 +494,7 @@ public class ScopeManagementService : IScopeManagementService
     /// <inheritdoc />
     public Task<IReadOnlyList<Guid>> GetLinkedScopeIdsAsync(Guid playbookId, ScopeType scopeType, CancellationToken cancellationToken)
     {
-        // TODO: Replace with actual Dataverse Web API query
+        // TRACKED: GitHub #229 - Replace with Dataverse Web API query
         // GET /api/data/v9.2/sprk_aianalysisplaybooks({playbookId})/{relationshipName}?$select=...
 
         IReadOnlyList<Guid> result;

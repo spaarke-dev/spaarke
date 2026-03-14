@@ -18,60 +18,57 @@
  * @see spec-FR-11 - Actions governed by playbook capability declarations
  */
 
-import { useCallback, useState, useRef } from "react";
-import type { IChatAction, ChatActionCategory, IHostContext } from "../types";
+import { useCallback, useState, useRef } from 'react';
+import type { IChatAction, ChatActionCategory, IHostContext } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Write mode preference — "stream" for streaming insert, "diff" for diff compare view. */
-export type WriteMode = "stream" | "diff";
+export type WriteMode = 'stream' | 'diff';
 
 /** localStorage key for persisting the user's write mode preference. */
-const WRITE_MODE_STORAGE_KEY = "sprk-chat-write-mode";
+const WRITE_MODE_STORAGE_KEY = 'sprk-chat-write-mode';
 
 /**
  * Context required by action handlers to interact with SprkChat state and API.
  * Provided by the parent SprkChat component via the hook's options parameter.
  */
 export interface ActionHandlerContext {
-    /** Current chat session ID (required for API calls). */
-    sessionId: string | undefined;
-    /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net"). */
-    apiBaseUrl: string;
-    /** Bearer token for API authentication. */
-    accessToken: string;
-    /** Current document ID from the chat context. */
-    documentId: string | undefined;
-    /** Host context describing the embedding entity. */
-    hostContext: IHostContext | undefined;
-    /** Callback to send a chat message programmatically (uses the existing SSE send flow). */
-    sendMessage: (message: string) => void;
-    /**
-     * Callback to switch the session's playbook context via PATCH /sessions/{id}/context.
-     * This delegates to useChatSession.switchContext which handles the API call.
-     */
-    switchPlaybook: (documentId: string | undefined, playbookId: string) => Promise<void>;
-    /** Callback to invalidate the action menu cache (refetch on next open). */
-    refetchActions: () => void;
-    /**
-     * Callback to set the chat input value and focus it.
-     * Used by the Search handler to pre-fill a search prefix.
-     */
-    setInputValue: (value: string) => void;
-    /** Callback to report errors to the user (e.g., failed playbook switch). */
-    onError: (message: string) => void;
+  /** Current chat session ID (required for API calls). */
+  sessionId: string | undefined;
+  /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net"). */
+  apiBaseUrl: string;
+  /** Bearer token for API authentication. */
+  accessToken: string;
+  /** Current document ID from the chat context. */
+  documentId: string | undefined;
+  /** Host context describing the embedding entity. */
+  hostContext: IHostContext | undefined;
+  /** Callback to send a chat message programmatically (uses the existing SSE send flow). */
+  sendMessage: (message: string) => void;
+  /**
+   * Callback to switch the session's playbook context via PATCH /sessions/{id}/context.
+   * This delegates to useChatSession.switchContext which handles the API call.
+   */
+  switchPlaybook: (documentId: string | undefined, playbookId: string) => Promise<void>;
+  /** Callback to invalidate the action menu cache (refetch on next open). */
+  refetchActions: () => void;
+  /**
+   * Callback to set the chat input value and focus it.
+   * Used by the Search handler to pre-fill a search prefix.
+   */
+  setInputValue: (value: string) => void;
+  /** Callback to report errors to the user (e.g., failed playbook switch). */
+  onError: (message: string) => void;
 }
 
 /**
  * A handler function for a specific action type.
  * Receives the selected action and the handler context.
  */
-export type ActionHandler = (
-    action: IChatAction,
-    context: ActionHandlerContext
-) => Promise<void>;
+export type ActionHandler = (action: IChatAction, context: ActionHandlerContext) => Promise<void>;
 
 /**
  * Registry mapping action categories (and optionally action IDs) to handler functions.
@@ -89,12 +86,12 @@ export interface UseActionHandlersOptions extends ActionHandlerContext {}
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface IUseActionHandlersResult {
-    /** Dispatch an action to the appropriate handler. */
-    handleAction: (action: IChatAction) => Promise<void>;
-    /** Current write mode preference ("stream" or "diff"). */
-    writeMode: WriteMode;
-    /** Whether a handler is currently executing (e.g., playbook switch API call). */
-    isHandling: boolean;
+  /** Dispatch an action to the appropriate handler. */
+  handleAction: (action: IChatAction) => Promise<void>;
+  /** Current write mode preference ("stream" or "diff"). */
+  writeMode: WriteMode;
+  /** Whether a handler is currently executing (e.g., playbook switch API call). */
+  isHandling: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,35 +106,32 @@ export interface IUseActionHandlersResult {
  * action menu cache. On failure: reports error via onError callback.
  */
 const handleSwitchPlaybook: ActionHandler = async (action, context) => {
-    const { sessionId, switchPlaybook, documentId, refetchActions, onError } = context;
+  const { sessionId, switchPlaybook, documentId, refetchActions, onError } = context;
 
-    if (!sessionId) {
-        onError("No active session. Please start a conversation first.");
-        return;
-    }
+  if (!sessionId) {
+    onError('No active session. Please start a conversation first.');
+    return;
+  }
 
-    // The playbook ID is either in the action's id (for playbook-category actions
-    // where each action represents a specific playbook) or could be embedded in
-    // action metadata. By convention, playbook actions use the playbookId as
-    // the action id.
-    const playbookId = action.id;
-    if (!playbookId) {
-        onError("Invalid playbook action — no playbook ID found.");
-        return;
-    }
+  // The playbook ID is either in the action's id (for playbook-category actions
+  // where each action represents a specific playbook) or could be embedded in
+  // action metadata. By convention, playbook actions use the playbookId as
+  // the action id.
+  const playbookId = action.id;
+  if (!playbookId) {
+    onError('Invalid playbook action — no playbook ID found.');
+    return;
+  }
 
-    try {
-        // Delegate to useChatSession.switchContext which handles the PATCH API call
-        await switchPlaybook(documentId, playbookId);
-        // Playbook switch changes capabilities — invalidate action menu cache
-        refetchActions();
-    } catch (err: unknown) {
-        const message =
-            err instanceof Error
-                ? err.message
-                : "Failed to switch playbook. Please try again.";
-        onError(message);
-    }
+  try {
+    // Delegate to useChatSession.switchContext which handles the PATCH API call
+    await switchPlaybook(documentId, playbookId);
+    // Playbook switch changes capabilities — invalidate action menu cache
+    refetchActions();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to switch playbook. Please try again.';
+    onError(message);
+  }
 };
 
 /**
@@ -150,19 +144,16 @@ const handleSwitchPlaybook: ActionHandler = async (action, context) => {
  *
  * @returns The new write mode value (resolved via the setWriteMode callback).
  */
-const handleChangeMode = (
-    currentMode: WriteMode,
-    setWriteMode: (mode: WriteMode) => void
-): void => {
-    const newMode: WriteMode = currentMode === "stream" ? "diff" : "stream";
-    setWriteMode(newMode);
+const handleChangeMode = (currentMode: WriteMode, setWriteMode: (mode: WriteMode) => void): void => {
+  const newMode: WriteMode = currentMode === 'stream' ? 'diff' : 'stream';
+  setWriteMode(newMode);
 
-    // Persist to localStorage for cross-session continuity
-    try {
-        localStorage.setItem(WRITE_MODE_STORAGE_KEY, newMode);
-    } catch {
-        // localStorage may be unavailable in some environments — fail silently
-    }
+  // Persist to localStorage for cross-session continuity
+  try {
+    localStorage.setItem(WRITE_MODE_STORAGE_KEY, newMode);
+  } catch {
+    // localStorage may be unavailable in some environments — fail silently
+  }
 };
 
 /**
@@ -174,7 +165,7 @@ const handleChangeMode = (
  * undo stack management.
  */
 const handleReanalyze: ActionHandler = async (_action, context) => {
-    context.sendMessage("Rerun analysis");
+  context.sendMessage('Rerun analysis');
 };
 
 /**
@@ -184,7 +175,7 @@ const handleReanalyze: ActionHandler = async (_action, context) => {
  * flow. The AI agent processes the message normally through the chat pipeline.
  */
 const handleSummarize: ActionHandler = async (_action, context) => {
-    context.sendMessage("Summarize this document");
+  context.sendMessage('Summarize this document');
 };
 
 /**
@@ -194,7 +185,7 @@ const handleSummarize: ActionHandler = async (_action, context) => {
  * and focuses the input. The user completes the search query and sends normally.
  */
 const handleSearch: ActionHandler = async (_action, context) => {
-    context.setInputValue("Search for: ");
+  context.setInputValue('Search for: ');
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,15 +196,15 @@ const handleSearch: ActionHandler = async (_action, context) => {
  * Reads the initial write mode from localStorage, defaulting to "stream".
  */
 function getInitialWriteMode(): WriteMode {
-    try {
-        const stored = localStorage.getItem(WRITE_MODE_STORAGE_KEY);
-        if (stored === "stream" || stored === "diff") {
-            return stored;
-        }
-    } catch {
-        // localStorage unavailable — use default
+  try {
+    const stored = localStorage.getItem(WRITE_MODE_STORAGE_KEY);
+    if (stored === 'stream' || stored === 'diff') {
+      return stored;
     }
-    return "stream";
+  } catch {
+    // localStorage unavailable — use default
+  }
+  return 'stream';
 }
 
 /**
@@ -241,72 +232,70 @@ function getInitialWriteMode(): WriteMode {
  * });
  * ```
  */
-export function useActionHandlers(
-    options: UseActionHandlersOptions
-): IUseActionHandlersResult {
-    const [writeMode, setWriteMode] = useState<WriteMode>(getInitialWriteMode);
-    const [isHandling, setIsHandling] = useState<boolean>(false);
+export function useActionHandlers(options: UseActionHandlersOptions): IUseActionHandlersResult {
+  const [writeMode, setWriteMode] = useState<WriteMode>(getInitialWriteMode);
+  const [isHandling, setIsHandling] = useState<boolean>(false);
 
-    // Keep a stable ref to the options to avoid re-creating the handleAction callback
-    // on every render while still accessing the latest values.
-    const optionsRef = useRef<UseActionHandlersOptions>(options);
-    optionsRef.current = options;
+  // Keep a stable ref to the options to avoid re-creating the handleAction callback
+  // on every render while still accessing the latest values.
+  const optionsRef = useRef<UseActionHandlersOptions>(options);
+  optionsRef.current = options;
 
-    /**
-     * Dispatches to the appropriate handler based on action category and ID.
-     *
-     * Dispatch priority:
-     * 1. Exact match on action.id (for specific actions like "reanalyze")
-     * 2. Category-level match (for categories like "playbooks" where any action triggers the same handler)
-     */
-    const handleAction = useCallback(
-        async (action: IChatAction): Promise<void> => {
-            const ctx = optionsRef.current;
+  /**
+   * Dispatches to the appropriate handler based on action category and ID.
+   *
+   * Dispatch priority:
+   * 1. Exact match on action.id (for specific actions like "reanalyze")
+   * 2. Category-level match (for categories like "playbooks" where any action triggers the same handler)
+   */
+  const handleAction = useCallback(
+    async (action: IChatAction): Promise<void> => {
+      const ctx = optionsRef.current;
 
-            setIsHandling(true);
-            try {
-                // Dispatch by action ID first, then by category
-                switch (action.category as ChatActionCategory) {
-                    case "playbooks":
-                        await handleSwitchPlaybook(action, ctx);
-                        break;
+      setIsHandling(true);
+      try {
+        // Dispatch by action ID first, then by category
+        switch (action.category as ChatActionCategory) {
+          case 'playbooks':
+            await handleSwitchPlaybook(action, ctx);
+            break;
 
-                    case "settings":
-                        if (action.id === "change_mode") {
-                            handleChangeMode(writeMode, setWriteMode);
-                        }
-                        break;
-
-                    case "actions":
-                        if (action.id === "reanalyze") {
-                            await handleReanalyze(action, ctx);
-                        } else if (action.id === "summarize") {
-                            await handleSummarize(action, ctx);
-                        } else {
-                            // Unknown action in "actions" category — send as chat command
-                            ctx.sendMessage(`/${action.id}`);
-                        }
-                        break;
-
-                    case "search":
-                        await handleSearch(action, ctx);
-                        break;
-
-                    default:
-                        // Unknown category — send as chat command as fallback
-                        ctx.sendMessage(`/${action.id}`);
-                        break;
-                }
-            } finally {
-                setIsHandling(false);
+          case 'settings':
+            if (action.id === 'change_mode') {
+              handleChangeMode(writeMode, setWriteMode);
             }
-        },
-        [writeMode]
-    );
+            break;
 
-    return {
-        handleAction,
-        writeMode,
-        isHandling,
-    };
+          case 'actions':
+            if (action.id === 'reanalyze') {
+              await handleReanalyze(action, ctx);
+            } else if (action.id === 'summarize') {
+              await handleSummarize(action, ctx);
+            } else {
+              // Unknown action in "actions" category — send as chat command
+              ctx.sendMessage(`/${action.id}`);
+            }
+            break;
+
+          case 'search':
+            await handleSearch(action, ctx);
+            break;
+
+          default:
+            // Unknown category — send as chat command as fallback
+            ctx.sendMessage(`/${action.id}`);
+            break;
+        }
+      } finally {
+        setIsHandling(false);
+      }
+    },
+    [writeMode]
+  );
+
+  return {
+    handleAction,
+    writeMode,
+    isHandling,
+  };
 }

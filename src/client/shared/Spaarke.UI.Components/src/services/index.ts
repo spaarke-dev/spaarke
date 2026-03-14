@@ -1,4 +1,4 @@
-export { EntityCreationService } from "./EntityCreationService";
+export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,
   ISpeFileMetadata,
@@ -7,10 +7,10 @@ export type {
   ISendEmailResult,
   IUploadProgress,
   AuthenticatedFetchFn,
-} from "./EntityCreationService";
-export * from "./CommandRegistry";
-export * from "./CommandExecutor";
-export { FieldMappingService } from "./FieldMappingService";
+} from './EntityCreationService';
+export * from './CommandRegistry';
+export * from './CommandExecutor';
+export { FieldMappingService } from './FieldMappingService';
 export {
   EventTypeService,
   eventTypeService,
@@ -19,9 +19,9 @@ export {
   DEFAULT_SECTION_STATES,
   ALL_SECTION_NAMES,
   getEventTypeFieldConfig,
-} from "./EventTypeService";
-export type { IGetEventTypeFieldConfigResult, SectionName } from "./EventTypeService";
-export { FetchXmlService } from "./FetchXmlService";
+} from './EventTypeService';
+export type { IGetEventTypeFieldConfigResult, SectionName } from './EventTypeService';
+export { FetchXmlService } from './FetchXmlService';
 export type {
   IFetchXmlResult,
   IFetchXmlOptions,
@@ -29,10 +29,10 @@ export type {
   IFilterGroup,
   IFilterCondition,
   ColumnDataType,
-} from "./FetchXmlService";
-export { ViewService } from "./ViewService";
-export type { IGetViewsOptions } from "./ViewService";
-export { ConfigurationService } from "./ConfigurationService";
+} from './FetchXmlService';
+export { ViewService } from './ViewService';
+export type { IGetViewsOptions } from './ViewService';
+export { ConfigurationService } from './ConfigurationService';
 export type {
   IGridConfiguration,
   IGridConfigJson,
@@ -41,20 +41,15 @@ export type {
   IRowFormattingRule,
   IGridFeatures,
   GridConfigViewType,
-} from "./ConfigurationService";
-export {
-  resolveRecordType,
-  buildRecordUrl,
-  findNavProp,
-  applyResolverFields,
-} from "./PolymorphicResolverService";
+} from './ConfigurationService';
+export { resolveRecordType, buildRecordUrl, findNavProp, applyResolverFields } from './PolymorphicResolverService';
 export type {
   IPolymorphicWebApi,
   IRecordTypeRef,
   INavPropEntry,
   IResolverFieldValues,
-} from "./PolymorphicResolverService";
-export { SprkChatBridge } from "./SprkChatBridge";
+} from './PolymorphicResolverService';
+export { SprkChatBridge } from './SprkChatBridge';
 export type {
   SprkChatBridgeEventMap,
   SprkChatBridgeEventName,
@@ -68,4 +63,4 @@ export type {
   ReAnalysisProgressPayload,
   SelectionChangedPayload,
   ContextChangedPayload,
-} from "./SprkChatBridge";
+} from './SprkChatBridge';

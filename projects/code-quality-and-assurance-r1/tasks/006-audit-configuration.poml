@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit Configuration Files Consistency</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 010, 011</blocks>
+    <tags>audit, configuration, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive audit of all quality-related configuration files in the repository.
+    Assess .editorconfig consistency and completeness, ESLint configuration per PCF/Code Page
+    project (and the absence of a root ESLint config), tsconfig.json consistency across TypeScript
+    projects, Directory.Build.props .NET settings, and check for missing configurations that
+    Phase 2 will introduce: no root ESLint config, no Prettier config, no Husky pre-commit hooks.
+    Produce a structured audit report establishing the configuration baseline.
+  </prompt>
+
+  <role>
+    Senior platform engineer and developer experience expert. Familiar with .editorconfig,
+    ESLint, TypeScript configuration, .NET Directory.Build.props, Prettier, and Husky.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-configuration.md
+    inventorying all quality-related configuration files, identifying inconsistencies across projects,
+    documenting what is missing (Prettier, Husky, root ESLint), and providing an overall letter
+    grade (A-F) for configuration quality. This establishes the baseline that Phase 2 tooling tasks
+    010, 011, and 012 will improve.
+  </goal>
+
+  <context>
+    <background>
+      Configuration consistency is a foundational quality concern. Inconsistent configuration
+      means different quality standards apply to different parts of the codebase — some areas
+      may have strict TypeScript settings while others are lenient, some PCF projects may have
+      ESLint rules while others have none.
+
+      Key known gaps from the spec:
+      - No root-level ESLint config: each PCF project directory may have its own (or none)
+      - No Prettier config: TypeScript formatting is inconsistent across the codebase
+      - No Husky pre-commit hooks: no client-side enforcement before commits reach CI
+      - No lint-staged config: no targeted staged-file linting on commit
+
+      Key existing configuration files to audit:
+      - .editorconfig (root): defines C# formatting conventions — check completeness and
+        whether it covers TypeScript files as well
+      - Directory.Build.props (root or server/): defines .NET build properties shared across
+        all C# projects — check for missing quality settings (TreatWarningsAsErrors, etc.)
+      - tsconfig.json files: each PCF control project and Code Page project has its own —
+        check for strict mode, noImplicitAny, strictNullChecks consistency
+      - .eslintrc.* or eslint.config.js: per-project ESLint configs — inventory what rules
+        are enabled vs. disabled across projects
+      - coverlet.runsettings: coverage thresholds — verify if minimum coverage thresholds
+        are configured or if they are absent
+
+      Phase 2 tasks 010 (Prettier), 011 (ESLint strictening), and 012 (Husky) will add the
+      missing pieces. This audit defines exactly what needs to be added and what inconsistencies
+      need to be resolved.
+    </background>
+    <relevant-files>
+      <file>.editorconfig (read — root editor configuration)</file>
+      <file>Directory.Build.props (read — if exists, root or src/)</file>
+      <file>src/client/pcf/ (read — ESLint configs and tsconfig.json files per project)</file>
+      <file>src/client/code-pages/ (read — ESLint configs and tsconfig.json files per project)</file>
+      <file>config/coverlet.runsettings (read — coverage configuration)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any configuration files during this task. Document findings only.</constraint>
+    <constraint source="spec">Prettier, Husky, and root ESLint configuration are tasks 010, 011, 012 — this task only documents their absence and the current inconsistencies to resolve.</constraint>
+    <constraint source="spec">Document the current state of each config file so that Phase 2 tasks have a precise starting point.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.editorconfig</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit .editorconfig: read the root .editorconfig — check if it covers [*.ts] and [*.tsx] sections in addition to [*.cs]. Identify any missing file type coverage or inconsistent indent/line-ending settings</step>
+    <step order="2">Check for root-level quality config files: verify whether .prettierrc.json, .prettierignore, eslint.config.js (root), .husky/, and lint-staged.config.js exist at the repository root. Document each as present or absent</step>
+    <step order="3">Inventory ESLint configurations: for every PCF control project under src/client/pcf/, check if an .eslintrc.* or eslint.config.js file exists — create a table showing which projects have ESLint configs and which do not</step>
+    <step order="4">Compare ESLint rules across PCF projects: for the projects that do have ESLint configs, compare the rule sets — identify rules that are enabled in some projects but disabled/absent in others</step>
+    <step order="5">Inventory ESLint configurations for Code Page projects under src/client/code-pages/ — same analysis as step 3/4</step>
+    <step order="6">Audit tsconfig.json files: for each TypeScript project (PCF and Code Pages), read the tsconfig.json — create a comparison table of key strictness settings: strict, noImplicitAny, strictNullChecks, strictFunctionTypes, noUncheckedIndexedAccess</step>
+    <step order="7">Check Directory.Build.props: locate all Directory.Build.props files — verify if TreatWarningsAsErrors, Nullable (enable), ImplicitUsings (enable), and other quality settings are present. Note if absent</step>
+    <step order="8">Review coverlet.runsettings: check if minimum coverage thresholds are configured (Threshold element) or if the configuration only collects coverage without enforcing minimums</step>
+    <step order="9">Check for .gitignore completeness: verify that common generated files (TestResults/, coverage/, node_modules/, dist/, .vite/) are properly ignored and not accidentally committed</step>
+    <step order="10">Summarize all missing configurations with the Phase 2 task that will address each gap</step>
+    <step order="11">Compile findings into the audit report — assign overall letter grade (A-F) for configuration quality, list top 5 priorities for Phase 2</step>
+    <step order="12">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-configuration.md</step>
+    <step order="13">Update TASK-INDEX.md: change task 006 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-configuration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-configuration.md exists and covers all six audit areas: .editorconfig, ESLint configs per project, tsconfig.json consistency, Directory.Build.props, missing configs (Prettier/Husky/root ESLint), coverlet thresholds</criterion>
+    <criterion>Complete inventory table of ESLint configs: one row per PCF and Code Page project showing config file presence (yes/no) and rule count</criterion>
+    <criterion>tsconfig.json strictness comparison table: one row per TypeScript project, columns for each key strictness flag</criterion>
+    <criterion>Explicitly states whether .prettierrc.json, .husky/, lint-staged config, and root eslint.config.js are present or absent</criterion>
+    <criterion>Directory.Build.props settings documented — if absent, noted as gap</criterion>
+    <criterion>coverlet.runsettings minimum threshold configuration (or absence thereof) documented</criterion>
+    <criterion>Missing configurations mapped to the Phase 2 task that will address each</criterion>
+    <criterion>Overall letter grade (A-F) assigned to configuration quality with justification</criterion>
+    <criterion>Top 5 remediation priorities listed linked to Phase 2 task numbers</criterion>
+    <criterion>No configuration files were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

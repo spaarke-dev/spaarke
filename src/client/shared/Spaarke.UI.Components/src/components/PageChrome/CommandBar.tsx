@@ -16,7 +16,7 @@
  * @see ADR-021 Fluent UI v9 Design System
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   Toolbar,
   ToolbarButton,
@@ -28,15 +28,15 @@ import {
   makeStyles,
   tokens,
   mergeClasses,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Add20Regular,
   Delete20Regular,
   ArrowClockwise20Regular,
   Search20Regular,
   MoreHorizontal20Regular,
-} from "@fluentui/react-icons";
-import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+} from '@fluentui/react-icons';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
 /**
  * Command item for custom commands
@@ -99,35 +99,35 @@ export interface ICommandBarProps {
 const useStyles = makeStyles({
   toolbar: {
     backgroundColor: tokens.colorNeutralBackground1,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    minHeight: "44px",
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "nowrap",
+    minHeight: '44px',
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
   },
   toolbarCompact: {
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
-    minHeight: "36px",
+    minHeight: '36px',
   },
   leftGroup: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     flexGrow: 1,
   },
   rightGroup: {
-    display: "flex",
-    alignItems: "center",
-    marginLeft: "auto",
+    display: 'flex',
+    alignItems: 'center',
+    marginLeft: 'auto',
   },
   searchBox: {
-    width: "200px",
+    width: '200px',
     marginLeft: tokens.spacingHorizontalM,
   },
   deleteBadge: {
@@ -153,14 +153,14 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   showDelete = true,
   showRefresh = true,
   showSearch = false,
-  searchPlaceholder = "Search...",
+  searchPlaceholder = 'Search...',
   canCreate = true,
   canDelete = true,
   compact = false,
   className,
 }) => {
   const styles = useStyles();
-  const [searchText, setSearchText] = React.useState("");
+  const [searchText, setSearchText] = React.useState('');
 
   const hasSelection = selectedIds.length > 0;
   const selectionCount = selectedIds.length;
@@ -169,32 +169,32 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   const shortcuts = React.useMemo(
     () => [
       {
-        key: "ctrl+n",
+        key: 'ctrl+n',
         handler: () => {
           if (showNew && canCreate && onNew) {
             onNew();
           }
         },
-        description: "Create new record",
+        description: 'Create new record',
       },
       {
-        key: "delete",
+        key: 'delete',
         handler: () => {
           if (showDelete && canDelete && hasSelection && onDelete) {
             onDelete(selectedIds);
           }
         },
-        description: "Delete selected records",
+        description: 'Delete selected records',
       },
       {
-        key: "f5",
+        key: 'f5',
         handler: (e: KeyboardEvent) => {
           e.preventDefault();
           if (showRefresh && onRefresh) {
             onRefresh();
           }
         },
-        description: "Refresh data",
+        description: 'Refresh data',
       },
     ],
     [showNew, showDelete, showRefresh, canCreate, canDelete, hasSelection, selectedIds, onNew, onDelete, onRefresh]
@@ -203,17 +203,14 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   useKeyboardShortcuts(shortcuts);
 
   // Handle search
-  const handleSearchChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setSearchText(value);
-    },
-    []
-  );
+  const handleSearchChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchText(value);
+  }, []);
 
   const handleSearchKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" && onSearch) {
+      if (e.key === 'Enter' && onSearch) {
         onSearch(searchText);
       }
     },
@@ -230,11 +227,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   return (
     <Toolbar
       aria-label={`${entityLogicalName} command bar`}
-      className={mergeClasses(
-        styles.toolbar,
-        compact && styles.toolbarCompact,
-        className
-      )}
+      className={mergeClasses(styles.toolbar, compact && styles.toolbarCompact, className)}
     >
       {/* Left group - Primary commands */}
       <ToolbarGroup className={styles.leftGroup}>
@@ -244,7 +237,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
             content={
               <>
                 New {entityLogicalName}
-                <span style={{ marginLeft: "8px", opacity: 0.7 }}>Ctrl+N</span>
+                <span style={{ marginLeft: '8px', opacity: 0.7 }}>Ctrl+N</span>
               </>
             }
             relationship="description"
@@ -268,8 +261,8 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
             <Tooltip
               content={
                 hasSelection
-                  ? `Delete ${selectionCount} selected ${selectionCount === 1 ? "record" : "records"}`
-                  : "Select records to delete"
+                  ? `Delete ${selectionCount} selected ${selectionCount === 1 ? 'record' : 'records'}`
+                  : 'Select records to delete'
               }
               relationship="description"
             >
@@ -282,12 +275,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
               >
                 <span className={styles.buttonLabel}>Delete</span>
                 {hasSelection && (
-                  <Badge
-                    appearance="filled"
-                    color="danger"
-                    size="small"
-                    className={styles.deleteBadge}
-                  >
+                  <Badge appearance="filled" color="danger" size="small" className={styles.deleteBadge}>
                     {selectionCount}
                   </Badge>
                 )}
@@ -304,7 +292,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
               content={
                 <>
                   Refresh data
-                  <span style={{ marginLeft: "8px", opacity: 0.7 }}>F5</span>
+                  <span style={{ marginLeft: '8px', opacity: 0.7 }}>F5</span>
                 </>
               }
               relationship="description"
@@ -322,17 +310,12 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
         )}
 
         {/* Divider before custom commands */}
-        {commands.length > 0 && (showNew || showDelete || showRefresh) && (
-          <ToolbarDivider />
-        )}
+        {commands.length > 0 && (showNew || showDelete || showRefresh) && <ToolbarDivider />}
 
         {/* Custom commands */}
-        {commands.map((command) => (
+        {commands.map(command => (
           <React.Fragment key={command.key}>
-            <Tooltip
-              content={command.description || command.label}
-              relationship="description"
-            >
+            <Tooltip content={command.description || command.label} relationship="description">
               <ToolbarButton
                 icon={command.icon}
                 disabled={command.disabled}
@@ -357,7 +340,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
             value={searchText}
             onChange={handleSearchChange}
             onKeyDown={handleSearchKeyDown}
-            size={compact ? "small" : "medium"}
+            size={compact ? 'small' : 'medium'}
             aria-label="Search records"
           />
         </ToolbarGroup>

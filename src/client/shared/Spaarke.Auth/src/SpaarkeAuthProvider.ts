@@ -31,10 +31,7 @@ export class SpaarkeAuthProvider {
 
     // Validate requireXrm option
     if (this._config.requireXrm && !this._isXrmAvailable()) {
-      throw new AuthError(
-        'Xrm is required but not available in this context',
-        'xrm_required',
-      );
+      throw new AuthError('Xrm is required but not available in this context', 'xrm_required');
     }
 
     const msalConfig: Configuration = {
@@ -61,7 +58,7 @@ export class SpaarkeAuthProvider {
     this._msalSilentStrategy = new MsalSilentStrategy(msalConfig, this._config.bffApiScope);
     this._msalPopupStrategy = new MsalPopupStrategy(
       () => this._msalSilentStrategy.getMsalInstance(),
-      this._config.bffApiScope,
+      this._config.bffApiScope
     );
 
     // Start proactive refresh if configured
@@ -138,8 +135,16 @@ export class SpaarkeAuthProvider {
     // 2. Xrm global context (frame-walk)
     try {
       const frames: Window[] = [window];
-      try { if (window.parent !== window) frames.push(window.parent); } catch { /* */ }
-      try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* */ }
+      try {
+        if (window.parent !== window) frames.push(window.parent);
+      } catch {
+        /* */
+      }
+      try {
+        if (window.top && window.top !== window) frames.push(window.top);
+      } catch {
+        /* */
+      }
 
       for (const frame of frames) {
         try {
@@ -147,9 +152,13 @@ export class SpaarkeAuthProvider {
           const xrm = (frame as any).Xrm;
           const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
           if (tid) return tid;
-        } catch { /* cross-origin */ }
+        } catch {
+          /* cross-origin */
+        }
       }
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
     return '';
   }

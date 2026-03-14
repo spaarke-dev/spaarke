@@ -1,16 +1,16 @@
 {
-    "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
-    "compilerOptions": {
-        "typeRoots": ["node_modules/@types"],
-        "module": "es2015",
-        "moduleResolution": "node"
-    },
-    "exclude": [
-        "node_modules",
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "**/__tests__/**",
-        "jest.config.js",
-        "jest.setup.js"
-    ]
+  "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
+  "compilerOptions": {
+    "typeRoots": ["node_modules/@types"],
+    "module": "es2015",
+    "moduleResolution": "node"
+  },
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**",
+    "jest.config.js",
+    "jest.setup.js"
+  ]
 }

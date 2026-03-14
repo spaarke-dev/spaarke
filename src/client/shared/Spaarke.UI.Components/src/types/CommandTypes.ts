@@ -2,7 +2,7 @@
  * Command system types
  */
 
-import { IDatasetRecord } from "./DatasetTypes";
+import { IDatasetRecord } from './DatasetTypes';
 
 /**
  * Command context provided to command handlers
@@ -35,7 +35,7 @@ export interface ICommand {
   confirmationMessage?: string;
 
   // UI Enhancements
-  group?: "primary" | "secondary" | "overflow"; // Command group for toolbar organization
+  group?: 'primary' | 'secondary' | 'overflow'; // Command group for toolbar organization
   description?: string; // For tooltips and screen readers
   keyboardShortcut?: string; // e.g., "Ctrl+N", "F5", "Delete"
   iconOnly?: boolean; // Show only icon with tooltip
@@ -52,7 +52,7 @@ export interface ICommand {
 export interface ICustomCommandConfig {
   key: string;
   label: string;
-  actionType: "workflow" | "customapi" | "action" | "function";
+  actionType: 'workflow' | 'customapi' | 'action' | 'function';
   actionName: string;
   icon?: string;
   requiresSelection?: boolean;
@@ -72,7 +72,7 @@ export enum AccessRights {
   CreateAccess = 16,
   DeleteAccess = 32,
   ShareAccess = 64,
-  AssignAccess = 128
+  AssignAccess = 128,
 }
 
 /**

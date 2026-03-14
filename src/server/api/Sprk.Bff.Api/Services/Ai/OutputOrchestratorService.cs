@@ -316,7 +316,7 @@ public class OutputOrchestratorService : IOutputOrchestratorService
     /// </remarks>
     private OutputMappingConfig? ParseOutputMapping(PlaybookResponse playbook)
     {
-        // TODO: Determine where outputMapping is stored in playbook entity
+        // TRACKED: GitHub #233 - Determine where outputMapping is stored
         // Options:
         // 1. Dedicated field: playbook.OutputMappingJson
         // 2. Part of ConfigJson: playbook.ConfigJson.outputMapping

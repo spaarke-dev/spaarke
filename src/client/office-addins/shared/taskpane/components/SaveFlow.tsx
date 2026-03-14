@@ -222,7 +222,11 @@ export interface SaveFlowProps {
   /** Email sender display name (Outlook only) */
   senderDisplayName?: string;
   /** Email recipients (Outlook only) */
-  recipients?: Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>;
+  recipients?: Array<{
+    email: string;
+    displayName?: string;
+    type: 'to' | 'cc' | 'bcc';
+  }>;
   /** Email sent date (Outlook only) */
   sentDate?: Date;
   /** Email body content (Outlook only) */
@@ -308,20 +312,23 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const { announce } = useAnnounce();
 
   // Initialize save flow hook
-  const saveFlowOptions: UseSaveFlowOptions = useMemo(() => ({
-    apiBaseUrl,
-    getAccessToken,
-    onComplete: (docId, docUrl) => {
-      announce('Document saved successfully', 'polite');
-      onComplete?.(docId, docUrl);
-    },
-    onError: (error) => {
-      announce(`Error: ${error.message}`, 'assertive');
-    },
-    onDuplicate: (docId, message) => {
-      announce('Duplicate detected: ' + message, 'polite');
-    },
-  }), [apiBaseUrl, getAccessToken, onComplete, announce]);
+  const saveFlowOptions: UseSaveFlowOptions = useMemo(
+    () => ({
+      apiBaseUrl,
+      getAccessToken,
+      onComplete: (docId, docUrl) => {
+        announce('Document saved successfully', 'polite');
+        onComplete?.(docId, docUrl);
+      },
+      onError: error => {
+        announce(`Error: ${error.message}`, 'assertive');
+      },
+      onDuplicate: (docId, message) => {
+        announce('Duplicate detected: ' + message, 'polite');
+      },
+    }),
+    [apiBaseUrl, getAccessToken, onComplete, announce]
+  );
 
   const {
     flowState,
@@ -351,21 +358,38 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [documentDescription, setDocumentDescription] = useState<string>('');
 
   // Build save context
-  const buildSaveContext = useCallback((): SaveFlowContext => ({
-    hostType,
-    itemId,
-    itemName,
-    documentName: documentName || undefined,
-    documentDescription: documentDescription || undefined,
-    attachments,
-    senderEmail,
-    senderDisplayName,
-    recipients,
-    sentDate,
-    emailBody,
-    documentUrl,
-    documentContentBase64,
-  }), [hostType, itemId, itemName, documentName, documentDescription, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl, documentContentBase64]);
+  const buildSaveContext = useCallback(
+    (): SaveFlowContext => ({
+      hostType,
+      itemId,
+      itemName,
+      documentName: documentName || undefined,
+      documentDescription: documentDescription || undefined,
+      attachments,
+      senderEmail,
+      senderDisplayName,
+      recipients,
+      sentDate,
+      emailBody,
+      documentUrl,
+      documentContentBase64,
+    }),
+    [
+      hostType,
+      itemId,
+      itemName,
+      documentName,
+      documentDescription,
+      attachments,
+      senderEmail,
+      senderDisplayName,
+      recipients,
+      sentDate,
+      emailBody,
+      documentUrl,
+      documentContentBase64,
+    ]
+  );
 
   // Handle save button click
   const handleSave = useCallback(() => {
@@ -374,12 +398,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   }, [buildSaveContext, startSave]);
 
   // Handle entity selection
-  const handleEntitySelect = useCallback((entity: EntitySearchResult | null) => {
-    setSelectedEntity(entity);
-    if (entity) {
-      announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
-    }
-  }, [setSelectedEntity, announce]);
+  const handleEntitySelect = useCallback(
+    (entity: EntitySearchResult | null) => {
+      setSelectedEntity(entity);
+      if (entity) {
+        announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
+      }
+    },
+    [setSelectedEntity, announce]
+  );
 
   // Handle view document
   const handleViewDocument = useCallback(() => {
@@ -427,9 +454,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           <Badge
             appearance="filled"
             color={
-              jobStatus.status === 'Completed' ? 'success' :
-              jobStatus.status === 'Failed' ? 'danger' :
-              'informative'
+              jobStatus.status === 'Completed' ? 'success' : jobStatus.status === 'Failed' ? 'danger' : 'informative'
             }
           >
             {jobStatus.status}
@@ -438,12 +463,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
         <ProgressBar value={progressPercentage / 100} />
 
-        <div
-          className={styles.stageList}
-          role="list"
-          aria-label="Processing stages"
-        >
-          {jobStatus.stages.map((stage) => (
+        <div className={styles.stageList} role="list" aria-label="Processing stages">
+          {jobStatus.stages.map(stage => (
             <div
               key={stage.name}
               className={styles.stageItem}
@@ -465,33 +486,21 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const renderSuccessState = () => (
     <Card className={styles.successCard}>
       <CheckmarkCircleRegular className={styles.successIcon} aria-hidden="true" />
-      <Text size={500} weight="semibold">Document Saved</Text>
+      <Text size={500} weight="semibold">
+        Document Saved
+      </Text>
       <Body1 style={{ marginTop: tokens.spacingVerticalS }}>
         Your document has been saved to Spaarke and associated with{' '}
         <Text weight="semibold">{selectedEntity?.name}</Text>.
       </Body1>
       <div className={styles.successActions}>
-        <Button
-          appearance="primary"
-          icon={<OpenRegular />}
-          onClick={handleViewDocument}
-          disabled={!savedDocumentUrl}
-        >
+        <Button appearance="primary" icon={<OpenRegular />} onClick={handleViewDocument} disabled={!savedDocumentUrl}>
           View Document
         </Button>
-        <Button
-          appearance="outline"
-          icon={<CopyRegular />}
-          onClick={handleCopyLink}
-          disabled={!savedDocumentUrl}
-        >
+        <Button appearance="outline" icon={<CopyRegular />} onClick={handleCopyLink} disabled={!savedDocumentUrl}>
           Copy Link
         </Button>
-        <Button
-          appearance="subtle"
-          icon={<ArrowResetRegular />}
-          onClick={reset}
-        >
+        <Button appearance="subtle" icon={<ArrowResetRegular />} onClick={reset}>
           Save Another
         </Button>
       </div>
@@ -602,9 +611,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <div className={styles.section}>
           <div className={styles.sectionTitle}>
             <DocumentRegular />
-            <Text weight="semibold">
-              {hostType === 'outlook' ? 'Email' : 'Document'}
-            </Text>
+            <Text weight="semibold">{hostType === 'outlook' ? 'Email' : 'Document'}</Text>
           </div>
           <div className={styles.documentInfo}>
             <div className={styles.documentInfoRow}>
@@ -617,9 +624,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             )}
             {hostType === 'outlook' && sentDate && (
               <div className={styles.documentInfoRow}>
-                <Text size={200}>
-                  Sent: {sentDate.toLocaleDateString()}
-                </Text>
+                <Text size={200}>Sent: {sentDate.toLocaleDateString()}</Text>
               </div>
             )}
           </div>
@@ -728,11 +733,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   };
 
   return (
-    <div
-      className={mergeClasses(styles.container, className)}
-      role="form"
-      aria-label="Save to Spaarke"
-    >
+    <div className={mergeClasses(styles.container, className)} role="form" aria-label="Save to Spaarke">
       {renderContent()}
     </div>
   );

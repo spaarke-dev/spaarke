@@ -13,12 +13,7 @@ import {
   MessageBarBody,
   Button,
 } from '@fluentui/react-components';
-import {
-  CheckmarkCircleRegular,
-  ErrorCircleRegular,
-  ClockRegular,
-  ArrowSyncRegular,
-} from '@fluentui/react-icons';
+import { CheckmarkCircleRegular, ErrorCircleRegular, ClockRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
@@ -119,11 +114,7 @@ const StageIcon: React.FC<{ status: string }> = ({ status }) => {
   }
 };
 
-export const StatusView: React.FC<StatusViewProps> = ({
-  onFetchJobs,
-  refreshInterval = 5000,
-  error,
-}) => {
+export const StatusView: React.FC<StatusViewProps> = ({ onFetchJobs, refreshInterval = 5000, error }) => {
   const styles = useStyles();
   const [jobs, setJobs] = useState<ProcessingJob[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -150,8 +141,8 @@ export const StatusView: React.FC<StatusViewProps> = ({
     return undefined;
   }, [refreshInterval]);
 
-  const activeJobs = jobs.filter((j) => j.status === 'Pending' || j.status === 'InProgress');
-  const recentJobs = jobs.filter((j) => j.status !== 'Pending' && j.status !== 'InProgress').slice(0, 5);
+  const activeJobs = jobs.filter(j => j.status === 'Pending' || j.status === 'InProgress');
+  const recentJobs = jobs.filter(j => j.status !== 'Pending' && j.status !== 'InProgress').slice(0, 5);
 
   return (
     <div className={styles.container}>
@@ -179,25 +170,28 @@ export const StatusView: React.FC<StatusViewProps> = ({
         />
         {activeJobs.length === 0 ? (
           <div className={styles.emptyState}>
-            <ClockRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
+            <ClockRegular
+              style={{
+                fontSize: '32px',
+                marginBottom: tokens.spacingVerticalS,
+              }}
+            />
             <Body1>No active jobs</Body1>
           </div>
         ) : (
-          activeJobs.map((job) => (
+          activeJobs.map(job => (
             <div key={job.id} className={styles.jobCard}>
               <div className={styles.jobHeader}>
                 <Body1>{job.jobType}</Body1>
                 <Badge color={getStatusColor(job.status)}>{job.status}</Badge>
               </div>
               <ProgressBar value={job.progress / 100} />
-              {job.currentStage && (
-                <Text size={200}>Stage: {job.currentStage}</Text>
-              )}
+              {job.currentStage && <Text size={200}>Stage: {job.currentStage}</Text>}
 
               {/* Stage List */}
               {job.stages && job.stageStatus && (
                 <div className={styles.stageList}>
-                  {job.stages.map((stage) => {
+                  {job.stages.map(stage => {
                     const stageInfo = job.stageStatus?.[stage];
                     return (
                       <div key={stage} className={styles.stageItem}>
@@ -219,17 +213,13 @@ export const StatusView: React.FC<StatusViewProps> = ({
       {recentJobs.length > 0 && (
         <Card>
           <CardHeader header={<Text weight="semibold">Recent Jobs</Text>} />
-          {recentJobs.map((job) => (
+          {recentJobs.map(job => (
             <div key={job.id} className={styles.jobCard}>
               <div className={styles.jobHeader}>
                 <Body1>{job.jobType}</Body1>
                 <Badge color={getStatusColor(job.status)}>{job.status}</Badge>
               </div>
-              {job.completedDate && (
-                <Text size={200}>
-                  Completed: {new Date(job.completedDate).toLocaleString()}
-                </Text>
-              )}
+              {job.completedDate && <Text size={200}>Completed: {new Date(job.completedDate).toLocaleString()}</Text>}
               {job.status === 'Failed' && job.errorMessage && (
                 <MessageBar intent="error">
                   <MessageBarBody>{job.errorMessage}</MessageBarBody>

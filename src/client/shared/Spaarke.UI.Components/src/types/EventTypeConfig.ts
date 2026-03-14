@@ -25,7 +25,7 @@ export interface IFieldRule {
 /**
  * Dataverse requirement level values
  */
-export type RequiredLevel = "required" | "recommended" | "none";
+export type RequiredLevel = 'required' | 'recommended' | 'none';
 
 /**
  * Default state configuration for a field
@@ -47,7 +47,7 @@ export interface IFieldDefaultStates {
 /**
  * Section collapse state options
  */
-export type SectionCollapseState = "expanded" | "collapsed";
+export type SectionCollapseState = 'expanded' | 'collapsed';
 
 /**
  * Default collapse states for form sections

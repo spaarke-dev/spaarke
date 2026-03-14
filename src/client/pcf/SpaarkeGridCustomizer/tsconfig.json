@@ -24,13 +24,6 @@
     "resolveJsonModule": true,
     "outDir": "./out"
   },
-  "include": [
-    "./**/*.ts",
-    "./**/*.tsx"
-  ],
-  "exclude": [
-    "node_modules",
-    "out",
-    "generated"
-  ]
+  "include": ["./**/*.ts", "./**/*.tsx"],
+  "exclude": ["node_modules", "out", "generated"]
 }

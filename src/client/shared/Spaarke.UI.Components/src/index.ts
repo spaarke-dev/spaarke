@@ -5,22 +5,22 @@
  */
 
 // Icons (Fluent UI v9 only - central registry)
-export * from "./icons";
+export * from './icons';
 
 // Theme
-export * from "./theme";
+export * from './theme';
 
 // Types
-export * from "./types";
+export * from './types';
 
 // Utils
-export * from "./utils";
+export * from './utils';
 
 // Hooks
-export * from "./hooks";
+export * from './hooks';
 
 // Services
-export * from "./services";
+export * from './services';
 
 // Components
-export * from "./components";
+export * from './components';

@@ -12,22 +12,22 @@
 
 // Import types and default states from shared service
 import {
-    IFieldRule,
-    IFieldDefaultStates,
-    IEventTypeFieldConfig,
-    IApplyRulesResult,
-    IComputedFieldStates,
-    RequiredLevel
-} from "@spaarke/ui-components";
+  IFieldRule,
+  IFieldDefaultStates,
+  IEventTypeFieldConfig,
+  IApplyRulesResult,
+  IComputedFieldStates,
+  RequiredLevel,
+} from '@spaarke/ui-components';
 
 import {
-    EventTypeService,
-    eventTypeService,
-    DEFAULT_EVENT_FIELD_STATES,
-    ALL_EVENT_FIELDS,
-    ALL_SECTION_NAMES,
-    DEFAULT_SECTION_STATES
-} from "@spaarke/ui-components";
+  EventTypeService,
+  eventTypeService,
+  DEFAULT_EVENT_FIELD_STATES,
+  ALL_EVENT_FIELDS,
+  ALL_SECTION_NAMES,
+  DEFAULT_SECTION_STATES,
+} from '@spaarke/ui-components';
 
 // Re-export types for backward compatibility with existing code
 export type { IFieldRule, IApplyRulesResult, RequiredLevel };
@@ -37,9 +37,9 @@ export type { IFieldRule, IApplyRulesResult, RequiredLevel };
  * @deprecated Use IFieldRule from @spaarke/ui-components
  */
 export interface FieldRule {
-    fieldName: string;
-    visible: boolean;
-    required: boolean;
+  fieldName: string;
+  visible: boolean;
+  required: boolean;
 }
 
 /**
@@ -47,31 +47,32 @@ export interface FieldRule {
  * @deprecated Use IEventTypeFieldConfig from @spaarke/ui-components
  */
 export interface EventTypeFieldConfig {
-    requiredFields: string[];
-    hiddenFields: string[];
-    optionalFields?: string[];
+  requiredFields: string[];
+  hiddenFields: string[];
+  optionalFields?: string[];
 }
 
 /**
  * Legacy type alias for backward compatibility
  * @deprecated Use IFieldDefaultStates from @spaarke/ui-components
  */
-export interface FieldDefaultStates {
-    [fieldName: string]: {
-        visible: boolean;
-        requiredLevel: RequiredLevel;
-    };
-}
+export type FieldDefaultStates = Record<
+  string,
+  {
+    visible: boolean;
+    requiredLevel: RequiredLevel;
+  }
+>;
 
 /**
  * Legacy type alias for backward compatibility
  * @deprecated Use IApplyRulesResult from @spaarke/ui-components
  */
 export interface ApplyRulesResult {
-    success: boolean;
-    rulesApplied: number;
-    skippedFields: string[];
-    errors: string[];
+  success: boolean;
+  rulesApplied: number;
+  skippedFields: string[];
+  errors: string[];
 }
 
 // Re-export default field states from shared service for backward compatibility
@@ -85,8 +86,8 @@ export { eventTypeService, EventTypeService };
  * Uses legacy Xrm.Page API for compatibility with current Dataverse forms
  */
 function getFormContext(): any | null {
-    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-    return xrm?.Page || null;
+  const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
+  return xrm?.Page || null;
 }
 
 /**
@@ -97,25 +98,25 @@ function getFormContext(): any | null {
  * @returns true if successful, false if field not found
  */
 export function showField(fieldName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - showField");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - showField');
+    return false;
+  }
 
-    const control = formContext.getControl(fieldName);
-    if (!control) {
-        console.warn(`[FieldVisibilityHandler] Field not found on form: ${fieldName}`);
-        return false;
-    }
+  const control = formContext.getControl(fieldName);
+  if (!control) {
+    console.warn(`[FieldVisibilityHandler] Field not found on form: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        control.setVisible(true);
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error showing field ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    control.setVisible(true);
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error showing field ${fieldName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -126,25 +127,25 @@ export function showField(fieldName: string): boolean {
  * @returns true if successful, false if field not found
  */
 export function hideField(fieldName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - hideField");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - hideField');
+    return false;
+  }
 
-    const control = formContext.getControl(fieldName);
-    if (!control) {
-        console.warn(`[FieldVisibilityHandler] Field not found on form: ${fieldName}`);
-        return false;
-    }
+  const control = formContext.getControl(fieldName);
+  if (!control) {
+    console.warn(`[FieldVisibilityHandler] Field not found on form: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        control.setVisible(false);
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error hiding field ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    control.setVisible(false);
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error hiding field ${fieldName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -156,27 +157,27 @@ export function hideField(fieldName: string): boolean {
  * @returns true if successful, false if field not found
  */
 export function setRequired(fieldName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - setRequired");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - setRequired');
+    return false;
+  }
 
-    const attribute = formContext.getAttribute(fieldName);
-    if (!attribute) {
-        console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
-        return false;
-    }
+  const attribute = formContext.getAttribute(fieldName);
+  if (!attribute) {
+    console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        attribute.setRequiredLevel("required");
-        // Also ensure the field is visible when required
-        showField(fieldName);
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error setting required ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    attribute.setRequiredLevel('required');
+    // Also ensure the field is visible when required
+    showField(fieldName);
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error setting required ${fieldName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -187,25 +188,25 @@ export function setRequired(fieldName: string): boolean {
  * @returns true if successful, false if field not found
  */
 export function setOptional(fieldName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - setOptional");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - setOptional');
+    return false;
+  }
 
-    const attribute = formContext.getAttribute(fieldName);
-    if (!attribute) {
-        console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
-        return false;
-    }
+  const attribute = formContext.getAttribute(fieldName);
+  if (!attribute) {
+    console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        attribute.setRequiredLevel("none");
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error setting optional ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    attribute.setRequiredLevel('none');
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error setting optional ${fieldName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -216,25 +217,25 @@ export function setOptional(fieldName: string): boolean {
  * @returns true if successful, false if field not found
  */
 export function setRecommended(fieldName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - setRecommended");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - setRecommended');
+    return false;
+  }
 
-    const attribute = formContext.getAttribute(fieldName);
-    if (!attribute) {
-        console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
-        return false;
-    }
+  const attribute = formContext.getAttribute(fieldName);
+  if (!attribute) {
+    console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        attribute.setRequiredLevel("recommended");
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error setting recommended ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    attribute.setRequiredLevel('recommended');
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error setting recommended ${fieldName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -245,25 +246,25 @@ export function setRecommended(fieldName: string): boolean {
  * @returns true if successful, false if field not found
  */
 export function setRequiredLevel(fieldName: string, level: RequiredLevel): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - setRequiredLevel");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - setRequiredLevel');
+    return false;
+  }
 
-    const attribute = formContext.getAttribute(fieldName);
-    if (!attribute) {
-        console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
-        return false;
-    }
+  const attribute = formContext.getAttribute(fieldName);
+  if (!attribute) {
+    console.warn(`[FieldVisibilityHandler] Attribute not found: ${fieldName}`);
+    return false;
+  }
 
-    try {
-        attribute.setRequiredLevel(level);
-        return true;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error setting required level ${fieldName}:`, err);
-        return false;
-    }
+  try {
+    attribute.setRequiredLevel(level);
+    return true;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error setting required level ${fieldName}:`, err);
+    return false;
+  }
 }
 
 // =============================================================================
@@ -278,41 +279,41 @@ export function setRequiredLevel(fieldName: string, level: RequiredLevel): boole
  * @returns true if successful, false if section not found
  */
 export function showSection(sectionName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - showSection");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - showSection');
+    return false;
+  }
 
-    // Get all tabs and search for the section
-    const tabs = formContext.ui?.tabs;
-    if (!tabs) {
-        console.warn("[FieldVisibilityHandler] Form tabs not available");
-        return false;
-    }
+  // Get all tabs and search for the section
+  const tabs = formContext.ui?.tabs;
+  if (!tabs) {
+    console.warn('[FieldVisibilityHandler] Form tabs not available');
+    return false;
+  }
 
-    try {
-        let found = false;
-        tabs.forEach((tab: any) => {
-            const sections = tab.sections;
-            if (sections) {
-                sections.forEach((section: any) => {
-                    if (section.getName() === sectionName) {
-                        section.setVisible(true);
-                        found = true;
-                    }
-                });
-            }
+  try {
+    let found = false;
+    tabs.forEach((tab: any) => {
+      const sections = tab.sections;
+      if (sections) {
+        sections.forEach((section: any) => {
+          if (section.getName() === sectionName) {
+            section.setVisible(true);
+            found = true;
+          }
         });
+      }
+    });
 
-        if (!found) {
-            console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
-        }
-        return found;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error showing section ${sectionName}:`, err);
-        return false;
+    if (!found) {
+      console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
     }
+    return found;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error showing section ${sectionName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -323,41 +324,41 @@ export function showSection(sectionName: string): boolean {
  * @returns true if successful, false if section not found
  */
 export function hideSection(sectionName: string): boolean {
-    const formContext = getFormContext();
-    if (!formContext) {
-        console.warn("[FieldVisibilityHandler] Xrm.Page not available - hideSection");
-        return false;
-    }
+  const formContext = getFormContext();
+  if (!formContext) {
+    console.warn('[FieldVisibilityHandler] Xrm.Page not available - hideSection');
+    return false;
+  }
 
-    // Get all tabs and search for the section
-    const tabs = formContext.ui?.tabs;
-    if (!tabs) {
-        console.warn("[FieldVisibilityHandler] Form tabs not available");
-        return false;
-    }
+  // Get all tabs and search for the section
+  const tabs = formContext.ui?.tabs;
+  if (!tabs) {
+    console.warn('[FieldVisibilityHandler] Form tabs not available');
+    return false;
+  }
 
-    try {
-        let found = false;
-        tabs.forEach((tab: any) => {
-            const sections = tab.sections;
-            if (sections) {
-                sections.forEach((section: any) => {
-                    if (section.getName() === sectionName) {
-                        section.setVisible(false);
-                        found = true;
-                    }
-                });
-            }
+  try {
+    let found = false;
+    tabs.forEach((tab: any) => {
+      const sections = tab.sections;
+      if (sections) {
+        sections.forEach((section: any) => {
+          if (section.getName() === sectionName) {
+            section.setVisible(false);
+            found = true;
+          }
         });
+      }
+    });
 
-        if (!found) {
-            console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
-        }
-        return found;
-    } catch (err) {
-        console.error(`[FieldVisibilityHandler] Error hiding section ${sectionName}:`, err);
-        return false;
+    if (!found) {
+      console.warn(`[FieldVisibilityHandler] Section not found on form: ${sectionName}`);
     }
+    return found;
+  } catch (err) {
+    console.error(`[FieldVisibilityHandler] Error hiding section ${sectionName}:`, err);
+    return false;
+  }
 }
 
 /**
@@ -368,7 +369,7 @@ export function hideSection(sectionName: string): boolean {
  * @returns true if successful, false if section not found
  */
 export function setSectionVisibility(sectionName: string, visible: boolean): boolean {
-    return visible ? showSection(sectionName) : hideSection(sectionName);
+  return visible ? showSection(sectionName) : hideSection(sectionName);
 }
 
 /**
@@ -378,28 +379,28 @@ export function setSectionVisibility(sectionName: string, visible: boolean): boo
  * @returns true if visible, false if hidden, undefined if section not found
  */
 export function isSectionVisible(sectionName: string): boolean | undefined {
-    const formContext = getFormContext();
-    if (!formContext) return undefined;
+  const formContext = getFormContext();
+  if (!formContext) return undefined;
 
-    const tabs = formContext.ui?.tabs;
-    if (!tabs) return undefined;
+  const tabs = formContext.ui?.tabs;
+  if (!tabs) return undefined;
 
-    try {
-        let visible: boolean | undefined;
-        tabs.forEach((tab: any) => {
-            const sections = tab.sections;
-            if (sections) {
-                sections.forEach((section: any) => {
-                    if (section.getName() === sectionName) {
-                        visible = section.getVisible();
-                    }
-                });
-            }
+  try {
+    let visible: boolean | undefined;
+    tabs.forEach((tab: any) => {
+      const sections = tab.sections;
+      if (sections) {
+        sections.forEach((section: any) => {
+          if (section.getName() === sectionName) {
+            visible = section.getVisible();
+          }
         });
-        return visible;
-    } catch {
-        return undefined;
-    }
+      }
+    });
+    return visible;
+  } catch {
+    return undefined;
+  }
 }
 
 // =============================================================================
@@ -413,64 +414,66 @@ export function isSectionVisible(sectionName: string): boolean | undefined {
  * @returns Result of the reset operation
  */
 export function resetToDefaults(): ApplyRulesResult {
-    const result: ApplyRulesResult = {
-        success: true,
-        rulesApplied: 0,
-        skippedFields: [],
-        errors: []
-    };
+  const result: ApplyRulesResult = {
+    success: true,
+    rulesApplied: 0,
+    skippedFields: [],
+    errors: [],
+  };
 
-    const formContext = getFormContext();
-    if (!formContext) {
-        result.success = false;
-        result.errors.push("Xrm.Page not available");
-        return result;
-    }
-
-    // Use default states from shared service
-    for (const [fieldName, defaults] of Object.entries(DEFAULT_EVENT_FIELD_STATES)) {
-        try {
-            // Reset visibility
-            const control = formContext.getControl(fieldName);
-            if (control) {
-                control.setVisible(defaults.visible);
-            } else {
-                result.skippedFields.push(fieldName);
-                continue; // Skip to next field
-            }
-
-            // Reset requirement level
-            const attribute = formContext.getAttribute(fieldName);
-            if (attribute) {
-                attribute.setRequiredLevel(defaults.requiredLevel);
-            }
-
-            result.rulesApplied++;
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            result.errors.push(`Error resetting ${fieldName}: ${errorMsg}`);
-        }
-    }
-
-    // Reset all sections to visible
-    let sectionsReset = 0;
-    for (const sectionName of ALL_SECTION_NAMES) {
-        try {
-            if (showSection(sectionName)) {
-                sectionsReset++;
-            }
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            result.errors.push(`Error resetting section ${sectionName}: ${errorMsg}`);
-        }
-    }
-
-    if (result.errors.length > 0) {
-        result.success = false;
-    }
-
-    console.log(`[FieldVisibilityHandler] Reset complete: ${result.rulesApplied} fields, ${sectionsReset} sections, ${result.skippedFields.length} skipped`);
+  const formContext = getFormContext();
+  if (!formContext) {
+    result.success = false;
+    result.errors.push('Xrm.Page not available');
     return result;
+  }
+
+  // Use default states from shared service
+  for (const [fieldName, defaults] of Object.entries(DEFAULT_EVENT_FIELD_STATES)) {
+    try {
+      // Reset visibility
+      const control = formContext.getControl(fieldName);
+      if (control) {
+        control.setVisible(defaults.visible);
+      } else {
+        result.skippedFields.push(fieldName);
+        continue; // Skip to next field
+      }
+
+      // Reset requirement level
+      const attribute = formContext.getAttribute(fieldName);
+      if (attribute) {
+        attribute.setRequiredLevel(defaults.requiredLevel);
+      }
+
+      result.rulesApplied++;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Error resetting ${fieldName}: ${errorMsg}`);
+    }
+  }
+
+  // Reset all sections to visible
+  let sectionsReset = 0;
+  for (const sectionName of ALL_SECTION_NAMES) {
+    try {
+      if (showSection(sectionName)) {
+        sectionsReset++;
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Error resetting section ${sectionName}: ${errorMsg}`);
+    }
+  }
+
+  if (result.errors.length > 0) {
+    result.success = false;
+  }
+
+  console.log(
+    `[FieldVisibilityHandler] Reset complete: ${result.rulesApplied} fields, ${sectionsReset} sections, ${result.skippedFields.length} skipped`
+  );
+  return result;
 }
 
 /**
@@ -481,69 +484,71 @@ export function resetToDefaults(): ApplyRulesResult {
  * @returns Result of applying the rules
  */
 export function applyComputedFieldStates(computed: IComputedFieldStates): ApplyRulesResult {
-    const result: ApplyRulesResult = {
-        success: true,
-        rulesApplied: 0,
-        skippedFields: [],
-        errors: []
-    };
+  const result: ApplyRulesResult = {
+    success: true,
+    rulesApplied: 0,
+    skippedFields: [],
+    errors: [],
+  };
 
-    const formContext = getFormContext();
-    if (!formContext) {
-        result.success = false;
-        result.errors.push("Xrm.Page not available");
-        return result;
-    }
-
-    // Apply each field's computed state
-    for (const [fieldName, state] of computed.fields) {
-        try {
-            // Set visibility
-            const control = formContext.getControl(fieldName);
-            if (control) {
-                control.setVisible(state.isVisible);
-            } else {
-                result.skippedFields.push(fieldName);
-                continue; // Skip to next field
-            }
-
-            // Set requirement level
-            const attribute = formContext.getAttribute(fieldName);
-            if (attribute) {
-                attribute.setRequiredLevel(state.requiredLevel);
-            }
-
-            result.rulesApplied++;
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            result.errors.push(`Error applying state to ${fieldName}: ${errorMsg}`);
-        }
-    }
-
-    // Apply section visibility states
-    let sectionsApplied = 0;
-    const skippedSections: string[] = [];
-
-    for (const [sectionName, state] of computed.sections) {
-        try {
-            const success = setSectionVisibility(sectionName, state.isVisible);
-            if (success) {
-                sectionsApplied++;
-            } else {
-                skippedSections.push(sectionName);
-            }
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            result.errors.push(`Error applying section state to ${sectionName}: ${errorMsg}`);
-        }
-    }
-
-    if (result.errors.length > 0) {
-        result.success = false;
-    }
-
-    console.log(`[FieldVisibilityHandler] Applied computed states: ${result.rulesApplied} fields, ${sectionsApplied} sections, ${result.skippedFields.length} fields skipped, ${skippedSections.length} sections skipped`);
+  const formContext = getFormContext();
+  if (!formContext) {
+    result.success = false;
+    result.errors.push('Xrm.Page not available');
     return result;
+  }
+
+  // Apply each field's computed state
+  for (const [fieldName, state] of computed.fields) {
+    try {
+      // Set visibility
+      const control = formContext.getControl(fieldName);
+      if (control) {
+        control.setVisible(state.isVisible);
+      } else {
+        result.skippedFields.push(fieldName);
+        continue; // Skip to next field
+      }
+
+      // Set requirement level
+      const attribute = formContext.getAttribute(fieldName);
+      if (attribute) {
+        attribute.setRequiredLevel(state.requiredLevel);
+      }
+
+      result.rulesApplied++;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Error applying state to ${fieldName}: ${errorMsg}`);
+    }
+  }
+
+  // Apply section visibility states
+  let sectionsApplied = 0;
+  const skippedSections: string[] = [];
+
+  for (const [sectionName, state] of computed.sections) {
+    try {
+      const success = setSectionVisibility(sectionName, state.isVisible);
+      if (success) {
+        sectionsApplied++;
+      } else {
+        skippedSections.push(sectionName);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      result.errors.push(`Error applying section state to ${sectionName}: ${errorMsg}`);
+    }
+  }
+
+  if (result.errors.length > 0) {
+    result.success = false;
+  }
+
+  console.log(
+    `[FieldVisibilityHandler] Applied computed states: ${result.rulesApplied} fields, ${sectionsApplied} sections, ${result.skippedFields.length} fields skipped, ${skippedSections.length} sections skipped`
+  );
+  return result;
 }
 
 /**
@@ -554,57 +559,57 @@ export function applyComputedFieldStates(computed: IComputedFieldStates): ApplyR
  * @returns Result of applying the rules
  */
 export function applyFieldRules(config: EventTypeFieldConfig): ApplyRulesResult {
-    const result: ApplyRulesResult = {
-        success: true,
-        rulesApplied: 0,
-        skippedFields: [],
-        errors: []
-    };
+  const result: ApplyRulesResult = {
+    success: true,
+    rulesApplied: 0,
+    skippedFields: [],
+    errors: [],
+  };
 
-    const formContext = getFormContext();
-    if (!formContext) {
-        result.success = false;
-        result.errors.push("Xrm.Page not available");
-        return result;
-    }
-
-    // First, reset optional fields to ensure clean state
-    if (config.optionalFields) {
-        for (const fieldName of config.optionalFields) {
-            if (setOptional(fieldName)) {
-                result.rulesApplied++;
-            } else {
-                result.skippedFields.push(fieldName);
-            }
-        }
-    }
-
-    // Set required fields - also makes them visible
-    for (const fieldName of config.requiredFields) {
-        if (setRequired(fieldName)) {
-            result.rulesApplied++;
-        } else {
-            result.skippedFields.push(fieldName);
-        }
-    }
-
-    // Hide fields
-    for (const fieldName of config.hiddenFields) {
-        if (hideField(fieldName)) {
-            // Also set hidden fields to optional (can't require hidden fields)
-            setOptional(fieldName);
-            result.rulesApplied++;
-        } else {
-            result.skippedFields.push(fieldName);
-        }
-    }
-
-    if (result.skippedFields.length > 0) {
-        console.warn(`[FieldVisibilityHandler] Skipped fields not on form: ${result.skippedFields.join(", ")}`);
-    }
-
-    console.log(`[FieldVisibilityHandler] Applied ${result.rulesApplied} rules, skipped ${result.skippedFields.length}`);
+  const formContext = getFormContext();
+  if (!formContext) {
+    result.success = false;
+    result.errors.push('Xrm.Page not available');
     return result;
+  }
+
+  // First, reset optional fields to ensure clean state
+  if (config.optionalFields) {
+    for (const fieldName of config.optionalFields) {
+      if (setOptional(fieldName)) {
+        result.rulesApplied++;
+      } else {
+        result.skippedFields.push(fieldName);
+      }
+    }
+  }
+
+  // Set required fields - also makes them visible
+  for (const fieldName of config.requiredFields) {
+    if (setRequired(fieldName)) {
+      result.rulesApplied++;
+    } else {
+      result.skippedFields.push(fieldName);
+    }
+  }
+
+  // Hide fields
+  for (const fieldName of config.hiddenFields) {
+    if (hideField(fieldName)) {
+      // Also set hidden fields to optional (can't require hidden fields)
+      setOptional(fieldName);
+      result.rulesApplied++;
+    } else {
+      result.skippedFields.push(fieldName);
+    }
+  }
+
+  if (result.skippedFields.length > 0) {
+    console.warn(`[FieldVisibilityHandler] Skipped fields not on form: ${result.skippedFields.join(', ')}`);
+  }
+
+  console.log(`[FieldVisibilityHandler] Applied ${result.rulesApplied} rules, skipped ${result.skippedFields.length}`);
+  return result;
 }
 
 /**
@@ -612,7 +617,7 @@ export function applyFieldRules(config: EventTypeFieldConfig): ApplyRulesResult 
  * Useful for conditional rendering in PCF controls
  */
 export function isFormContextAvailable(): boolean {
-    return getFormContext() !== null;
+  return getFormContext() !== null;
 }
 
 /**
@@ -622,17 +627,17 @@ export function isFormContextAvailable(): boolean {
  * @returns true if visible, false if hidden, undefined if field not found
  */
 export function isFieldVisible(fieldName: string): boolean | undefined {
-    const formContext = getFormContext();
-    if (!formContext) return undefined;
+  const formContext = getFormContext();
+  if (!formContext) return undefined;
 
-    const control = formContext.getControl(fieldName);
-    if (!control) return undefined;
+  const control = formContext.getControl(fieldName);
+  if (!control) return undefined;
 
-    try {
-        return control.getVisible();
-    } catch {
-        return undefined;
-    }
+  try {
+    return control.getVisible();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -642,15 +647,15 @@ export function isFieldVisible(fieldName: string): boolean | undefined {
  * @returns "required" | "recommended" | "none" | undefined if field not found
  */
 export function getFieldRequiredLevel(fieldName: string): RequiredLevel | undefined {
-    const formContext = getFormContext();
-    if (!formContext) return undefined;
+  const formContext = getFormContext();
+  if (!formContext) return undefined;
 
-    const attribute = formContext.getAttribute(fieldName);
-    if (!attribute) return undefined;
+  const attribute = formContext.getAttribute(fieldName);
+  if (!attribute) return undefined;
 
-    try {
-        return attribute.getRequiredLevel();
-    } catch {
-        return undefined;
-    }
+  try {
+    return attribute.getRequiredLevel();
+  } catch {
+    return undefined;
+  }
 }

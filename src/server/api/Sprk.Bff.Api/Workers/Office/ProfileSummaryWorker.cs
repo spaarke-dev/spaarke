@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// <para>
 /// Processing stages:
 /// 1. Receive profile job message from office-profile queue
-/// 2. Generate AI summary using existing AI services (TODO: implement)
+/// 2. Generate AI summary using existing AI services (TRACKED: GitHub #233)
 /// 3. Update Document record with profile summary
 /// 4. Queue indexing stage if RagIndex is enabled
 /// 5. Update ProcessingJob status to completed

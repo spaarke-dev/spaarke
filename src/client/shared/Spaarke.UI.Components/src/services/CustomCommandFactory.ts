@@ -2,15 +2,10 @@
  * CustomCommandFactory - Creates ICommand instances from JSON configuration
  */
 
-import * as React from "react";
-import {
-  ArrowUploadRegular,
-  ArrowDownloadRegular,
-  MailRegular,
-  SendRegular
-} from "@fluentui/react-icons";
-import { ICommand, ICommandContext } from "../types/CommandTypes";
-import { ICustomCommandConfiguration } from "../types/EntityConfigurationTypes";
+import * as React from 'react';
+import { ArrowUploadRegular, ArrowDownloadRegular, MailRegular, SendRegular } from '@fluentui/react-icons';
+import { ICommand, ICommandContext } from '../types/CommandTypes';
+import { ICustomCommandConfiguration } from '../types/EntityConfigurationTypes';
 
 export class CustomCommandFactory {
   /**
@@ -22,7 +17,7 @@ export class CustomCommandFactory {
       label: config.label,
       icon: this.getIcon(config.icon),
       requiresSelection: config.requiresSelection ?? false,
-      group: config.group ?? "overflow",
+      group: config.group ?? 'overflow',
       description: config.description,
       keyboardShortcut: config.keyboardShortcut,
       confirmationMessage: config.confirmationMessage,
@@ -30,7 +25,7 @@ export class CustomCommandFactory {
       successMessage: config.successMessage,
       handler: async (context: ICommandContext) => {
         await this.executeCustomCommand(key, config, context);
-      }
+      },
     };
   }
 
@@ -44,7 +39,7 @@ export class CustomCommandFactory {
   ): Promise<void> {
     // Validate selection requirements
     if (config.requiresSelection && context.selectedRecords.length === 0) {
-      throw new Error("No records selected");
+      throw new Error('No records selected');
     }
 
     if (config.minSelection && context.selectedRecords.length < config.minSelection) {
@@ -60,19 +55,19 @@ export class CustomCommandFactory {
 
     // Execute based on action type
     switch (config.actionType) {
-      case "customapi":
+      case 'customapi':
         await this.executeCustomApi(config.actionName, parameters, context);
         break;
 
-      case "action":
+      case 'action':
         await this.executeAction(config.actionName, parameters, context);
         break;
 
-      case "function":
+      case 'function':
         await this.executeFunction(config.actionName, parameters, context);
         break;
 
-      case "workflow":
+      case 'workflow':
         await this.executeWorkflow(config.actionName, parameters, context);
         break;
 
@@ -95,8 +90,8 @@ export class CustomCommandFactory {
         boundParameter: null,
         parameterTypes: {},
         operationType: 0,
-        operationName: apiName
-      })
+        operationName: apiName,
+      }),
     };
 
     await (context.webAPI as any).execute(request);
@@ -116,20 +111,20 @@ export class CustomCommandFactory {
         const request = {
           entity: {
             entityType: context.entityName,
-            id: record.id
+            id: record.id,
           },
           ...parameters,
           getMetadata: () => ({
-            boundParameter: "entity",
+            boundParameter: 'entity',
             parameterTypes: {
               entity: {
                 typeName: context.entityName,
-                structuralProperty: 5
-              }
+                structuralProperty: 5,
+              },
             },
             operationType: 0,
-            operationName: actionName
-          })
+            operationName: actionName,
+          }),
         };
 
         await (context.webAPI as any).execute(request);
@@ -142,8 +137,8 @@ export class CustomCommandFactory {
           boundParameter: null,
           parameterTypes: {},
           operationType: 0,
-          operationName: actionName
-        })
+          operationName: actionName,
+        }),
       };
 
       await (context.webAPI as any).execute(request);
@@ -161,7 +156,7 @@ export class CustomCommandFactory {
     // Build OData function URL
     const params = Object.entries(parameters)
       .map(([key, value]) => `${key}=${encodeURIComponent(JSON.stringify(value))}`)
-      .join(",");
+      .join(',');
 
     const url = params ? `${functionName}(${params})` : functionName;
 
@@ -184,11 +179,11 @@ export class CustomCommandFactory {
         getMetadata: () => ({
           boundParameter: null,
           parameterTypes: {
-            EntityId: { typeName: "Edm.Guid", structuralProperty: 1 }
+            EntityId: { typeName: 'Edm.Guid', structuralProperty: 1 },
           },
           operationType: 0,
-          operationName: "ExecuteWorkflow"
-        })
+          operationName: 'ExecuteWorkflow',
+        }),
       };
 
       await (context.webAPI as any).execute(request);
@@ -198,14 +193,11 @@ export class CustomCommandFactory {
   /**
    * Interpolate parameter values with context tokens
    */
-  private static interpolateParameters(
-    parameters: Record<string, any>,
-    context: ICommandContext
-  ): Record<string, any> {
+  private static interpolateParameters(parameters: Record<string, any>, context: ICommandContext): Record<string, any> {
     const result: Record<string, any> = {};
 
     Object.entries(parameters).forEach(([key, value]) => {
-      if (typeof value === "string") {
+      if (typeof value === 'string') {
         result[key] = this.interpolateString(value, context);
       } else {
         result[key] = value;
@@ -222,8 +214,8 @@ export class CustomCommandFactory {
     let result = value;
     result = result.replace(/\{selectedCount\}/g, String(context.selectedRecords.length));
     result = result.replace(/\{entityName\}/g, context.entityName);
-    result = result.replace(/\{parentRecordId\}/g, context.parentRecord?.id?.guid ?? "");
-    result = result.replace(/\{parentTable\}/g, (context.parentRecord as any)?.entityType ?? "");
+    result = result.replace(/\{parentRecordId\}/g, context.parentRecord?.id?.guid ?? '');
+    result = result.replace(/\{parentTable\}/g, (context.parentRecord as any)?.entityType ?? '');
     // Add more token replacements as needed
     return result;
   }
@@ -238,7 +230,7 @@ export class CustomCommandFactory {
       ArrowUpload: ArrowUploadRegular,
       ArrowDownload: ArrowDownloadRegular,
       Mail: MailRegular,
-      Send: SendRegular
+      Send: SendRegular,
       // Add more icon mappings as needed
     };
 

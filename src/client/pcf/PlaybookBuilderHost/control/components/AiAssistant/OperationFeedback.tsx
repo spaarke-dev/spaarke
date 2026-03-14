@@ -13,15 +13,7 @@
  */
 
 import * as React from 'react';
-import {
-  Spinner,
-  Text,
-  Badge,
-  makeStyles,
-  tokens,
-  shorthands,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Spinner, Text, Badge, makeStyles, tokens, shorthands, mergeClasses } from '@fluentui/react-components';
 import { Checkmark12Regular } from '@fluentui/react-icons';
 import { useAiAssistantStore } from '../../stores/aiAssistantStore';
 
@@ -165,11 +157,7 @@ export const OperationFeedback: React.FC<OperationFeedbackProps> = ({
     >
       {/* Spinner or complete icon */}
       <div className={styles.spinnerContainer}>
-        {showComplete ? (
-          <Checkmark12Regular className={styles.completeIcon} />
-        ) : (
-          <Spinner size="tiny" />
-        )}
+        {showComplete ? <Checkmark12Regular className={styles.completeIcon} /> : <Spinner size="tiny" />}
       </div>
 
       {/* Status text */}

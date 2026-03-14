@@ -320,10 +320,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
             <div className={styles.sourceSection}>
               <Text className={styles.sourceLabel}>Copying from</Text>
               <div className={styles.sourceInfo}>
-                <OwnershipBadge
-                  ownershipType={sourceScope.ownershipType}
-                  className={styles.ownershipBadge}
-                />
+                <OwnershipBadge ownershipType={sourceScope.ownershipType} className={styles.ownershipBadge} />
                 <Text className={styles.sourceName}>{sourceScope.displayName}</Text>
               </div>
               {sourceScope.description && (
@@ -362,12 +359,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
         </DialogBody>
 
         <DialogActions>
-          <Button
-            appearance="secondary"
-            icon={<Dismiss20Regular />}
-            onClick={handleCancel}
-            disabled={isSubmitting}
-          >
+          <Button appearance="secondary" icon={<Dismiss20Regular />} onClick={handleCancel} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button

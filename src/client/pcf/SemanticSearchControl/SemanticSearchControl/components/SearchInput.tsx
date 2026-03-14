@@ -8,31 +8,25 @@
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
-import * as React from "react";
-import { useCallback, KeyboardEvent } from "react";
-import {
-    makeStyles,
-    tokens,
-    Input,
-    Button,
-    Spinner,
-} from "@fluentui/react-components";
-import { Search20Regular, AddRegular } from "@fluentui/react-icons";
-import { ISearchInputProps } from "../types";
+import * as React from 'react';
+import { useCallback, KeyboardEvent } from 'react';
+import { makeStyles, tokens, Input, Button, Spinner } from '@fluentui/react-components';
+import { Search20Regular, AddRegular } from '@fluentui/react-icons';
+import { ISearchInputProps } from '../types';
 
 const useStyles = makeStyles({
-    container: {
-        display: "flex",
-        gap: tokens.spacingHorizontalS,
-        alignItems: "center",
-    },
-    input: {
-        flex: 1,
-        minWidth: "200px",
-    },
-    searchButton: {
-        minWidth: "90px",
-    },
+  container: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalS,
+    alignItems: 'center',
+  },
+  input: {
+    flex: 1,
+    minWidth: '200px',
+  },
+  searchButton: {
+    minWidth: '90px',
+  },
 });
 
 /**
@@ -46,72 +40,67 @@ const useStyles = makeStyles({
  * @param props.onAddDocument - Callback when Add Document is clicked
  */
 export const SearchInput: React.FC<ISearchInputProps> = ({
-    value,
-    placeholder,
-    disabled,
-    onValueChange,
-    onSearch,
-    onAddDocument,
+  value,
+  placeholder,
+  disabled,
+  onValueChange,
+  onSearch,
+  onAddDocument,
 }) => {
-    const styles = useStyles();
+  const styles = useStyles();
 
-    // Handle input change
-    const handleInputChange = useCallback(
-        (ev: React.ChangeEvent<HTMLInputElement>) => {
-            onValueChange(ev.target.value);
-        },
-        [onValueChange]
-    );
+  // Handle input change
+  const handleInputChange = useCallback(
+    (ev: React.ChangeEvent<HTMLInputElement>) => {
+      onValueChange(ev.target.value);
+    },
+    [onValueChange]
+  );
 
-    // Handle Enter key press — allow search with empty query
-    const handleKeyDown = useCallback(
-        (ev: KeyboardEvent<HTMLInputElement>) => {
-            if (ev.key === "Enter" && !disabled) {
-                onSearch();
-            }
-        },
-        [disabled, onSearch]
-    );
+  // Handle Enter key press — allow search with empty query
+  const handleKeyDown = useCallback(
+    (ev: KeyboardEvent<HTMLInputElement>) => {
+      if (ev.key === 'Enter' && !disabled) {
+        onSearch();
+      }
+    },
+    [disabled, onSearch]
+  );
 
-    // Handle search button click
-    const handleSearchClick = useCallback(() => {
-        if (!disabled) {
-            onSearch();
-        }
-    }, [disabled, onSearch]);
+  // Handle search button click
+  const handleSearchClick = useCallback(() => {
+    if (!disabled) {
+      onSearch();
+    }
+  }, [disabled, onSearch]);
 
-    return (
-        <div className={styles.container}>
-            <Input
-                className={styles.input}
-                value={value}
-                placeholder={placeholder}
-                disabled={disabled}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                contentBefore={<Search20Regular />}
-                appearance="outline"
-                size="medium"
-            />
-            <Button
-                className={styles.searchButton}
-                appearance="primary"
-                disabled={disabled}
-                onClick={handleSearchClick}
-                icon={disabled ? <Spinner size="tiny" /> : undefined}
-            >
-                {disabled ? "Searching..." : "Search"}
-            </Button>
-            <Button
-                appearance="secondary"
-                icon={<AddRegular />}
-                onClick={onAddDocument}
-                disabled={disabled}
-            >
-                Add Document
-            </Button>
-        </div>
-    );
+  return (
+    <div className={styles.container}>
+      <Input
+        className={styles.input}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        contentBefore={<Search20Regular />}
+        appearance="outline"
+        size="medium"
+      />
+      <Button
+        className={styles.searchButton}
+        appearance="primary"
+        disabled={disabled}
+        onClick={handleSearchClick}
+        icon={disabled ? <Spinner size="tiny" /> : undefined}
+      >
+        {disabled ? 'Searching...' : 'Search'}
+      </Button>
+      <Button appearance="secondary" icon={<AddRegular />} onClick={onAddDocument} disabled={disabled}>
+        Add Document
+      </Button>
+    </div>
+  );
 };
 
 export default SearchInput;

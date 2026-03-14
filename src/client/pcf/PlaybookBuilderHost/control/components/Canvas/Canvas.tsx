@@ -7,13 +7,7 @@
 
 import * as React from 'react';
 import { useCallback, useRef, DragEvent, CSSProperties } from 'react';
-import ReactFlow, {
-  Background,
-  Controls,
-  ReactFlowInstance,
-  Node,
-  BackgroundVariant,
-} from 'react-flow-renderer';
+import ReactFlow, { Background, Controls, ReactFlowInstance, Node, BackgroundVariant } from 'react-flow-renderer';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { useCanvasStore, PlaybookNodeType, PlaybookNode } from '../../stores';
 import { nodeTypes } from '../Nodes';
@@ -38,7 +32,6 @@ const reactFlowStyle: CSSProperties = {
   backgroundColor: 'var(--colorNeutralBackground1)',
 };
 
-
 /**
  * Main canvas component using React Flow v10.
  * Supports node placement, edge connections, zoom/pan, and drag-drop.
@@ -49,15 +42,7 @@ export const Canvas = React.memo(function Canvas() {
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
 
   // Get state and actions from store
-  const {
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    selectNode,
-    onDrop,
-  } = useCanvasStore();
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectNode, onDrop } = useCanvasStore();
 
   // Handle React Flow initialization
   const onInit = useCallback((instance: ReactFlowInstance) => {
@@ -141,12 +126,7 @@ export const Canvas = React.memo(function Canvas() {
         deleteKeyCode="Delete"
         selectionKeyCode="Shift"
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={16}
-          size={1}
-          color={tokens.colorNeutralStroke2}
-        />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color={tokens.colorNeutralStroke2} />
         <Controls showZoom showFitView showInteractive />
       </ReactFlow>
     </div>

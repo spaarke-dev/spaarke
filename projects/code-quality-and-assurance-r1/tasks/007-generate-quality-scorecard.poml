@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Generate Quality Scorecard and Baseline Metrics</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 002, 003, 004, 005, 006</dependencies>
+    <blocks>008</blocks>
+    <tags>audit, metrics, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Compile all six audit reports (tasks 001-006) into a single quality scorecard document.
+    Assign A-F letter grades per quality area, calculate baseline metrics (coverage percentage,
+    TODO count, lint violation count, dependency health score, file size distribution), and
+    produce an overall project quality grade. This scorecard becomes the baseline against which
+    all future quality improvements are measured.
+  </prompt>
+
+  <role>
+    Senior engineering lead and quality analyst. Synthesize findings from all six audit areas
+    into a coherent quality assessment. Objective, data-driven grading using the evidence from
+    the audit reports.
+  </role>
+
+  <goal>
+    A comprehensive quality scorecard at projects/code-quality-and-assurance-r1/notes/quality-scorecard.md
+    with: (1) A-F grade and key metrics for each of the 6 audit areas, (2) an overall project
+    quality grade, (3) a quantitative baseline metrics table that will be updated in future
+    quarterly audits, and (4) a prioritized summary of the most impactful issues that feeds
+    directly into task 008 (remediation plan).
+  </goal>
+
+  <context>
+    <background>
+      This task is the synthesis step of Phase 1. All six parallel audit tasks (001-006) must
+      be completed before this task begins. Each audit report contains:
+      - An area-specific letter grade (A-F)
+      - Individual findings with severity ratings
+      - A prioritized top-5 remediation list
+
+      The scorecard consolidates these into a unified view that serves multiple audiences:
+      1. Engineering team: understand the current state and what to fix first
+      2. Project tracking: establish the baseline for measuring improvement over 3 months
+      3. Task 008 input: the scorecard's prioritized findings map directly to Phase 4 remediation tasks
+
+      Grading scale guidance (apply consistently across all areas):
+      - A (90-100): Excellent — minimal issues, follows all conventions, no critical findings
+      - B (80-89): Good — minor issues only, no high-severity findings
+      - C (70-79): Acceptable — some issues present, at least one high-severity finding
+      - D (60-69): Poor — multiple high-severity findings, systemic pattern problems
+      - F (<60): Critical — critical vulnerabilities, fundamental pattern violations, major blockers
+
+      The quantitative metrics table is the most important output for future trend tracking.
+      Every metric must have a precise number (not "many" or "several") so that future audits
+      can show +/- change.
+
+      Key metrics to capture:
+      - Overall test coverage % (from task 004)
+      - Total TODO/FIXME count across all code (from tasks 001 + 002 + 003)
+      - Total ESLint violation count (errors + warnings, from task 002)
+      - Total PSScriptAnalyzer violation count (from task 003)
+      - Dependency vulnerability count by severity (from task 005)
+      - Largest file size in lines (Program.cs and others, from task 001)
+      - Number of interfaces with single implementations (from task 001)
+      - Number of PCF projects missing ESLint config (from task 006)
+      - Number of TypeScript projects with strict mode disabled (from task 006)
+    </background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md (read — task 001 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md (read — task 002 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-powershell.md (read — task 003 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-test-suite.md (read — task 004 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md (read — task 005 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md (read — task 006 output)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-scorecard.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 6 audit reports (tasks 001-006) must be read before generating the scorecard. If any audit report is missing, STOP and report which prerequisite task is incomplete.</constraint>
+    <constraint source="spec">Every metric in the baseline metrics table must be a precise number — not qualitative descriptions. If a precise number cannot be obtained from the audit reports, note it as "requires re-measurement" and explain why.</constraint>
+    <constraint source="spec">Grades must be justified with evidence from the audit reports — cite specific findings that drove the grade up or down.</constraint>
+    <constraint source="spec">The overall project grade must be calculated as a weighted average: BFF API (25%), TypeScript/PCF (25%), Tests (20%), Dependencies (15%), PowerShell (10%), Configuration (5%).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-powershell.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-test-suite.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all 6 audit reports exist and are complete — if any is missing or appears incomplete (no grade assigned), stop and report which prerequisite tasks are incomplete</step>
+    <step order="2">Extract the grade and top findings from each audit report:
+      - audit-bff-api.md: grade, DI registration count, Program.cs line count, TODO count, top 3 findings
+      - audit-typescript-pcf.md: grade, total ESLint violations, ADR-021/022/026 violation count, TODO count, top 3 findings
+      - audit-powershell.md: grade, total PSScriptAnalyzer violations, top 3 findings
+      - audit-test-suite.md: grade, overall coverage %, ArchTest count, top 3 findings
+      - audit-dependencies.md: grade, critical/high/medium/low vuln counts, top 3 findings
+      - audit-configuration.md: grade, missing config count, top 3 findings
+    </step>
+    <step order="3">Compile the quantitative baseline metrics table — one row per metric, columns: metric name, baseline value (2026-03-11), target value, improvement needed</step>
+    <step order="4">Calculate overall project grade using weighted average: BFF API (25%) + TypeScript/PCF (25%) + Tests (20%) + Dependencies (15%) + PowerShell (10%) + Configuration (5%)</step>
+    <step order="5">Identify the top 10 most impactful issues across all areas — rank by: (1) security/critical severity, (2) breadth of impact, (3) remediation effort vs. improvement</step>
+    <step order="6">Map each top-10 issue to the Phase 4 task that will address it (030 = Program.cs, 031 = TODOs, 032 = dependencies, 033 = ESLint, 034 = Prettier, 035 = CI/CD)</step>
+    <step order="7">Write the quality scorecard document with sections: Executive Summary, Per-Area Grades (with evidence), Baseline Metrics Table, Top 10 Issues, Phase 4 Mapping, Measurement Schedule</step>
+    <step order="8">Write the complete scorecard to projects/code-quality-and-assurance-r1/notes/quality-scorecard.md</step>
+    <step order="9">Update TASK-INDEX.md: change task 007 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/quality-scorecard.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>quality-scorecard.md exists with all required sections</criterion>
+    <criterion>Letter grade (A-F) assigned to each of the 6 audit areas with evidence citations from the audit reports</criterion>
+    <criterion>Overall project quality grade calculated using the specified weighted average</criterion>
+    <criterion>Baseline metrics table contains precise numbers for: coverage %, total TODO count, total ESLint violations, total PSScriptAnalyzer violations, vulnerability counts by severity, Program.cs line count, DI registration count</criterion>
+    <criterion>Target values specified for each baseline metric (aligned with project success criteria)</criterion>
+    <criterion>Top 10 most impactful issues listed and ranked by priority</criterion>
+    <criterion>Each top-10 issue mapped to the Phase 4 remediation task that addresses it</criterion>
+    <criterion>Measurement schedule defined (next review date for quarterly audit comparison)</criterion>
+    <criterion>No source files were modified during this task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

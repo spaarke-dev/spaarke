@@ -261,50 +261,30 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
             {documentName || 'Document Preview'}
           </DialogTitle>
           <Tooltip content="Close" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              aria-label="Close"
-              onClick={onClose}
-            />
+            <Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />
           </Tooltip>
         </div>
 
         {/* Toolbar */}
         <Toolbar className={styles.toolbar} size="small">
           <Tooltip content="Open file" relationship="label">
-            <ToolbarButton
-              icon={<Open24Regular />}
-              onClick={handleOpenFile}
-            >
+            <ToolbarButton icon={<Open24Regular />} onClick={handleOpenFile}>
               Open File
             </ToolbarButton>
           </Tooltip>
           <Tooltip content="Open record" relationship="label">
-            <ToolbarButton
-              icon={<OpenRegular />}
-              onClick={handleOpenRecord}
-            >
+            <ToolbarButton icon={<OpenRegular />} onClick={handleOpenRecord}>
               Open Record
             </ToolbarButton>
           </Tooltip>
           <ToolbarDivider />
           <Tooltip content="Copy link to clipboard" relationship="label">
-            <ToolbarButton
-              icon={<LinkRegular />}
-              onClick={handleCopyLink}
-            >
+            <ToolbarButton icon={<LinkRegular />} onClick={handleCopyLink}>
               Copy Link
             </ToolbarButton>
           </Tooltip>
-          <Tooltip
-            content={inWorkspace ? 'Remove from workspace' : 'Add to workspace'}
-            relationship="label"
-          >
-            <ToolbarButton
-              icon={inWorkspace ? <StarFilled /> : <StarRegular />}
-              onClick={handleToggleWorkspace}
-            >
+          <Tooltip content={inWorkspace ? 'Remove from workspace' : 'Add to workspace'} relationship="label">
+            <ToolbarButton icon={inWorkspace ? <StarFilled /> : <StarRegular />} onClick={handleToggleWorkspace}>
               {inWorkspace ? 'Remove from Workspace' : 'Add to Workspace'}
             </ToolbarButton>
           </Tooltip>

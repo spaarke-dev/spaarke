@@ -31,17 +31,9 @@
  */
 
 // Main client
-export {
-  officeApiClient,
-  createOfficeApiClient,
-  OfficeApiClientImpl,
-} from './OfficeApiClient';
+export { officeApiClient, createOfficeApiClient, OfficeApiClientImpl } from './OfficeApiClient';
 
-export type {
-  IOfficeApiClient,
-  OfficeApiClientConfig,
-  RequestOptions,
-} from './OfficeApiClient';
+export type { IOfficeApiClient, OfficeApiClientConfig, RequestOptions } from './OfficeApiClient';
 
 // Error handling
 export {

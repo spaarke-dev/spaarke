@@ -15,12 +15,7 @@ import {
   Spinner,
   Field,
 } from '@fluentui/react-components';
-import {
-  ShareRegular,
-  CopyRegular,
-  SearchRegular,
-  DocumentRegular,
-} from '@fluentui/react-icons';
+import { ShareRegular, CopyRegular, SearchRegular, DocumentRegular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
@@ -141,7 +136,9 @@ export const ShareView: React.FC<ShareViewProps> = ({
 
   const handleGenerateLink = async () => {
     if (onGenerateLink && selectedDocument) {
-      const link = await onGenerateLink(selectedDocument.id, { type: permissionType });
+      const link = await onGenerateLink(selectedDocument.id, {
+        type: permissionType,
+      });
       setGeneratedLink(link);
     }
   };
@@ -164,10 +161,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
     <div className={styles.container}>
       {/* Search Section */}
       <Card>
-        <CardHeader
-          image={<SearchRegular />}
-          header={<Text weight="semibold">Find Document</Text>}
-        />
+        <CardHeader image={<SearchRegular />} header={<Text weight="semibold">Find Document</Text>} />
         <div className={styles.searchSection}>
           <div className={styles.searchRow}>
             <Input
@@ -175,7 +169,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
               placeholder="Search by name or path..."
               value={searchQuery}
               onChange={(_, data) => setSearchQuery(data.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyDown={e => e.key === 'Enter' && handleSearch()}
             />
             <Button
               icon={isLoading ? <Spinner size="tiny" /> : <SearchRegular />}
@@ -189,7 +183,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
           {/* Search Results */}
           {searchResults.length > 0 && (
             <div className={styles.documentList}>
-              {searchResults.map((doc) => (
+              {searchResults.map(doc => (
                 <div
                   key={doc.id}
                   className={`${styles.documentItem} ${selectedDocument?.id === doc.id ? styles.documentItemSelected : ''}`}
@@ -210,10 +204,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
       {/* Link Generation */}
       {selectedDocument && (
         <Card>
-          <CardHeader
-            image={<ShareRegular />}
-            header={<Text weight="semibold">Generate Sharing Link</Text>}
-          />
+          <CardHeader image={<ShareRegular />} header={<Text weight="semibold">Generate Sharing Link</Text>} />
           <div className={styles.linkSection}>
             <Body1>Selected: {selectedDocument.name}</Body1>
 
@@ -239,15 +230,8 @@ export const ShareView: React.FC<ShareViewProps> = ({
             {/* Generated Link */}
             {generatedLink && (
               <div className={styles.linkRow}>
-                <Input
-                  className={styles.linkInput}
-                  value={generatedLink}
-                  readOnly
-                />
-                <Button
-                  icon={<CopyRegular />}
-                  onClick={handleCopyLink}
-                >
+                <Input className={styles.linkInput} value={generatedLink} readOnly />
+                <Button icon={<CopyRegular />} onClick={handleCopyLink}>
                   {linkCopied ? 'Copied!' : 'Copy'}
                 </Button>
               </div>
@@ -266,11 +250,7 @@ export const ShareView: React.FC<ShareViewProps> = ({
       {/* Insert Action */}
       {generatedLink && (
         <div className={styles.actions}>
-          <Button
-            appearance="primary"
-            onClick={handleInsertLink}
-            disabled={isLoading}
-          >
+          <Button appearance="primary" onClick={handleInsertLink} disabled={isLoading}>
             Insert Link
           </Button>
         </div>

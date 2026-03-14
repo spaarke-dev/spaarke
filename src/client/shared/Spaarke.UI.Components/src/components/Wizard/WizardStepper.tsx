@@ -192,9 +192,7 @@ const StepIndicator: React.FC<IStepIndicatorProps> = ({ status }) => {
   }
 
   // pending
-  return (
-    <span className={styles.indicatorPending} aria-hidden="true" />
-  );
+  return <span className={styles.indicatorPending} aria-hidden="true" />;
 };
 
 // ---------------------------------------------------------------------------
@@ -212,22 +210,14 @@ const StepRow: React.FC<IStepRowProps> = ({ step, isLast }) => {
     step.status === 'active'
       ? styles.labelActive
       : step.status === 'completed'
-      ? styles.labelCompleted
-      : styles.labelPending;
+        ? styles.labelCompleted
+        : styles.labelPending;
 
   return (
-    <li
-      className={styles.stepItem}
-      role="listitem"
-      aria-current={step.status === 'active' ? 'step' : undefined}
-    >
+    <li className={styles.stepItem} role="listitem" aria-current={step.status === 'active' ? 'step' : undefined}>
       <div className={styles.stepRow}>
         <StepIndicator status={step.status} />
-        <Text
-          size={200}
-          className={labelClass}
-          aria-label={`${step.label}, ${step.status}`}
-        >
+        <Text size={200} className={labelClass} aria-label={`${step.label}, ${step.status}`}>
           {step.label}
         </Text>
       </div>
@@ -246,21 +236,12 @@ export const WizardStepper: React.FC<IWizardStepperProps> = ({ steps }) => {
 
   return (
     <nav className={styles.stepper} aria-label="Wizard steps">
-      <Text
-        size={100}
-        weight="semibold"
-        className={styles.stepsLabel}
-        aria-hidden="true"
-      >
+      <Text size={100} weight="semibold" className={styles.stepsLabel} aria-hidden="true">
         Steps
       </Text>
       <ol className={styles.stepList} aria-label="Step list">
         {steps.map((step, index) => (
-          <StepRow
-            key={step.id}
-            step={step}
-            isLast={index === steps.length - 1}
-          />
+          <StepRow key={step.id} step={step} isLast={index === steps.length - 1} />
         ))}
       </ol>
     </nav>

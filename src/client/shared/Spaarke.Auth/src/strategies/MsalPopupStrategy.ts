@@ -11,10 +11,7 @@ export class MsalPopupStrategy implements ITokenStrategy {
   private readonly _getMsalInstance: () => PublicClientApplication | null;
   private readonly _scope: string;
 
-  constructor(
-    getMsalInstance: () => PublicClientApplication | null,
-    scope: string,
-  ) {
+  constructor(getMsalInstance: () => PublicClientApplication | null, scope: string) {
     this._getMsalInstance = getMsalInstance;
     this._scope = scope;
   }

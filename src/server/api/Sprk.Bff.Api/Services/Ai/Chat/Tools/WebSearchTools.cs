@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 ///   - <see cref="SearchWebAsync"/> — searches the web via Azure Bing Search API and returns
 ///     results marked as external content for data governance (ADR-015).
 ///
-/// TODO: PH-088-A (post-R2) — SearchWebAsync returns mock results until Bing API is provisioned.
+/// TRACKED: GitHub #232 - SearchWebAsync returns mock results until Bing API is provisioned (PH-088-A).
 ///
 /// When the Azure Bing Search API is provisioned, this class will:
 ///   - Accept an HttpClient pre-configured with the Bing API key (Ocp-Apim-Subscription-Key header)
@@ -50,7 +50,7 @@ public sealed class WebSearchTools
     /// Results are marked as [External Source] to indicate they originate from the public web
     /// and have not been verified against internal knowledge sources (ADR-015).
     ///
-    /// TODO: PH-088-A (post-R2) — Returns mock results until Bing API is provisioned.
+    /// TRACKED: GitHub #232 - Returns mock results until Bing API is provisioned (PH-088-A).
     /// </summary>
     /// <param name="query">Web search query</param>
     /// <param name="maxResults">Maximum number of results to return (default: 5, cap: 10).</param>
@@ -73,7 +73,7 @@ public sealed class WebSearchTools
             "SearchWeb starting — queryLen={QueryLen}, maxResults={MaxResults}",
             query.Length, count);
 
-        // TODO: PH-088-A (post-R2) — Replace mock results with Bing API call when provisioned.
+        // TRACKED: GitHub #232 - Replace with Bing API (PH-088-A)
         //
         // When Bing API is provisioned, replace this block with:
         //   1. HttpClient GET to https://api.bing.microsoft.com/v7.0/search?q={query}&count={count}&mkt=en-US
@@ -108,7 +108,7 @@ public sealed class WebSearchTools
     /// Generates mock search results for development and testing.
     /// Returns up to <paramref name="count"/> realistic-looking results.
     ///
-    /// TODO: PH-088-A (post-R2) — Remove when real Bing API call replaces mock results.
+    /// TRACKED: GitHub #232 - Remove when real Bing API call replaces mock results (PH-088-A).
     /// </summary>
     private static List<MockSearchResult> GenerateMockResults(string query, int count)
     {

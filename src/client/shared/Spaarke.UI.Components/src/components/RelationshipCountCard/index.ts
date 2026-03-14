@@ -1,4 +1,1 @@
-export {
-  RelationshipCountCard,
-  type IRelationshipCountCardProps,
-} from "./RelationshipCountCard";
+export { RelationshipCountCard, type IRelationshipCountCardProps } from './RelationshipCountCard';

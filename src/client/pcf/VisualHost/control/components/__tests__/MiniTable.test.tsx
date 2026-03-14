@@ -4,11 +4,7 @@ import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-com
 import { MiniTable, IMiniTableColumn, IMiniTableItem } from '../MiniTable';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
-  return render(
-    <FluentProvider theme={theme}>
-      {component}
-    </FluentProvider>
-  );
+  return render(<FluentProvider theme={theme}>{component}</FluentProvider>);
 };
 
 const mockColumns: IMiniTableColumn[] = [
@@ -27,9 +23,7 @@ const mockItems: IMiniTableItem[] = [
 describe('MiniTable', () => {
   describe('rendering', () => {
     it('renders with required props', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} />);
 
       // Column headers should be visible
       expect(screen.getByText('Name')).toBeInTheDocument();
@@ -41,25 +35,19 @@ describe('MiniTable', () => {
     });
 
     it('renders with title', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} title="Top Items" />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} title="Top Items" />);
 
       expect(screen.getByText('Top Items')).toBeInTheDocument();
     });
 
     it('renders empty state when no items', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={[]} title="Empty Table" />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={[]} title="Empty Table" />);
 
       expect(screen.getByText('No data available')).toBeInTheDocument();
     });
 
     it('shows rank numbers by default', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} showRank={true} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} showRank={true} />);
 
       // Rank column header
       expect(screen.getByText('#')).toBeInTheDocument();
@@ -70,17 +58,13 @@ describe('MiniTable', () => {
     });
 
     it('hides rank numbers when showRank is false', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} showRank={false} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} showRank={false} />);
 
       expect(screen.queryByText('#')).not.toBeInTheDocument();
     });
 
     it('limits items based on topN prop', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} topN={3} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} topN={3} />);
 
       expect(screen.getByText('Item A')).toBeInTheDocument();
       expect(screen.getByText('Item B')).toBeInTheDocument();
@@ -96,9 +80,7 @@ describe('MiniTable', () => {
         fieldValue: String(i + 1),
       }));
 
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={manyItems} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={manyItems} />);
 
       expect(screen.getByText('Item 1')).toBeInTheDocument();
       expect(screen.getByText('Item 5')).toBeInTheDocument();
@@ -111,12 +93,7 @@ describe('MiniTable', () => {
       const mockDrill = jest.fn();
 
       renderWithTheme(
-        <MiniTable
-          columns={mockColumns}
-          items={mockItems}
-          onDrillInteraction={mockDrill}
-          drillField="item"
-        />
+        <MiniTable columns={mockColumns} items={mockItems} onDrillInteraction={mockDrill} drillField="item" />
       );
 
       // Find and click a row
@@ -137,12 +114,7 @@ describe('MiniTable', () => {
       const mockDrill = jest.fn();
 
       renderWithTheme(
-        <MiniTable
-          columns={mockColumns}
-          items={mockItems}
-          onDrillInteraction={mockDrill}
-          drillField="item"
-        />
+        <MiniTable columns={mockColumns} items={mockItems} onDrillInteraction={mockDrill} drillField="item" />
       );
 
       const row = screen.getByText('Item A').closest('tr');
@@ -155,13 +127,7 @@ describe('MiniTable', () => {
     it('rows are not interactive without drillField', () => {
       const mockDrill = jest.fn();
 
-      renderWithTheme(
-        <MiniTable
-          columns={mockColumns}
-          items={mockItems}
-          onDrillInteraction={mockDrill}
-        />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} onDrillInteraction={mockDrill} />);
 
       // Rows should not have tabindex when not interactive
       const row = screen.getByText('Item A').closest('tr');
@@ -188,10 +154,7 @@ describe('MiniTable', () => {
 
   describe('theme support', () => {
     it('renders correctly in dark theme', () => {
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={mockItems} title="Dark Table" />,
-        webDarkTheme
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={mockItems} title="Dark Table" />, webDarkTheme);
 
       expect(screen.getByText('Dark Table')).toBeInTheDocument();
     });
@@ -204,9 +167,7 @@ describe('MiniTable', () => {
         { key: 'value', header: 'Value', isValue: true, width: '100px' },
       ];
 
-      renderWithTheme(
-        <MiniTable columns={columnsWithWidth} items={mockItems} />
-      );
+      renderWithTheme(<MiniTable columns={columnsWithWidth} items={mockItems} />);
 
       expect(screen.getByText('Name')).toBeInTheDocument();
     });
@@ -216,9 +177,7 @@ describe('MiniTable', () => {
         { id: '1', values: { name: 'Item A' }, fieldValue: 'a' }, // missing value
       ];
 
-      renderWithTheme(
-        <MiniTable columns={mockColumns} items={itemsWithMissing} />
-      );
+      renderWithTheme(<MiniTable columns={mockColumns} items={itemsWithMissing} />);
 
       expect(screen.getByText('Item A')).toBeInTheDocument();
       expect(screen.getByText('-')).toBeInTheDocument();

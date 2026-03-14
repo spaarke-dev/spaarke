@@ -8,6 +8,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -371,7 +372,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("DocumentIntelligence:RecordMatchingEnabled", "false");
         builder.UseSetting("Analysis:Enabled", "false");
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureTestServices(services =>
         {
             // Remove real registrations and replace with test doubles
             services.RemoveAll<ChatSessionManager>();
@@ -415,6 +416,14 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(MockBehavior.Loose).Object);
+
+            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
+            // Register its missing dependency stubs so DI can construct it.
+            services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(MockBehavior.Loose).Object);
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
+
+            // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
+            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(MockBehavior.Loose).Object);
 
             services.AddSingleton(_ => new Azure.Search.Documents.Indexes.SearchIndexClient(
                 new Uri("https://test-search.search.windows.net"),
@@ -716,7 +725,7 @@ public class ReAnalysisFlowErrorFixture : ReAnalysisFlowTestFixture
         base.ConfigureWebHost(builder);
 
         // Override the chat client mock to throw during streaming
-        builder.ConfigureServices(services =>
+        builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IChatClient>();
 

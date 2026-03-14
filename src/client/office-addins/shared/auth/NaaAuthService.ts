@@ -220,9 +220,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
     if (this.naaSupported) {
       // Use NAA (Nested App Authentication) - the preferred method
       console.info('[NaaAuthService] Using Nested App Authentication (NAA)');
-      this.msalInstance = await createNestablePublicClientApplication(
-        createNaaMsalConfig(this.config)
-      );
+      this.msalInstance = await createNestablePublicClientApplication(createNaaMsalConfig(this.config));
     } else {
       // Fallback to standard MSAL with Dialog API
       console.info('[NaaAuthService] NAA not supported, using fallback authentication');
@@ -377,7 +375,9 @@ class NaaAuthServiceImpl implements INaaAuthService {
   // Private methods
   // ============================================
 
-  private ensureInitialized(): asserts this is { msalInstance: IPublicClientApplication } {
+  private ensureInitialized(): asserts this is {
+    msalInstance: IPublicClientApplication;
+  } {
     if (!this.initialized || !this.msalInstance) {
       throw new NaaAuthError(
         NaaAuthErrorCode.NOT_INITIALIZED,
@@ -393,7 +393,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
 
   private notifyStateChange(): void {
     const state = this.getAuthState();
-    this.authStateListeners.forEach((listener) => {
+    this.authStateListeners.forEach(listener => {
       try {
         listener(state);
       } catch (error) {
@@ -453,10 +453,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
 
   private async acquireTokenInteractive(): Promise<AuthenticationResult> {
     if (!this.msalInstance) {
-      throw new NaaAuthError(
-        NaaAuthErrorCode.NOT_INITIALIZED,
-        'Authentication service is not initialized.'
-      );
+      throw new NaaAuthError(NaaAuthErrorCode.NOT_INITIALIZED, 'Authentication service is not initialized.');
     }
 
     const loginHint = this.currentAccount?.username;
@@ -468,10 +465,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
     });
   }
 
-  private mapToTokenResult(
-    authResult: AuthenticationResult,
-    fromCache: boolean
-  ): TokenResult {
+  private mapToTokenResult(authResult: AuthenticationResult, fromCache: boolean): TokenResult {
     return {
       accessToken: authResult.accessToken,
       expiresOn: authResult.expiresOn || new Date(Date.now() + 3600 * 1000),
@@ -483,21 +477,13 @@ class NaaAuthServiceImpl implements INaaAuthService {
   private mapToAuthError(error: unknown): NaaAuthError {
     // Handle MSAL errors
     if (error instanceof InteractionRequiredAuthError) {
-      return new NaaAuthError(
-        NaaAuthErrorCode.SILENT_FAILED,
-        'Sign-in required. Please sign in to continue.',
-        error
-      );
+      return new NaaAuthError(NaaAuthErrorCode.SILENT_FAILED, 'Sign-in required. Please sign in to continue.', error);
     }
 
     if (error instanceof BrowserAuthError) {
       // Check for user cancellation
       if (error.errorCode === 'user_cancelled') {
-        return new NaaAuthError(
-          NaaAuthErrorCode.USER_CANCELLED,
-          'Sign-in was cancelled.',
-          error
-        );
+        return new NaaAuthError(NaaAuthErrorCode.USER_CANCELLED, 'Sign-in was cancelled.', error);
       }
 
       // Check for popup blocked
@@ -520,20 +506,12 @@ class NaaAuthServiceImpl implements INaaAuthService {
     }
 
     if (error instanceof AuthError) {
-      return new NaaAuthError(
-        NaaAuthErrorCode.UNKNOWN,
-        `Authentication failed: ${error.errorMessage}`,
-        error
-      );
+      return new NaaAuthError(NaaAuthErrorCode.UNKNOWN, `Authentication failed: ${error.errorMessage}`, error);
     }
 
     // Unknown error
     const message = error instanceof Error ? error.message : 'Unknown authentication error';
-    return new NaaAuthError(
-      NaaAuthErrorCode.UNKNOWN,
-      message,
-      error instanceof Error ? error : undefined
-    );
+    return new NaaAuthError(NaaAuthErrorCode.UNKNOWN, message, error instanceof Error ? error : undefined);
   }
 
   /**
@@ -559,7 +537,7 @@ class NaaAuthServiceImpl implements INaaAuthService {
       }
 
       // Wait for Office to be ready
-      await new Promise<void>((resolve) => {
+      await new Promise<void>(resolve => {
         if (Office.onReady) {
           Office.onReady(() => resolve());
         } else {

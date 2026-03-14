@@ -1,4 +1,1 @@
-export {
-  FindSimilarDialog,
-  type IFindSimilarDialogProps,
-} from "./FindSimilarDialog";
+export { FindSimilarDialog, type IFindSimilarDialogProps } from './FindSimilarDialog';

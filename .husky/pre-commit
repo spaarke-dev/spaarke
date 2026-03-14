@@ -1,0 +1,4 @@
+# Skip pre-commit hooks in CI environments
+[ "$CI" = "true" ] && exit 0
+
+npx lint-staged
