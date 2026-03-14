@@ -55,7 +55,11 @@ When Claude Code is asked to "deploy to production" or "set up production enviro
 12. [Troubleshooting](#12-troubleshooting)
 13. [Known Issues and Lessons Learned](#13-known-issues-and-lessons-learned)
 14. [Reference: Resource Inventory](#14-reference-resource-inventory)
-15. [CI/CD Pipelines](#15-cicd-pipelines)
+15. [Subscription and Resource Group Strategy](#15-subscription-and-resource-group-strategy)
+16. [Dataverse Solution Lifecycle](#16-dataverse-solution-lifecycle)
+17. [Managed vs Unmanaged Solutions](#17-managed-vs-unmanaged-solutions)
+18. [Dataverse CI/CD and Deployment Automation](#18-dataverse-cicd-and-deployment-automation)
+19. [CI/CD Pipelines (Azure)](#19-cicd-pipelines-azure)
 
 ---
 
@@ -905,7 +909,371 @@ param openAiLocation = 'westus3'
 
 ---
 
-## 15. CI/CD Pipelines
+## 15. Subscription and Resource Group Strategy
+
+> **ADR**: See [ADR-027: Subscription Isolation and Dataverse Solution Management](../../docs/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md)
+
+### Resource Group Model
+
+Spaarke uses **explicit resource groups** for isolation. These are created automatically by Bicep templates (subscription-scoped deployments):
+
+| Scope | Resource Group | Created By | Contains |
+|-------|---------------|------------|----------|
+| Shared platform | `rg-spaarke-platform-{env}` | `platform.bicep` via `Deploy-Platform.ps1` | App Service, OpenAI, AI Search, Doc Intel, Key Vault, Monitoring |
+| Per-customer | `rg-spaarke-{customerId}-{env}` | `customer.bicep` via `Provision-Customer.ps1` | Storage, Key Vault, Service Bus, Redis |
+
+Both Bicep templates use `targetScope = 'subscription'`, which means the resource group is **created as part of the deployment** — no manual `az group create` needed.
+
+```bicep
+// platform.bicep — subscription-scoped
+targetScope = 'subscription'
+
+resource resourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: 'rg-spaarke-platform-${environmentName}'
+  location: location
+}
+```
+
+### Subscription Strategy
+
+**[DECISION]** Choose a subscription model based on organizational requirements:
+
+| Model | Description | When to Use | Current Status |
+|-------|-------------|-------------|----------------|
+| **A: Single subscription** | Dev + Prod in same subscription, isolated by resource groups | Small teams, startups, single-operator | **Current** |
+| **B: Env-separated subscriptions** | Separate subscriptions for Dev and Prod | **Recommended for production** — prevents blast radius, enables RBAC isolation | Planned |
+| **C: Customer-separated subscriptions** | Each customer gets their own subscription | Enterprise customers requiring billing isolation or data sovereignty | Future consideration |
+
+#### Model B: Environment-Separated Subscriptions (Recommended)
+
+```
+┌─────────────────────────────────────────────┐
+│ Management Group: Spaarke                    │
+│                                              │
+│  ┌───────────────────┐  ┌─────────────────┐ │
+│  │ Dev Subscription   │  │ Prod Subscription│ │
+│  │                    │  │                  │ │
+│  │ rg-spaarke-        │  │ rg-spaarke-      │ │
+│  │   platform-dev     │  │   platform-prod  │ │
+│  │ rg-spaarke-        │  │ rg-spaarke-      │ │
+│  │   demo-dev         │  │   demo-prod      │ │
+│  └───────────────────┘  │ rg-spaarke-      │ │
+│                          │   acme-prod      │ │
+│                          └─────────────────┘ │
+└─────────────────────────────────────────────┘
+```
+
+**To implement Model B:**
+1. Create a second Azure subscription for production
+2. Update `Deploy-Platform.ps1` and `Provision-Customer.ps1` to accept a `-SubscriptionId` parameter
+3. Add `az account set --subscription` at the start of each script
+4. Use separate service principals per subscription (RBAC isolation)
+5. GitHub Actions workflows use different `AZURE_SUBSCRIPTION_ID` secrets per environment
+
+**Impact on existing scripts**: Minimal — all scripts already parameterize resource group names and environment names. The subscription is the only new parameter.
+
+#### Model C: Customer-Separated Subscriptions
+
+For enterprise customers requiring subscription-level isolation:
+- `customer.bicep` deploys to the customer's subscription
+- Service principal needs `Contributor` on the customer's subscription
+- Cross-subscription networking (VNet peering) may be needed for BFF API → customer resources
+- Significant architectural change — not currently supported
+
+### What Claude Code Should Do
+
+When deploying, Claude Code should:
+1. Verify the correct subscription is active: `az account show`
+2. If Model B is adopted, switch subscriptions before each phase
+3. Never deploy platform resources into a customer resource group or vice versa
+4. Use `Deploy-Platform.ps1 -WhatIf` to verify resource group targeting before actual deployment
+
+---
+
+## 16. Dataverse Solution Lifecycle
+
+### What's in the Solutions
+
+Spaarke Dataverse solutions contain all platform customizations:
+
+| Component Type | Examples | Solution |
+|----------------|----------|----------|
+| Tables (entities) | `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_document` | SpaarkeCore |
+| Columns (fields) | Custom fields on all Spaarke entities | SpaarkeCore |
+| Views | List views, quick-find views | SpaarkeCore |
+| Forms | Main forms, quick-create forms | SpaarkeCore |
+| Option sets | Priority, Status, Event Type | SpaarkeCore |
+| Security roles | Spaarke User, Spaarke Admin | SpaarkeCore |
+| Web resources (JS) | Ribbon commands, form scripts | SpaarkeWebResources |
+| Web resources (HTML) | Code pages (React 18 apps) | Feature solutions |
+| Web resources (SVG/PNG) | Icons, images | SpaarkeWebResources |
+| Model-driven apps | Spaarke legal workspace app | LegalWorkspace |
+| Sitemaps | Navigation structure | LegalWorkspace |
+| Ribbons/Command bars | Custom buttons and actions | Feature solutions |
+| Dashboards | Analytics views | Feature solutions |
+
+### Solution Dependency Tree
+
+```
+SpaarkeCore (Tier 1 — base entities, option sets, security roles)
+  └── SpaarkeWebResources (Tier 2 — JS/icons used by all features)
+        ├── AnalysisBuilder (Tier 3)
+        ├── CalendarSidePane (Tier 3)
+        ├── DocumentUploadWizard (Tier 3)
+        ├── EventCommands (Tier 3)
+        ├── EventDetailSidePane (Tier 3)
+        ├── EventsPage (Tier 3)
+        ├── LegalWorkspace (Tier 3)
+        └── TodoDetailSidePane (Tier 3)
+```
+
+All 10 solutions are imported by `Deploy-DataverseSolutions.ps1` in this dependency order.
+
+### Dev → Production Pipeline
+
+**[AI+HUMAN]** The current process for moving solutions from dev to production:
+
+```
+Step 1: Build components in Dev (unmanaged)
+  ├── PCF controls → npm run build → pac pcf push (dev)
+  ├── Code pages → npm run build → deploy script → upload web resource (dev)
+  ├── Schema changes → Power Apps maker portal (dev)
+  └── Form/view customizations → Power Apps maker portal (dev)
+
+Step 2: Export from Dev as MANAGED solution ZIPs
+  [AI] pac solution export \
+    --environment https://spaarkedev1.crm.dynamics.com \
+    --path ./exports/SpaarkeCore_managed.zip \
+    --name SpaarkeCore \
+    --managed true
+
+Step 3: Store ZIPs in repository or artifact store
+  [AI] Copy exported ZIPs to src/solutions/ or a release artifact location
+
+Step 4: Import to Production
+  [AI] .\scripts\Deploy-DataverseSolutions.ps1 \
+    -EnvironmentUrl "https://spaarke-prod.crm.dynamics.com" \
+    -TenantId "..." -ClientId "..." -ClientSecret "..." \
+    -SolutionPath "./exports/"
+```
+
+**Current gap**: Steps 2-3 are manual. There is no automated pipeline that exports from dev and imports to prod. See [Section 18](#18-dataverse-cicd-and-deployment-automation) for automation options.
+
+### Version Management
+
+Solutions should be version-bumped before export:
+
+```powershell
+# Bump solution version in dev before export
+pac solution version --solution-name SpaarkeCore --strategy solution --value 1.2.0.0
+```
+
+Version format: `{major}.{minor}.{patch}.{revision}`
+
+| When to Bump | Version Part | Example |
+|-------------|-------------|---------|
+| Breaking schema changes | Major | 1.0 → 2.0 |
+| New features, new entities | Minor | 1.1 → 1.2 |
+| Bug fixes, form tweaks | Patch | 1.1.1 → 1.1.2 |
+| Build/CI increments | Revision | 1.1.1.0 → 1.1.1.1 |
+
+---
+
+## 17. Managed vs Unmanaged Solutions
+
+### Key Differences
+
+| Aspect | Unmanaged | Managed |
+|--------|-----------|---------|
+| **Purpose** | Development — active editing | Production — locked-down delivery |
+| **Customizable** | Yes — full editing in maker tools | No — components are read-only |
+| **Deletable** | Manual component-by-component | Clean uninstall removes all components |
+| **Layering** | Base layer | Top layer, overrides unmanaged |
+| **Rollback** | No clean rollback mechanism | Uninstall → previous version restored |
+| **Schema conflicts** | Merge on import | Fail on conflict (safer) |
+| **Recommended for** | Dev environments | Staging, Demo, Production |
+
+### Current State and Migration Path
+
+**Current state**: Dev environment uses **unmanaged** solutions (standard development pattern).
+
+**Target state**:
+
+| Environment | Solution Type | Rationale |
+|-------------|--------------|-----------|
+| Dev (`spaarkedev1`) | Unmanaged | Active development — developers need to edit |
+| Demo-Production | **Managed** | Clean uninstall, prevents ad-hoc changes |
+| Customer-Production | **Managed** | Clean uninstall, version control, rollback support |
+
+### Implications of Moving to Managed
+
+**Benefits:**
+- Clean uninstall: removing a managed solution removes ALL its components cleanly
+- Version rollback: import a previous version to roll back
+- No accidental customizations in production
+- Clear component ownership (which solution owns which component)
+
+**Risks and considerations:**
+- Cannot make ad-hoc fixes in production — all changes must go through dev → export → import
+- **Unmanaged-to-managed migration**: If a production environment already has unmanaged components that overlap with the managed solution, import will fail. Must remove unmanaged customizations first.
+- **Demo environment**: If demo currently has unmanaged components, a one-time cleanup is needed before importing managed versions
+- **Hotfix process**: Emergency fixes require fast-tracking through dev → managed export → prod import (cannot edit in-place)
+
+### Migration Steps (Demo Environment)
+
+**[AI+HUMAN]** One-time migration from unmanaged to managed:
+
+```powershell
+# 1. In dev: Ensure all components are in solutions (not "default solution")
+# 2. Export each solution as managed
+pac solution export --name SpaarkeCore --managed true --path ./exports/
+
+# 3. In demo: Remove existing unmanaged solutions (CAUTION: back up first)
+#    This is the riskiest step — may need manual cleanup of overlapping components
+
+# 4. Import managed solutions in dependency order
+.\scripts\Deploy-DataverseSolutions.ps1 `
+    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -TenantId "..." -ClientId "..." -ClientSecret "..."
+```
+
+**[HUMAN]** Before migration:
+1. Document all unmanaged customizations in the target environment
+2. Back up the environment (Power Platform Admin Center > Environments > Back up)
+3. Test the full managed import in a throwaway environment first
+4. Plan for a maintenance window — solution import can take 10-30 minutes
+
+---
+
+## 18. Dataverse CI/CD and Deployment Automation
+
+### Current State
+
+| What | Automated? | Tool |
+|------|-----------|------|
+| PCF control build | Partial | `npm run build` + `pac pcf push` (manual) |
+| Code page build | Partial | Build scripts exist, manual deployment |
+| Solution export from dev | **No** | Manual `pac solution export` |
+| Solution import to prod | **Yes** | `Deploy-DataverseSolutions.ps1` |
+| Solution version bumping | **No** | Manual `pac solution version` |
+| Schema changes | **No** | Manual in maker portal |
+
+### Recommended Automation Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ GitHub Actions: deploy-dataverse.yml                      │
+│                                                          │
+│  Trigger: Manual dispatch (workflow_dispatch)             │
+│  Inputs: target_environment, solutions_to_deploy          │
+│                                                          │
+│  Job 1: export-solutions                                  │
+│    ├── pac auth create (service principal)                │
+│    ├── pac solution export --managed (each solution)      │
+│    └── Upload ZIPs as build artifacts                    │
+│                                                          │
+│  Job 2: validate (depends on Job 1)                      │
+│    ├── Download artifacts                                 │
+│    ├── pac solution check (solution checker)              │
+│    └── Report warnings/errors                            │
+│                                                          │
+│  Job 3: deploy-staging (depends on Job 2)                │
+│    ├── pac auth create (staging env)                      │
+│    ├── pac solution import (managed, staging)             │
+│    └── Verify import success                             │
+│                                                          │
+│  Job 4: deploy-production (depends on Job 3, approval)   │
+│    ├── Environment protection: require reviewer           │
+│    ├── pac auth create (prod env)                        │
+│    ├── pac solution import (managed, prod)                │
+│    └── Verify import success                             │
+└──────────────────────────────────────────────────────────┘
+```
+
+### GitHub Actions: PAC CLI Authentication
+
+PAC CLI can authenticate via service principal in CI/CD:
+
+```yaml
+- name: Authenticate PAC CLI
+  run: |
+    pac auth create \
+      --environment ${{ vars.DATAVERSE_URL }} \
+      --tenant ${{ secrets.AZURE_TENANT_ID }} \
+      --applicationId ${{ secrets.DATAVERSE_CLIENT_ID }} \
+      --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+```
+
+**Required GitHub secrets for Dataverse CI/CD:**
+
+| Secret | Purpose |
+|--------|---------|
+| `DATAVERSE_CLIENT_ID` | `spaarke-dataverse-s2s-{env}` app registration |
+| `DATAVERSE_CLIENT_SECRET` | Client secret for the S2S app |
+| `AZURE_TENANT_ID` | Entra ID tenant (same as Azure) |
+
+**Required GitHub variables:**
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `DATAVERSE_URL_DEV` | Dev environment URL | `https://spaarkedev1.crm.dynamics.com` |
+| `DATAVERSE_URL_PROD` | Prod environment URL | `https://spaarke-prod.crm.dynamics.com` |
+
+### Microsoft Power Platform GitHub Actions (Alternative)
+
+Microsoft provides official GitHub Actions for Power Platform deployments:
+
+```yaml
+- uses: microsoft/powerplatform-actions/export-solution@v1
+  with:
+    environment-url: ${{ vars.DATAVERSE_URL_DEV }}
+    solution-name: SpaarkeCore
+    managed: true
+    solution-output-file: exports/SpaarkeCore_managed.zip
+    app-id: ${{ secrets.DATAVERSE_CLIENT_ID }}
+    client-secret: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+- uses: microsoft/powerplatform-actions/import-solution@v1
+  with:
+    environment-url: ${{ vars.DATAVERSE_URL_PROD }}
+    solution-file: exports/SpaarkeCore_managed.zip
+    app-id: ${{ secrets.DATAVERSE_CLIENT_ID }}
+    client-secret: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+```
+
+### Solution Packager (Source Control)
+
+For advanced teams, solutions can be **unpacked to source control** and **repacked for deployment**:
+
+```powershell
+# Unpack solution to source-controllable files
+pac solution unpack --solution-zip SpaarkeCore_managed.zip --folder src/solutions/SpaarkeCore/
+
+# Repack from source files
+pac solution pack --folder src/solutions/SpaarkeCore/ --zip-file SpaarkeCore_managed.zip --type managed
+```
+
+**Pros**: Full git history of schema changes, code review on entity/form changes, merge support.
+**Cons**: Adds complexity, unpack/pack can drift from actual environment state.
+
+**Current recommendation**: Start with managed solution export/import via `Deploy-DataverseSolutions.ps1`. Add Solution Packager when the team grows and needs schema change review.
+
+### Claude Code Execution Pattern for Dataverse Deployments
+
+When asked to "deploy to Dataverse" or "update Dataverse solutions":
+
+1. **Build components first**: PCF controls (`npm run build`), code pages (webpack/vite build)
+2. **Deploy to dev**: `pac pcf push`, deploy scripts for web resources
+3. **Export as managed**: `pac solution export --managed true`
+4. **Import to prod**: `.\scripts\Deploy-DataverseSolutions.ps1`
+
+Claude Code can automate steps 1, 2, and 4. Step 3 (export) requires the dev environment to be in a clean state, which Claude Code can verify but the developer should confirm.
+
+---
+
+## 19. CI/CD Pipelines (Azure)
 
 Three GitHub Actions workflows automate deployment after initial setup:
 

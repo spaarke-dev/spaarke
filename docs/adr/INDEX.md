@@ -34,6 +34,9 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-020](ADR-020-versioning-strategy-apis-jobs-client-packages.md) | Versioning Strategy | Operations | Accepted |
 | [ADR-021](ADR-021-fluent-ui-design-system.md) | Fluent UI v9 Design System | **UI/UX** | **Accepted** |
 | [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF Platform Libraries — Field-Bound Controls Only | Frontend | Accepted |
+| [ADR-023](ADR-023-choice-dialog-pattern.md) | Choice Dialog Pattern | Frontend | Accepted |
+| [ADR-026](ADR-026-full-page-custom-page-standard.md) | Full-Page Custom Page Standard | Frontend | Accepted |
+| [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription Isolation & Dataverse Solution Management | Operations | Proposed |
 
 ## ADRs by Domain
 
@@ -93,6 +96,7 @@ Architecture Decision Records capture important architectural decisions made dur
 |-----|---------|
 | [ADR-018](ADR-018-feature-flags-and-kill-switches.md) | Feature flag patterns |
 | [ADR-020](ADR-020-versioning-strategy-apis-jobs-client-packages.md) | Versioning strategy |
+| [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription isolation, managed solutions, Dataverse CI/CD |
 
 ---
 
