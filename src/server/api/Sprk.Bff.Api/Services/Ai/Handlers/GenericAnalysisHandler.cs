@@ -465,11 +465,6 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             var schemaBinaryData = BinaryData.FromString(schemaJsonString);
             var schemaName = rendered.SchemaName ?? "prompt_response";
 
-            // TEMP DIAG: Log the exact schema being sent to OpenAI
-            _logger.LogWarning(
-                "DIAG_SCHEMA: AnalysisId={AnalysisId}, ToolName={ToolName}, SchemaName={SchemaName}, PromptFormat={Format}, Schema={Schema}",
-                context.AnalysisId, tool.Name, schemaName, rendered.Format, schemaJsonString);
-
             _logger.LogInformation(
                 "Using structured output (response_format: json_schema) for streaming analysis {AnalysisId}, schema: {SchemaName}, model: {Model}",
                 context.AnalysisId, schemaName, actionModel);

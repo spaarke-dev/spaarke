@@ -32,7 +32,7 @@ public class OfficeJobStatusService : IOfficeJobStatusService
             jobId, phase, status,
             string.IsNullOrEmpty(errorMessage) ? "" : $" ({errorMessage})");
 
-        // TODO (Task 064): Publish to Redis pub/sub and update Dataverse record
+        // TRACKED: GitHub #230 - Integrate with Redis pub/sub (Task 064)
         return Task.CompletedTask;
     }
 
@@ -46,7 +46,7 @@ public class OfficeJobStatusService : IOfficeJobStatusService
             "Job {JobId} progress update: {Progress}%",
             jobId, progress);
 
-        // TODO (Task 064): Publish to Redis pub/sub
+        // TRACKED: GitHub #230 - Integrate with Redis pub/sub (Task 064)
         return Task.CompletedTask;
     }
 
@@ -61,7 +61,7 @@ public class OfficeJobStatusService : IOfficeJobStatusService
             "Job {JobId} completed. DocumentId: {DocumentId}",
             jobId, documentId);
 
-        // TODO (Task 064): Publish to Redis pub/sub and update Dataverse record
+        // TRACKED: GitHub #230 - Integrate with Redis pub/sub (Task 064)
         return Task.CompletedTask;
     }
 
@@ -77,7 +77,7 @@ public class OfficeJobStatusService : IOfficeJobStatusService
             "Job {JobId} failed: [{ErrorCode}] {ErrorMessage} (Retryable: {Retryable})",
             jobId, errorCode, errorMessage, retryable);
 
-        // TODO (Task 064): Publish to Redis pub/sub and update Dataverse record
+        // TRACKED: GitHub #230 - Integrate with Redis pub/sub (Task 064)
         return Task.CompletedTask;
     }
 }

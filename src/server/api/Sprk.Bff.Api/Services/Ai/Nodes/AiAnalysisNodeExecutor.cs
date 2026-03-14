@@ -649,7 +649,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             {
                 contextParts.Add($"[{knowledge.Name}]\n{knowledge.Content}");
             }
-            // TODO: Document and RagIndex types will be resolved in PlaybookOrchestrationService
+            // NOTE: Document and RagIndex types resolved in PlaybookOrchestrationService
             // and pre-populated into knowledge.Content before reaching the executor
         }
 

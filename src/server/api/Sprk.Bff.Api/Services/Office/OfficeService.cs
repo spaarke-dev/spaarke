@@ -106,7 +106,7 @@ public class OfficeService : IOfficeService
             var idempotencyKey = request.IdempotencyKey ?? GenerateIdempotencyKey(request);
 
             // Step 2: Check for existing job with this idempotency key
-            // TODO: Replace with actual Dataverse query for ProcessingJob by IdempotencyKey
+            // TRACKED: GitHub #229 - Replace with Dataverse ProcessingJob query
             var existingJob = await CheckForExistingJobAsync(idempotencyKey, cancellationToken);
 
             if (existingJob is not null)
@@ -1372,7 +1372,7 @@ public class OfficeService : IOfficeService
             userId);
 
         // Look up job in in-memory store
-        // TODO: Replace with actual Dataverse query once ProcessingJob table exists
+        // TRACKED: GitHub #229 - Replace with Dataverse query once ProcessingJob exists
         if (_jobStore.TryGetValue(jobId, out var job))
         {
             _logger.LogDebug(
@@ -1521,7 +1521,7 @@ public class OfficeService : IOfficeService
         // Determine which entity types to search
         var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
 
-        // TODO: Replace with actual Dataverse queries once tables exist
+        // TRACKED: GitHub #229 - Replace with Dataverse queries once tables exist
         // The implementation should:
         // 1. Build FetchXML queries for each entity type with 'contains' filter on name fields
         // 2. Execute queries in parallel for performance
@@ -1661,7 +1661,7 @@ public class OfficeService : IOfficeService
             request.Top,
             userId);
 
-        // TODO: Replace with actual Dataverse/SpeFileStore queries once document entity exists
+        // TRACKED: GitHub #229 - Replace with Dataverse/SpeFileStore queries
         // The implementation should:
         // 1. Build FetchXML query for sprk_document with filters:
         //    - Name/filename contains query (case-insensitive)
@@ -1903,7 +1903,7 @@ public class OfficeService : IOfficeService
         string userId,
         CancellationToken cancellationToken)
     {
-        // TODO: Replace with actual Dataverse security role check
+        // TRACKED: GitHub #229 - Replace with Dataverse security role check
         _logger.LogDebug(
             "Permission check for document {DocumentId} by user {UserId}",
             documentId,
@@ -1919,7 +1919,7 @@ public class OfficeService : IOfficeService
         Guid documentId,
         CancellationToken cancellationToken)
     {
-        // TODO: Replace with actual Dataverse query
+        // TRACKED: GitHub #229 - Replace with Dataverse query
         var shortId = documentId.ToString("N").Substring(0, 8);
         return Task.FromResult<ShareLinkDocumentMetadata?>(new ShareLinkDocumentMetadata
         {
@@ -1935,7 +1935,7 @@ public class OfficeService : IOfficeService
     /// </summary>
     private static string GenerateShareLinkUrl(Guid documentId)
     {
-        // TODO: Make base URL configurable via appsettings
+        // TRACKED: GitHub #233 - Make base URL configurable via appsettings
         const string baseUrl = "https://spaarke.app/doc";
         return $"{baseUrl}/{documentId}";
     }
@@ -2034,7 +2034,7 @@ public class OfficeService : IOfficeService
             ? $"{request.FirstName} {request.LastName}".Trim()
             : request.Name ?? "Unnamed";
 
-        // TODO: Implement actual Dataverse record creation
+        // TRACKED: GitHub #229 - Implement Dataverse record creation
         // The implementation should:
         // 1. Verify user has create permission for the entity type
         // 2. Build the entity record with appropriate fields based on entity type:
@@ -2080,7 +2080,7 @@ public class OfficeService : IOfficeService
             userId,
             top);
 
-        // TODO: Replace with actual Redis + Dataverse queries
+        // TRACKED: GitHub #229 - Replace with Redis + Dataverse queries
         // The full implementation should:
         // 1. Query Redis sorted set for recent associations: "recent:associations:{userId}"
         // 2. Query Redis sorted set for recent documents: "recent:documents:{userId}"
@@ -2310,7 +2310,7 @@ public class OfficeService : IOfficeService
         {
             try
             {
-                // TODO: Replace with actual implementation once dependencies are available:
+                // TRACKED: GitHub #229 - Replace with real implementation once dependencies available:
                 // 1. Get document from Dataverse via IDataverseService
                 // 2. Verify user has share permission via UAC
                 // 3. Check size limits (25MB per file, 100MB total)
@@ -2407,7 +2407,7 @@ public class OfficeService : IOfficeService
         const long maxAttachmentSizeBytes = 25 * 1024 * 1024; // 25MB per file
         const long recommendedBase64ThresholdBytes = 1 * 1024 * 1024; // 1MB
 
-        // TODO: Replace with actual implementation:
+        // TRACKED: GitHub #229 - Replace with real implementation:
         // 1. Look up document in Dataverse by ID
         // 2. Verify SPE pointers exist (GraphDriveId, GraphItemId)
         // 3. Check user share permission

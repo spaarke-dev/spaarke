@@ -27,7 +27,7 @@ public class ProductionTestExecutor : IProductionTestExecutor
     private readonly ILogger<ProductionTestExecutor> _logger;
 
     // In-memory store for test results (aligns with Phase 1 AnalysisOrchestrationService pattern)
-    // TODO: Replace with Dataverse persistence in future task
+    // TRACKED: GitHub #229 - Replace with Dataverse persistence
     private static readonly Dictionary<Guid, ProductionTestResult> _testResultStore = new();
 
     public ProductionTestExecutor(

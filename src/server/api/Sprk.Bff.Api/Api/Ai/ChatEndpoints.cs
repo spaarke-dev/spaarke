@@ -829,7 +829,7 @@ public record ChatSendMessageRequest(string Message, string? DocumentId = null);
 /// Optional surrounding paragraphs for AI context. When provided, the AI model
 /// receives context about where the selected text appears in the document, improving
 /// refinement quality.
-/// TODO: PH-112-A — Full context-aware refinement wired when editor exposes surrounding
+/// TRACKED: GitHub #233 - PH-112-A: Full context-aware refinement (editor surrounding context)
 /// paragraph extraction. For now, this field is optional and the backend proceeds without it.
 /// </param>
 public record ChatRefineRequest(string SelectedText, string Instruction, string? SurroundingContext = null);

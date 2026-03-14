@@ -581,7 +581,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     {
         _logger.LogDebug("Retrieving temporary file from {Location}", location);
 
-        // TODO: Implement actual blob storage retrieval
+        // TRACKED: GitHub #231 - Implement blob storage retrieval
         // For now, return a stub that simulates file retrieval
         // In production, this would:
         // 1. Parse the location (blob URL or local path)
@@ -955,7 +955,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     {
         _logger.LogDebug("Cleaning up temporary file at {Location}", location);
 
-        // TODO: Implement actual blob deletion
+        // TRACKED: GitHub #231 - Implement blob deletion
         // This would:
         // 1. Parse the blob URL
         // 2. Delete using BlobClient.DeleteIfExistsAsync

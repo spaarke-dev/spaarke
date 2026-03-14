@@ -1,0 +1,121 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Identity.Web;
+using Sprk.Bff.Api.Infrastructure.Authorization;
+
+namespace Sprk.Bff.Api.Infrastructure.DI;
+
+/// <summary>
+/// DI registration module for authentication and authorization services (ADR-008, ADR-010).
+/// Registers Azure AD JWT bearer authentication, authorization handler, and all authorization policies.
+/// </summary>
+public static class AuthorizationModule
+{
+    /// <summary>
+    /// Adds authentication (Azure AD JWT), authorization handler, and all authorization policies.
+    /// </summary>
+    public static IServiceCollection AddAuthorizationModule(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Azure AD JWT Bearer Token Validation
+        services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
+            .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
+
+        // Register authorization handler (Scoped to match AuthorizationService dependency)
+        services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
+
+        // Authorization policies - granular operation-level policies matching SPE/Graph API operations
+        services.AddAuthorization(options =>
+        {
+            // DriveItem Content Operations
+            options.AddPolicy("canpreviewfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.preview")));
+            options.AddPolicy("candownloadfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.content.download")));
+            options.AddPolicy("canuploadfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.content.upload")));
+            options.AddPolicy("canreplacefiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.content.replace")));
+
+            // DriveItem Metadata Operations
+            options.AddPolicy("canreadmetadata", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.get")));
+            options.AddPolicy("canupdatemetadata", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.update")));
+            options.AddPolicy("canlistchildren", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.list.children")));
+
+            // DriveItem File Management
+            options.AddPolicy("candeletefiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.delete")));
+            options.AddPolicy("canmovefiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.move")));
+            options.AddPolicy("cancopyfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.copy")));
+            options.AddPolicy("cancreatefolders", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.create.folder")));
+
+            // DriveItem Sharing & Permissions
+            options.AddPolicy("cansharefiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.createlink")));
+            options.AddPolicy("canmanagefilepermissions", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.permissions.add")));
+
+            // DriveItem Versioning
+            options.AddPolicy("canviewversions", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.versions.list")));
+            options.AddPolicy("canrestoreversions", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.versions.restore")));
+
+            // Container Operations
+            options.AddPolicy("canlistcontainers", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("container.list")));
+            options.AddPolicy("cancreatecontainers", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("container.create")));
+            options.AddPolicy("candeletecontainers", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("container.delete")));
+            options.AddPolicy("canupdatecontainers", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("container.update")));
+            options.AddPolicy("canmanagecontainerpermissions", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("container.permissions.add")));
+
+            // Advanced Operations
+            options.AddPolicy("cansearchfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.search")));
+            options.AddPolicy("cantrackchanges", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.delta")));
+            options.AddPolicy("canmanagecompliancelabels", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("driveitem.sensitivitylabel.assign")));
+
+            // Legacy Compatibility
+            options.AddPolicy("canreadfiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("preview_file")));
+            options.AddPolicy("canwritefiles", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
+            options.AddPolicy("canmanagecontainers", p =>
+                p.Requirements.Add(new ResourceAccessRequirement("create_container")));
+
+            // Admin Policies
+            options.AddPolicy("SystemAdmin", p =>
+            {
+                p.RequireAuthenticatedUser();
+                p.RequireAssertion(context =>
+                {
+                    var hasAdminRole = context.User.IsInRole("Admin") ||
+                                       context.User.IsInRole("SystemAdmin") ||
+                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
+                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin");
+
+                    var hasAdminScope = context.User.HasClaim(c =>
+                        c.Type == "http://schemas.microsoft.com/identity/claims/scope" &&
+                        c.Value.Contains("admin", StringComparison.OrdinalIgnoreCase));
+
+                    return hasAdminRole || hasAdminScope;
+                });
+            });
+        });
+
+        return services;
+    }
+}

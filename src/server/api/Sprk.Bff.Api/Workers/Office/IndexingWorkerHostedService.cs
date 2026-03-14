@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// remains accessible but won't appear in AI search results.
 /// </para>
 /// <para>
-/// TODO: Integrate with actual IndexingWorker.ProcessAsync() when FileIndexingService
+/// TRACKED: GitHub #233 - Integrate with IndexingWorker.ProcessAsync() when FileIndexingService
 /// is fully configured. For now, this stub completes the job immediately.
 /// </para>
 /// </remarks>
