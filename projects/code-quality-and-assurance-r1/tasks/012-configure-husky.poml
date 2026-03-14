@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure Husky and lint-staged for Pre-Commit Hooks</title>
     <phase>2: Tooling Foundation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010, 011</dependencies>
     <blocks>017</blocks>

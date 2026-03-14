@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Quality Badges to Repository README</title>
     <phase>4: Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>043</blocks>

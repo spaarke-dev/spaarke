@@ -1,17 +1,32 @@
 # Testing and Code Quality Procedures
 
-> **Purpose**: Guide for code quality and testing workflows in Claude Code, including automated quality gates, UI testing, and human checkpoints.
+> **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
-> **Last Updated**: January 6, 2026
+> **Last Updated**: March 13, 2026
 
 ---
 
 ## Overview
 
-This guide explains the testing and code quality process in the Spaarke development workflow. Quality assurance is built into **every task execution** through automated quality gates, with optional browser-based UI testing for frontend work.
+This guide explains the complete code quality system in the Spaarke development workflow. Quality assurance operates at **five levels**, from individual developer commits through quarterly audits.
+
+**Quality Lifecycle Layers**:
+
+| Layer | When | Tools | Blocking? |
+|-------|------|-------|-----------|
+| **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
+| **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
+| **PR gates** | Every pull request (sdap-ci.yml) | Build, test, security scan, client quality, code quality, ADR tests | Yes |
+| **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
+| **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
+| **Quarterly** | Manual trigger | Full audit runbook | Advisory |
 
 **Key Concepts**:
-- Quality gates run **automatically** after code implementation (Step 9.5)
+- Pre-commit hooks catch formatting and lint issues **before code enters git**
+- Task-level quality gates run **automatically** after code implementation (Step 9.5)
+- PR gates enforce build, test, and quality checks on **every pull request**
+- Nightly sweeps provide deep analysis that would be too slow for PR-time
+- Weekly summaries track quality trends over time
 - UI testing runs **with user confirmation** for PCF/frontend tasks (Step 9.7)
 - Repository cleanup runs at **project completion** (Task 090)
 - Human-in-loop at **decision points**, not execution
@@ -20,21 +35,92 @@ This guide explains the testing and code quality process in the Spaarke developm
 
 ## Table of Contents
 
-1. [Quality Gate Overview](#quality-gate-overview)
-2. [Automated vs Human-in-Loop](#automated-vs-human-in-loop)
+1. [Pre-Commit Hooks (Husky + lint-staged)](#pre-commit-hooks-husky--lint-staged)
+2. [Task-Level Quality Gates (Step 9.5)](#task-level-quality-gates-step-95)
 3. [Code Review (Step 9.5)](#code-review-step-95)
 4. [ADR Compliance Check (Step 9.5)](#adr-compliance-check-step-95)
 5. [Linting (Step 9.5)](#linting-step-95)
-6. [UI Testing (Step 9.7)](#ui-testing-step-97)
-7. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
-8. [Complete Quality Flow](#complete-quality-flow)
-9. [Skill Reference](#skill-reference)
+6. [PR Quality Gates (sdap-ci.yml)](#pr-quality-gates-sdap-ciyml)
+7. [Nightly Quality Pipeline](#nightly-quality-pipeline)
+8. [Weekly Quality Summary](#weekly-quality-summary)
+9. [Quarterly Audit](#quarterly-audit)
+10. [UI Testing (Step 9.7)](#ui-testing-step-97)
+11. [Claude Code Hooks](#claude-code-hooks)
+12. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
+13. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
+14. [Complete Quality Flow](#complete-quality-flow)
+15. [Skill Reference](#skill-reference)
 
 ---
 
-## Quality Gate Overview
+## Pre-Commit Hooks (Husky + lint-staged)
 
-Quality gates are checkpoints that run during task execution to ensure code meets standards before completion.
+Pre-commit hooks are the first quality layer, catching formatting and lint issues before code enters git history.
+
+### Configuration
+
+| Component | Config File | Purpose |
+|-----------|------------|---------|
+| Husky | `.husky/pre-commit` | Runs `npx lint-staged` on every commit |
+| lint-staged | `.lintstagedrc.mjs` | Defines per-filetype commands for staged files |
+| Prettier | `.prettierrc.json` | TypeScript/JSON/YAML formatting rules |
+| ESLint | `src/client/pcf/eslint.config.mjs` (+ per-control configs) | TypeScript/React linting rules |
+| dotnet format | `.editorconfig` | C# formatting rules |
+
+### What Runs on Commit
+
+| File Type | Tool | Action |
+|-----------|------|--------|
+| `*.ts`, `*.tsx` | Prettier + ESLint | Format, then lint (from nearest eslint.config directory) |
+| `*.json`, `*.yaml`, `*.yml` | Prettier | Format |
+| `*.cs` | dotnet format | Format (scoped to staged files) |
+
+### Performance Target
+
+Pre-commit hooks MUST complete in **< 10 seconds** (lint-staged runs only on staged files, not the full codebase).
+
+### Skipping Hooks (Emergency Only)
+
+```bash
+# Skip pre-commit hooks (use sparingly — CI will catch issues)
+git commit --no-verify -m "fix(api): emergency hotfix — skipping hooks, justification: [reason]"
+```
+
+Hooks are automatically skipped in CI environments (`$CI=true`).
+
+**Important**: When skipping hooks, document the justification in the commit message. CI will still enforce the same checks -- skipping hooks only defers the feedback.
+
+### Updating Hooks
+
+If you modify `.lintstagedrc.mjs` or add a new ESLint config directory, test the hooks locally:
+
+```bash
+# Verify Husky is installed
+npx husky --version
+
+# Re-install hooks after cloning or after package.json changes
+npx husky install
+
+# Test lint-staged without committing
+npx lint-staged --verbose
+```
+
+### Husky Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "command not found: npx" | Node.js not in PATH when hook runs | Ensure Node.js is installed and in system PATH; on Windows, restart terminal after Node install |
+| Hook not firing on commit | Husky not initialized or `.husky/pre-commit` missing | Run `npx husky install` to re-initialize; verify `.husky/pre-commit` exists and contains `npx lint-staged` |
+| "permission denied" on `.husky/pre-commit` (macOS/Linux) | Hook file not executable | Run `chmod +x .husky/pre-commit` |
+| lint-staged hangs or times out | ESLint running on too many files or missing node_modules | Run `npm ci` in the relevant directory; check `.lintstagedrc.mjs` for correct glob patterns |
+| "Cannot find module" errors from lint-staged | Dependencies not installed | Run `npm ci` at repo root and `npm ci` in `src/client/pcf/` |
+| Hook runs but doesn't catch formatting | Files not staged (only staged files are checked) | Stage files with `git add` before committing; lint-staged only processes staged files |
+
+---
+
+## Task-Level Quality Gates (Step 9.5)
+
+Quality gates are checkpoints that run during Claude Code task execution to ensure code meets standards before completion.
 
 ### When Quality Gates Run
 
@@ -293,41 +379,349 @@ The adr-check skill validates code against Architecture Decision Records:
 
 ## Linting (Step 9.5)
 
-### TypeScript/PCF Linting
+### Prettier (TypeScript/JSON/YAML Formatting)
 
-```bash
-# Runs automatically in Step 9.5
-cd src/client/pcf && npm run lint
+**What it does**: Enforces consistent code formatting for TypeScript, JSON, and YAML files across the repository.
 
-# Auto-fix available issues
-npx eslint --fix {files}
+**When it runs**: Pre-commit (via Husky/lint-staged), PR (client-quality job in sdap-ci.yml), Step 9.5 quality gates.
+
+**Configuration**: `.prettierrc.json` at repository root:
+```json
+{
+  "printWidth": 120,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "es5",
+  "bracketSpacing": true,
+  "arrowParens": "avoid",
+  "endOfLine": "crlf"
+}
 ```
 
-**Config**: `src/client/pcf/eslint.config.mjs`
-
-**Catches**:
-- Unused variables
-- Type issues
-- React hooks rules
-- Power Apps specific rules (@microsoft/eslint-plugin-power-apps)
-
-### C# Linting (Roslyn Analyzers)
-
+**Run Locally**:
 ```bash
-# Runs automatically in Step 9.5
-dotnet build --warnaserror
+# Check formatting (reports violations without modifying files)
+npx prettier --check "src/client/**/*.{ts,tsx}"
+
+# Auto-fix formatting
+npx prettier --write "src/client/**/*.{ts,tsx}"
+
+# Check all supported file types
+npx prettier --check "src/client/**/*.{ts,tsx,json,yaml,yml}"
+```
+
+**How to interpret results**: Prettier outputs a list of files that do not match the expected format. If the command exits with code 1, formatting violations exist.
+
+**Troubleshooting**:
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "No parser could be inferred" error | File extension not recognized by Prettier | Check `.prettierrc.json` and ensure the file type is supported; add `--parser typescript` if needed |
+| Prettier conflicts with ESLint | Prettier and ESLint disagree on formatting | Prettier runs first (formatting), then ESLint (logic). lint-staged handles this order automatically |
+| CRLF/LF mismatch | `endOfLine` setting doesn't match git config | Ensure `.prettierrc.json` has `"endOfLine": "crlf"` (Windows) and git `autocrlf` is set appropriately |
+
+### ESLint (TypeScript/React Linting)
+
+**What it does**: Enforces TypeScript/React coding standards, catches type issues, and validates Power Apps component framework rules.
+
+**When it runs**: Pre-commit (via Husky/lint-staged), PR (client-quality job with `--max-warnings 0`), Step 9.5 quality gates.
+
+**Configuration**: `src/client/pcf/eslint.config.mjs` (flat config format). Key rule sets:
+- `@eslint/js` recommended
+- `typescript-eslint` recommended + stylistic
+- `eslint-plugin-promise` flat/recommended
+- `@microsoft/eslint-plugin-power-apps` paCheckerHosted
+
+Per-control overrides exist in `src/client/pcf/{ControlName}/eslint.config.mjs` for controls with specific needs.
+
+**Strictened rules** (added in this project):
+- `@typescript-eslint/no-explicit-any`: warn
+- `@typescript-eslint/no-empty-function`: warn
+- `@typescript-eslint/array-type`: warn
+- `@typescript-eslint/consistent-generic-constructors`: warn
+- `@typescript-eslint/consistent-indexed-object-style`: warn
+- `promise/always-return`: warn
+- `promise/catch-or-return`: warn
+
+**Run Locally**:
+```bash
+# Run ESLint strict check (same as CI)
+cd src/client/pcf && npx eslint . --max-warnings 0
+
+# Auto-fix available issues
+cd src/client/pcf && npx eslint . --fix
+
+# Check a specific control
+cd src/client/pcf && npx eslint UniversalDatasetGrid/ --max-warnings 0
+```
+
+**How to interpret results**: ESLint outputs violations grouped by file. Each violation shows the rule name, severity (error/warning), line number, and message. With `--max-warnings 0`, any warning causes a non-zero exit code.
+
+**Justified suppressions**: When a rule violation is intentional and correct, suppress it inline with a comment explaining why:
+```typescript
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Dataverse SDK returns untyped data
+const rawData: any = context.parameters.dataset;
+```
+
+**Troubleshooting**:
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "Cannot find module 'eslint-plugin-promise'" | ESLint dependencies not installed in pcf directory | Run `cd src/client/pcf && npm ci` |
+| Flat config not loading | ESLint < 9 or wrong config file name | Ensure ESLint 9+ and file is named `eslint.config.mjs` |
+| PA Checker rules producing false positives | Power Apps rules don't apply to all controls | Rules are set to `"off"` in base config; enable per-control if needed |
+
+### C# Formatting and Linting (Roslyn Analyzers + dotnet format)
+
+**What it does**: Enforces C# code formatting via EditorConfig rules and catches code quality issues via Roslyn analyzers.
+
+**When it runs**: Pre-commit (via Husky/lint-staged for staged .cs files), PR (code-quality job), Step 9.5 quality gates.
+
+**Configuration**: `.editorconfig` (formatting rules), `Directory.Build.props` (TreatWarningsAsErrors).
+
+**Run Locally**:
+```bash
+# Check formatting without modifying files (same as CI)
+dotnet format --verify-no-changes --verbosity diagnostic
 
 # Auto-fix formatting
 dotnet format
+
+# Build with warnings as errors (catches Roslyn analyzer issues)
+dotnet build --warnaserror
 ```
 
-**Config**: `Directory.Build.props` (TreatWarningsAsErrors=true)
+**Troubleshooting**:
 
-**Catches**:
-- Null reference issues
-- Async patterns
-- Naming conventions
-- Code style
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "dotnet format" changes files unexpectedly | `.editorconfig` rules differ from IDE settings | Run `dotnet format` and commit the changes; ensure `.editorconfig` is authoritative |
+| Build fails with CS8600 (nullable reference) | Nullable reference type analysis | Add null checks or use `!` operator with comment if safe |
+
+### PSScriptAnalyzer (PowerShell Linting)
+
+**What it does**: Analyzes PowerShell scripts for security issues, best practice violations, and code quality problems.
+
+**When it runs**: Nightly quality pipeline (ai-code-review job indirectly reviews scripts). Can be run locally on demand.
+
+**Configuration**: `PSScriptAnalyzerSettings.psd1` at repository root. Key rule categories:
+- **Error severity** (security): `PSAvoidUsingPlainTextForPassword`, `PSAvoidUsingInvokeExpression`, credential-related rules
+- **Warning severity** (best practice): `PSUseDeclaredVarsMoreThanAssignments`, `PSAvoidGlobalVars`, `PSAvoidUsingEmptyCatchBlock`, `PSAvoidUsingCmdletAliases`
+- **Excluded**: `PSAvoidUsingWriteHost` (intentional in deployment scripts)
+
+**Run Locally**:
+```powershell
+# Install PSScriptAnalyzer (if not already installed)
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+
+# Analyze all scripts with project settings
+Invoke-ScriptAnalyzer -Path scripts/ -Settings PSScriptAnalyzerSettings.psd1 -Recurse
+
+# Analyze a specific script
+Invoke-ScriptAnalyzer -Path scripts/Deploy-BffApi.ps1 -Settings PSScriptAnalyzerSettings.psd1
+
+# Show only errors (security issues)
+Invoke-ScriptAnalyzer -Path scripts/ -Settings PSScriptAnalyzerSettings.psd1 -Recurse -Severity Error
+```
+
+**How to interpret results**: Each finding shows the rule name, severity (Error/Warning/Information), file, line, and message. Error-severity findings (security issues) should be fixed immediately. Warning-severity findings should be addressed during remediation.
+
+**Troubleshooting**:
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "PSScriptAnalyzer module not found" | Module not installed | Run `Install-Module -Name PSScriptAnalyzer -Scope CurrentUser` |
+| False positive on `Write-Host` | Rule not excluded | Verify `PSAvoidUsingWriteHost` is in `ExcludeRules` in `PSScriptAnalyzerSettings.psd1` |
+| Too many warnings on legacy scripts | Scripts written before standards were established | Fix incrementally; focus on Error-severity findings first |
+
+### SonarCloud (Deep Static Analysis)
+
+**What it does**: Provides deep static analysis including code smells, bugs, vulnerabilities, security hotspots, and code coverage tracking. Includes AI Code Assurance for LLM-generated code detection.
+
+**When it runs**: Nightly quality pipeline (sonarcloud-analysis job, depends on test-and-coverage for coverage data).
+
+**Configuration**: `sonar-project.properties` at repository root. Key settings:
+- **Project**: `spaarke-dev_spaarke` (organization: `spaarke-dev`)
+- **Sources**: `src/` (excludes `src/solutions/`, `node_modules/`, `dist/`, `bin/`, `obj/`)
+- **Coverage**: Reads OpenCover reports from `**/coverage.opencover.xml`
+- **Duplicate detection**: Excludes test files
+
+**Dashboard**: Access at `https://sonarcloud.io/project/overview?id=spaarke-dev_spaarke`
+
+**Quality Gate Conditions** (default SonarCloud gate):
+- New code coverage >= 80% (or project-configured threshold)
+- No new bugs with severity > minor
+- No new vulnerabilities
+- No new security hotspots (reviewed)
+- Code smells on new code within threshold
+
+**Run Locally** (requires SonarCloud token):
+```bash
+# Install SonarScanner (if not already installed)
+dotnet tool install --global dotnet-sonarscanner
+
+# Begin analysis
+dotnet sonarscanner begin /k:"spaarke-dev_spaarke" /o:"spaarke-dev" /d:sonar.token="$SONAR_TOKEN" /d:sonar.host.url="https://sonarcloud.io"
+
+# Build
+dotnet build
+
+# End analysis (uploads to SonarCloud)
+dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+```
+
+**How to interpret results**: Visit the SonarCloud dashboard. The "Overall Code" tab shows cumulative metrics. The "New Code" tab shows metrics for code changed since the last analysis period. Focus on "New Code" metrics -- these reflect the quality of recent changes.
+
+**Troubleshooting**:
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| "Coverage not updating" on dashboard | Coverage reports not uploaded or wrong path | Check `sonar.cs.opencover.reportsPaths` in `sonar-project.properties`; verify Coverlet generates OpenCover format |
+| Quality gate stuck on "Computing" | Analysis still processing | Wait 2-3 minutes; SonarCloud processes asynchronously |
+| "Project not found" error | Wrong project key or missing SONAR_TOKEN | Verify `sonar.projectKey` matches SonarCloud project; ensure `SONAR_TOKEN` secret is set in GitHub |
+| Local scan fails with authentication error | Token expired or incorrect | Generate a new token at `https://sonarcloud.io/account/security` |
+
+---
+
+## PR Quality Gates (sdap-ci.yml)
+
+The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All jobs must pass before a PR can merge.
+
+### CI Jobs
+
+| Job | Runner | What It Checks | Blocking? |
+|-----|--------|---------------|-----------|
+| **Security Scan** | ubuntu-latest | Trivy filesystem vulnerability scan | Yes |
+| **Build & Test** | windows-latest | `dotnet build`, `dotnet test` with coverage | Yes |
+| **Client Quality** | ubuntu-latest | Prettier format check, ESLint strict check | Yes |
+| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), plugin size validation, dependency audit | Yes |
+| **Integration Readiness** | windows-latest | Build for deployment, package artifacts, environment readiness | Yes |
+| **ADR Violations Report** | ubuntu-latest | Parses NetArchTest results and comments on PR | Advisory |
+| **CI Summary** | ubuntu-latest | Aggregates all job results into step summary | Advisory |
+
+### Key Commands Run in CI
+
+```bash
+# Client Quality job
+npx prettier --check .                    # Format verification
+cd src/client/pcf && npx eslint .         # ESLint strict check
+
+# Code Quality job
+dotnet format --verify-no-changes         # C# format verification
+dotnet test tests/Spaarke.ArchTests/      # ADR architecture tests (NetArchTest)
+```
+
+### Performance Target
+
+The full PR pipeline MUST complete in **< 5 minutes**. The `client-quality` job runs in parallel with `build-test` and `security-scan` to stay within budget.
+
+---
+
+## Nightly Quality Pipeline
+
+The `nightly-quality.yml` workflow runs a comprehensive quality sweep on weeknights (Mon-Fri, 6 AM UTC / midnight MST). For trigger details, manual dispatch options, and troubleshooting, see the [CI/CD Workflow Guide - Nightly Quality Workflow](ci-cd-workflow.md#nightly-quality-workflow).
+
+### Jobs
+
+| Job | Depends On | What It Does |
+|-----|-----------|-------------|
+| **test-and-coverage** | — | Full test suite with Coverlet coverage collection |
+| **sonarcloud-analysis** | test-and-coverage | SonarCloud deep analysis (uses coverage artifacts) |
+| **ai-code-review** | — | Claude Code headless review using `scripts/quality/nightly-review-prompt.md` |
+| **dependency-audit** | — | `dotnet list --vulnerable` + `npm audit` |
+| **report-results** | All above | Aggregates findings into a rolling GitHub issue (label: `nightly-quality`) |
+
+### Performance Target
+
+The nightly pipeline MUST complete in **< 15 minutes**.
+
+### Manual Trigger
+
+```bash
+# Run nightly quality on-demand via GitHub CLI
+gh workflow run nightly-quality.yml
+
+# Run without SonarCloud
+gh workflow run nightly-quality.yml -f run_sonarcloud=false
+
+# Run without AI review
+gh workflow run nightly-quality.yml -f run_ai_review=false
+```
+
+---
+
+## Weekly Quality Summary
+
+The `weekly-quality.yml` workflow runs every Friday at 10 PM UTC (4 PM MST). It aggregates metrics from the week's nightly runs into a trend table.
+
+### Metrics Tracked
+
+| Metric | Source |
+|--------|--------|
+| Test coverage % | `coverage.cobertura.xml` artifact |
+| New violations count | `ai-review-results.json` artifact |
+| TODO/FIXME count | `ai-review-results.json` artifact |
+| Vulnerable dependency count | `dependency-audit-results` artifact |
+| Build warnings | Test run exit status |
+
+### Output
+
+Creates/updates a GitHub issue labeled `weekly-quality-summary` with a trend table showing the week's quality trajectory.
+
+---
+
+## Quarterly Audit
+
+Quarterly audits are a manual, comprehensive review of the entire quality system.
+
+**Future:** A detailed quarterly audit runbook will be created as task 044 in the code-quality-and-assurance-r1 project. The runbook will cover:
+- Full codebase audit against all ADRs
+- Tool configuration review (are thresholds still appropriate?)
+- Dependency health deep dive
+- Quality trend analysis from weekly summaries
+- Process improvement recommendations
+
+---
+
+## Claude Code Hooks
+
+Claude Code hooks provide real-time quality feedback during AI-assisted development sessions. Configured in `.claude/settings.json`.
+
+### Active Hooks
+
+| Hook Event | Matcher | Script | Purpose |
+|-----------|---------|--------|---------|
+| `PostToolUse` | `Edit` | `scripts/quality/post-edit-lint.sh` | Runs lint checks after every file edit |
+| `TaskCompleted` | (all) | `scripts/quality/task-quality-gate.sh` | Runs quality gate when a task completes |
+
+### How They Work
+
+- **PostToolUse (Edit)**: After Claude edits any file, the post-edit lint hook runs relevant linters on the changed file. This provides immediate feedback without waiting for Step 9.5.
+- **TaskCompleted**: When Claude marks a task as complete, the quality gate hook runs a final check. This complements the Step 9.5 quality gates in the task-execute protocol.
+
+---
+
+## AI-Assisted PR Reviews
+
+Two AI review tools provide automated PR feedback:
+
+### CodeRabbit
+
+- **Trigger**: Automatically reviews every PR
+- **Focus**: Line-by-line code review, bug detection, style suggestions
+- **Config**: `.coderabbit.yaml` (if configured)
+- **Status**: Advisory (comments on PR, does not block merge)
+
+### Claude Code Action
+
+- **Trigger**: Automatically reviews every PR via GitHub Actions
+- **Workflow**: `.github/workflows/claude-code-review.yml`
+- **Focus**: Architecture-level review, ADR compliance, design patterns
+- **Status**: Advisory (comments on PR, does not block merge)
+
+Both tools complement each other: CodeRabbit focuses on code-level details while Claude Code Action provides higher-level architectural analysis.
 
 ---
 
@@ -766,6 +1160,7 @@ claude --chrome
 ## Related Documentation
 
 - [CI/CD Workflow Guide](ci-cd-workflow.md) - GitHub Actions, commits, PRs, deployments
+- [Code Quality Onboarding Guide](../guides/code-quality-onboarding.md) - **Future:** Quick-start guide for new developers (task 042)
 - [Parallel Claude Code Sessions](parallel-claude-sessions.md) - Multi-session workflow
 - [Context Recovery Procedure](context-recovery.md) - Resuming work
 - [code-review Skill](../../.claude/skills/code-review/SKILL.md) - Full skill documentation
@@ -775,4 +1170,4 @@ claude --chrome
 
 ---
 
-*Last updated: January 6, 2026*
+*Last updated: March 13, 2026*

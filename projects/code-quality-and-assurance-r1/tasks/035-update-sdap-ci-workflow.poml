@@ -3,7 +3,7 @@
   <metadata>
     <title>Update sdap-ci.yml with New Quality Checks</title>
     <phase>4: Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030, 033, 034</dependencies>
     <blocks>040, 043</blocks>

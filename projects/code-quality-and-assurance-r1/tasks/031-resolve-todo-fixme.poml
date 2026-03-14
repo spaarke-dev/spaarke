@@ -3,7 +3,7 @@
   <metadata>
     <title>Resolve TODO/FIXME Comments Across Codebase</title>
     <phase>4: Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>008</dependencies>
     <blocks>043</blocks>
