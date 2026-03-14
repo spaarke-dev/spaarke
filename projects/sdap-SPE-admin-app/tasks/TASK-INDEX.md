@@ -164,8 +164,8 @@
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
 | 061 | Create ContainerTypesPage UI | ✅ | 029, 050-054 | 3h |
-| 062 | Create ContainerTypeDetail panel | 🔲 | 061 | 3h |
-| 063 | Create RegisterWizard | 🔲 | 061 | 4h |
+| 062 | Create ContainerTypeDetail panel | ✅ | 061 | 3h |
+| 063 | Create RegisterWizard | ✅ | 061 | 4h |
 
 ### 2.4 Code Page — Container Enhancements
 
@@ -193,8 +193,8 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 071 | Phase 2 integration testing | 🔲 | 061-070 | 3h |
-| 072 | Deploy updated BFF and Code Page | 🔲 | 071 | 2h |
+| 071 | Phase 2 integration testing | ✅ | 061-070 | 3h |
+| 072 | Deploy updated BFF and Code Page | ✅ | 071 | 2h |
 
 ---
 
@@ -202,12 +202,12 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 080 | eDiscovery read-only dashboard | 🔲 | 072 | 4h |
-| 081 | Retention label management | 🔲 | 072 | 3h |
-| 082 | Multi-tenant consuming tenant management | 🔲 | 072 | 4h |
-| 083 | Bulk operations | 🔲 | 072 | 4h |
-| 084 | Multi-app registration support | 🔲 | 072 | 4h |
-| 085 | Phase 3 integration testing and deployment | 🔲 | 080-084 | 3h |
+| 080 | eDiscovery read-only dashboard | ⏭️ | 072 | 4h |
+| 081 | Retention label management | ⏭️ | 072 | 3h |
+| 082 | Multi-tenant consuming tenant management | ✅ | 072 | 4h |
+| 083 | Bulk operations | ✅ | 072 | 4h |
+| 084 | Multi-app registration support | ✅ | 072 | 4h |
+| 085 | Phase 3 integration testing and deployment | ✅ | 080-084 | 3h |
 | 090 | Project wrap-up | 🔲 | 085 | 2h |
 
 ---

@@ -1,7 +1,7 @@
 <task id="SPE-085" project="SDAP SPE Admin App">
   <metadata>
     <title>Phase 3 Integration Testing and Deployment</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
     <tags>deploy, testing, phase-3</tags>
     <phase>phase-3</phase>
