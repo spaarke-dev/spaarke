@@ -33,10 +33,7 @@ import {
   type TableColumnDefinition,
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
-import {
-  EyeRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
+import { EyeRegular, OpenRegular } from '@fluentui/react-icons';
 import { FilePreviewDialog } from '../FilePreview';
 import type { IFilePreviewServices } from '../FilePreview/filePreviewTypes';
 import type {
@@ -70,21 +67,66 @@ export interface IFindSimilarResultsStepProps {
 // ---------------------------------------------------------------------------
 
 const DOCUMENT_COLUMNS: IGridColumn[] = [
-  { name: 'name', displayName: 'Name', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
-  { name: 'combinedScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'fileType', displayName: 'File Type', dataType: 'FileType', visualSizeFactor: 1 },
+  {
+    name: 'name',
+    displayName: 'Name',
+    dataType: 'SingleLine.Text',
+    visualSizeFactor: 3,
+  },
+  {
+    name: 'combinedScore',
+    displayName: 'Score',
+    dataType: 'Percentage',
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: 'fileType',
+    displayName: 'File Type',
+    dataType: 'FileType',
+    visualSizeFactor: 1,
+  },
 ];
 
 const MATTER_COLUMNS: IGridColumn[] = [
-  { name: 'recordName', displayName: 'Matter Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
-  { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
+  {
+    name: 'recordName',
+    displayName: 'Matter Name',
+    dataType: 'SingleLine.Text',
+    visualSizeFactor: 2.5,
+  },
+  {
+    name: 'confidenceScore',
+    displayName: 'Score',
+    dataType: 'Percentage',
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: 'recordDescription',
+    displayName: 'Description',
+    dataType: 'SingleLine.Text',
+    visualSizeFactor: 3,
+  },
 ];
 
 const PROJECT_COLUMNS: IGridColumn[] = [
-  { name: 'recordName', displayName: 'Project Name', dataType: 'SingleLine.Text', visualSizeFactor: 2.5 },
-  { name: 'confidenceScore', displayName: 'Score', dataType: 'Percentage', visualSizeFactor: 0.8 },
-  { name: 'recordDescription', displayName: 'Description', dataType: 'SingleLine.Text', visualSizeFactor: 3 },
+  {
+    name: 'recordName',
+    displayName: 'Project Name',
+    dataType: 'SingleLine.Text',
+    visualSizeFactor: 2.5,
+  },
+  {
+    name: 'confidenceScore',
+    displayName: 'Score',
+    dataType: 'Percentage',
+    visualSizeFactor: 0.8,
+  },
+  {
+    name: 'recordDescription',
+    displayName: 'Description',
+    dataType: 'SingleLine.Text',
+    visualSizeFactor: 3,
+  },
 ];
 
 const COLUMNS_BY_DOMAIN: Record<FindSimilarDomain, IGridColumn[]> = {
@@ -127,7 +169,7 @@ function renderByDataType(value: unknown, dataType: string): string {
 // ---------------------------------------------------------------------------
 
 function mapDocumentResults(docs: IDocumentResult[]): IGridRecord[] {
-  return docs.map((d) => ({
+  return docs.map(d => ({
     id: d.documentId,
     entityName: 'sprk_document',
     name: d.name,
@@ -140,7 +182,7 @@ function mapDocumentResults(docs: IDocumentResult[]): IGridRecord[] {
 }
 
 function mapRecordResults(records: IRecordResult[]): IGridRecord[] {
-  return records.map((r) => ({
+  return records.map(r => ({
     id: r.recordId,
     entityName: r.recordType,
     recordName: r.recordName,
@@ -270,12 +312,12 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
-      (entries) => {
+      entries => {
         if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, records.length));
+          setVisibleCount(prev => Math.min(prev + PAGE_SIZE, records.length));
         }
       },
-      { threshold: 0.1 },
+      { threshold: 0.1 }
     );
 
     observer.observe(sentinel);
@@ -293,12 +335,12 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
         entityId: record.id,
       });
     },
-    [onNavigateToEntity],
+    [onNavigateToEntity]
   );
 
   // Build table columns (data columns + actions column)
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
-    const dataCols = columns.map((col) =>
+    const dataCols = columns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
         compare: (a, b) => {
@@ -310,8 +352,8 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
           return String(aVal ?? '').localeCompare(String(bVal ?? ''));
         },
         renderHeaderCell: () => col.displayName,
-        renderCell: (item) => renderByDataType(item[col.name], col.dataType),
-      }),
+        renderCell: item => renderByDataType(item[col.name], col.dataType),
+      })
     );
 
     // Actions column
@@ -319,7 +361,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
       columnId: '_actions',
       compare: () => 0,
       renderHeaderCell: () => '',
-      renderCell: (item) => {
+      renderCell: item => {
         if (domain === 'documents') {
           return (
             <div className={styles.actionsCell}>
@@ -329,7 +371,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
                   size="small"
                   icon={<EyeRegular />}
                   aria-label="Preview document"
-                  onClick={(e) => {
+                  onClick={e => {
                     e.stopPropagation();
                     setPreviewDocId(item.id);
                     setPreviewDocName(item.name ?? item.id);
@@ -351,7 +393,10 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
                 size="small"
                 icon={<OpenRegular />}
                 aria-label={label}
-                onClick={(e) => { e.stopPropagation(); handleOpenRecord(item); }}
+                onClick={e => {
+                  e.stopPropagation();
+                  handleOpenRecord(item);
+                }}
               />
             </Tooltip>
           </div>
@@ -381,23 +426,17 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
     return options;
   }, [columns]);
 
-  const visibleRecords = React.useMemo(
-    () => records.slice(0, visibleCount),
-    [records, visibleCount],
-  );
+  const visibleRecords = React.useMemo(() => records.slice(0, visibleCount), [records, visibleCount]);
 
-  const items: GridItem[] = React.useMemo(
-    () => visibleRecords.map((r, i) => ({ ...r, _rowId: i })),
-    [visibleRecords],
-  );
+  const items: GridItem[] = React.useMemo(() => visibleRecords.map((r, i) => ({ ...r, _rowId: i })), [visibleRecords]);
 
   if (records.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <Text size={400} weight="semibold">No results found</Text>
-        <Text size={200}>
-          No similar {domain} were found for the uploaded files.
+        <Text size={400} weight="semibold">
+          No results found
         </Text>
+        <Text size={200}>No similar {domain} were found for the uploaded files.</Text>
       </div>
     );
   }
@@ -420,20 +459,14 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
           <DataGridHeader>
             <DataGridRow>
               {({ renderHeaderCell }) => (
-                <DataGridHeaderCell className={styles.headerCell}>
-                  {renderHeaderCell()}
-                </DataGridHeaderCell>
+                <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
               )}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<GridItem>>
             {({ item, rowId }) => (
               <DataGridRow<GridItem> key={rowId} style={{ height: '44px' }}>
-                {({ renderCell }) => (
-                  <DataGridCell className={styles.cell}>
-                    {renderCell(item)}
-                  </DataGridCell>
-                )}
+                {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
               </DataGridRow>
             )}
           </DataGridBody>
@@ -483,11 +516,20 @@ export const FindSimilarResultsStep: React.FC<IFindSimilarResultsStepProps> = ({
     if (!results) return { records: [], count: 0 };
     switch (activeDomain) {
       case 'documents':
-        return { records: mapDocumentResults(results.documents ?? []), count: results.documentsTotalCount };
+        return {
+          records: mapDocumentResults(results.documents ?? []),
+          count: results.documentsTotalCount,
+        };
       case 'matters':
-        return { records: mapRecordResults(results.matters ?? []), count: results.mattersTotalCount };
+        return {
+          records: mapRecordResults(results.matters ?? []),
+          count: results.mattersTotalCount,
+        };
       case 'projects':
-        return { records: mapRecordResults(results.projects ?? []), count: results.projectsTotalCount };
+        return {
+          records: mapRecordResults(results.projects ?? []),
+          count: results.projectsTotalCount,
+        };
     }
   }, [activeDomain, results]);
 

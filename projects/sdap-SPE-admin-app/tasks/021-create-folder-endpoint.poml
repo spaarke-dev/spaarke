@@ -1,0 +1,42 @@
+<task id="SPE-021" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create Folder Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-017</dependencies>
+  </metadata>
+  <prompt>Implement the Create Folder endpoint so administrators can create folder structures within SPE containers for organizing content.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>A working endpoint that creates a new folder in a container via the Graph API.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Administrators need to create folder structures within containers to organize documents. The endpoint creates a new folder at the container root or within a specified parent folder using the Graph API drive items endpoint with a folder facet.</background>
+  </context>
+  <steps>
+    <step order="1" name="Implement POST endpoint">Add POST /api/spe/containers/{id}/folders?configId={id} to ContainerItemEndpoints.cs accepting folder name and optional parentFolderId.</step>
+    <step order="2" name="Call Graph API">Create the folder via Graph API by posting a DriveItem with a folder facet and the specified name.</step>
+    <step order="3" name="Support parent folder">When parentFolderId is provided, create the folder as a child of that folder. Otherwise create at container root.</step>
+    <step order="4" name="Validate input">Validate folder name is not empty and does not contain invalid characters.</step>
+    <step order="5" name="Test endpoint">Verify folder creation at root and within subfolders works correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerItemEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/containers/{id}/folders creates a new folder at the container root.</criterion>
+    <criterion testable="true">Providing parentFolderId creates the folder within the specified parent folder.</criterion>
+    <criterion testable="true">Empty or invalid folder name returns 400 Bad Request.</criterion>
+    <criterion testable="true">Response includes the created folder's ID and metadata.</criterion>
+  </acceptance-criteria>
+</task>

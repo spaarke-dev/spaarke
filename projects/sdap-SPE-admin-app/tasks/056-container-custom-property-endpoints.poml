@@ -1,0 +1,48 @@
+<task id="SPE-056" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Container Custom Property Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-013</dependencies>
+  </metadata>
+  <prompt>Implement endpoints to read and update custom properties on containers. Custom properties are key-value pairs that can optionally be marked as searchable, enabling administrators to attach metadata to containers for classification, filtering, and search scenarios.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>Working GET and PUT endpoints for container custom properties via Graph API, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Custom properties on containers are key-value pairs that provide additional metadata. Each property has a name, value, and isSearchable flag. When isSearchable is true, the property value is indexed and can be used in search queries. This enables advanced filtering and discovery of containers based on business-specific attributes.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dtos">Define CustomPropertyDto with name, value, isSearchable fields and UpdateCustomPropertiesRequest as a collection</step>
+    <step order="2" name="add-graph-methods">Add GetCustomPropertiesAsync and UpdateCustomPropertiesAsync to SpeAdminGraphService</step>
+    <step order="3" name="add-get-endpoint">Add GET /api/spe/containers/{id}/customproperties endpoint</step>
+    <step order="4" name="add-put-endpoint">Add PUT /api/spe/containers/{id}/customproperties endpoint with validation</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to both endpoints</step>
+    <step order="6" name="add-tests">Write unit tests for both operations</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/CustomPropertyDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/CustomPropertyTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/containers/{id}/customproperties returns list of custom properties with name, value, isSearchable</criterion>
+    <criterion testable="true">PUT /api/spe/containers/{id}/customproperties updates the properties and returns updated list</criterion>
+    <criterion testable="true">Empty property name is rejected with 400</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to both endpoints</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

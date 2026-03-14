@@ -6,13 +6,7 @@
 
 import * as React from 'react';
 import { Handle, Position } from 'react-flow-renderer';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-  shorthands,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, mergeClasses, shorthands } from '@fluentui/react-components';
 import type { PlaybookNodeData, PlaybookNodeType } from '../../stores';
 
 const useStyles = makeStyles({
@@ -68,10 +62,7 @@ const useStyles = makeStyles({
 });
 
 // Node color schemes by type
-export const nodeColorSchemes: Record<
-  PlaybookNodeType,
-  { background: string; iconColor: string }
-> = {
+export const nodeColorSchemes: Record<PlaybookNodeType, { background: string; iconColor: string }> = {
   aiAnalysis: { background: '#0078D4', iconColor: '#ffffff' },
   aiCompletion: { background: '#0078D4', iconColor: '#ffffff' },
   condition: { background: '#FFB900', iconColor: '#000000' },
@@ -137,9 +128,7 @@ export const BaseNode = React.memo(function BaseNode({
       {children && <div className={styles.body}>{children}</div>}
 
       {/* Source handle (output) */}
-      {sourceHandleCount > 0 && (
-        <Handle type="source" position={Position.Bottom} />
-      )}
+      {sourceHandleCount > 0 && <Handle type="source" position={Position.Bottom} />}
     </div>
   );
 });

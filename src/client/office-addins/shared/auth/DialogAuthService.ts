@@ -294,7 +294,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
           displayInIframe: mergedOptions.displayInIframe,
           promptBeforeOpen: false,
         },
-        (asyncResult) => {
+        asyncResult => {
           if (asyncResult.status === Office.AsyncResultStatus.Failed) {
             this.handleDialogOpenError(asyncResult.error);
             return;
@@ -310,12 +310,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
   public cancelAuthentication(): void {
     this.cleanup();
     if (this.pendingReject) {
-      this.pendingReject(
-        new DialogAuthError(
-          DialogAuthErrorCode.USER_CANCELLED,
-          'Authentication was cancelled.'
-        )
-      );
+      this.pendingReject(new DialogAuthError(DialogAuthErrorCode.USER_CANCELLED, 'Authentication was cancelled.'));
     }
     this.clearPendingPromise();
   }
@@ -358,12 +353,9 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     );
 
     // Handle dialog close event
-    this.activeDialog.addEventHandler(
-      Office.EventType.DialogEventReceived,
-      (arg: { error: number }) => {
-        this.handleDialogEvent(arg.error);
-      }
-    );
+    this.activeDialog.addEventHandler(Office.EventType.DialogEventReceived, (arg: { error: number }) => {
+      this.handleDialogEvent(arg.error);
+    });
   }
 
   private handleDialogMessage(message: string): void {
@@ -432,10 +424,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.MSAL_ERROR,
-        message.errorMessage || 'Authentication failed in dialog.'
-      )
+      new DialogAuthError(DialogAuthErrorCode.MSAL_ERROR, message.errorMessage || 'Authentication failed in dialog.')
     );
   }
 
@@ -443,10 +432,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.USER_CANCELLED,
-        'Authentication was cancelled by user.'
-      )
+      new DialogAuthError(DialogAuthErrorCode.USER_CANCELLED, 'Authentication was cancelled by user.')
     );
   }
 
@@ -455,10 +441,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.COMMUNICATION_ERROR,
-        `Dialog communication error (code: ${errorCode}).`
-      )
+      new DialogAuthError(DialogAuthErrorCode.COMMUNICATION_ERROR, `Dialog communication error (code: ${errorCode}).`)
     );
   }
 
@@ -476,17 +459,11 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     if (eventType === 12002) {
       // Dialog was closed by user
       this.rejectWithError(
-        new DialogAuthError(
-          DialogAuthErrorCode.DIALOG_CLOSED,
-          'The authentication dialog was closed.'
-        )
+        new DialogAuthError(DialogAuthErrorCode.DIALOG_CLOSED, 'The authentication dialog was closed.')
       );
     } else {
       this.rejectWithError(
-        new DialogAuthError(
-          DialogAuthErrorCode.COMMUNICATION_ERROR,
-          `Dialog event error (code: ${eventType}).`
-        )
+        new DialogAuthError(DialogAuthErrorCode.COMMUNICATION_ERROR, `Dialog event error (code: ${eventType}).`)
       );
     }
   }
@@ -508,10 +485,7 @@ class DialogAuthServiceImpl implements IDialogAuthService {
     this.cleanup();
 
     this.rejectWithError(
-      new DialogAuthError(
-        DialogAuthErrorCode.AUTH_TIMEOUT,
-        'Authentication timed out. Please try again.'
-      )
+      new DialogAuthError(DialogAuthErrorCode.AUTH_TIMEOUT, 'Authentication timed out. Please try again.')
     );
   }
 

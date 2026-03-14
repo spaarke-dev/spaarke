@@ -1,0 +1,40 @@
+<task id="SPE-030" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create BuContextPicker Cascade Component</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027</dependencies>
+  </metadata>
+  <prompt>Create the BuContextPicker component that provides cascading dropdown selection for Business Unit, Container Type Configuration, and Environment. This component drives the entire app context — all downstream pages depend on the selected BU and configuration.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>BuContextPicker renders three cascading dropdowns (BU → CT Config → Environment) that populate from API data, filter correctly on selection, and update the shared BuContext state.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse LookupField from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App operates in a multi-tenant, multi-BU context. Users must first select their Business Unit, then a Container Type Configuration (filtered by BU), and finally an Environment (derived from the config). This cascading selection determines which SPE tenant and container type all subsequent operations target.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/layout/BuContextPicker.tsx with three cascading dropdowns using LookupField from @spaarke/ui-components.</step>
+    <step order="2" name="bu-dropdown">Implement BU dropdown that populates from the API and triggers filtering of CT Config dropdown on selection.</step>
+    <step order="3" name="config-dropdown">Implement CT Config dropdown filtered by selected BU, loading configs from API.</step>
+    <step order="4" name="environment-dropdown">Implement Environment dropdown that auto-populates from the selected config's environment reference.</step>
+    <step order="5" name="context-update">On complete selection, update the shared BuContext state so downstream components receive the active context.</step>
+    <step order="6" name="persistence">Persist the last selection so it restores on page reload.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/layout/BuContextPicker.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">BU selection filters the CT Config dropdown to show only configs belonging to that BU.</criterion>
+    <criterion testable="true">Config selection loads the associated environment into the Environment dropdown.</criterion>
+    <criterion testable="true">Selected context state persists across page navigation within the app.</criterion>
+  </acceptance-criteria>
+</task>

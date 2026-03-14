@@ -1,0 +1,50 @@
+<task id="SPE-053" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Register Container Type Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-050</dependencies>
+  </metadata>
+  <prompt>Implement the container type registration endpoint. This is the key step that enables containers to be created from a container type by granting the consuming application the necessary delegated and application permissions. Without registration, a container type exists but cannot be used. This uses the SharePoint REST API rather than Graph API.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph and SharePoint REST API expertise</role>
+  <goal>A working POST endpoint that registers a container type by setting application permissions via SharePoint REST API, with proper permission selection and audit logging.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph/SharePoint SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container type registration is the process of granting a consuming application (identified by its Azure AD app ID) the permissions it needs to create and manage containers of a given type. This is done via the SharePoint REST API endpoint PUT /_api/v2.1/storageContainerTypes/{containerTypeId}/applicationPermissions, passing the selected delegated permissions (e.g., ReadContent, WriteContent, Create, Delete, ManagePermissions) and application permissions. This is a critical security operation since it controls what the consuming app can do with containers.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-request-dto">Define RegisterContainerTypeRequest with appId (consuming app), delegatedPermissions (string array), and applicationPermissions (string array)</step>
+    <step order="2" name="define-permission-enums">Define enums or constants for valid delegated permissions (ReadContent, WriteContent, Create, Delete, ManagePermissions, AddAllPermissions, etc.) and application permissions</step>
+    <step order="3" name="add-sharepoint-method">Add RegisterContainerTypeAsync to SpeAdminGraphService that calls PUT to SharePoint REST API /_api/v2.1/storageContainerTypes/{id}/applicationPermissions with the selected permissions payload</step>
+    <step order="4" name="add-endpoint">Add POST /api/spe/containertypes/{typeId}/register?configId={id} endpoint with validation, SharePoint REST call, and audit logging</step>
+    <step order="5" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="6" name="add-tests">Write unit tests covering success, invalid permissions, missing app ID, and audit log creation</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/RegisterContainerTypeRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/RegisterContainerTypeTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/containertypes/{typeId}/register calls SharePoint REST API PUT /_api/v2.1/storageContainerTypes/{id}/applicationPermissions</criterion>
+    <criterion testable="true">Request must include appId and at least one permission</criterion>
+    <criterion testable="true">Invalid permission names are rejected with 400</criterion>
+    <criterion testable="true">Audit log entry is created for successful registration</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

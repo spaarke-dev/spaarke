@@ -2,10 +2,10 @@
  * Core types for Universal Dataset component
  */
 
-export type ViewMode = "Grid" | "Card" | "List";
-export type ThemeMode = "Auto" | "Spaarke" | "Host";
-export type SelectionMode = "None" | "Single" | "Multiple";
-export type ScrollBehavior = "Auto" | "Infinite" | "Paged";
+export type ViewMode = 'Grid' | 'Card' | 'List';
+export type ThemeMode = 'Auto' | 'Spaarke' | 'Host';
+export type SelectionMode = 'None' | 'Single' | 'Multiple';
+export type ScrollBehavior = 'Auto' | 'Infinite' | 'Paged';
 
 export interface IDatasetRecord {
   id: string;
@@ -38,6 +38,6 @@ export interface IDatasetConfig {
   scrollBehavior: ScrollBehavior;
 
   // Toolbar configuration
-  compactToolbar?: boolean;           // Icon-only mode
-  toolbarShowOverflow?: boolean;      // Enable overflow menu (default: true)
+  compactToolbar?: boolean; // Icon-only mode
+  toolbarShowOverflow?: boolean; // Enable overflow menu (default: true)
 }

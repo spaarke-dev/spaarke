@@ -1,32 +1,32 @@
 {
-    "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
-    "compilerOptions": {
-        "typeRoots": ["node_modules/@types"]
-    },
-    "exclude": [
-        "node_modules",
-        "**/__tests__/**",
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "**/*.spec.ts",
-        "**/*.spec.tsx",
-        "**/*.stories.ts",
-        "**/*.stories.tsx",
-        "**/jest.setup.ts",
-        "AIMetadataExtractor/**",
-        "AnalysisBuilder/**",
-        "AnalysisWorkspace/**",
-        "AiToolAgent/**",
-        "AISummaryPanel/**",
-        "DocumentRelationshipViewer/**",
-        "DrillThroughWorkspace/**",
-        "EmailProcessingMonitor/**",
-        "PlaybookBuilderHost/**",
-        "SpeFileViewer/**",
-        "SourceDocumentViewer/**",
-        "ThemeEnforcer/**",
-        "UniversalDatasetGrid/**",
-        "UniversalQuickCreate/**",
-        "VisualHost/**"
-    ]
+  "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
+  "compilerOptions": {
+    "typeRoots": ["node_modules/@types"]
+  },
+  "exclude": [
+    "node_modules",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/*.stories.ts",
+    "**/*.stories.tsx",
+    "**/jest.setup.ts",
+    "AIMetadataExtractor/**",
+    "AnalysisBuilder/**",
+    "AnalysisWorkspace/**",
+    "AiToolAgent/**",
+    "AISummaryPanel/**",
+    "DocumentRelationshipViewer/**",
+    "DrillThroughWorkspace/**",
+    "EmailProcessingMonitor/**",
+    "PlaybookBuilderHost/**",
+    "SpeFileViewer/**",
+    "SourceDocumentViewer/**",
+    "ThemeEnforcer/**",
+    "UniversalDatasetGrid/**",
+    "UniversalQuickCreate/**",
+    "VisualHost/**"
+  ]
 }

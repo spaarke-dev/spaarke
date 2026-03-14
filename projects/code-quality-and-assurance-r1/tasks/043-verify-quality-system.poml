@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>End-to-End Verification of the Complete Quality System</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020, 021, 022, 023, 024, 025, 030, 031, 032, 033, 034, 035, 036, 040, 041</dependencies>
+    <blocks>090</blocks>
+    <tags>verification, integration-test, quality-gate</tags>
+  </metadata>
+
+  <prompt>
+    Perform end-to-end verification of the complete quality system. Test five scenarios: (1) make a
+    change and commit — verify pre-commit hooks fire correctly, (2) create or inspect a PR — verify
+    CodeRabbit and/or Claude Code Action produce review comments and the CI build passes in under 5
+    minutes, (3) manually trigger the nightly workflow — verify it completes in under 15 minutes and
+    creates/updates a GitHub issue, (4) verify Claude Code hooks fire on file edit and task completion,
+    (5) verify weekly summary generation produces a correctly structured output. Document all results
+    in a verification report.
+  </prompt>
+
+  <role>
+    QA engineer and DevOps specialist performing integration verification of a multi-component quality
+    system. Expert at designing verification scenarios that catch integration failures between components.
+  </role>
+
+  <goal>
+    A complete verification report at projects/code-quality-and-assurance-r1/notes/quality-system-verification.md
+    confirming that all five quality system components work end-to-end. Any failures are documented
+    with root cause and resolution. The verification report is the official acceptance sign-off for
+    the complete quality system.
+  </goal>
+
+  <context>
+    <background>
+      This task is the integration test for the entire project. All individual components were tested
+      during their respective implementation tasks — this task verifies they work together as a system.
+
+      Verification scenarios in detail:
+
+      Scenario 1 — Pre-commit hooks:
+      Make a small change to a .ts file (e.g., add a blank line) in src/client/. Stage it and run
+      `git commit`. Verify Husky fires the pre-commit hook, ESLint and Prettier checks run, and the
+      commit either succeeds (if change is clean) or fails with a clear error (if a violation is
+      introduced intentionally). Test both the passing and failing cases.
+
+      Scenario 2 — PR CI pipeline:
+      Either create a test PR to the repository or find the most recent PR in `gh pr list`. Run
+      `gh run list --workflow=sdap-ci.yml --limit=5` to find recent CI runs. Verify: build status
+      badge is present in PR, Prettier check passes, ESLint check passes, architecture tests pass,
+      and total runtime is under 5 minutes. Check that AI review comments appear (CodeRabbit/Claude
+      Code Action) and are marked as review comments (not required checks).
+
+      Scenario 3 — Nightly workflow:
+      Run `gh workflow run nightly-quality.yml` to trigger manually. Monitor with
+      `gh run watch` or `gh run list --workflow=nightly-quality.yml`. Verify: all four jobs complete
+      (tests, SonarCloud, AI review, dependency audit), total runtime under 15 minutes, and a GitHub
+      issue with label 'nightly-quality' is created or updated.
+
+      Scenario 4 — Claude Code hooks:
+      Start a Claude Code session. Make a file edit using the Edit tool. Verify the post-edit-lint.sh
+      hook fires and produces linter output. Complete a task (or simulate task completion). Verify
+      task-quality-gate.sh fires and produces gate check output.
+
+      Scenario 5 — Weekly summary:
+      Either trigger the weekly summary job manually (if separate trigger exists) or verify by
+      inspecting the weekly summary job definition that it would produce correctly structured output.
+      If the weekly job has run before, verify the GitHub issue with label 'weekly-quality-summary'
+      exists and has the expected table structure.
+    </background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-system-verification.md (create — verification report)</file>
+      <file>.github/workflows/nightly-quality.yml (reference — for manual trigger)</file>
+      <file>scripts/quality/post-edit-lint.sh (reference — hook being verified)</file>
+      <file>scripts/quality/task-quality-gate.sh (reference — hook being verified)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Verification must test actual behavior, not just inspect configuration. Run each scenario and record the observed output — do not mark a scenario as passing based on code review alone.</constraint>
+    <constraint source="spec">For scenarios that cannot be verified in the current session (e.g., weekly summary may require Friday night trigger), document the scenario as "Deferred — cannot verify in current session" with the verification steps for future confirmation.</constraint>
+    <constraint source="spec">Any verification failure must be treated as a blocking issue: root-cause the failure, fix it in the relevant task's deliverable, and re-verify before marking the scenario as passing.</constraint>
+    <constraint source="spec">The verification report must include: scenario name, expected outcome, actual outcome, pass/fail status, and any issues found. Use a consistent table or structured format.</constraint>
+    <constraint source="spec">All success criteria from spec.md must be mapped to one or more verification scenarios. Every spec success criterion must have a corresponding verification result (pass/fail/deferred).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r1/spec.md to extract all success criteria. Build a verification matrix: map each success criterion to the scenario that verifies it.</step>
+    <step order="2">Execute Scenario 1 (pre-commit hooks): create a small test change in a .ts file. Stage it. Run `git commit -m "test: verify pre-commit hooks"`. Observe and record whether Husky fires, what output it produces, and whether the commit succeeds or fails as expected. Then make an intentional lint violation and verify the hook catches it. Revert test changes after verification.</step>
+    <step order="3">Execute Scenario 2 (PR CI pipeline): run `gh run list --workflow=sdap-ci.yml --limit=3` to find recent CI runs. For the most recent run, check: `gh run view {run_id} --json jobs,status,timing`. Verify job names match the expected quality checks, all jobs pass, and total runtime is under 5 minutes. Record the actual runtime.</step>
+    <step order="4">Execute Scenario 3 (nightly workflow): run `gh workflow run nightly-quality.yml`. Monitor with `gh run list --workflow=nightly-quality.yml --limit=1`. Once complete (or timed out at 20 min), check: did all jobs complete? What is the GitHub issue status? Record results.</step>
+    <step order="5">Execute Scenario 4 (Claude Code hooks): verify the hooks are registered in .claude/settings.json. Manually test post-edit-lint.sh by running it directly with a mock PostToolUse JSON payload: `echo '{"tool_name":"Edit","tool_input":{"file_path":"src/client/pcf/SomeFile.tsx"}}' | bash scripts/quality/post-edit-lint.sh`. Record the output.</step>
+    <step order="6">Execute Scenario 5 (weekly summary): check if a GitHub issue with label 'weekly-quality-summary' exists (`gh issue list --label weekly-quality-summary`). If it does, verify the table structure. If it does not, verify the workflow definition is correct and document as "Deferred — awaiting Friday trigger".</step>
+    <step order="7">Map all spec success criteria against scenario results. Identify any criteria not covered by the five scenarios and add ad-hoc verification steps as needed.</step>
+    <step order="8">For any failing scenarios: root-cause the failure. If the fix is in a prior task's deliverable, make the fix and re-run the scenario. Document the issue and resolution in the verification report.</step>
+    <step order="9">Write the verification report at projects/code-quality-and-assurance-r1/notes/quality-system-verification.md. Include: verification date, executive summary (all pass / N deferred / N failed), scenario-by-scenario results table, spec criteria mapping, and any known issues with resolution status.</step>
+    <step order="10">Update TASK-INDEX.md: change task 043 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/quality-system-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>quality-system-verification.md exists with results for all five verification scenarios</criterion>
+    <criterion>Each scenario result includes: expected outcome, actual outcome, pass/fail/deferred status</criterion>
+    <criterion>Scenario 1 (pre-commit hooks) was executed with actual git commit commands, not just configuration inspection</criterion>
+    <criterion>Scenario 2 (PR CI pipeline) includes actual runtime data from gh run view output</criterion>
+    <criterion>Scenario 3 (nightly workflow) was triggered manually via gh workflow run</criterion>
+    <criterion>Scenario 4 (Claude Code hooks) includes the actual hook test output</criterion>
+    <criterion>All spec success criteria are mapped to a verification scenario with a result</criterion>
+    <criterion>Any verification failures are documented with root cause and resolution</criterion>
+    <criterion>No scenario is marked "passing" based solely on code inspection — each must have actual execution evidence</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

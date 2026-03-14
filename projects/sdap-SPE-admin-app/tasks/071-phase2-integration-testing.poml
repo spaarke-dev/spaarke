@@ -1,0 +1,55 @@
+<task id="SPE-071" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Phase 2 Integration Testing</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>testing, integration-test, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-061, SPE-062, SPE-063, SPE-064, SPE-065, SPE-066, SPE-067, SPE-068, SPE-069, SPE-070</dependencies>
+  </metadata>
+  <prompt>Perform comprehensive integration testing of all Phase 2 features to ensure the container type management, column/property editors, search, recycle bin, and security dashboard work correctly end-to-end. This validates that the BFF endpoints and UI components function together properly before deployment.</prompt>
+  <role>QA Engineer with experience in SharePoint Embedded and React applications</role>
+  <goal>All Phase 2 features pass integration testing with documented test results and any bugs fixed.</goal>
+  <constraints>
+    <constraint source="ADR-001">Test against the Minimal API endpoints — no direct Graph calls from tests</constraint>
+    <constraint source="ADR-008">Verify auth filters are enforced on all new endpoints</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Phase 2 adds significant functionality: container type CRUD and registration, column and custom property management, cross-container search, recycle bin management, and security dashboard. Integration testing must verify these features work correctly together — for example, creating a container type, registering it, then verifying it appears in the container types grid with correct settings.</background>
+  </context>
+  <steps>
+    <step order="1" name="test-container-type-crud">Test container type list, get, create, and update settings flow end-to-end</step>
+    <step order="2" name="test-registration">Test container type registration with various permission combinations</step>
+    <step order="3" name="test-permissions-view">Test viewing app permissions after registration</step>
+    <step order="4" name="test-columns">Test column CRUD operations (create, read, update, delete for each column type)</step>
+    <step order="5" name="test-custom-properties">Test custom property read and update, including searchable flag</step>
+    <step order="6" name="test-search-containers">Test container search with results, empty results, and pagination</step>
+    <step order="7" name="test-search-items">Test item search with scoped and unscoped queries</step>
+    <step order="8" name="test-recycle-bin">Test recycle bin list, restore, and permanent delete flows</step>
+    <step order="9" name="test-security">Test security alerts and score endpoint responses</step>
+    <step order="10" name="test-ui-components">Verify all UI pages render correctly and toolbar actions function</step>
+    <step order="11" name="fix-bugs">Fix any bugs discovered during testing</step>
+    <step order="12" name="document-results">Document test results and any known issues</step>
+  </steps>
+  <outputs>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/Phase2IntegrationTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Container type CRUD operations work correctly end-to-end</criterion>
+    <criterion testable="true">Container type registration succeeds with valid permissions</criterion>
+    <criterion testable="true">Column CRUD operations work for all supported column types</criterion>
+    <criterion testable="true">Custom property read/update works including searchable toggle</criterion>
+    <criterion testable="true">Container search returns results and supports pagination</criterion>
+    <criterion testable="true">Item search returns results and supports container scoping</criterion>
+    <criterion testable="true">Recycle bin restore and permanent delete work correctly</criterion>
+    <criterion testable="true">Security alerts and score display correctly</criterion>
+    <criterion testable="true">All UI pages render without errors in light and dark mode</criterion>
+    <criterion testable="true">All existing tests continue to pass</criterion>
+  </acceptance-criteria>
+</task>

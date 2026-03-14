@@ -8,10 +8,7 @@
  */
 
 import * as React from 'react';
-import {
-  getSmoothStepPath,
-  EdgeText,
-} from 'react-flow-renderer';
+import { getSmoothStepPath, EdgeText } from 'react-flow-renderer';
 import type { EdgeProps } from 'react-flow-renderer';
 
 // Green color for true branch

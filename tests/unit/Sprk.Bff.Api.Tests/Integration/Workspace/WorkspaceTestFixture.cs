@@ -130,6 +130,12 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 ["ModelSelector:ExtractionGeneration"] = "gpt-4o-mini",
                 ["ModelSelector:EmbeddingGeneration"] = "text-embedding-3-large",
                 ["ModelSelector:FallbackGeneration"] = "gpt-4o",
+
+                // SpeAdmin options (required by SpeAdminModule — added to Program.cs)
+                ["SpeAdmin:KeyVaultUri"] = "https://test.vault.azure.net/",
+
+                // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
+                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
             };
             config.AddInMemoryCollection(settings);
         });
@@ -294,14 +300,17 @@ internal sealed class FakeAuthHandler : AuthenticationHandler<AuthenticationSche
         if (string.IsNullOrWhiteSpace(authHeader))
             return Task.FromResult(AuthenticateResult.Fail("Empty Authorization header"));
 
-        // Build a test ClaimsPrincipal that WorkspaceAuthorizationFilter will accept.
-        // The filter reads the "oid" claim first (Entra ID object ID).
+        // Build a test ClaimsPrincipal that:
+        //   - WorkspaceAuthorizationFilter will accept (reads "oid" claim)
+        //   - SpeAdminAuthorizationFilter will accept (checks "roles" claim for Admin/SystemAdmin)
         var claims = new[]
         {
             new Claim("oid", WorkspaceTestConstants.TestUserId),
             new Claim(ClaimTypes.NameIdentifier, WorkspaceTestConstants.TestUserId),
             new Claim(ClaimTypes.Name, "Test User"),
             new Claim("name", "Test User"),
+            // Admin role required by SpeAdminAuthorizationFilter
+            new Claim("roles", "SystemAdmin"),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

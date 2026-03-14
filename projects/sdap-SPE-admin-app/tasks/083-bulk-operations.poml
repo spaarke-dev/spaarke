@@ -1,0 +1,81 @@
+<task id="SPE-083" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Bulk Operations</title>
+    <status>completed</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>bff-api, frontend, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-072</dependencies>
+  </metadata>
+  <prompt>Implement bulk operation endpoints with progress tracking and UI for batch delete and permission assignment operations. Bulk operations are critical for administrators managing large SPE environments where performing actions one container at a time would be impractical.</prompt>
+  <role>Full-Stack Developer with .NET BackgroundService and React progress tracking expertise</role>
+  <goal>Working BFF endpoints for bulk delete and bulk permission assignment with background processing and progress tracking, plus UI with progress bar visualization.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService for long-running operations — no Azure Functions</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+    <constraint source="ADR-012">Use shared UI components from @spaarke/ui-components</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>When managing hundreds of containers, administrators need batch operations. Bulk delete moves multiple containers to the recycle bin in one action. Bulk permission assignment adds or updates permissions for multiple containers simultaneously. These operations can take significant time, so they run in the background with progress tracking. The UI shows a progress bar with current/total counts and allows the administrator to continue working while the operation completes.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-models">Define BulkOperationRequest (containerIds, operation type), BulkOperationStatus (id, progress, completed, failed, errors)</step>
+    <step order="2" name="add-bulk-delete-endpoint">Add POST /api/spe/bulk/delete that enqueues a background delete job and returns operation ID</step>
+    <step order="3" name="add-bulk-permissions-endpoint">Add POST /api/spe/bulk/permissions that enqueues a background permission assignment job</step>
+    <step order="4" name="add-status-endpoint">Add GET /api/spe/bulk/{operationId}/status for polling progress</step>
+    <step order="5" name="implement-background-service">Implement bulk operation processing in BackgroundService with per-item progress tracking</step>
+    <step order="6" name="apply-auth-filter">Apply SpeAdminAuthFilter to all endpoints</step>
+    <step order="7" name="create-progress-ui">Create components/bulk/BulkOperationProgress.tsx with progress bar showing current/total, success/failure counts</step>
+    <step order="8" name="integrate-into-grids">Add bulk action buttons to ContainerResultsGrid and container management pages</step>
+    <step order="9" name="add-tests">Write unit tests for bulk operation endpoints and background service</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/BulkOperationModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/BulkOperationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/bulk/BulkOperationProgress.tsx</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/BulkOperationTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/spe/bulk/delete accepts container IDs and returns operation ID</criterion>
+    <criterion testable="true">POST /api/spe/bulk/permissions accepts container IDs and permissions payload and returns operation ID</criterion>
+    <criterion testable="true">GET /api/spe/bulk/{operationId}/status returns current progress (completed, total, failed)</criterion>
+    <criterion testable="true">Background service processes items sequentially with error handling per item</criterion>
+    <criterion testable="true">BulkOperationProgress component shows progress bar with counts</criterion>
+    <criterion testable="true">Failed items are reported with error details</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to all endpoints</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-03-14. All 9 acceptance criteria verified.
+
+    Implementation:
+    - BulkOperationModels.cs: 6 domain types (enum, 4 request/status records, error record)
+    - BulkOperationService.cs: BackgroundService with Channel[T] queue + ConcurrentDictionary status tracking
+    - BulkOperationEndpoints.cs: 3 endpoints (POST bulk/delete, POST bulk/permissions, GET bulk/{id}/status)
+    - BulkOperationProgress.tsx: React polling component (2s interval, Fluent v9, dark-mode compliant)
+    - SpeAdminGraphService.cs: Added SoftDeleteContainerAsync method
+    - ContainerResultsGrid.tsx: Integrated bulk delete with progress panel
+    - BulkOperationTests.cs: 30 unit tests, all passing
+
+    Key design decisions:
+    - In-memory Channel + ConcurrentDictionary (not Redis/Service Bus) — SPE admin is infrequent
+    - BulkDelete = soft-delete to recycle bin (not permanent delete)
+    - BulkPermissions uses UserId/GroupId not email (matches ContainerPermissionEndpoints pattern)
+    - 30-minute status retention window after completion
+    - Max 500 containers per request
+
+    Code quality: Zero ADR violations. Handler methods renamed (dropped spurious Async suffix).
+    No-op useEffect removed from BulkOperationProgress. Build: 0 errors 0 warnings. Tests: 30/30.
+  </notes>
+</task>

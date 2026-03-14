@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Update CI/CD and Code Quality Procedure Documentation</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 035</dependencies>
+    <blocks>043</blocks>
+    <tags>documentation</tags>
+  </metadata>
+
+  <prompt>
+    Update docs/procedures/ci-cd-workflow.md and docs/procedures/testing-and-code-quality.md to reflect
+    the complete quality pipeline implemented in this project. Document all new tools, workflows, and
+    processes: the nightly quality workflow, CodeRabbit, Claude Code Action, SonarCloud, Prettier,
+    Husky pre-commit hooks, and PSScriptAnalyzer. Include troubleshooting sections for the most common
+    issues developers will encounter with each tool.
+  </prompt>
+
+  <role>
+    Technical writer and DevOps engineer with expertise in documenting CI/CD pipelines for development
+    teams. Skilled at writing clear, maintainable procedure documents that serve both human developers
+    and AI coding assistants.
+  </role>
+
+  <goal>
+    Updated procedure documentation that accurately reflects the full quality system. Developers and
+    AI agents can read these documents and understand: what quality checks run at each stage (pre-commit,
+    PR, nightly, weekly), what each tool does, how to interpret results, and how to fix common issues.
+  </goal>
+
+  <context>
+    <background>
+      The existing procedure documents were written before this project and do not reflect the new
+      tooling. They need to be updated (not replaced) with the new quality system components.
+
+      New components to document in ci-cd-workflow.md:
+      - Nightly quality workflow: trigger schedule, four jobs, issue creation, what to do when it fails
+      - Claude Code Action: what it reviews, how to interpret PR comments, why it is advisory
+      - CodeRabbit: what it reviews, how to configure per-PR review settings
+      - Weekly summary: what it shows, how to read the trend table
+
+      New components to document in testing-and-code-quality.md:
+      - Prettier: configuration, how to run locally, what the CI check enforces
+      - ESLint strictened rules: what rules were added, how to fix common violations, how to add
+        justified suppressions (eslint-disable-next-line with comment)
+      - Husky pre-commit hooks: what they check, how to skip in emergencies (git commit --no-verify
+        with documented justification requirement), how to update them
+      - PSScriptAnalyzer: what PowerShell files it checks, severity levels, how to fix findings
+      - SonarCloud: how to access the dashboard, what the quality gate checks, how new-code coverage
+        threshold works
+
+      Each tool section should include:
+      - What it does (one sentence)
+      - When it runs (pre-commit / PR / nightly / weekly)
+      - How to run it locally
+      - How to interpret results
+      - Troubleshooting: 2-3 most common issues and their fixes
+
+      The documents should cross-reference each other where appropriate (e.g., ci-cd-workflow.md
+      references testing-and-code-quality.md for tool details).
+    </background>
+    <relevant-files>
+      <file>docs/procedures/ci-cd-workflow.md (modify — add nightly workflow, AI reviews, weekly summary)</file>
+      <file>docs/procedures/testing-and-code-quality.md (modify — add Prettier, ESLint, Husky, PSScriptAnalyzer, SonarCloud sections)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Existing procedure document content must be preserved. Updates are additive — add new sections, extend existing ones. Do not remove documentation for tools or processes that are still in use.</constraint>
+    <constraint source="spec">Documentation must be accurate to the actual implementation. Read the relevant workflow files and tool configurations before writing about them — do not describe idealized behavior that differs from what is actually deployed.</constraint>
+    <constraint source="spec">Each new tool section must include a "Run Locally" subsection so developers can reproduce CI checks on their machines before pushing.</constraint>
+    <constraint source="spec">Troubleshooting sections must be specific (e.g., "If Husky fails with 'permission denied', run chmod +x .husky/pre-commit") — not generic advice.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.github/workflows/nightly-quality.yml</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/procedures/ci-cd-workflow.md in full to understand the current structure, existing sections, and tone. Identify where new content should be inserted without disrupting existing flow.</step>
+    <step order="2">Read docs/procedures/testing-and-code-quality.md in full to map the existing structure and identify insertion points for the new tool sections.</step>
+    <step order="3">Read .github/workflows/nightly-quality.yml and sdap-ci.yml to gather accurate details about trigger schedules, job names, and what each step does. Use this as the source of truth for documentation.</step>
+    <step order="4">Update ci-cd-workflow.md: add a "Nightly Quality Workflow" section covering trigger (weeknight 6AM UTC), four jobs (tests, SonarCloud, AI review, dependency audit), issue creation, and how to interpret the nightly issue.</step>
+    <step order="5">Update ci-cd-workflow.md: add a "Automated Code Review" section covering Claude Code Action (what it reviews, advisory status) and CodeRabbit (if deployed — check for .coderabbit.yaml or similar config). Add a "Weekly Quality Summary" section.</step>
+    <step order="6">Update testing-and-code-quality.md: add sections for each new tool following the standard format (What it does / When it runs / Run locally / Interpret results / Troubleshooting). Tools to add: Prettier, ESLint (strictened rules), Husky, PSScriptAnalyzer, SonarCloud.</step>
+    <step order="7">Add the "Run Locally" commands for each tool: `prettier --check "src/client/**/*.{ts,tsx}"`, `npx eslint src/client/ --max-warnings 0`, and the equivalent commands for running architecture tests and SonarCloud local scan.</step>
+    <step order="8">Add troubleshooting subsections: common issues with Husky hooks (permission denied, hook not firing), common ESLint suppressions (when to use and how), common SonarCloud issues (coverage not updating, quality gate stuck).</step>
+    <step order="9">Review both documents for cross-references: ensure ci-cd-workflow.md links to testing-and-code-quality.md for tool details, and vice versa for pipeline integration context.</step>
+    <step order="10">Update TASK-INDEX.md: change task 041 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">docs/procedures/ci-cd-workflow.md (updated with nightly workflow, AI reviews, weekly summary)</output>
+    <output type="file">docs/procedures/testing-and-code-quality.md (updated with all new tool sections)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ci-cd-workflow.md includes a Nightly Quality Workflow section with accurate schedule and job descriptions</criterion>
+    <criterion>ci-cd-workflow.md includes sections for Claude Code Action and/or CodeRabbit AI reviews with advisory status clearly noted</criterion>
+    <criterion>testing-and-code-quality.md includes sections for Prettier, ESLint strictened rules, Husky, PSScriptAnalyzer, and SonarCloud</criterion>
+    <criterion>Each new tool section includes a "Run Locally" command</criterion>
+    <criterion>Each new tool section includes at least 2 troubleshooting items</criterion>
+    <criterion>All existing procedure document content is preserved</criterion>
+    <criterion>Documentation is accurate to actual deployment (trigger times, job names match workflow files)</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

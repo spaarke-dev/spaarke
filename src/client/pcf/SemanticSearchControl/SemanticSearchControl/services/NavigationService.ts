@@ -7,462 +7,460 @@
  * @see spec.md for navigation requirements
  */
 
-import { SearchResult, SearchFilters, SearchScope } from "../types";
-import { getAuthProvider } from "@spaarke/auth";
-import { getEffectiveDarkMode } from "./ThemeService";
+import { SearchResult, SearchFilters, SearchScope } from '../types';
+import { getAuthProvider } from '@spaarke/auth';
+import { getEffectiveDarkMode } from './ThemeService';
 
 /**
  * Navigation target modes
  */
 export enum NavigationTarget {
-    /** Open in new tab (Xrm target: 1) */
-    NewTab = 1,
-    /** Open in modal dialog (Xrm target: 2) */
-    Modal = 2,
+  /** Open in new tab (Xrm target: 1) */
+  NewTab = 1,
+  /** Open in modal dialog (Xrm target: 2) */
+  Modal = 2,
 }
 
 /**
  * Modal dialog options
  */
 export interface ModalOptions {
-    width: number;
-    height: number;
-    unit: "%" | "px";
+  width: number;
+  height: number;
+  unit: '%' | 'px';
 }
 
 /**
  * Default modal options (80% width and height per spec)
  */
 const DEFAULT_MODAL_OPTIONS: ModalOptions = {
-    width: 80,
-    height: 80,
-    unit: "%",
+  width: 80,
+  height: 80,
+  unit: '%',
 };
 
 /**
  * Service for navigation operations
  */
 export class NavigationService {
-    /**
-     * Open a file in web browser or desktop application.
-     * @param fileUrl - SPE pre-authenticated file URL (may be empty if not available from API)
-     * @param recordUrl - Fallback Dataverse record URL
-     * @param fileType - File extension (docx, xlsx, pdf, etc.)
-     * @param mode - "web" opens in browser; "desktop" launches Office app via ms-office protocol
-     */
-    openFile(fileUrl: string, recordUrl: string, fileType: string, mode: "web" | "desktop"): void {
-        if (mode === "web") {
-            // Prefer SPE file URL; fall back to the Dataverse record URL
-            const url = fileUrl || recordUrl;
-            if (!url) {
-                console.warn("NavigationService.openFile: No URL provided for web mode");
-                return;
-            }
-            window.open(url, "_blank", "noopener,noreferrer");
-        } else {
-            // Desktop mode — use Microsoft Office URI scheme
-            if (!fileUrl) {
-                console.warn("NavigationService.openFile: No fileUrl for desktop mode, falling back to record URL");
-                if (recordUrl) {
-                    window.open(recordUrl, "_blank", "noopener,noreferrer");
-                }
-                return;
-            }
-            const protocol = this.getOfficeProtocol(fileType);
-            if (protocol) {
-                // Open using ms-word://, ms-excel://, etc.
-                window.open(`${protocol}ofe|u|${encodeURIComponent(fileUrl)}`, "_self");
-            } else {
-                // No protocol for this type (e.g. PDF) — open in browser
-                window.open(fileUrl, "_blank", "noopener,noreferrer");
-            }
+  /**
+   * Open a file in web browser or desktop application.
+   * @param fileUrl - SPE pre-authenticated file URL (may be empty if not available from API)
+   * @param recordUrl - Fallback Dataverse record URL
+   * @param fileType - File extension (docx, xlsx, pdf, etc.)
+   * @param mode - "web" opens in browser; "desktop" launches Office app via ms-office protocol
+   */
+  openFile(fileUrl: string, recordUrl: string, fileType: string, mode: 'web' | 'desktop'): void {
+    if (mode === 'web') {
+      // Prefer SPE file URL; fall back to the Dataverse record URL
+      const url = fileUrl || recordUrl;
+      if (!url) {
+        console.warn('NavigationService.openFile: No URL provided for web mode');
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      // Desktop mode — use Microsoft Office URI scheme
+      if (!fileUrl) {
+        console.warn('NavigationService.openFile: No fileUrl for desktop mode, falling back to record URL');
+        if (recordUrl) {
+          window.open(recordUrl, '_blank', 'noopener,noreferrer');
         }
+        return;
+      }
+      const protocol = this.getOfficeProtocol(fileType);
+      if (protocol) {
+        // Open using ms-word://, ms-excel://, etc.
+        window.open(`${protocol}ofe|u|${encodeURIComponent(fileUrl)}`, '_self');
+      } else {
+        // No protocol for this type (e.g. PDF) — open in browser
+        window.open(fileUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  }
+
+  /**
+   * Map file extension to Microsoft Office URI scheme.
+   */
+  private getOfficeProtocol(fileType: string): string | null {
+    switch (fileType.toLowerCase()) {
+      case 'doc':
+      case 'docx':
+        return 'ms-word:';
+      case 'xls':
+      case 'xlsx':
+        return 'ms-excel:';
+      case 'ppt':
+      case 'pptx':
+        return 'ms-powerpoint:';
+      case 'one':
+      case 'onetoc2':
+        return 'onenote:';
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Open a Dataverse record in a modal dialog
+   * @param result - Search result containing entity and record info
+   * @param options - Optional modal sizing options
+   */
+  async openRecordModal(result: SearchResult, options: ModalOptions = DEFAULT_MODAL_OPTIONS): Promise<void> {
+    const entityName = this.getEntityLogicalName(result);
+    const recordId = this.getRecordId(result);
+
+    if (!entityName || !recordId) {
+      console.warn('NavigationService.openRecordModal: Missing entity name or record ID', { entityName, recordId });
+      return;
     }
 
-    /**
-     * Map file extension to Microsoft Office URI scheme.
-     */
-    private getOfficeProtocol(fileType: string): string | null {
-        switch (fileType.toLowerCase()) {
-            case "doc":
-            case "docx": return "ms-word:";
-            case "xls":
-            case "xlsx": return "ms-excel:";
-            case "ppt":
-            case "pptx": return "ms-powerpoint:";
-            case "one":
-            case "onetoc2": return "onenote:";
-            default: return null;
-        }
+    await this.navigateToRecord(entityName, recordId, NavigationTarget.Modal, options);
+  }
+
+  /**
+   * Open a Dataverse record in a new browser tab.
+   * Uses window.open() directly because Xrm.Navigation.navigateTo(target:1)
+   * navigates inline (replaces current page), not in a new browser tab.
+   * @param result - Search result containing entity and record info
+   */
+  openRecordNewTab(result: SearchResult): void {
+    const entityName = this.getEntityLogicalName(result);
+    const recordId = this.getRecordId(result);
+
+    if (!entityName || !recordId) {
+      console.warn('NavigationService.openRecordNewTab: Missing entity name or record ID', { entityName, recordId });
+      return;
     }
 
-    /**
-     * Open a Dataverse record in a modal dialog
-     * @param result - Search result containing entity and record info
-     * @param options - Optional modal sizing options
-     */
-    async openRecordModal(
-        result: SearchResult,
-        options: ModalOptions = DEFAULT_MODAL_OPTIONS
-    ): Promise<void> {
-        const entityName = this.getEntityLogicalName(result);
-        const recordId = this.getRecordId(result);
+    const clientUrl = this.getClientUrl();
+    const recordUrl = `${clientUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`;
+    window.open(recordUrl, '_blank', 'noopener,noreferrer');
+  }
 
-        if (!entityName || !recordId) {
-            console.warn(
-                "NavigationService.openRecordModal: Missing entity name or record ID",
-                { entityName, recordId }
-            );
-            return;
-        }
-
-        await this.navigateToRecord(entityName, recordId, NavigationTarget.Modal, options);
+  /**
+   * Open the DocumentRelationshipViewer HTML web resource for a document (Find Similar)
+   * @param result - Search result to find similar documents for
+   */
+  /**
+   * Build the URL for the DocumentRelationshipViewer web resource.
+   * Returns null if the document ID is missing.
+   * Caller is responsible for opening/rendering the URL (e.g. in an iframe Dialog).
+   */
+  getFindSimilarUrl(result: SearchResult, isDarkMode: boolean = false): string | null {
+    const rawId = result.documentId;
+    if (!rawId) {
+      console.warn('NavigationService.getFindSimilarUrl: Missing document ID');
+      return null;
     }
 
-    /**
-     * Open a Dataverse record in a new browser tab.
-     * Uses window.open() directly because Xrm.Navigation.navigateTo(target:1)
-     * navigates inline (replaces current page), not in a new browser tab.
-     * @param result - Search result containing entity and record info
-     */
-    openRecordNewTab(result: SearchResult): void {
-        const entityName = this.getEntityLogicalName(result);
-        const recordId = this.getRecordId(result);
+    const authority = getAuthProvider().getConfig().authority ?? '';
+    const authorityParts = authority.split('/');
+    const tenantId = authorityParts[authorityParts.length - 1] ?? '';
+    const theme = isDarkMode ? 'dark' : 'light';
+    const data = new URLSearchParams({
+      documentId: rawId,
+      tenantId,
+      theme,
+    }).toString();
+    const clientUrl = this.getClientUrl();
+    return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(data)}`;
+  }
 
-        if (!entityName || !recordId) {
-            console.warn(
-                "NavigationService.openRecordNewTab: Missing entity name or record ID",
-                { entityName, recordId }
-            );
-            return;
-        }
-
-        const clientUrl = this.getClientUrl();
-        const recordUrl = `${clientUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`;
-        window.open(recordUrl, "_blank", "noopener,noreferrer");
+  /**
+   * Open the Document Upload Wizard (Code Page web resource).
+   * Uses Integration Pattern B from DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md.
+   *
+   * @param scopeId - Current record ID to associate the upload with
+   * @param entityType - API entity type name (matter, project, etc.)
+   * @param onDialogClosed - Optional callback after dialog closes (e.g. refresh results)
+   */
+  async openAddDocument(scopeId: string | null, entityType: string | null, onDialogClosed?: () => void): Promise<void> {
+    const xrm = this.getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn('NavigationService.openAddDocument: Xrm.Navigation not available');
+      return;
     }
 
-    /**
-     * Open the DocumentRelationshipViewer HTML web resource for a document (Find Similar)
-     * @param result - Search result to find similar documents for
-     */
-    /**
-     * Build the URL for the DocumentRelationshipViewer web resource.
-     * Returns null if the document ID is missing.
-     * Caller is responsible for opening/rendering the URL (e.g. in an iframe Dialog).
-     */
-    getFindSimilarUrl(result: SearchResult, isDarkMode: boolean = false): string | null {
-        const rawId = result.documentId;
-        if (!rawId) {
-            console.warn("NavigationService.getFindSimilarUrl: Missing document ID");
-            return null;
-        }
+    const entityLogicalNameMap: Record<string, string> = {
+      matter: 'sprk_matter',
+      project: 'sprk_project',
+      invoice: 'sprk_invoice',
+      account: 'account',
+      contact: 'contact',
+    };
+    const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : 'sprk_matter';
+    const cleanId = scopeId ? scopeId.replace(/[{}]/g, '').toLowerCase() : '';
 
-        const authority = getAuthProvider().getConfig().authority ?? "";
-        const authorityParts = authority.split("/");
-        const tenantId = authorityParts[authorityParts.length - 1] ?? "";
-        const theme = isDarkMode ? "dark" : "light";
-        const data = new URLSearchParams({ documentId: rawId, tenantId, theme }).toString();
-        const clientUrl = this.getClientUrl();
-        return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(data)}`;
+    // Resolve container ID from business unit
+    let containerId = '';
+    try {
+      const userSettings = xrm.Utility.getGlobalContext().userSettings;
+      const userId = userSettings.userId.replace(/[{}]/g, '');
+      const user = await xrm.WebApi.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
+      const buId = user._businessunitid_value as string;
+      if (buId) {
+        const bu = await xrm.WebApi.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
+        containerId = (bu.sprk_containerid as string) ?? '';
+      }
+    } catch (err) {
+      console.warn('NavigationService.openAddDocument: Failed to resolve container ID:', err);
     }
 
-    /**
-     * Open the Document Upload Wizard (Code Page web resource).
-     * Uses Integration Pattern B from DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md.
-     *
-     * @param scopeId - Current record ID to associate the upload with
-     * @param entityType - API entity type name (matter, project, etc.)
-     * @param onDialogClosed - Optional callback after dialog closes (e.g. refresh results)
-     */
-    async openAddDocument(
-        scopeId: string | null,
-        entityType: string | null,
-        onDialogClosed?: () => void,
-    ): Promise<void> {
-        const xrm = this.getXrm();
-        if (!xrm?.Navigation?.navigateTo) {
-            console.warn("NavigationService.openAddDocument: Xrm.Navigation not available");
-            return;
+    if (!containerId) {
+      console.error('NavigationService.openAddDocument: No container ID available');
+      return;
+    }
+
+    // Resolve display name from parent record
+    let parentEntityName = '';
+    if (cleanId && parentEntityType) {
+      try {
+        const record = await xrm.WebApi.retrieveRecord(
+          parentEntityType,
+          cleanId,
+          '?$select=sprk_name,name,sprk_matternumber,sprk_projectname'
+        );
+        parentEntityName =
+          (record.sprk_matternumber as string) ??
+          (record.sprk_projectname as string) ??
+          (record.sprk_name as string) ??
+          (record.name as string) ??
+          '';
+      } catch {
+        parentEntityName = '';
+      }
+    }
+
+    // Detect theme using ThemeService priority chain
+    // (localStorage → URL flag → PCF context → navbar → page background → system)
+    const theme = getEffectiveDarkMode() ? 'dark' : 'light';
+
+    const dataString =
+      'parentEntityType=' +
+      parentEntityType +
+      '&parentEntityId=' +
+      cleanId +
+      '&parentEntityName=' +
+      encodeURIComponent(parentEntityName) +
+      '&containerId=' +
+      containerId +
+      '&theme=' +
+      theme;
+
+    try {
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: 'webresource' as Xrm.Navigation.PageInputHtmlWebResource['pageType'],
+          webresourceName: 'sprk_documentuploadwizard',
+          data: encodeURIComponent(dataString),
+        } as Xrm.Navigation.PageInputHtmlWebResource,
+        {
+          target: 2,
+          width: { value: 60, unit: '%' },
+          height: { value: 70, unit: '%' },
         }
+      );
+      // Dialog closed successfully
+      onDialogClosed?.();
+    } catch (error) {
+      // errorCode 2 = user cancelled — not an error
+      const err = error as { errorCode?: number };
+      if (err?.errorCode !== 2) {
+        console.error('NavigationService.openAddDocument: Navigation failed', error);
+      }
+    }
+  }
 
-        const entityLogicalNameMap: Record<string, string> = {
-            matter: "sprk_matter",
-            project: "sprk_project",
-            invoice: "sprk_invoice",
-            account: "account",
-            contact: "contact",
-        };
-        const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : "sprk_matter";
-        const cleanId = scopeId ? scopeId.replace(/[{}]/g, "").toLowerCase() : "";
+  /**
+   * Navigate to the Custom Page for viewing all search results
+   * @param query - Current search query
+   * @param scope - Search scope (all, matter, custom)
+   * @param scopeId - Scope ID if applicable
+   * @param filters - Current search filters
+   * @param customPageName - Logical name of the custom page (default: sprk_semanticsearchpage)
+   */
+  async viewAllResults(
+    query: string,
+    scope: SearchScope,
+    scopeId: string | null,
+    filters: SearchFilters,
+    customPageName: string = 'sprk_semanticsearchpage'
+  ): Promise<void> {
+    const xrm = this.getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn('NavigationService.viewAllResults: Xrm.Navigation not available');
+      return;
+    }
 
-        // Resolve container ID from business unit
-        let containerId = "";
-        try {
-            const userSettings = xrm.Utility.getGlobalContext().userSettings;
-            const userId = userSettings.userId.replace(/[{}]/g, "");
-            const user = await xrm.WebApi.retrieveRecord(
-                "systemuser", userId, "?$select=_businessunitid_value"
-            );
-            const buId = user["_businessunitid_value"] as string;
-            if (buId) {
-                const bu = await xrm.WebApi.retrieveRecord(
-                    "businessunit", buId, "?$select=sprk_containerid"
-                );
-                containerId = (bu["sprk_containerid"] as string) ?? "";
+    try {
+      const pageInput: Xrm.Navigation.CustomPage = {
+        pageType: 'custom',
+        name: customPageName,
+        entityName: scope === 'matter' && scopeId ? 'sprk_matter' : undefined,
+        recordId: scope === 'matter' && scopeId ? scopeId : undefined,
+      };
+
+      const navigationOptions: Xrm.Navigation.NavigationOptions = {
+        target: 1, // New window
+      };
+
+      await xrm.Navigation.navigateTo(pageInput, navigationOptions);
+    } catch (error) {
+      console.error('NavigationService.viewAllResults: Navigation failed', error);
+    }
+  }
+
+  /**
+   * Navigate to a Dataverse record
+   */
+  private async navigateToRecord(
+    entityName: string,
+    recordId: string,
+    target: NavigationTarget,
+    modalOptions?: ModalOptions
+  ): Promise<void> {
+    const xrm = this.getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn('NavigationService: Xrm.Navigation not available, falling back to URL navigation');
+      this.fallbackNavigate(entityName, recordId, target);
+      return;
+    }
+
+    try {
+      const pageInput: Xrm.Navigation.PageInputEntityRecord = {
+        pageType: 'entityrecord',
+        entityName,
+        entityId: recordId,
+      };
+
+      const navigationOptions: Xrm.Navigation.NavigationOptions =
+        target === NavigationTarget.Modal
+          ? {
+              target: 2,
+              width: {
+                value: modalOptions?.width ?? 80,
+                unit: modalOptions?.unit ?? '%',
+              },
+              height: {
+                value: modalOptions?.height ?? 80,
+                unit: modalOptions?.unit ?? '%',
+              },
             }
-        } catch (err) {
-            console.warn("NavigationService.openAddDocument: Failed to resolve container ID:", err);
-        }
-
-        if (!containerId) {
-            console.error("NavigationService.openAddDocument: No container ID available");
-            return;
-        }
-
-        // Resolve display name from parent record
-        let parentEntityName = "";
-        if (cleanId && parentEntityType) {
-            try {
-                const record = await xrm.WebApi.retrieveRecord(
-                    parentEntityType, cleanId, "?$select=sprk_name,name,sprk_matternumber,sprk_projectname"
-                );
-                parentEntityName = (record["sprk_matternumber"] as string)
-                    ?? (record["sprk_projectname"] as string)
-                    ?? (record["sprk_name"] as string)
-                    ?? (record["name"] as string)
-                    ?? "";
-            } catch {
-                parentEntityName = "";
-            }
-        }
-
-        // Detect theme using ThemeService priority chain
-        // (localStorage → URL flag → PCF context → navbar → page background → system)
-        const theme = getEffectiveDarkMode() ? "dark" : "light";
-
-        const dataString =
-            "parentEntityType=" + parentEntityType +
-            "&parentEntityId=" + cleanId +
-            "&parentEntityName=" + encodeURIComponent(parentEntityName) +
-            "&containerId=" + containerId +
-            "&theme=" + theme;
-
-        try {
-            await xrm.Navigation.navigateTo(
-                {
-                    pageType: "webresource" as Xrm.Navigation.PageInputHtmlWebResource["pageType"],
-                    webresourceName: "sprk_documentuploadwizard",
-                    data: encodeURIComponent(dataString),
-                } as Xrm.Navigation.PageInputHtmlWebResource,
-                {
-                    target: 2,
-                    width: { value: 60, unit: "%" },
-                    height: { value: 70, unit: "%" },
-                }
-            );
-            // Dialog closed successfully
-            onDialogClosed?.();
-        } catch (error) {
-            // errorCode 2 = user cancelled — not an error
-            const err = error as { errorCode?: number };
-            if (err?.errorCode !== 2) {
-                console.error("NavigationService.openAddDocument: Navigation failed", error);
-            }
-        }
-    }
-
-    /**
-     * Navigate to the Custom Page for viewing all search results
-     * @param query - Current search query
-     * @param scope - Search scope (all, matter, custom)
-     * @param scopeId - Scope ID if applicable
-     * @param filters - Current search filters
-     * @param customPageName - Logical name of the custom page (default: sprk_semanticsearchpage)
-     */
-    async viewAllResults(
-        query: string,
-        scope: SearchScope,
-        scopeId: string | null,
-        filters: SearchFilters,
-        customPageName: string = "sprk_semanticsearchpage"
-    ): Promise<void> {
-        const xrm = this.getXrm();
-        if (!xrm?.Navigation?.navigateTo) {
-            console.warn(
-                "NavigationService.viewAllResults: Xrm.Navigation not available"
-            );
-            return;
-        }
-
-        try {
-            const pageInput: Xrm.Navigation.CustomPage = {
-                pageType: "custom",
-                name: customPageName,
-                entityName: scope === "matter" && scopeId ? "sprk_matter" : undefined,
-                recordId: scope === "matter" && scopeId ? scopeId : undefined,
+          : {
+              target: 1,
             };
 
-            const navigationOptions: Xrm.Navigation.NavigationOptions = {
-                target: 1, // New window
-            };
+      await xrm.Navigation.navigateTo(pageInput, navigationOptions);
+    } catch (error) {
+      console.error('NavigationService: Navigation failed', error);
+      this.fallbackNavigate(entityName, recordId, target);
+    }
+  }
 
-            await xrm.Navigation.navigateTo(pageInput, navigationOptions);
-        } catch (error) {
-            console.error("NavigationService.viewAllResults: Navigation failed", error);
-        }
+  /**
+   * Fallback navigation using URL
+   */
+  private fallbackNavigate(entityName: string, recordId: string, target: NavigationTarget): void {
+    const clientUrl = this.getClientUrl();
+    const recordUrl = `${clientUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`;
+
+    if (target === NavigationTarget.NewTab) {
+      window.open(recordUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // For modal, we can't replicate Xrm modal behavior without Xrm.Navigation
+      // Fall back to new tab
+      window.open(recordUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  /**
+   * Extract entity logical name from search result
+   */
+  private getEntityLogicalName(result: SearchResult): string | undefined {
+    // Use explicit entityLogicalName if available
+    if (result.entityLogicalName) {
+      return result.entityLogicalName;
     }
 
-    /**
-     * Navigate to a Dataverse record
-     */
-    private async navigateToRecord(
-        entityName: string,
-        recordId: string,
-        target: NavigationTarget,
-        modalOptions?: ModalOptions
-    ): Promise<void> {
-        const xrm = this.getXrm();
-        if (!xrm?.Navigation?.navigateTo) {
-            console.warn(
-                "NavigationService: Xrm.Navigation not available, falling back to URL navigation"
-            );
-            this.fallbackNavigate(entityName, recordId, target);
-            return;
-        }
-
-        try {
-            const pageInput: Xrm.Navigation.PageInputEntityRecord = {
-                pageType: "entityrecord",
-                entityName,
-                entityId: recordId,
-            };
-
-            const navigationOptions: Xrm.Navigation.NavigationOptions =
-                target === NavigationTarget.Modal
-                    ? {
-                          target: 2,
-                          width: { value: modalOptions?.width ?? 80, unit: modalOptions?.unit ?? "%" },
-                          height: { value: modalOptions?.height ?? 80, unit: modalOptions?.unit ?? "%" },
-                      }
-                    : {
-                          target: 1,
-                      };
-
-            await xrm.Navigation.navigateTo(pageInput, navigationOptions);
-        } catch (error) {
-            console.error("NavigationService: Navigation failed", error);
-            this.fallbackNavigate(entityName, recordId, target);
-        }
+    // Try to extract from recordUrl
+    if (result.recordUrl) {
+      const match = result.recordUrl.match(/etn=([^&]+)/);
+      if (match) {
+        return match[1];
+      }
     }
 
-    /**
-     * Fallback navigation using URL
-     */
-    private fallbackNavigate(
-        entityName: string,
-        recordId: string,
-        target: NavigationTarget
-    ): void {
-        const clientUrl = this.getClientUrl();
-        const recordUrl = `${clientUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`;
+    // Default to sprk_document
+    return 'sprk_document';
+  }
 
-        if (target === NavigationTarget.NewTab) {
-            window.open(recordUrl, "_blank", "noopener,noreferrer");
-        } else {
-            // For modal, we can't replicate Xrm modal behavior without Xrm.Navigation
-            // Fall back to new tab
-            window.open(recordUrl, "_blank", "noopener,noreferrer");
-        }
+  /**
+   * Extract record ID from search result
+   */
+  private getRecordId(result: SearchResult): string | undefined {
+    // Use explicit recordId if available
+    if (result.recordId) {
+      return result.recordId;
     }
 
-    /**
-     * Extract entity logical name from search result
-     */
-    private getEntityLogicalName(result: SearchResult): string | undefined {
-        // Use explicit entityLogicalName if available
-        if (result.entityLogicalName) {
-            return result.entityLogicalName;
-        }
-
-        // Try to extract from recordUrl
-        if (result.recordUrl) {
-            const match = result.recordUrl.match(/etn=([^&]+)/);
-            if (match) {
-                return match[1];
-            }
-        }
-
-        // Default to sprk_document
-        return "sprk_document";
+    // Use documentId
+    if (result.documentId) {
+      return result.documentId;
     }
 
-    /**
-     * Extract record ID from search result
-     */
-    private getRecordId(result: SearchResult): string | undefined {
-        // Use explicit recordId if available
-        if (result.recordId) {
-            return result.recordId;
-        }
-
-        // Use documentId
-        if (result.documentId) {
-            return result.documentId;
-        }
-
-        // Try to extract from recordUrl
-        if (result.recordUrl) {
-            const match = result.recordUrl.match(/id=([^&]+)/);
-            if (match) {
-                return match[1];
-            }
-        }
-
-        return undefined;
+    // Try to extract from recordUrl
+    if (result.recordUrl) {
+      const match = result.recordUrl.match(/id=([^&]+)/);
+      if (match) {
+        return match[1];
+      }
     }
 
-    /**
-     * Get the Dataverse client URL
-     */
-    private getClientUrl(): string {
-        const xrm = this.getXrm();
-        if (xrm?.Utility?.getGlobalContext) {
-            return xrm.Utility.getGlobalContext().getClientUrl();
-        }
+    return undefined;
+  }
 
-        // Fallback to current origin
-        return window.location.origin;
+  /**
+   * Get the Dataverse client URL
+   */
+  private getClientUrl(): string {
+    const xrm = this.getXrm();
+    if (xrm?.Utility?.getGlobalContext) {
+      return xrm.Utility.getGlobalContext().getClientUrl();
     }
 
-    /**
-     * Resolve the Xrm global in a PCF virtual control context.
-     *
-     * PCF virtual controls run inside an iframe (or sandboxed context), so the
-     * top-level `Xrm` declaration from @types/xrm may not be available as a
-     * bare global. We check window.Xrm and window.parent.Xrm as fallbacks.
-     */
-    private getXrm(): typeof Xrm | undefined {
-        // Direct global (works in classic web resource context)
-        if (typeof Xrm !== "undefined") {
-            return Xrm;
-        }
-        // window.Xrm (PCF virtual controls in the same origin frame)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        if (w.Xrm) {
-            return w.Xrm as typeof Xrm;
-        }
-        // window.parent.Xrm (PCF controls inside cross-origin iframes fall back to parent)
-        try {
-            if (w.parent?.Xrm) {
-                return w.parent.Xrm as typeof Xrm;
-            }
-        } catch {
-            // Cross-origin parent access blocked — swallow silently
-        }
-        return undefined;
+    // Fallback to current origin
+    return window.location.origin;
+  }
+
+  /**
+   * Resolve the Xrm global in a PCF virtual control context.
+   *
+   * PCF virtual controls run inside an iframe (or sandboxed context), so the
+   * top-level `Xrm` declaration from @types/xrm may not be available as a
+   * bare global. We check window.Xrm and window.parent.Xrm as fallbacks.
+   */
+  private getXrm(): typeof Xrm | undefined {
+    // Direct global (works in classic web resource context)
+    if (typeof Xrm !== 'undefined') {
+      return Xrm;
     }
+    // window.Xrm (PCF virtual controls in the same origin frame)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    if (w.Xrm) {
+      return w.Xrm as typeof Xrm;
+    }
+    // window.parent.Xrm (PCF controls inside cross-origin iframes fall back to parent)
+    try {
+      if (w.parent?.Xrm) {
+        return w.parent.Xrm as typeof Xrm;
+      }
+    } catch {
+      // Cross-origin parent access blocked — swallow silently
+    }
+    return undefined;
+  }
 }
 
 export default NavigationService;

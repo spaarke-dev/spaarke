@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Services.Office;
 /// This service:
 /// - Publishes status updates to Redis channels for real-time SSE delivery
 /// - Manages subscriptions for SSE endpoints
-/// - Updates ProcessingJob records in Dataverse (TODO: integrate when ready)
+/// - Updates ProcessingJob records in Dataverse (TRACKED: GitHub #230)
 /// - Handles Redis connection failures gracefully
 /// </para>
 /// <para>
@@ -275,7 +275,7 @@ public class JobStatusService : IJobStatusService, IDisposable
 
         try
         {
-            // TODO: Update Dataverse ProcessingJob record when SDK is integrated
+            // TRACKED: GitHub #230 - Update Dataverse ProcessingJob record
             // For now, just publish the update to Redis for SSE subscribers
 
             // Determine update type based on status

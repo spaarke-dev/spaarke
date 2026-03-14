@@ -24,34 +24,29 @@
  * @see SprkChatPane/src/ThemeProvider.ts (reference implementation)
  */
 
-import { useState, useEffect, useCallback } from "react";
-import {
-    type Theme,
-    webLightTheme,
-    webDarkTheme,
-    teamsHighContrastTheme,
-} from "@fluentui/react-components";
+import { useState, useEffect, useCallback } from 'react';
+import { type Theme, webLightTheme, webDarkTheme, teamsHighContrastTheme } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const THEME_CHANGE_EVENT = "spaarke-theme-change";
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
 /** Theme name values used for resolution and reporting */
-export type ThemeName = "light" | "dark" | "highcontrast";
+export type ThemeName = 'light' | 'dark' | 'highcontrast';
 
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
 
 export interface UseThemeDetectionResult {
-    /** The resolved Fluent UI v9 Theme object for FluentProvider */
-    theme: Theme;
-    /** The resolved theme name (light, dark, highcontrast) */
-    themeName: ThemeName;
-    /** Whether the current theme is dark (not light, not high-contrast) */
-    isDark: boolean;
+  /** The resolved Fluent UI v9 Theme object for FluentProvider */
+  theme: Theme;
+  /** The resolved theme name (light, dark, highcontrast) */
+  themeName: ThemeName;
+  /** Whether the current theme is dark (not light, not high-contrast) */
+  isDark: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,12 +58,12 @@ export interface UseThemeDetectionResult {
  * Accepts: "dark", "light", "highcontrast" (case-insensitive).
  */
 function getThemeFromUrlParam(params?: URLSearchParams): ThemeName | null {
-    if (!params) return null;
-    const value = params.get("theme")?.toLowerCase();
-    if (value === "dark" || value === "light" || value === "highcontrast") {
-        return value;
-    }
-    return null;
+  if (!params) return null;
+  const value = params.get('theme')?.toLowerCase();
+  if (value === 'dark' || value === 'light' || value === 'highcontrast') {
+    return value;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,55 +80,55 @@ function getThemeFromUrlParam(params?: URLSearchParams): ThemeName | null {
  * whether the host is in dark mode. Falls back to body background luminance.
  */
 function getThemeFromXrmFrameWalk(): ThemeName | null {
-    const frames: Window[] = [window];
+  const frames: Window[] = [window];
+  try {
+    if (window.parent && window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
+
+  for (const frame of frames) {
     try {
-        if (window.parent && window.parent !== window) frames.push(window.parent);
+      const xrm = (frame as any).Xrm;
+      if (!xrm) continue;
+
+      // Attempt getCurrentTheme() API
+      const ctx = xrm.Utility?.getGlobalContext?.();
+      if (ctx?.getCurrentTheme) {
+        const themeInfo = ctx.getCurrentTheme();
+        // Check the page/content background color -- NOT the navbar color.
+        // The navbar color is the brand color and does NOT indicate light/dark mode.
+        if (themeInfo?.backgroundcolor) {
+          const dark = isColorDark(themeInfo.backgroundcolor);
+          if (dark !== null) return dark ? 'dark' : 'light';
+        }
+      }
     } catch {
-        /* cross-origin */
+      /* cross-origin or unavailable */
     }
+  }
+
+  // Fallback: check body background of this frame AND parent frames.
+  // The code page's own body is typically transparent; the parent Dataverse
+  // form's body carries the actual theme color.
+  for (const frame of frames) {
     try {
-        if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top);
+      const bgColor = (frame as any).getComputedStyle((frame as any).document.body).backgroundColor;
+      if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+        const dark = isColorDark(bgColor);
+        if (dark !== null) return dark ? 'dark' : 'light';
+      }
     } catch {
-        /* cross-origin */
+      /* cross-origin or DOM access failed */
     }
+  }
 
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm;
-            if (!xrm) continue;
-
-            // Attempt getCurrentTheme() API
-            const ctx = xrm.Utility?.getGlobalContext?.();
-            if (ctx?.getCurrentTheme) {
-                const themeInfo = ctx.getCurrentTheme();
-                // Check the page/content background color -- NOT the navbar color.
-                // The navbar color is the brand color and does NOT indicate light/dark mode.
-                if (themeInfo?.backgroundcolor) {
-                    const dark = isColorDark(themeInfo.backgroundcolor);
-                    if (dark !== null) return dark ? "dark" : "light";
-                }
-            }
-        } catch {
-            /* cross-origin or unavailable */
-        }
-    }
-
-    // Fallback: check body background of this frame AND parent frames.
-    // The code page's own body is typically transparent; the parent Dataverse
-    // form's body carries the actual theme color.
-    for (const frame of frames) {
-        try {
-            const bgColor = (frame as any).getComputedStyle((frame as any).document.body).backgroundColor;
-            if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
-                const dark = isColorDark(bgColor);
-                if (dark !== null) return dark ? "dark" : "light";
-            }
-        } catch {
-            /* cross-origin or DOM access failed */
-        }
-    }
-
-    return null;
+  return null;
 }
 
 /**
@@ -142,34 +137,34 @@ function getThemeFromXrmFrameWalk(): ThemeName | null {
  * Returns null if the color cannot be parsed.
  */
 function isColorDark(color: string): boolean | null {
-    if (!color) return null;
+  if (!color) return null;
 
-    let r: number, g: number, b: number;
+  let r: number, g: number, b: number;
 
-    // Try rgb(r, g, b) format
-    const rgbMatch = color.match(/\d+/g)?.map(Number);
-    if (rgbMatch && rgbMatch.length >= 3) {
-        [r, g, b] = rgbMatch;
-    } else if (color.startsWith("#")) {
-        const hex = color.replace("#", "");
-        if (hex.length === 3) {
-            r = parseInt(hex[0] + hex[0], 16);
-            g = parseInt(hex[1] + hex[1], 16);
-            b = parseInt(hex[2] + hex[2], 16);
-        } else if (hex.length >= 6) {
-            r = parseInt(hex.substring(0, 2), 16);
-            g = parseInt(hex.substring(2, 4), 16);
-            b = parseInt(hex.substring(4, 6), 16);
-        } else {
-            return null;
-        }
+  // Try rgb(r, g, b) format
+  const rgbMatch = color.match(/\d+/g)?.map(Number);
+  if (rgbMatch && rgbMatch.length >= 3) {
+    [r, g, b] = rgbMatch;
+  } else if (color.startsWith('#')) {
+    const hex = color.replace('#', '');
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length >= 6) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
     } else {
-        return null;
+      return null;
     }
+  } else {
+    return null;
+  }
 
-    // Relative luminance calculation (ITU-R BT.601)
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance < 0.5;
+  // Relative luminance calculation (ITU-R BT.601)
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.5;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -183,14 +178,14 @@ function isColorDark(color: string): boolean | null {
  * Detects forced-colors (high contrast) as a separate theme.
  */
 function getSystemThemePreference(): ThemeName | null {
-    try {
-        if (window.matchMedia("(forced-colors: active)").matches) return "highcontrast";
-        if (window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
-        if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
-    } catch {
-        /* matchMedia not available */
-    }
-    return null;
+  try {
+    if (window.matchMedia('(forced-colors: active)').matches) return 'highcontrast';
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+  } catch {
+    /* matchMedia not available */
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,15 +196,15 @@ function getSystemThemePreference(): ThemeName | null {
  * Map a ThemeName to a Fluent UI v9 Theme object.
  */
 function themeNameToFluentTheme(name: ThemeName): Theme {
-    switch (name) {
-        case "dark":
-            return webDarkTheme;
-        case "highcontrast":
-            return teamsHighContrastTheme;
-        case "light":
-        default:
-            return webLightTheme;
-    }
+  switch (name) {
+    case 'dark':
+      return webDarkTheme;
+    case 'highcontrast':
+      return teamsHighContrastTheme;
+    case 'light':
+    default:
+      return webLightTheme;
+  }
 }
 
 /**
@@ -222,24 +217,24 @@ function themeNameToFluentTheme(name: ThemeName): Theme {
  *   4. Default: "light"
  */
 function resolveThemeName(params?: URLSearchParams): ThemeName {
-    try {
-        // Level 1: URL parameter
-        const urlTheme = getThemeFromUrlParam(params);
-        if (urlTheme) return urlTheme;
+  try {
+    // Level 1: URL parameter
+    const urlTheme = getThemeFromUrlParam(params);
+    if (urlTheme) return urlTheme;
 
-        // Level 2: Xrm frame-walk
-        const xrmTheme = getThemeFromXrmFrameWalk();
-        if (xrmTheme) return xrmTheme;
+    // Level 2: Xrm frame-walk
+    const xrmTheme = getThemeFromXrmFrameWalk();
+    if (xrmTheme) return xrmTheme;
 
-        // Level 3: System preference
-        const systemTheme = getSystemThemePreference();
-        if (systemTheme) return systemTheme;
+    // Level 3: System preference
+    const systemTheme = getSystemThemePreference();
+    if (systemTheme) return systemTheme;
 
-        // Level 4: Default
-        return "light";
-    } catch {
-        return "light";
-    }
+    // Level 4: Default
+    return 'light';
+  } catch {
+    return 'light';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,35 +257,35 @@ function resolveThemeName(params?: URLSearchParams): ThemeName {
  * ```
  */
 export function useThemeDetection(params?: URLSearchParams): UseThemeDetectionResult {
-    const [themeName, setThemeName] = useState<ThemeName>(() => resolveThemeName(params));
+  const [themeName, setThemeName] = useState<ThemeName>(() => resolveThemeName(params));
 
-    // Re-resolve callback (called on OS change or user preference change)
-    const reResolve = useCallback(() => {
-        setThemeName(resolveThemeName(params));
-    }, [params]);
+  // Re-resolve callback (called on OS change or user preference change)
+  const reResolve = useCallback(() => {
+    setThemeName(resolveThemeName(params));
+  }, [params]);
 
-    // Listen for OS theme changes and custom user preference changes
-    useEffect(() => {
-        // OS dark mode preference changes
-        const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-        darkQuery.addEventListener("change", reResolve);
+  // Listen for OS theme changes and custom user preference changes
+  useEffect(() => {
+    // OS dark mode preference changes
+    const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    darkQuery.addEventListener('change', reResolve);
 
-        // OS forced-colors (high contrast) changes
-        const hcQuery = window.matchMedia("(forced-colors: active)");
-        hcQuery.addEventListener("change", reResolve);
+    // OS forced-colors (high contrast) changes
+    const hcQuery = window.matchMedia('(forced-colors: active)');
+    hcQuery.addEventListener('change', reResolve);
 
-        // Custom spaarke theme change event (user preference toggle)
-        window.addEventListener(THEME_CHANGE_EVENT, reResolve);
+    // Custom spaarke theme change event (user preference toggle)
+    window.addEventListener(THEME_CHANGE_EVENT, reResolve);
 
-        return () => {
-            darkQuery.removeEventListener("change", reResolve);
-            hcQuery.removeEventListener("change", reResolve);
-            window.removeEventListener(THEME_CHANGE_EVENT, reResolve);
-        };
-    }, [reResolve]);
+    return () => {
+      darkQuery.removeEventListener('change', reResolve);
+      hcQuery.removeEventListener('change', reResolve);
+      window.removeEventListener(THEME_CHANGE_EVENT, reResolve);
+    };
+  }, [reResolve]);
 
-    const theme = themeNameToFluentTheme(themeName);
-    const isDark = themeName === "dark";
+  const theme = themeNameToFluentTheme(themeName);
+  const isDark = themeName === 'dark';
 
-    return { theme, themeName, isDark };
+  return { theme, themeName, isDark };
 }

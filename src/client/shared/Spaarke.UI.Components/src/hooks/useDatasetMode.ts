@@ -3,9 +3,9 @@
  * Used in model-driven apps where Power Platform provides the dataset
  */
 
-import { useState, useEffect, useMemo } from "react";
-import { IDatasetRecord, IDatasetColumn } from "../types";
-import { IDatasetResult } from "./types";
+import { useState, useEffect, useMemo } from 'react';
+import { IDatasetRecord, IDatasetColumn } from '../types';
+import { IDatasetResult } from './types';
 
 export interface IUseDatasetModeProps {
   dataset: ComponentFramework.PropertyTypes.DataSet;
@@ -21,7 +21,7 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
       return [];
     }
 
-    return dataset.columns.map((col) => {
+    return dataset.columns.map(col => {
       // Extract field security from column metadata
       const colSecurity = (col as any).security;
 
@@ -36,7 +36,7 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
         isSecured: colSecurity?.secured === true,
         canRead: colSecurity?.readable !== false,
         canUpdate: colSecurity?.editable !== false,
-        canCreate: colSecurity?.editable !== false
+        canCreate: colSecurity?.editable !== false,
       };
     });
   }, [dataset.columns]);
@@ -49,17 +49,17 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
 
     const extractedRecords: IDatasetRecord[] = [];
 
-    dataset.sortedRecordIds.forEach((recordId) => {
+    dataset.sortedRecordIds.forEach(recordId => {
       const record = dataset.records[recordId];
       if (!record) return;
 
       const dataRecord: IDatasetRecord = {
         id: recordId,
-        entityName: dataset.getTargetEntityType()
+        entityName: dataset.getTargetEntityType(),
       };
 
       // Extract all column values
-      columns.forEach((col) => {
+      columns.forEach(col => {
         const formattedValue = record.getFormattedValue(col.name);
         const rawValue = record.getValue(col.name);
 
@@ -96,14 +96,14 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
       dataset.refresh();
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh dataset");
+      setError(err instanceof Error ? err.message : 'Failed to refresh dataset');
     }
   };
 
   // Monitor for errors
   useEffect(() => {
     if (dataset.error) {
-      setError("Dataset error occurred");
+      setError('Dataset error occurred');
     } else {
       setError(null);
     }
@@ -119,6 +119,6 @@ export function useDatasetMode(props: IUseDatasetModeProps): IDatasetResult {
     hasPreviousPage,
     loadNextPage,
     loadPreviousPage,
-    refresh
+    refresh,
   };
 }

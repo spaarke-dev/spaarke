@@ -23,10 +23,7 @@ import {
   shorthands,
 } from '@fluentui/react-components';
 import { Delete20Regular } from '@fluentui/react-icons';
-import type {
-  SpinButtonChangeEvent,
-  SpinButtonOnChangeData,
-} from '@fluentui/react-components';
+import type { SpinButtonChangeEvent, SpinButtonOnChangeData } from '@fluentui/react-components';
 import { useCanvasStore, PlaybookNode, PlaybookNodeData, PlaybookNodeType } from '../../stores';
 import { ScopeSelector } from './ScopeSelector';
 import { ConditionEditor } from './ConditionEditor';
@@ -75,10 +72,7 @@ const nodeTypeLabels: Record<PlaybookNodeType, string> = {
 };
 
 // Badge colors for node types
-const nodeTypeBadgeColors: Record<
-  PlaybookNodeType,
-  'brand' | 'warning' | 'success' | 'important'
-> = {
+const nodeTypeBadgeColors: Record<PlaybookNodeType, 'brand' | 'warning' | 'success' | 'important'> = {
   aiAnalysis: 'brand',
   aiCompletion: 'brand',
   condition: 'warning',
@@ -97,12 +91,10 @@ interface NodePropertiesFormProps {
  * Uses collapsible Accordion sections for cleaner UI.
  * Auto-saves changes to the Zustand store.
  */
-export const NodePropertiesForm = React.memo(function NodePropertiesForm({
-  node,
-}: NodePropertiesFormProps) {
+export const NodePropertiesForm = React.memo(function NodePropertiesForm({ node }: NodePropertiesFormProps) {
   const styles = useStyles();
-  const updateNode = useCanvasStore((state) => state.updateNode);
-  const removeNode = useCanvasStore((state) => state.removeNode);
+  const updateNode = useCanvasStore(state => state.updateNode);
+  const removeNode = useCanvasStore(state => state.removeNode);
 
   const isConditionNode = node.data.type === 'condition';
   const isAiNode = node.data.type === 'aiAnalysis' || node.data.type === 'aiCompletion';
@@ -117,21 +109,19 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
 
   // Handler for text inputs
   const handleTextChange = useCallback(
-    (field: keyof PlaybookNodeData) =>
-      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        handleUpdate(field, e.target.value);
-      },
+    (field: keyof PlaybookNodeData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      handleUpdate(field, e.target.value);
+    },
     [handleUpdate]
   );
 
   // Handler for spin button (number inputs)
   const handleNumberChange = useCallback(
-    (field: keyof PlaybookNodeData) =>
-      (_e: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-        if (data.value !== undefined && data.value !== null) {
-          handleUpdate(field, data.value);
-        }
-      },
+    (field: keyof PlaybookNodeData) => (_e: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+      if (data.value !== undefined && data.value !== null) {
+        handleUpdate(field, data.value);
+      }
+    },
     [handleUpdate]
   );
 
@@ -147,9 +137,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
       outputVariable: node.data.outputVariable || '',
       timeoutSeconds: node.data.timeoutSeconds ?? 300,
       retryCount: node.data.retryCount ?? 0,
-      conditionJson:
-        node.data.conditionJson ||
-        '{\n  "field": "",\n  "operator": "equals",\n  "value": ""\n}',
+      conditionJson: node.data.conditionJson || '{\n  "field": "",\n  "operator": "equals",\n  "value": ""\n}',
       skillIds: node.data.skillIds || [],
       knowledgeIds: node.data.knowledgeIds || [],
       toolId: node.data.toolId,
@@ -182,11 +170,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
         />
       </div>
 
-      <Accordion
-        multiple
-        collapsible
-        defaultOpenItems={defaultOpenItems}
-      >
+      <Accordion multiple collapsible defaultOpenItems={defaultOpenItems}>
         {/* Basic Properties Section */}
         <AccordionItem value="basic">
           <AccordionHeader size="small">Basic</AccordionHeader>
@@ -229,11 +213,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
           <AccordionItem value="aiModel">
             <AccordionHeader size="small">AI Model</AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
-              <ModelSelector
-                nodeId={node.id}
-                selectedModelId={values.modelDeploymentId}
-                onUpdate={updateNode}
-              />
+              <ModelSelector nodeId={node.id} selectedModelId={values.modelDeploymentId} onUpdate={updateNode} />
             </AccordionPanel>
           </AccordionItem>
         )}
@@ -338,7 +318,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
             <AccordionPanel className={styles.accordionPanel}>
               <ConditionEditor
                 conditionJson={values.conditionJson}
-                onChange={(json) => handleUpdate('conditionJson', json)}
+                onChange={json => handleUpdate('conditionJson', json)}
               />
             </AccordionPanel>
           </AccordionItem>

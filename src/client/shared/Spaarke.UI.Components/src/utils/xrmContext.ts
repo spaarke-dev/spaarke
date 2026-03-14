@@ -31,22 +31,11 @@ export interface XrmWebApi {
     maxPageSize?: number
   ): Promise<RetrieveMultipleResult>;
 
-  retrieveRecord(
-    entityLogicalName: string,
-    id: string,
-    options?: string
-  ): Promise<Record<string, any>>;
+  retrieveRecord(entityLogicalName: string, id: string, options?: string): Promise<Record<string, any>>;
 
-  createRecord(
-    entityLogicalName: string,
-    data: Record<string, any>
-  ): Promise<EntityReference>;
+  createRecord(entityLogicalName: string, data: Record<string, any>): Promise<EntityReference>;
 
-  updateRecord(
-    entityLogicalName: string,
-    id: string,
-    data: Record<string, any>
-  ): Promise<EntityReference>;
+  updateRecord(entityLogicalName: string, id: string, data: Record<string, any>): Promise<EntityReference>;
 
   deleteRecord(entityLogicalName: string, id: string): Promise<EntityReference>;
 }
@@ -56,11 +45,11 @@ export interface XrmWebApi {
  */
 export interface RetrieveMultipleResult {
   entities: Record<string, any>[];
-  "@odata.nextLink"?: string;
-  "@Microsoft.Dynamics.CRM.totalrecordcount"?: number;
-  "@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"?: boolean;
-  "@Microsoft.Dynamics.CRM.fetchxmlpagingcookie"?: string;
-  "@Microsoft.Dynamics.CRM.morerecords"?: boolean;
+  '@odata.nextLink'?: string;
+  '@Microsoft.Dynamics.CRM.totalrecordcount'?: number;
+  '@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded'?: boolean;
+  '@Microsoft.Dynamics.CRM.fetchxmlpagingcookie'?: string;
+  '@Microsoft.Dynamics.CRM.morerecords'?: boolean;
 }
 
 /**
@@ -105,7 +94,7 @@ export interface WindowOptions {
 }
 
 export interface PageInput {
-  pageType: "entityrecord" | "entitylist" | "webresource" | "custom";
+  pageType: 'entityrecord' | 'entitylist' | 'webresource' | 'custom';
   entityName?: string;
   entityId?: string;
   data?: Record<string, any>;
@@ -214,7 +203,7 @@ export function getXrm(): XrmContext | undefined {
 
   // Try parent.Xrm for Custom Pages running in iframe
   try {
-    if (typeof window !== "undefined" && window.parent && window.parent !== window) {
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
       const parentXrm = (window.parent as any).Xrm;
       if (parentXrm?.WebApi) {
         return parentXrm as XrmContext;
@@ -234,9 +223,7 @@ export function getXrm(): XrmContext | undefined {
  */
 export function isCustomPageContext(): boolean {
   try {
-    return typeof window !== "undefined" &&
-           window.parent !== undefined &&
-           window.parent !== window;
+    return typeof window !== 'undefined' && window.parent !== undefined && window.parent !== window;
   } catch {
     return false;
   }
@@ -249,8 +236,7 @@ export function isCustomPageContext(): boolean {
  */
 export function isPcfContext(): boolean {
   try {
-    return typeof (window as any).Xrm !== "undefined" &&
-           (window as any).Xrm?.WebApi !== undefined;
+    return typeof (window as any).Xrm !== 'undefined' && (window as any).Xrm?.WebApi !== undefined;
   } catch {
     return false;
   }
@@ -272,7 +258,7 @@ export function isPcfContext(): boolean {
  */
 export function detectThemeFromHost(): {
   isDarkTheme: boolean;
-  source: "xrm" | "media-query" | "default";
+  source: 'xrm' | 'media-query' | 'default';
 } {
   // Try Xrm global context first
   try {
@@ -282,7 +268,7 @@ export function detectThemeFromHost(): {
       if (globalContext?.userSettings?.isDarkTheme !== undefined) {
         return {
           isDarkTheme: globalContext.userSettings.isDarkTheme,
-          source: "xrm",
+          source: 'xrm',
         };
       }
     }
@@ -292,11 +278,11 @@ export function detectThemeFromHost(): {
 
   // Fall back to prefers-color-scheme media query
   try {
-    if (typeof window !== "undefined" && window.matchMedia) {
-      const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
       return {
         isDarkTheme: darkModeQuery.matches,
-        source: "media-query",
+        source: 'media-query',
       };
     }
   } catch {
@@ -306,7 +292,7 @@ export function detectThemeFromHost(): {
   // Default to light theme
   return {
     isDarkTheme: false,
-    source: "default",
+    source: 'default',
   };
 }
 

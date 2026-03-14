@@ -183,14 +183,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
     >
       <DialogSurface className={styles.surface}>
         <DialogTitle
-          action={
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              aria-label="Close"
-              onClick={onClose}
-            />
-          }
+          action={<Button appearance="subtle" icon={<Dismiss24Regular />} aria-label="Close" onClick={onClose} />}
         >
           Email Document
         </DialogTitle>
@@ -213,7 +206,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
               <Field label={renderLabel('Subject', true)} required>
                 <Input
                   value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
+                  onChange={e => setSubject(e.target.value)}
                   placeholder="Email subject"
                   aria-label="Subject"
                   disabled={sending}
@@ -224,7 +217,7 @@ export const SendEmailDialog: React.FC<ISendEmailDialogProps> = ({
               <Field label={renderLabel('Message')}>
                 <Textarea
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={e => setBody(e.target.value)}
                   placeholder="Compose your message..."
                   rows={10}
                   resize="vertical"

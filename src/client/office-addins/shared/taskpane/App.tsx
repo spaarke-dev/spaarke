@@ -4,11 +4,7 @@ import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
 import { useOfficeTheme } from './hooks';
-import {
-  TaskPaneShell,
-  type NavigationTab,
-  type HostType,
-} from './components/TaskPaneShell';
+import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
 import { SaveView } from './components/views/SaveView';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
@@ -155,7 +151,7 @@ export const App: React.FC<AppProps> = ({
       // Simulate save progress
       for (let i = 0; i <= 100; i += 20) {
         setSaveProgress(i);
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       setSaveSuccess('Document saved successfully to Spaarke');
@@ -276,7 +272,7 @@ export const App: React.FC<AppProps> = ({
 
         {currentTab === 'share' && (
           <ShareView
-            onSearch={async (query) => {
+            onSearch={async query => {
               // Placeholder - will connect to API in later tasks
               console.log('Search:', query);
               return [];
@@ -286,7 +282,7 @@ export const App: React.FC<AppProps> = ({
               console.log('Generate link:', docId, permissions);
               return `https://spaarke.com/share/${docId}`;
             }}
-            onInsertLink={async (link) => {
+            onInsertLink={async link => {
               // Placeholder - will use host adapter in later tasks
               console.log('Insert link:', link);
             }}

@@ -28,7 +28,7 @@ function showTaskPane(event: Office.AddinCommands.Event): void {
  */
 async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
   try {
-    // TODO: Implement quick save functionality
+    // TRACKED: GitHub #234 - Implement quick save functionality
     Office.context.mailbox.item?.notificationMessages.addAsync('spaarke_save', {
       type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
       message: 'Saving to Spaarke...',
@@ -38,7 +38,6 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
 
     // Placeholder for actual save logic
     // Will be implemented in task 030-implement-save-email-endpoint
-
   } catch (error) {
     console.error('Quick save failed:', error);
     Office.context.mailbox.item?.notificationMessages.addAsync('spaarke_error', {

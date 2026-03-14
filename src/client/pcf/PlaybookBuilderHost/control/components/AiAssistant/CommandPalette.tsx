@@ -15,13 +15,7 @@
 
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  makeStyles,
-  tokens,
-  shorthands,
-  Text,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, Text, mergeClasses } from '@fluentui/react-components';
 import {
   BrainCircuit20Regular,
   Grid20Regular,
@@ -29,12 +23,7 @@ import {
   PlayCircle20Regular,
   Question20Regular,
 } from '@fluentui/react-icons';
-import {
-  filterCommands,
-  CATEGORY_LABELS,
-  CATEGORY_ORDER,
-  type SlashCommand,
-} from './commands';
+import { filterCommands, CATEGORY_LABELS, CATEGORY_ORDER, type SlashCommand } from './commands';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -59,10 +48,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(
-      tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM
-    ),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
@@ -77,10 +63,7 @@ const useStyles = makeStyles({
   commandItem: {
     display: 'flex',
     flexDirection: 'column',
-    ...shorthands.padding(
-      tokens.spacingVerticalS,
-      tokens.spacingHorizontalM
-    ),
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     cursor: 'pointer',
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
@@ -135,10 +118,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    ...shorthands.padding(
-      tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM
-    ),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
     fontSize: tokens.fontSizeBase100,
@@ -184,12 +164,7 @@ export interface CommandPaletteProps {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({
-  query,
-  onSelectCommand,
-  onClose,
-  isOpen,
-}) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ query, onSelectCommand, onClose, isOpen }) => {
   const styles = useStyles();
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -231,9 +206,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   useEffect(() => {
     if (!containerRef.current || flatCommands.length === 0) return;
 
-    const selectedElement = containerRef.current.querySelector(
-      `[data-index="${selectedIndex}"]`
-    );
+    const selectedElement = containerRef.current.querySelector(`[data-index="${selectedIndex}"]`);
     if (selectedElement) {
       selectedElement.scrollIntoView({ block: 'nearest' });
     }
@@ -247,15 +220,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < flatCommands.length - 1 ? prev + 1 : 0
-          );
+          setSelectedIndex(prev => (prev < flatCommands.length - 1 ? prev + 1 : 0));
           break;
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : flatCommands.length - 1
-          );
+          setSelectedIndex(prev => (prev > 0 ? prev - 1 : flatCommands.length - 1));
           break;
         case 'Enter':
           e.preventDefault();
@@ -303,24 +272,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   return (
     <div className={styles.container} ref={containerRef}>
       {flatCommands.length === 0 ? (
-        <div className={styles.emptyState}>
-          No commands found for &quot;{query}&quot;
-        </div>
+        <div className={styles.emptyState}>No commands found for &quot;{query}&quot;</div>
       ) : (
         <>
-          {CATEGORY_ORDER.map((category) => {
+          {CATEGORY_ORDER.map(category => {
             const commands = groupedCommands[category];
             if (!commands || commands.length === 0) return null;
 
             return (
               <div key={category}>
                 <div className={styles.categoryHeader}>
-                  <span className={styles.categoryIcon}>
-                    {CATEGORY_ICONS[category]}
-                  </span>
+                  <span className={styles.categoryIcon}>{CATEGORY_ICONS[category]}</span>
                   <Text>{CATEGORY_LABELS[category]}</Text>
                 </div>
-                {commands.map((cmd) => {
+                {commands.map(cmd => {
                   const index = globalIndex++;
                   const isSelected = index === selectedIndex;
 
@@ -328,10 +293,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     <div
                       key={cmd.name}
                       data-index={index}
-                      className={mergeClasses(
-                        styles.commandItem,
-                        isSelected && styles.commandItemSelected
-                      )}
+                      className={mergeClasses(styles.commandItem, isSelected && styles.commandItemSelected)}
                       onClick={() => handleItemClick(cmd)}
                       onMouseEnter={() => setSelectedIndex(index)}
                       role="option"
@@ -340,9 +302,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <div className={styles.commandHeader}>
                         <div className={styles.commandName}>
                           <span className={styles.commandSlash}>/</span>
-                          <Text className={styles.commandLabel}>
-                            {cmd.name}
-                          </Text>
+                          <Text className={styles.commandLabel}>{cmd.name}</Text>
                           {cmd.argsHint && (
                             <Text
                               size={200}
@@ -354,15 +314,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                             </Text>
                           )}
                         </div>
-                        {cmd.shortcut && (
-                          <span className={styles.commandShortcut}>
-                            {cmd.shortcut}
-                          </span>
-                        )}
+                        {cmd.shortcut && <span className={styles.commandShortcut}>{cmd.shortcut}</span>}
                       </div>
-                      <Text className={styles.commandDescription}>
-                        {cmd.description}
-                      </Text>
+                      <Text className={styles.commandDescription}>{cmd.description}</Text>
                     </div>
                   );
                 })}

@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Spinner,
-  Text,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
@@ -104,7 +99,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
   const [senderEmail, setSenderEmail] = useState<string | undefined>();
   const [senderDisplayName, setSenderDisplayName] = useState<string | undefined>();
-  const [recipients, setRecipients] = useState<Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>>([]);
+  const [recipients, setRecipients] = useState<
+    Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>
+  >([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
   const [documentContentBase64, setDocumentContentBase64] = useState<string | undefined>();
@@ -158,11 +155,13 @@ export const SaveView: React.FC<SaveViewProps> = ({
           // Get recipients
           if (hostAdapter.getCapabilities().canGetRecipients) {
             const recipientList = await hostAdapter.getRecipients();
-            setRecipients(recipientList.map(r => ({
-              email: r.email,
-              displayName: r.displayName,
-              type: r.type,
-            })));
+            setRecipients(
+              recipientList.map(r => ({
+                email: r.email,
+                displayName: r.displayName,
+                type: r.type,
+              }))
+            );
           }
 
           // Get sent date if available (OutlookAdapter specific)
@@ -181,7 +180,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
           // Capture document content as base64 for upload
           if (hostAdapter.getCapabilities().canGetDocumentContent) {
             try {
-              const content = await hostAdapter.getDocumentContent({ format: 'ooxml' });
+              const content = await hostAdapter.getDocumentContent({
+                format: 'ooxml',
+              });
               // Convert ArrayBuffer to base64
               const uint8Array = new Uint8Array(content);
               let binary = '';
@@ -215,14 +216,17 @@ export const SaveView: React.FC<SaveViewProps> = ({
   }, []);
 
   // Handle view document click
-  const handleViewDocument = useCallback((url: string) => {
-    if (onViewDocument) {
-      onViewDocument(url);
-    } else {
-      // Default behavior: open in new tab
-      window.open(url, '_blank');
-    }
-  }, [onViewDocument]);
+  const handleViewDocument = useCallback(
+    (url: string) => {
+      if (onViewDocument) {
+        onViewDocument(url);
+      } else {
+        // Default behavior: open in new tab
+        window.open(url, '_blank');
+      }
+    },
+    [onViewDocument]
+  );
 
   // Loading state
   if (isLoading) {

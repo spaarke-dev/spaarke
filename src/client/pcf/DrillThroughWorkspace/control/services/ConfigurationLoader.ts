@@ -6,24 +6,17 @@
  * Adapted for DrillThroughWorkspace PCF
  */
 
-import type { IChartDefinition } from "../types";
-import { VisualType, AggregationType } from "../types";
-import { logger } from "../utils/logger";
+import type { IChartDefinition } from '../types';
+import { VisualType, AggregationType } from '../types';
+import { logger } from '../utils/logger';
 
 /**
  * WebAPI interface for retrieving Dataverse records
  * Abstraction layer to enable testing without ComponentFramework
  */
 export interface IConfigWebApi {
-  retrieveRecord(
-    entityType: string,
-    id: string,
-    options?: string
-  ): Promise<Record<string, unknown>>;
-  retrieveMultipleRecords(
-    entityType: string,
-    options?: string
-  ): Promise<{ entities: Array<Record<string, unknown>> }>;
+  retrieveRecord(entityType: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  retrieveMultipleRecords(entityType: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
 }
 
 /**
@@ -40,32 +33,35 @@ export interface IConfigContext {
 export class ConfigurationNotFoundError extends Error {
   constructor(id: string) {
     super(`Chart definition not found: ${id}`);
-    this.name = "ConfigurationNotFoundError";
+    this.name = 'ConfigurationNotFoundError';
   }
 }
 
 export class ConfigurationLoadError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown
+  ) {
     super(message);
-    this.name = "ConfigurationLoadError";
+    this.name = 'ConfigurationLoadError';
   }
 }
 
 /**
  * Entity field names for sprk_chartdefinition
  */
-const ENTITY_NAME = "sprk_chartdefinition";
+const ENTITY_NAME = 'sprk_chartdefinition';
 
 const FIELDS = {
-  id: "sprk_chartdefinitionid",
-  name: "sprk_name",
-  visualType: "sprk_visualtype",
-  entityLogicalName: "sprk_entitylogicalname",
-  baseViewId: "sprk_baseviewid",
-  aggregationField: "sprk_aggregationfield",
-  aggregationType: "sprk_aggregationtype",
-  groupByField: "sprk_groupbyfield",
-  optionsJson: "sprk_optionsjson",
+  id: 'sprk_chartdefinitionid',
+  name: 'sprk_name',
+  visualType: 'sprk_visualtype',
+  entityLogicalName: 'sprk_entitylogicalname',
+  baseViewId: 'sprk_baseviewid',
+  aggregationField: 'sprk_aggregationfield',
+  aggregationType: 'sprk_aggregationtype',
+  groupByField: 'sprk_groupbyfield',
+  optionsJson: 'sprk_optionsjson',
 } as const;
 
 /**
@@ -81,7 +77,7 @@ const SELECT_COLUMNS = [
   FIELDS.aggregationType,
   FIELDS.groupByField,
   FIELDS.optionsJson,
-].join(",");
+].join(',');
 
 /**
  * Cache entry for chart definitions
@@ -114,10 +110,10 @@ function isCacheValid(entry: ICacheEntry): boolean {
 export function clearCache(id?: string): void {
   if (id) {
     cache.delete(id);
-    logger.debug("ConfigurationLoader", `Cache cleared for ${id}`);
+    logger.debug('ConfigurationLoader', `Cache cleared for ${id}`);
   } else {
     cache.clear();
-    logger.debug("ConfigurationLoader", "Cache cleared entirely");
+    logger.debug('ConfigurationLoader', 'Cache cleared entirely');
   }
 }
 
@@ -126,21 +122,21 @@ export function clearCache(id?: string): void {
  * Returns empty object on parse failure
  */
 function parseOptionsJson(jsonString?: string): Record<string, unknown> {
-  if (!jsonString || jsonString.trim() === "") {
+  if (!jsonString || jsonString.trim() === '') {
     return {};
   }
 
   try {
     const parsed = JSON.parse(jsonString);
-    if (typeof parsed !== "object" || parsed === null) {
-      logger.warn("ConfigurationLoader", "optionsJson is not an object", {
+    if (typeof parsed !== 'object' || parsed === null) {
+      logger.warn('ConfigurationLoader', 'optionsJson is not an object', {
         jsonString,
       });
       return {};
     }
     return parsed as Record<string, unknown>;
   } catch (error) {
-    logger.warn("ConfigurationLoader", "Failed to parse optionsJson", {
+    logger.warn('ConfigurationLoader', 'Failed to parse optionsJson', {
       jsonString,
       error,
     });
@@ -152,10 +148,10 @@ function parseOptionsJson(jsonString?: string): Record<string, unknown> {
  * Validate and convert visual type value
  */
 function parseVisualType(value: unknown): VisualType {
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
-    logger.warn("ConfigurationLoader", "Invalid visual type, defaulting to MetricCard", {
+    logger.warn('ConfigurationLoader', 'Invalid visual type, defaulting to MetricCard', {
       value,
     });
     return VisualType.MetricCard;
@@ -166,7 +162,7 @@ function parseVisualType(value: unknown): VisualType {
     return numValue as VisualType;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown visual type, defaulting to MetricCard", {
+  logger.warn('ConfigurationLoader', 'Unknown visual type, defaulting to MetricCard', {
     value: numValue,
   });
   return VisualType.MetricCard;
@@ -180,7 +176,7 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return undefined;
   }
 
-  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+  const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
 
   if (isNaN(numValue)) {
     return undefined;
@@ -191,19 +187,19 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
     return numValue as AggregationType;
   }
 
-  logger.warn("ConfigurationLoader", "Unknown aggregation type", { value: numValue });
+  logger.warn('ConfigurationLoader', 'Unknown aggregation type', {
+    value: numValue,
+  });
   return undefined;
 }
 
 /**
  * Map Dataverse record to IChartDefinition
  */
-function mapToChartDefinition(
-  record: Record<string, unknown>
-): IChartDefinition {
+function mapToChartDefinition(record: Record<string, unknown>): IChartDefinition {
   const definition: IChartDefinition = {
     sprk_chartdefinitionid: record[FIELDS.id] as string,
-    sprk_name: (record[FIELDS.name] as string) || "Untitled Chart",
+    sprk_name: (record[FIELDS.name] as string) || 'Untitled Chart',
     sprk_visualtype: parseVisualType(record[FIELDS.visualType]),
     sprk_entitylogicalname: record[FIELDS.entityLogicalName] as string | undefined,
     sprk_baseviewid: record[FIELDS.baseViewId] as string | undefined,
@@ -237,31 +233,27 @@ export async function loadChartDefinition(
   skipCache = false
 ): Promise<IChartDefinition> {
   // Validate input
-  if (!id || id.trim() === "") {
-    throw new ConfigurationLoadError("Chart definition ID is required");
+  if (!id || id.trim() === '') {
+    throw new ConfigurationLoadError('Chart definition ID is required');
   }
 
   // Normalize GUID format (remove braces if present)
-  const normalizedId = id.replace(/[{}]/g, "").toLowerCase();
+  const normalizedId = id.replace(/[{}]/g, '').toLowerCase();
 
-  logger.debug("ConfigurationLoader", `Loading chart definition: ${normalizedId}`);
+  logger.debug('ConfigurationLoader', `Loading chart definition: ${normalizedId}`);
 
   // Check cache first (unless skipCache is true)
   if (!skipCache) {
     const cached = cache.get(normalizedId);
     if (cached && isCacheValid(cached)) {
-      logger.debug("ConfigurationLoader", `Cache hit for ${normalizedId}`);
+      logger.debug('ConfigurationLoader', `Cache hit for ${normalizedId}`);
       return cached.definition;
     }
   }
 
   try {
     // Use WebAPI to retrieve the record
-    const record = await context.webAPI.retrieveRecord(
-      ENTITY_NAME,
-      normalizedId,
-      `?$select=${SELECT_COLUMNS}`
-    );
+    const record = await context.webAPI.retrieveRecord(ENTITY_NAME, normalizedId, `?$select=${SELECT_COLUMNS}`);
 
     // Map to typed interface
     const definition = mapToChartDefinition(record);
@@ -272,7 +264,7 @@ export async function loadChartDefinition(
       timestamp: Date.now(),
     });
 
-    logger.info("ConfigurationLoader", `Loaded chart definition: ${definition.sprk_name}`, {
+    logger.info('ConfigurationLoader', `Loaded chart definition: ${definition.sprk_name}`, {
       id: normalizedId,
       visualType: definition.sprk_visualtype,
       entity: definition.sprk_entitylogicalname,
@@ -281,25 +273,21 @@ export async function loadChartDefinition(
     return definition;
   } catch (error: unknown) {
     // Handle specific error types
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Check for "not found" type errors
     if (
-      errorMessage.includes("does not exist") ||
-      errorMessage.includes("not found") ||
-      errorMessage.includes("0x80040217") // Dataverse object not found
+      errorMessage.includes('does not exist') ||
+      errorMessage.includes('not found') ||
+      errorMessage.includes('0x80040217') // Dataverse object not found
     ) {
-      logger.warn("ConfigurationLoader", `Chart definition not found: ${normalizedId}`);
+      logger.warn('ConfigurationLoader', `Chart definition not found: ${normalizedId}`);
       throw new ConfigurationNotFoundError(normalizedId);
     }
 
     // Other errors
-    logger.error("ConfigurationLoader", `Failed to load chart definition: ${normalizedId}`, error);
-    throw new ConfigurationLoadError(
-      `Failed to load chart definition: ${errorMessage}`,
-      error
-    );
+    logger.error('ConfigurationLoader', `Failed to load chart definition: ${normalizedId}`, error);
+    throw new ConfigurationLoadError(`Failed to load chart definition: ${errorMessage}`, error);
   }
 }
 
@@ -307,8 +295,6 @@ export async function loadChartDefinition(
  * Get parsed options from a chart definition
  * Convenience method to parse optionsJson field
  */
-export function getChartOptions(
-  definition: IChartDefinition
-): Record<string, unknown> {
+export function getChartOptions(definition: IChartDefinition): Record<string, unknown> {
   return parseOptionsJson(definition.sprk_optionsjson);
 }

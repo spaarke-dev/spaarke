@@ -388,7 +388,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         {
             [DocInvoiceReviewStatus] = ReviewStatusRejectedNotInvoice,
             [DocInvoiceReviewedOn] = DateTime.UtcNow
-            // TODO: Add DocInvoiceReviewedBy when user context is available
+            // TRACKED: GitHub #233 - Add DocInvoiceReviewedBy when user context available
             // [DocInvoiceReviewedBy] = currentUserId
         };
 

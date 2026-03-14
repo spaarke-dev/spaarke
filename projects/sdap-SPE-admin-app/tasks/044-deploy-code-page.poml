@@ -1,0 +1,37 @@
+<task id="SPE-044" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Deploy Code Page to Dataverse</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>deploy, code-page, dataverse, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-042</dependencies>
+  </metadata>
+  <prompt>Deploy the built SPE Admin App code page (dist/speadmin.html) as a Dataverse web resource. Upload it as sprk_speadmin, publish customizations, and verify it is accessible from the Dataverse sitemap.</prompt>
+  <role>Dataverse developer with web resource deployment experience</role>
+  <goal>The sprk_speadmin web resource is published in Dataverse and accessible from the sitemap entry created in task SPE-004.</goal>
+  <constraints>
+    <constraint source="ADR-006">Code pages are deployed as single-file HTML web resources to Dataverse.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App is a React 18 code page that gets deployed as a Dataverse web resource. The deployment process uploads the single HTML file to Dataverse and publishes customizations so it becomes available to users. The sitemap entry (created in task SPE-004) points to this web resource.</background>
+  </context>
+  <steps>
+    <step order="1" name="upload">Deploy dist/speadmin.html as the sprk_speadmin web resource to Dataverse.</step>
+    <step order="2" name="publish">Publish all customizations to make the web resource available.</step>
+    <step order="3" name="verify-sitemap">Verify the web resource is accessible from the Dataverse sitemap.</step>
+    <step order="4" name="test-load">Open the admin app from the sitemap and verify it loads without errors.</step>
+  </steps>
+  <outputs>
+    <output type="code">Dataverse web resource: sprk_speadmin</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Web resource sprk_speadmin is published in Dataverse.</criterion>
+    <criterion testable="true">Admin app is accessible from the Dataverse sitemap.</criterion>
+  </acceptance-criteria>
+</task>

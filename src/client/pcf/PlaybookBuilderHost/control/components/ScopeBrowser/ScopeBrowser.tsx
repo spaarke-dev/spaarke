@@ -293,14 +293,14 @@ const createMockScopes = (type: ScopeType): ScopeItem[] => {
 
 const defaultFetchScopes = async (type: ScopeType, searchTerm?: string): Promise<ScopeItem[]> => {
   // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   let scopes = createMockScopes(type);
 
   if (searchTerm) {
     const term = searchTerm.toLowerCase();
     scopes = scopes.filter(
-      (s) =>
+      s =>
         s.name.toLowerCase().includes(term) ||
         s.displayName.toLowerCase().includes(term) ||
         s.description.toLowerCase().includes(term)
@@ -507,20 +507,20 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   // Load scopes for a tab (lazy loading)
   const loadScopes = useCallback(
     async (type: ScopeType, search?: string) => {
-      setIsLoading((prev) => ({ ...prev, [type]: true }));
-      setErrors((prev) => ({ ...prev, [type]: null }));
+      setIsLoading(prev => ({ ...prev, [type]: true }));
+      setErrors(prev => ({ ...prev, [type]: null }));
 
       try {
         const result = await fetchScopes(type, search);
-        setScopes((prev) => ({ ...prev, [type]: result }));
-        setLoadedTabs((prev) => new Set(prev).add(type));
+        setScopes(prev => ({ ...prev, [type]: result }));
+        setLoadedTabs(prev => new Set(prev).add(type));
       } catch (error) {
-        setErrors((prev) => ({
+        setErrors(prev => ({
           ...prev,
           [type]: error instanceof Error ? error.message : 'Failed to load scopes',
         }));
       } finally {
-        setIsLoading((prev) => ({ ...prev, [type]: false }));
+        setIsLoading(prev => ({ ...prev, [type]: false }));
       }
     },
     [fetchScopes]
@@ -530,7 +530,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   const loadAllScopes = useCallback(
     async (search?: string) => {
       const types: ScopeType[] = ['actions', 'skills', 'tools', 'knowledge'];
-      await Promise.all(types.map((type) => loadScopes(type, search)));
+      await Promise.all(types.map(type => loadScopes(type, search)));
     },
     [loadScopes]
   );
@@ -540,7 +540,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
     if (typeFilter === 'all') {
       // Load all types when "All" is selected
       const types: ScopeType[] = ['actions', 'skills', 'tools', 'knowledge'];
-      types.forEach((type) => {
+      types.forEach(type => {
         if (!loadedTabs.has(type) && !isLoading[type]) {
           loadScopes(type);
         }
@@ -567,18 +567,15 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   }, [debouncedSearchTerm, typeFilter, selectedTab, loadScopes, loadAllScopes]);
 
   // Handle type filter change
-  const handleTypeFilterChange = useCallback(
-    (_: unknown, data: { optionValue?: string }) => {
-      const newFilter = data.optionValue as ScopeTypeFilter;
-      setTypeFilter(newFilter);
-      if (newFilter !== 'all') {
-        setSelectedTab(newFilter);
-      }
-      setSelectedScope(null);
-      setSearchTerm('');
-    },
-    []
-  );
+  const handleTypeFilterChange = useCallback((_: unknown, data: { optionValue?: string }) => {
+    const newFilter = data.optionValue as ScopeTypeFilter;
+    setTypeFilter(newFilter);
+    if (newFilter !== 'all') {
+      setSelectedTab(newFilter);
+    }
+    setSelectedScope(null);
+    setSearchTerm('');
+  }, []);
 
   // Handle tab change (for non-"All" filter)
   const handleTabSelect = useCallback((_: SelectTabEvent, data: SelectTabData) => {
@@ -589,7 +586,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
   // Handle scope row click (for detail panel)
   const handleScopeClick = useCallback((scope: ScopeItem) => {
-    setSelectedScope((prev) => (prev?.id === scope.id ? null : scope));
+    setSelectedScope(prev => (prev?.id === scope.id ? null : scope));
   }, []);
 
   // Handle clear search
@@ -602,16 +599,14 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
     if (typeFilter === 'all') {
       // Combine all scopes with type indicator
       const allScopes: { scope: ScopeItem; type: ScopeType }[] = [];
-      (Object.keys(scopes) as ScopeType[]).forEach((type) => {
-        scopes[type].forEach((scope) => {
+      (Object.keys(scopes) as ScopeType[]).forEach(type => {
+        scopes[type].forEach(scope => {
           allScopes.push({ scope, type });
         });
       });
       // Sort by modified date (newest first)
-      allScopes.sort((a, b) =>
-        new Date(b.scope.modifiedOn).getTime() - new Date(a.scope.modifiedOn).getTime()
-      );
-      return allScopes.map((item) => item.scope);
+      allScopes.sort((a, b) => new Date(b.scope.modifiedOn).getTime() - new Date(a.scope.modifiedOn).getTime());
+      return allScopes.map(item => item.scope);
     }
     return scopes[selectedTab];
   }, [typeFilter, scopes, selectedTab]);
@@ -619,7 +614,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   // Current loading state
   const currentLoading = useMemo(() => {
     if (typeFilter === 'all') {
-      return Object.values(isLoading).some((l) => l);
+      return Object.values(isLoading).some(l => l);
     }
     return isLoading[selectedTab];
   }, [typeFilter, isLoading, selectedTab]);
@@ -627,7 +622,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
   // Current error state
   const currentError = useMemo(() => {
     if (typeFilter === 'all') {
-      const errorTypes = (Object.keys(errors) as ScopeType[]).filter((t) => errors[t]);
+      const errorTypes = (Object.keys(errors) as ScopeType[]).filter(t => errors[t]);
       if (errorTypes.length > 0) {
         return `Failed to load: ${errorTypes.join(', ')}`;
       }
@@ -641,7 +636,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
     if (typeFilter === 'all' && selectedScope) {
       // Find which type the selected scope belongs to
       for (const type of Object.keys(scopes) as ScopeType[]) {
-        if (scopes[type].some((s) => s.id === selectedScope.id)) {
+        if (scopes[type].some(s => s.id === selectedScope.id)) {
           return type;
         }
       }
@@ -661,7 +656,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
             value={TYPE_FILTER_CONFIG[typeFilter].label}
             onOptionSelect={handleTypeFilterChange}
           >
-            {(Object.keys(TYPE_FILTER_CONFIG) as ScopeTypeFilter[]).map((filter) => (
+            {(Object.keys(TYPE_FILTER_CONFIG) as ScopeTypeFilter[]).map(filter => (
               <Option key={filter} value={filter}>
                 {TYPE_FILTER_CONFIG[filter].label}
               </Option>
@@ -671,13 +666,8 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
         {/* Tabs (only shown when not filtering by "All") */}
         {typeFilter !== 'all' && (
-          <TabList
-            className={styles.tabList}
-            selectedValue={selectedTab}
-            onTabSelect={handleTabSelect}
-            size="small"
-          >
-            {(Object.keys(TAB_CONFIG) as ScopeType[]).map((type) => (
+          <TabList className={styles.tabList} selectedValue={selectedTab} onTabSelect={handleTabSelect} size="small">
+            {(Object.keys(TAB_CONFIG) as ScopeType[]).map(type => (
               <Tab key={type} value={type} icon={TAB_CONFIG[type].icon}>
                 {TAB_CONFIG[type].label}
               </Tab>
@@ -690,9 +680,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
           <Input
             className={styles.searchInput}
             placeholder={
-              typeFilter === 'all'
-                ? 'Search all scopes...'
-                : `Search ${TAB_CONFIG[selectedTab].label.toLowerCase()}...`
+              typeFilter === 'all' ? 'Search all scopes...' : `Search ${TAB_CONFIG[selectedTab].label.toLowerCase()}...`
             }
             value={searchTerm}
             onChange={(_, data) => setSearchTerm(data.value)}
@@ -745,11 +733,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
           {!currentLoading && !currentError && displayScopes.length === 0 && (
             <div className={styles.emptyState}>
               {typeFilter === 'all' ? <Apps20Regular /> : TAB_CONFIG[selectedTab].icon}
-              <p>
-                No{' '}
-                {typeFilter === 'all' ? 'scopes' : TAB_CONFIG[selectedTab].label.toLowerCase()}{' '}
-                found
-              </p>
+              <p>No {typeFilter === 'all' ? 'scopes' : TAB_CONFIG[selectedTab].label.toLowerCase()} found</p>
               {searchTerm && <p>Try adjusting your search terms</p>}
             </div>
           )}
@@ -759,31 +743,11 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
             <ScopeList
               scopes={displayScopes}
               scopeType={selectedScopeType}
-              onView={
-                onViewScope
-                  ? (scope) => onViewScope(scope, selectedScopeType)
-                  : undefined
-              }
-              onSaveAs={
-                onSaveAsScope
-                  ? (scope) => onSaveAsScope(scope, selectedScopeType)
-                  : undefined
-              }
-              onExtend={
-                onExtendScope
-                  ? (scope) => onExtendScope(scope, selectedScopeType)
-                  : undefined
-              }
-              onDelete={
-                onDeleteScope
-                  ? (scope) => onDeleteScope(scope, selectedScopeType)
-                  : undefined
-              }
-              onDragStart={
-                onDragToCanvas
-                  ? (scope) => onDragToCanvas(scope, selectedScopeType)
-                  : undefined
-              }
+              onView={onViewScope ? scope => onViewScope(scope, selectedScopeType) : undefined}
+              onSaveAs={onSaveAsScope ? scope => onSaveAsScope(scope, selectedScopeType) : undefined}
+              onExtend={onExtendScope ? scope => onExtendScope(scope, selectedScopeType) : undefined}
+              onDelete={onDeleteScope ? scope => onDeleteScope(scope, selectedScopeType) : undefined}
+              onDragStart={onDragToCanvas ? scope => onDragToCanvas(scope, selectedScopeType) : undefined}
               onRowClick={showDetailPanel ? handleScopeClick : undefined}
               selectedScopeId={selectedScope?.id}
               readOnly={readOnly}
@@ -793,11 +757,7 @@ export const ScopeBrowser: React.FC<ScopeBrowserProps> = ({
 
         {/* Detail Panel */}
         {showDetailPanel && (
-          <ScopeDetailPanel
-            scope={selectedScope}
-            scopeType={selectedScopeType}
-            onSelect={onSelectScope}
-          />
+          <ScopeDetailPanel scope={selectedScope} scopeType={selectedScopeType} onSelect={onSelectScope} />
         )}
       </div>
     </div>

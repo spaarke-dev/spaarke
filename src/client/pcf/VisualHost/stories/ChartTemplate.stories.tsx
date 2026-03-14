@@ -3,29 +3,23 @@
  * Use this as a starting point for new chart component stories
  */
 
-import * as React from "react";
-import type { Meta, StoryObj } from "@storybook/react";
-import { action } from "@storybook/addon-actions";
-import {
-  Card,
-  CardHeader,
-  Text,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { VisualType, AggregationType } from "../control/types";
-import type { IChartDefinition, IDrillInteraction } from "../control/types";
+import * as React from 'react';
+import type { Meta, StoryObj } from '@storybook/react';
+import { action } from '@storybook/addon-actions';
+import { Card, CardHeader, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { VisualType, AggregationType } from '../control/types';
+import type { IChartDefinition, IDrillInteraction } from '../control/types';
 
 // Sample chart definition for stories
 const sampleChartDefinition: IChartDefinition = {
-  sprk_chartdefinitionid: "sample-001",
-  sprk_name: "Sample Chart",
-  sprk_description: "A sample chart for Storybook development",
+  sprk_chartdefinitionid: 'sample-001',
+  sprk_name: 'Sample Chart',
+  sprk_description: 'A sample chart for Storybook development',
   sprk_visualtype: VisualType.MetricCard,
   sprk_aggregationtype: AggregationType.Count,
-  sprk_sourceentity: "account",
+  sprk_sourceentity: 'account',
   sprk_configurationjson: JSON.stringify({
-    primaryColor: "#0078D4",
+    primaryColor: '#0078D4',
     showTrend: true,
   }),
 };
@@ -33,11 +27,11 @@ const sampleChartDefinition: IChartDefinition = {
 // Placeholder component until real chart components are built
 const useStyles = makeStyles({
   placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "200px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '200px',
     padding: tokens.spacingVerticalL,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
@@ -51,7 +45,7 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusSmall,
-    fontFamily: "monospace",
+    fontFamily: 'monospace',
     fontSize: tokens.fontSizeBase200,
   },
 });
@@ -65,19 +59,16 @@ interface IChartPlaceholderProps {
  * ChartPlaceholder - Temporary component for story development
  * This will be replaced by actual chart implementations in tasks 010-016
  */
-const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({
-  definition,
-  onDrillInteraction,
-}) => {
+const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({ definition, onDrillInteraction }) => {
   const styles = useStyles();
 
   const handleClick = () => {
     if (onDrillInteraction) {
       const interaction: IDrillInteraction = {
-        field: "sample_field",
-        operator: "eq",
-        value: "sample_value",
-        label: "Sample Filter",
+        field: 'sample_field',
+        operator: 'eq',
+        value: 'sample_value',
+        label: 'Sample Filter',
       };
       onDrillInteraction(interaction);
     }
@@ -87,7 +78,7 @@ const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({
   const aggregationTypeName = AggregationType[definition.sprk_aggregationtype || 0];
 
   return (
-    <Card onClick={handleClick} style={{ cursor: onDrillInteraction ? "pointer" : "default" }}>
+    <Card onClick={handleClick} style={{ cursor: onDrillInteraction ? 'pointer' : 'default' }}>
       <CardHeader
         header={<Text weight="semibold">{definition.sprk_name}</Text>}
         description={<Text size={200}>{definition.sprk_description}</Text>}
@@ -97,11 +88,7 @@ const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({
         <Text size={200}>Coming in Task 010-016</Text>
         <Text size={100}>Aggregation: {aggregationTypeName}</Text>
         <Text size={100}>Source: {definition.sprk_sourceentity}</Text>
-        {onDrillInteraction && (
-          <div className={styles.drillInfo}>
-            Click to trigger drill interaction
-          </div>
-        )}
+        {onDrillInteraction && <div className={styles.drillInfo}>Click to trigger drill interaction</div>}
       </div>
     </Card>
   );
@@ -109,26 +96,26 @@ const ChartPlaceholder: React.FC<IChartPlaceholderProps> = ({
 
 // Story metadata
 const meta: Meta<typeof ChartPlaceholder> = {
-  title: "Charts/Template",
+  title: 'Charts/Template',
   component: ChartPlaceholder,
   parameters: {
-    layout: "centered",
+    layout: 'centered',
     docs: {
       description: {
         component:
-          "Template for chart component stories. Use this as a starting point when implementing actual chart components.",
+          'Template for chart component stories. Use this as a starting point when implementing actual chart components.',
       },
     },
   },
-  tags: ["autodocs"],
+  tags: ['autodocs'],
   argTypes: {
     definition: {
-      description: "Chart definition from sprk_chartdefinition entity",
-      control: "object",
+      description: 'Chart definition from sprk_chartdefinition entity',
+      control: 'object',
     },
     onDrillInteraction: {
-      description: "Callback when user clicks to drill through",
-      action: "drillInteraction",
+      description: 'Callback when user clicks to drill through',
+      action: 'drillInteraction',
     },
   },
 };
@@ -140,7 +127,7 @@ type Story = StoryObj<typeof ChartPlaceholder>;
 export const Default: Story = {
   args: {
     definition: sampleChartDefinition,
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
   },
 };
 
@@ -149,13 +136,13 @@ export const MetricCard: Story = {
   args: {
     definition: {
       ...sampleChartDefinition,
-      sprk_chartdefinitionid: "metric-001",
-      sprk_name: "Total Accounts",
-      sprk_description: "Count of active accounts",
+      sprk_chartdefinitionid: 'metric-001',
+      sprk_name: 'Total Accounts',
+      sprk_description: 'Count of active accounts',
       sprk_visualtype: VisualType.MetricCard,
       sprk_aggregationtype: AggregationType.Count,
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
   },
 };
 
@@ -164,13 +151,13 @@ export const BarChart: Story = {
   args: {
     definition: {
       ...sampleChartDefinition,
-      sprk_chartdefinitionid: "bar-001",
-      sprk_name: "Revenue by Region",
-      sprk_description: "Sum of revenue grouped by region",
+      sprk_chartdefinitionid: 'bar-001',
+      sprk_name: 'Revenue by Region',
+      sprk_description: 'Sum of revenue grouped by region',
       sprk_visualtype: VisualType.BarChart,
       sprk_aggregationtype: AggregationType.Sum,
     },
-    onDrillInteraction: action("drillInteraction"),
+    onDrillInteraction: action('drillInteraction'),
   },
 };
 
@@ -179,8 +166,8 @@ export const NoDrill: Story = {
   args: {
     definition: {
       ...sampleChartDefinition,
-      sprk_name: "Static Display",
-      sprk_description: "Chart without drill-through capability",
+      sprk_name: 'Static Display',
+      sprk_description: 'Chart without drill-through capability',
     },
     onDrillInteraction: undefined,
   },
@@ -200,8 +187,15 @@ export const AllVisualTypes: Story = {
     ];
 
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem", padding: "1rem" }}>
-        {visualTypes.map((visualType) => (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: '1rem',
+          padding: '1rem',
+        }}
+      >
+        {visualTypes.map(visualType => (
           <ChartPlaceholder
             key={visualType}
             definition={{

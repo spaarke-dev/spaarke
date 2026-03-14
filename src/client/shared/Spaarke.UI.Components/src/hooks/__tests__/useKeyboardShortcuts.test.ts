@@ -21,33 +21,33 @@ describe('useKeyboardShortcuts', () => {
         label: 'New',
         requiresSelection: false,
         keyboardShortcut: 'Ctrl+N',
-        handler: mockHandler
+        handler: mockHandler,
       },
       {
         key: 'open',
         label: 'Open',
         requiresSelection: true,
         keyboardShortcut: 'Ctrl+O',
-        handler: mockHandler
+        handler: mockHandler,
       },
       {
         key: 'delete',
         label: 'Delete',
         requiresSelection: true,
         keyboardShortcut: 'Delete',
-        handler: mockHandler
+        handler: mockHandler,
       },
       {
         key: 'refresh',
         label: 'Refresh',
         requiresSelection: false,
         keyboardShortcut: 'F5',
-        handler: mockHandler
-      }
+        handler: mockHandler,
+      },
     ];
 
     mockContext = createMockCommandContext({
-      selectedRecords: []
+      selectedRecords: [],
     });
   });
 
@@ -60,14 +60,14 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'N',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -80,13 +80,13 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'F5',
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -101,13 +101,13 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'Delete',
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -120,14 +120,14 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: false
+        enabled: false,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'N',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -142,14 +142,14 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'O',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -164,14 +164,14 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'O',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -186,26 +186,26 @@ describe('useKeyboardShortcuts', () => {
       requiresSelection: true,
       multiSelectSupport: false,
       keyboardShortcut: 'Ctrl+O',
-      handler: mockHandler
+      handler: mockHandler,
     };
 
     mockContext.selectedRecords = [
       { id: '1', entityName: 'account' },
-      { id: '2', entityName: 'account' }
+      { id: '2', entityName: 'account' },
     ];
 
     renderHook(() =>
       useKeyboardShortcuts({
         commands: [singleSelectCommand],
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'O',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -219,14 +219,14 @@ describe('useKeyboardShortcuts', () => {
       label: 'Save All',
       requiresSelection: false,
       keyboardShortcut: 'Ctrl+Shift+S',
-      handler: mockHandler
+      handler: mockHandler,
     };
 
     renderHook(() =>
       useKeyboardShortcuts({
         commands: [shiftCommand],
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
@@ -234,7 +234,7 @@ describe('useKeyboardShortcuts', () => {
       key: 'S',
       ctrlKey: true,
       shiftKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -248,21 +248,21 @@ describe('useKeyboardShortcuts', () => {
       label: 'Open Menu',
       requiresSelection: false,
       keyboardShortcut: 'Alt+M',
-      handler: mockHandler
+      handler: mockHandler,
     };
 
     renderHook(() =>
       useKeyboardShortcuts({
         commands: [altCommand],
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'M',
       altKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -277,7 +277,7 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
@@ -293,14 +293,14 @@ describe('useKeyboardShortcuts', () => {
       useKeyboardShortcuts({
         commands: mockCommands,
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: 'Z',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -314,20 +314,20 @@ describe('useKeyboardShortcuts', () => {
       label: 'Select',
       requiresSelection: false,
       keyboardShortcut: 'Space',
-      handler: mockHandler
+      handler: mockHandler,
     };
 
     renderHook(() =>
       useKeyboardShortcuts({
         commands: [spaceCommand],
         context: mockContext,
-        enabled: true
+        enabled: true,
       })
     );
 
     const event = new KeyboardEvent('keydown', {
       key: ' ',
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);
@@ -341,7 +341,7 @@ describe('useKeyboardShortcuts', () => {
         useKeyboardShortcuts({
           commands,
           context: mockContext,
-          enabled: true
+          enabled: true,
         }),
       { initialProps: { commands: mockCommands } }
     );
@@ -353,8 +353,8 @@ describe('useKeyboardShortcuts', () => {
         label: 'Test',
         requiresSelection: false,
         keyboardShortcut: 'Ctrl+T',
-        handler: newHandler
-      }
+        handler: newHandler,
+      },
     ];
 
     rerender({ commands: newCommands });
@@ -362,7 +362,7 @@ describe('useKeyboardShortcuts', () => {
     const event = new KeyboardEvent('keydown', {
       key: 'T',
       ctrlKey: true,
-      bubbles: true
+      bubbles: true,
     });
 
     window.dispatchEvent(event);

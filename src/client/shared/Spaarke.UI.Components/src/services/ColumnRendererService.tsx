@@ -2,25 +2,16 @@
  * Column renderer service - Type-based cell rendering
  */
 
-import * as React from "react";
-import {
-  Badge,
-  Link,
-  tokens,
-  Text
-} from "@fluentui/react-components";
-import {
-  CheckmarkCircle20Regular,
-  DismissCircle20Regular
-} from "@fluentui/react-icons";
-import { IDatasetColumn, IDatasetRecord } from "../types/DatasetTypes";
-import { ColumnRenderer, DataverseAttributeType } from "../types/ColumnRendererTypes";
+import * as React from 'react';
+import { Badge, Link, tokens, Text } from '@fluentui/react-components';
+import { CheckmarkCircle20Regular, DismissCircle20Regular } from '@fluentui/react-icons';
+import { IDatasetColumn, IDatasetRecord } from '../types/DatasetTypes';
+import { ColumnRenderer, DataverseAttributeType } from '../types/ColumnRendererTypes';
 
 /**
  * Column renderer registry
  */
 export class ColumnRendererService {
-
   /**
    * Get appropriate renderer for a column based on its dataType
    */
@@ -98,8 +89,8 @@ export class ColumnRendererService {
    * Render plain text
    */
   private static renderText(value: any): React.ReactElement | string {
-    if (value == null || value === "") {
-      return "";
+    if (value == null || value === '') {
+      return '';
     }
     return <Text>{String(value)}</Text>;
   }
@@ -108,7 +99,7 @@ export class ColumnRendererService {
    * Render email with link
    */
   private static renderEmail(value: any): React.ReactElement | string {
-    if (!value) return "";
+    if (!value) return '';
 
     return (
       <Link href={`mailto:${value}`} target="_blank">
@@ -121,23 +112,19 @@ export class ColumnRendererService {
    * Render phone
    */
   private static renderPhone(value: any): React.ReactElement | string {
-    if (!value) return "";
+    if (!value) return '';
 
-    return (
-      <Link href={`tel:${value}`}>
-        {String(value)}
-      </Link>
-    );
+    return <Link href={`tel:${value}`}>{String(value)}</Link>;
   }
 
   /**
    * Render URL with link
    */
   private static renderUrl(value: any): React.ReactElement | string {
-    if (!value) return "";
+    if (!value) return '';
 
     // Ensure URL has protocol
-    const url = String(value).startsWith("http") ? value : `https://${value}`;
+    const url = String(value).startsWith('http') ? value : `https://${value}`;
 
     return (
       <Link href={url} target="_blank">
@@ -150,7 +137,7 @@ export class ColumnRendererService {
    * Render number with locale formatting
    */
   private static renderNumber(value: any): React.ReactElement | string {
-    if (value == null) return "";
+    if (value == null) return '';
 
     const num = Number(value);
     if (isNaN(num)) return String(value);
@@ -162,18 +149,18 @@ export class ColumnRendererService {
    * Render money with currency symbol
    */
   private static renderMoney(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
-    if (value == null) return "";
+    if (value == null) return '';
 
     const num = Number(value);
     if (isNaN(num)) return String(value);
 
     // Check for currency code in record (e.g., transactioncurrencyid_formatted)
     const currencyField = `${column.name}_currency`;
-    const currencyCode = record[currencyField] || "USD";
+    const currencyCode = record[currencyField] || 'USD';
 
     const formatted = num.toLocaleString(undefined, {
-      style: "currency",
-      currency: currencyCode
+      style: 'currency',
+      currency: currencyCode,
     });
 
     return <Text>{formatted}</Text>;
@@ -183,17 +170,17 @@ export class ColumnRendererService {
    * Render date and time
    */
   private static renderDateTime(value: any): React.ReactElement | string {
-    if (!value) return "";
+    if (!value) return '';
 
     const date = new Date(value);
     if (isNaN(date.getTime())) return String(value);
 
     const formatted = date.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
 
     return <Text>{formatted}</Text>;
@@ -203,15 +190,15 @@ export class ColumnRendererService {
    * Render date only
    */
   private static renderDateOnly(value: any): React.ReactElement | string {
-    if (!value) return "";
+    if (!value) return '';
 
     const date = new Date(value);
     if (isNaN(date.getTime())) return String(value);
 
     const formatted = date.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
     });
 
     return <Text>{formatted}</Text>;
@@ -221,9 +208,9 @@ export class ColumnRendererService {
    * Render two options (boolean) with icons
    */
   private static renderTwoOptions(value: any): React.ReactElement | string {
-    if (value == null) return "";
+    if (value == null) return '';
 
-    const isTrue = value === true || value === 1 || value === "1" || value === "true";
+    const isTrue = value === true || value === 1 || value === '1' || value === 'true';
 
     return isTrue ? (
       <CheckmarkCircle20Regular style={{ color: tokens.colorPaletteGreenForeground1 }} />
@@ -235,8 +222,12 @@ export class ColumnRendererService {
   /**
    * Render option set (choice) with badge
    */
-  private static renderOptionSet(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
-    if (value == null) return "";
+  private static renderOptionSet(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn
+  ): React.ReactElement | string {
+    if (value == null) return '';
 
     // Use formatted value if available (e.g., "columnname@OData.Community.Display.V1.FormattedValue")
     const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
@@ -251,15 +242,25 @@ export class ColumnRendererService {
   /**
    * Render multi-select option set with multiple badges
    */
-  private static renderMultiSelectOptionSet(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
-    if (value == null) return "";
+  private static renderMultiSelectOptionSet(
+    value: any,
+    record: IDatasetRecord,
+    column: IDatasetColumn
+  ): React.ReactElement | string {
+    if (value == null) return '';
 
     // Multi-select values come as comma-separated string or array
     const formattedValue = record[`${column.name}@OData.Community.Display.V1.FormattedValue`] || String(value);
-    const options = formattedValue.split(";").map((s: string) => s.trim());
+    const options = formattedValue.split(';').map((s: string) => s.trim());
 
     return (
-      <div style={{ display: "flex", gap: tokens.spacingHorizontalXS, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: tokens.spacingHorizontalXS,
+          flexWrap: 'wrap',
+        }}
+      >
         {options.map((opt: string, idx: number) => (
           <Badge key={idx} appearance="outline" color="informative" size="small">
             {opt}
@@ -273,20 +274,17 @@ export class ColumnRendererService {
    * Render lookup with entity reference
    */
   private static renderLookup(value: any, record: IDatasetRecord, column: IDatasetColumn): React.ReactElement | string {
-    if (value == null) return "";
+    if (value == null) return '';
 
     // Lookup formatted value is in columnname_formatted or @OData annotation
-    const lookupName = record[`${column.name}_formatted`] ||
-                       record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
-                       record[`_${column.name}_value@OData.Community.Display.V1.FormattedValue`] ||
-                       String(value);
+    const lookupName =
+      record[`${column.name}_formatted`] ||
+      record[`${column.name}@OData.Community.Display.V1.FormattedValue`] ||
+      record[`_${column.name}_value@OData.Community.Display.V1.FormattedValue`] ||
+      String(value);
 
     // Could add click handler to open related record (future enhancement)
-    return (
-      <Link>
-        {lookupName}
-      </Link>
-    );
+    return <Link>{lookupName}</Link>;
   }
 
   /**

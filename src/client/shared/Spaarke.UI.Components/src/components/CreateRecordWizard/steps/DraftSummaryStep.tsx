@@ -8,20 +8,8 @@
  * @see CreateRecordWizard — wires the fetchAiSummary callback from config
  */
 import * as React from 'react';
-import {
-  Card,
-  CardHeader,
-  Textarea,
-  Spinner,
-  Text,
-  Badge,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  SparkleRegular,
-  WarningRegular,
-} from '@fluentui/react-icons';
+import { Card, CardHeader, Textarea, Spinner, Text, Badge, makeStyles, tokens } from '@fluentui/react-components';
+import { SparkleRegular, WarningRegular } from '@fluentui/react-icons';
 import { RecipientField } from './RecipientField';
 import type { IRecipientItem } from '../types';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -139,9 +127,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [summaryStatus, setSummaryStatus] = React.useState<
-    'idle' | 'loading' | 'loaded' | 'error'
-  >('idle');
+  const [summaryStatus, setSummaryStatus] = React.useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const hasFetchedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -162,7 +148,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
     setSummaryStatus('loading');
 
     fetchAiSummary()
-      .then((result) => {
+      .then(result => {
         if (cancelled) return;
         onSummaryChange(result.summary);
         setSummaryStatus('loaded');
@@ -185,17 +171,11 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
             Draft Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            Review and edit the AI-generated summary below, then add recipient
-            email addresses for distribution.
+            Review and edit the AI-generated summary below, then add recipient email addresses for distribution.
           </Text>
         </div>
         {summaryStatus === 'loaded' && fetchAiSummary && (
-          <Badge
-            className={styles.aiBadge}
-            appearance="tint"
-            color="brand"
-            icon={<SparkleRegular />}
-          >
+          <Badge className={styles.aiBadge} appearance="tint" color="brand" icon={<SparkleRegular />}>
             AI Generated
           </Badge>
         )}
@@ -224,9 +204,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
         {summaryStatus === 'error' && (
           <div className={styles.summaryUnavailable}>
             <WarningRegular aria-hidden="true" fontSize={16} />
-            <Text size={200}>
-              Summary unavailable. You can type a summary manually below.
-            </Text>
+            <Text size={200}>Summary unavailable. You can type a summary manually below.</Text>
           </div>
         )}
 
@@ -234,7 +212,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
           <Textarea
             className={styles.summaryTextarea}
             value={summaryText}
-            onChange={(e) => onSummaryChange(e.target.value)}
+            onChange={e => onSummaryChange(e.target.value)}
             placeholder="Enter or edit the summary here&hellip;"
             rows={10}
             resize="vertical"

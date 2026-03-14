@@ -11,7 +11,7 @@ describe('themeDetection', () => {
     it('should return Spaarke theme when mode is "Spaarke"', () => {
       const mockContext = {
         parameters: {},
-        mode: {}
+        mode: {},
       };
 
       const theme = detectTheme(mockContext, 'Spaarke');
@@ -23,8 +23,8 @@ describe('themeDetection', () => {
       const mockHostTheme = { ...webLightTheme };
       const mockContext = {
         fluentDesignLanguage: {
-          tokenTheme: mockHostTheme
-        }
+          tokenTheme: mockHostTheme,
+        },
       };
 
       const theme = detectTheme(mockContext, 'Host');
@@ -35,8 +35,8 @@ describe('themeDetection', () => {
     it('should return webDarkTheme when mode is "Host" with isDarkTheme=true', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkTheme: true
-        }
+          isDarkTheme: true,
+        },
       };
 
       const theme = detectTheme(mockContext, 'Host');
@@ -47,8 +47,8 @@ describe('themeDetection', () => {
     it('should return webLightTheme when mode is "Host" with isDarkTheme=false', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkTheme: false
-        }
+          isDarkTheme: false,
+        },
       };
 
       const theme = detectTheme(mockContext, 'Host');
@@ -60,8 +60,8 @@ describe('themeDetection', () => {
       const mockHostTheme = { ...webDarkTheme };
       const mockContext = {
         fluentDesignLanguage: {
-          tokenTheme: mockHostTheme
-        }
+          tokenTheme: mockHostTheme,
+        },
       };
 
       const theme = detectTheme(mockContext, 'Auto');
@@ -72,7 +72,7 @@ describe('themeDetection', () => {
     it('should fallback to Spaarke theme in Auto mode when host theme unavailable', () => {
       const mockContext = {
         parameters: {},
-        mode: {}
+        mode: {},
       };
 
       const theme = detectTheme(mockContext, 'Auto');
@@ -83,7 +83,7 @@ describe('themeDetection', () => {
     it('should return Spaarke theme when mode is undefined (defaults to Auto)', () => {
       const mockContext = {
         parameters: {},
-        mode: {}
+        mode: {},
       };
 
       const theme = detectTheme(mockContext, undefined);
@@ -96,8 +96,8 @@ describe('themeDetection', () => {
     it('should return true when isDarkTheme is true', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkTheme: true
-        }
+          isDarkTheme: true,
+        },
       };
 
       const result = isDarkMode(mockContext);
@@ -108,8 +108,8 @@ describe('themeDetection', () => {
     it('should return false when isDarkTheme is false', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkTheme: false
-        }
+          isDarkTheme: false,
+        },
       };
 
       const result = isDarkMode(mockContext);

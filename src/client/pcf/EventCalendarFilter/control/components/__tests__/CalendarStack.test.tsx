@@ -20,11 +20,7 @@ import { CalendarStack, ICalendarStackProps, IEventDateInfo } from '../CalendarS
 
 // Helper to render with Fluent theme
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
-  return render(
-    <FluentProvider theme={theme}>
-      {component}
-    </FluentProvider>
-  );
+  return render(<FluentProvider theme={theme}>{component}</FluentProvider>);
 };
 
 // Test data helpers
@@ -61,9 +57,7 @@ describe('CalendarStack', () => {
     });
 
     it('renders custom number of months', () => {
-      renderWithTheme(
-        <CalendarStack {...defaultProps} monthsToShow={5} />
-      );
+      renderWithTheme(<CalendarStack {...defaultProps} monthsToShow={5} />);
 
       // Should show 5 months starting from January
       expect(screen.getByText('January 2026')).toBeInTheDocument();
@@ -74,9 +68,7 @@ describe('CalendarStack', () => {
     });
 
     it('renders single month when monthsToShow is 1', () => {
-      renderWithTheme(
-        <CalendarStack {...defaultProps} monthsToShow={1} />
-      );
+      renderWithTheme(<CalendarStack {...defaultProps} monthsToShow={1} />);
 
       // Should show only January (one month before February initial)
       expect(screen.getByText('January 2026')).toBeInTheDocument();
@@ -90,7 +82,10 @@ describe('CalendarStack', () => {
       renderWithTheme(<CalendarStack />);
 
       // Should contain month one before current
-      const expectedMonth = oneMonthBefore.toLocaleString('default', { month: 'long', year: 'numeric' });
+      const expectedMonth = oneMonthBefore.toLocaleString('default', {
+        month: 'long',
+        year: 'numeric',
+      });
       expect(screen.getByText(expectedMonth)).toBeInTheDocument();
     });
   });
@@ -152,9 +147,7 @@ describe('CalendarStack', () => {
     it('passes eventDateInfos to child months', () => {
       const eventDateInfos = createEventDateInfos();
 
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} eventDateInfos={eventDateInfos} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} eventDateInfos={eventDateInfos} />);
 
       // Event counts should be visible in badges
       // February 10 has 3 events - use more specific selector
@@ -169,9 +162,7 @@ describe('CalendarStack', () => {
     it('supports legacy eventDates prop (string array)', () => {
       const eventDates = ['2026-02-05', '2026-02-10', '2026-02-15'];
 
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} eventDates={eventDates} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} eventDates={eventDates} />);
 
       // Dates with events should have indicators
       // Find February section and check for indicators
@@ -185,11 +176,7 @@ describe('CalendarStack', () => {
       const eventDates = ['2026-02-22']; // Would show as count 1
 
       const { container } = renderWithTheme(
-        <CalendarStack
-          {...defaultProps}
-          eventDateInfos={eventDateInfos}
-          eventDates={eventDates}
-        />
+        <CalendarStack {...defaultProps} eventDateInfos={eventDateInfos} eventDates={eventDates} />
       );
 
       // Should show 9 (from eventDateInfos), not 1 (from eventDates)
@@ -206,9 +193,7 @@ describe('CalendarStack', () => {
     it('calls onDateClick when clicking a date', () => {
       const onDateClick = jest.fn();
 
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} onDateClick={onDateClick} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} onDateClick={onDateClick} />);
 
       const dateCell = container.querySelector('[data-date="2026-02-10"]');
       expect(dateCell).toBeInTheDocument();
@@ -225,9 +210,7 @@ describe('CalendarStack', () => {
     it('highlights selected dates', () => {
       const selectedDates = ['2026-02-10', '2026-03-05'];
 
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} selectedDates={selectedDates} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} selectedDates={selectedDates} />);
 
       const febCell = container.querySelector('[data-date="2026-02-10"]');
       expect(febCell).toHaveAttribute('aria-selected', 'true');
@@ -239,9 +222,7 @@ describe('CalendarStack', () => {
     it('calls onSelectionChange with selected dates', () => {
       const onSelectionChange = jest.fn();
 
-      renderWithTheme(
-        <CalendarStack {...defaultProps} onSelectionChange={onSelectionChange} />
-      );
+      renderWithTheme(<CalendarStack {...defaultProps} onSelectionChange={onSelectionChange} />);
 
       // onSelectionChange is not directly called by CalendarStack,
       // it's a prop passed through - verify it's wired up
@@ -253,9 +234,7 @@ describe('CalendarStack', () => {
     it('calls onDateShiftClick when shift-clicking a date', () => {
       const onDateShiftClick = jest.fn();
 
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} onDateShiftClick={onDateShiftClick} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} onDateShiftClick={onDateShiftClick} />);
 
       const dateCell = container.querySelector('[data-date="2026-02-15"]');
       fireEvent.click(dateCell!, { shiftKey: true });
@@ -265,11 +244,7 @@ describe('CalendarStack', () => {
 
     it('highlights range across months', () => {
       const { container } = renderWithTheme(
-        <CalendarStack
-          {...defaultProps}
-          rangeStartDate="2026-02-25"
-          rangeEndDate="2026-03-05"
-        />
+        <CalendarStack {...defaultProps} rangeStartDate="2026-02-25" rangeEndDate="2026-03-05" />
       );
 
       // February dates in range
@@ -287,11 +262,7 @@ describe('CalendarStack', () => {
 
     it('passes range dates to child CalendarMonth components', () => {
       const { container } = renderWithTheme(
-        <CalendarStack
-          {...defaultProps}
-          rangeStartDate="2026-02-10"
-          rangeEndDate="2026-02-15"
-        />
+        <CalendarStack {...defaultProps} rangeStartDate="2026-02-10" rangeEndDate="2026-02-15" />
       );
 
       // Check that dates in range are marked as selected
@@ -321,9 +292,7 @@ describe('CalendarStack', () => {
 
   describe('height prop', () => {
     it('applies custom height when provided', () => {
-      const { container } = renderWithTheme(
-        <CalendarStack {...defaultProps} height={500} />
-      );
+      const { container } = renderWithTheme(<CalendarStack {...defaultProps} height={500} />);
 
       // The CalendarStack container is inside the FluentProvider
       // Find the element with inline style
@@ -379,9 +348,7 @@ describe('CalendarStack', () => {
     it('handles year transitions correctly', () => {
       const december2025 = new Date(2025, 11, 15); // December 15, 2025
 
-      renderWithTheme(
-        <CalendarStack initialDate={december2025} />
-      );
+      renderWithTheme(<CalendarStack initialDate={december2025} />);
 
       // Should show November 2025, December 2025, January 2026
       expect(screen.getByText('November 2025')).toBeInTheDocument();
@@ -390,21 +357,13 @@ describe('CalendarStack', () => {
     });
 
     it('handles empty event arrays', () => {
-      renderWithTheme(
-        <CalendarStack
-          {...defaultProps}
-          eventDateInfos={[]}
-          eventDates={[]}
-        />
-      );
+      renderWithTheme(<CalendarStack {...defaultProps} eventDateInfos={[]} eventDates={[]} />);
 
       expect(screen.getByText('February 2026')).toBeInTheDocument();
     });
 
     it('handles empty selection arrays', () => {
-      renderWithTheme(
-        <CalendarStack {...defaultProps} selectedDates={[]} />
-      );
+      renderWithTheme(<CalendarStack {...defaultProps} selectedDates={[]} />);
 
       expect(screen.getByText('February 2026')).toBeInTheDocument();
     });

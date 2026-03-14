@@ -14,10 +14,10 @@
  * @see SelectionChangedPayload in SprkChatBridge.ts
  */
 
-import { useEffect, useRef, useCallback } from "react";
-import type { SprkChatBridge } from "@spaarke/ui-components/services/SprkChatBridge";
-import type { RichTextEditorRef } from "@spaarke/ui-components";
-import type { SelectionBoundingRect } from "../types";
+import { useEffect, useRef, useCallback } from 'react';
+import type { SprkChatBridge } from '@spaarke/ui-components/services/SprkChatBridge';
+import type { RichTextEditorRef } from '@spaarke/ui-components';
+import type { SelectionBoundingRect } from '../types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,12 +31,12 @@ const SELECTION_DEBOUNCE_MS = 300;
 // ---------------------------------------------------------------------------
 
 export interface UseSelectionBroadcastOptions {
-    /** Ref to the RichTextEditor instance */
-    editorRef: React.RefObject<RichTextEditorRef | null>;
-    /** SprkChatBridge instance for emitting events (null when bridge is not active) */
-    bridge: SprkChatBridge | null;
-    /** Whether selection broadcasting is enabled (default: true) */
-    enabled?: boolean;
+  /** Ref to the RichTextEditor instance */
+  editorRef: React.RefObject<RichTextEditorRef | null>;
+  /** SprkChatBridge instance for emitting events (null when bridge is not active) */
+  bridge: SprkChatBridge | null;
+  /** Whether selection broadcasting is enabled (default: true) */
+  enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,144 +59,144 @@ export interface UseSelectionBroadcastOptions {
  * ```
  */
 export function useSelectionBroadcast(options: UseSelectionBroadcastOptions): void {
-    const { editorRef, bridge, enabled = true } = options;
+  const { editorRef, bridge, enabled = true } = options;
 
-    const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const lastSelectionTextRef = useRef<string>("");
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSelectionTextRef = useRef<string>('');
 
-    /**
-     * Read the current selection from the DOM and emit the appropriate
-     * bridge event (selection_changed or selection_cleared).
-     */
-    const handleSelectionChange = useCallback(() => {
-        if (!bridge || bridge.isDisconnected || !editorRef.current) {
-            return;
-        }
+  /**
+   * Read the current selection from the DOM and emit the appropriate
+   * bridge event (selection_changed or selection_cleared).
+   */
+  const handleSelectionChange = useCallback(() => {
+    if (!bridge || bridge.isDisconnected || !editorRef.current) {
+      return;
+    }
 
-        const selection = document.getSelection();
-        if (!selection || selection.rangeCount === 0) {
-            // Emit clear if we had a previous selection
-            if (lastSelectionTextRef.current) {
-                lastSelectionTextRef.current = "";
-                try {
-                    bridge.emit("selection_changed", {
-                        text: "",
-                        startOffset: 0,
-                        endOffset: 0,
-                        context: "selection_cleared",
-                    });
-                } catch {
-                    // Bridge disconnected or errored -- silently drop
-                }
-            }
-            return;
-        }
-
-        const range = selection.getRangeAt(0);
-        const selectedText = selection.toString().trim();
-
-        // Check if the selection is within the editor container
-        // by walking up from the range's common ancestor
-        const editorContainer = findEditorContainer(range.commonAncestorContainer);
-        if (!editorContainer) {
-            // Selection is outside the editor -- ignore
-            return;
-        }
-
-        if (!selectedText) {
-            // Selection is empty (e.g., just a cursor placement)
-            if (lastSelectionTextRef.current) {
-                lastSelectionTextRef.current = "";
-                try {
-                    bridge.emit("selection_changed", {
-                        text: "",
-                        startOffset: 0,
-                        endOffset: 0,
-                        context: "selection_cleared",
-                    });
-                } catch {
-                    // Silently drop
-                }
-            }
-            return;
-        }
-
-        // Avoid emitting duplicate events for the same selection text
-        if (selectedText === lastSelectionTextRef.current) {
-            return;
-        }
-
-        lastSelectionTextRef.current = selectedText;
-
-        // Get viewport-relative bounding rect
-        const rect = range.getBoundingClientRect();
-        const boundingRect: SelectionBoundingRect = {
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height,
-        };
-
-        // Get selected HTML content
-        const fragment = range.cloneContents();
-        const tempDiv = document.createElement("div");
-        tempDiv.appendChild(fragment);
-        const selectedHtml = tempDiv.innerHTML;
-
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      // Emit clear if we had a previous selection
+      if (lastSelectionTextRef.current) {
+        lastSelectionTextRef.current = '';
         try {
-            bridge.emit("selection_changed", {
-                text: selectedText,
-                startOffset: range.startOffset,
-                endOffset: range.endOffset,
-                context: JSON.stringify({
-                    selectedHtml,
-                    boundingRect,
-                    source: "analysis-editor",
-                }),
-            });
+          bridge.emit('selection_changed', {
+            text: '',
+            startOffset: 0,
+            endOffset: 0,
+            context: 'selection_cleared',
+          });
         } catch {
-            // Bridge disconnected or errored -- silently drop
-            // This is expected when SprkChat pane is not open
+          // Bridge disconnected or errored -- silently drop
         }
-    }, [bridge, editorRef]);
+      }
+      return;
+    }
 
-    /**
-     * Debounced wrapper around handleSelectionChange.
-     */
-    const debouncedHandleSelection = useCallback(() => {
-        if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
+    const range = selection.getRangeAt(0);
+    const selectedText = selection.toString().trim();
+
+    // Check if the selection is within the editor container
+    // by walking up from the range's common ancestor
+    const editorContainer = findEditorContainer(range.commonAncestorContainer);
+    if (!editorContainer) {
+      // Selection is outside the editor -- ignore
+      return;
+    }
+
+    if (!selectedText) {
+      // Selection is empty (e.g., just a cursor placement)
+      if (lastSelectionTextRef.current) {
+        lastSelectionTextRef.current = '';
+        try {
+          bridge.emit('selection_changed', {
+            text: '',
+            startOffset: 0,
+            endOffset: 0,
+            context: 'selection_cleared',
+          });
+        } catch {
+          // Silently drop
         }
+      }
+      return;
+    }
 
-        debounceTimerRef.current = setTimeout(() => {
-            handleSelectionChange();
-        }, SELECTION_DEBOUNCE_MS);
-    }, [handleSelectionChange]);
+    // Avoid emitting duplicate events for the same selection text
+    if (selectedText === lastSelectionTextRef.current) {
+      return;
+    }
 
-    // -----------------------------------------------------------------------
-    // Event listener setup and teardown
-    // -----------------------------------------------------------------------
+    lastSelectionTextRef.current = selectedText;
 
-    useEffect(() => {
-        if (!enabled || !bridge) {
-            return;
-        }
+    // Get viewport-relative bounding rect
+    const rect = range.getBoundingClientRect();
+    const boundingRect: SelectionBoundingRect = {
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    };
 
-        document.addEventListener("selectionchange", debouncedHandleSelection);
+    // Get selected HTML content
+    const fragment = range.cloneContents();
+    const tempDiv = document.createElement('div');
+    tempDiv.appendChild(fragment);
+    const selectedHtml = tempDiv.innerHTML;
 
-        return () => {
-            document.removeEventListener("selectionchange", debouncedHandleSelection);
+    try {
+      bridge.emit('selection_changed', {
+        text: selectedText,
+        startOffset: range.startOffset,
+        endOffset: range.endOffset,
+        context: JSON.stringify({
+          selectedHtml,
+          boundingRect,
+          source: 'analysis-editor',
+        }),
+      });
+    } catch {
+      // Bridge disconnected or errored -- silently drop
+      // This is expected when SprkChat pane is not open
+    }
+  }, [bridge, editorRef]);
 
-            // Clear any pending debounce timer
-            if (debounceTimerRef.current) {
-                clearTimeout(debounceTimerRef.current);
-                debounceTimerRef.current = null;
-            }
+  /**
+   * Debounced wrapper around handleSelectionChange.
+   */
+  const debouncedHandleSelection = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
 
-            // Reset tracked selection
-            lastSelectionTextRef.current = "";
-        };
-    }, [enabled, bridge, debouncedHandleSelection]);
+    debounceTimerRef.current = setTimeout(() => {
+      handleSelectionChange();
+    }, SELECTION_DEBOUNCE_MS);
+  }, [handleSelectionChange]);
+
+  // -----------------------------------------------------------------------
+  // Event listener setup and teardown
+  // -----------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!enabled || !bridge) {
+      return;
+    }
+
+    document.addEventListener('selectionchange', debouncedHandleSelection);
+
+    return () => {
+      document.removeEventListener('selectionchange', debouncedHandleSelection);
+
+      // Clear any pending debounce timer
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+
+      // Reset tracked selection
+      lastSelectionTextRef.current = '';
+    };
+  }, [enabled, bridge, debouncedHandleSelection]);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,16 +209,15 @@ export function useSelectionBroadcast(options: UseSelectionBroadcastOptions): vo
  * the editor.
  */
 function findEditorContainer(node: Node | null): HTMLElement | null {
-    let current: Node | null = node;
-    while (current) {
-        if (
-            current instanceof HTMLElement &&
-            (current.getAttribute("contenteditable") === "true" ||
-                current.getAttribute("data-lexical-editor") === "true")
-        ) {
-            return current;
-        }
-        current = current.parentNode;
+  let current: Node | null = node;
+  while (current) {
+    if (
+      current instanceof HTMLElement &&
+      (current.getAttribute('contenteditable') === 'true' || current.getAttribute('data-lexical-editor') === 'true')
+    ) {
+      return current;
     }
-    return null;
+    current = current.parentNode;
+  }
+  return null;
 }

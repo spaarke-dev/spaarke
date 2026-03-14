@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  forwardRef,
-  type KeyboardEvent,
-} from 'react';
+import React, { useState, useCallback, useMemo, forwardRef, type KeyboardEvent } from 'react';
 import {
   makeStyles,
   tokens,
@@ -172,8 +166,19 @@ const MAX_TOTAL_SIZE = 100 * 1024 * 1024;
  * Blocked file extensions for security.
  */
 const BLOCKED_EXTENSIONS = [
-  '.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js',
-  '.jar', '.msi', '.scr', '.com', '.pif', '.reg',
+  '.exe',
+  '.dll',
+  '.bat',
+  '.cmd',
+  '.ps1',
+  '.vbs',
+  '.js',
+  '.jar',
+  '.msi',
+  '.scr',
+  '.com',
+  '.pif',
+  '.reg',
 ];
 
 /**
@@ -196,11 +201,7 @@ function getAttachmentIcon(contentType: string, fileName: string): React.ReactEl
   ) {
     return <ArchiveRegular />;
   }
-  if (
-    contentType.includes('text/') ||
-    lowerName.endsWith('.txt') ||
-    lowerName.endsWith('.md')
-  ) {
+  if (contentType.includes('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
     return <NoteRegular />;
   }
   return <DocumentRegular />;
@@ -338,9 +339,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
 
     // Calculate total selected size
     const totalSelectedSize = useMemo(() => {
-      return attachments
-        .filter(att => selectedIds.has(att.id))
-        .reduce((sum, att) => sum + att.size, 0);
+      return attachments.filter(att => selectedIds.has(att.id)).reduce((sum, att) => sum + att.size, 0);
     }, [attachments, selectedIds]);
 
     // Check if total size exceeds limit
@@ -348,25 +347,27 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     const isTotalSizeWarning = totalSelectedSize > MAX_TOTAL_SIZE * 0.8;
 
     // Check if all selectable are selected
-    const allSelected = selectableAttachments.length > 0 &&
-      selectableAttachments.every(att => selectedIds.has(att.id));
+    const allSelected = selectableAttachments.length > 0 && selectableAttachments.every(att => selectedIds.has(att.id));
     const someSelected = selectableAttachments.some(att => selectedIds.has(att.id));
 
     // Handle individual attachment toggle
-    const handleToggle = useCallback((attachmentId: string) => {
-      if (disabled) return;
+    const handleToggle = useCallback(
+      (attachmentId: string) => {
+        if (disabled) return;
 
-      const validation = validationResults.get(attachmentId);
-      if (!validation?.isValid) return;
+        const validation = validationResults.get(attachmentId);
+        if (!validation?.isValid) return;
 
-      const newSelected = new Set(selectedIds);
-      if (newSelected.has(attachmentId)) {
-        newSelected.delete(attachmentId);
-      } else {
-        newSelected.add(attachmentId);
-      }
-      onSelectionChange(newSelected);
-    }, [disabled, validationResults, selectedIds, onSelectionChange]);
+        const newSelected = new Set(selectedIds);
+        if (newSelected.has(attachmentId)) {
+          newSelected.delete(attachmentId);
+        } else {
+          newSelected.add(attachmentId);
+        }
+        onSelectionChange(newSelected);
+      },
+      [disabled, validationResults, selectedIds, onSelectionChange]
+    );
 
     // Handle select all toggle
     const handleSelectAll = useCallback(() => {
@@ -390,26 +391,21 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     }, [disabled, allSelected, selectableAttachments, selectedIds, onSelectionChange]);
 
     // Handle keyboard navigation
-    const handleKeyDown = useCallback((
-      event: KeyboardEvent<HTMLDivElement>,
-      attachmentId: string
-    ) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        handleToggle(attachmentId);
-      }
-    }, [handleToggle]);
+    const handleKeyDown = useCallback(
+      (event: KeyboardEvent<HTMLDivElement>, attachmentId: string) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleToggle(attachmentId);
+        }
+      },
+      [handleToggle]
+    );
 
     // Loading state
     if (isLoading) {
       return (
         <Card className={mergeClasses(styles.container, className)} ref={ref}>
-          {showHeader && (
-            <CardHeader
-              image={<AttachRegular />}
-              header={<Text weight="semibold">{label}</Text>}
-            />
-          )}
+          {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
           <div className={styles.loadingContainer}>
             <Spinner size="small" label="Loading attachments..." />
           </div>
@@ -421,12 +417,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     if (attachments.length === 0) {
       return (
         <Card className={mergeClasses(styles.container, className)} ref={ref}>
-          {showHeader && (
-            <CardHeader
-              image={<AttachRegular />}
-              header={<Text weight="semibold">{label}</Text>}
-            />
-          )}
+          {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
           <div className={styles.emptyState}>
             <AttachRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
             <Text>No attachments</Text>
@@ -460,12 +451,8 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
         )}
 
         {/* Attachment List */}
-        <div
-          className={styles.attachmentList}
-          role="list"
-          aria-label="Attachment list"
-        >
-          {attachments.map((attachment) => {
+        <div className={styles.attachmentList} role="list" aria-label="Attachment list">
+          {attachments.map(attachment => {
             const validation = validationResults.get(attachment.id);
             const isValid = validation?.isValid ?? true;
             const isSelected = selectedIds.has(attachment.id);
@@ -482,7 +469,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
                 role="listitem"
                 tabIndex={isDisabled ? -1 : 0}
                 onClick={() => handleToggle(attachment.id)}
-                onKeyDown={(e) => handleKeyDown(e, attachment.id)}
+                onKeyDown={e => handleKeyDown(e, attachment.id)}
                 aria-selected={isSelected}
                 aria-disabled={isDisabled}
               >
@@ -503,11 +490,11 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
                     {attachment.name}
                   </span>
                   <div className={styles.attachmentMeta}>
-                    <span className={styles.attachmentSize}>
-                      {formatFileSize(attachment.size)}
-                    </span>
+                    <span className={styles.attachmentSize}>{formatFileSize(attachment.size)}</span>
                     {attachment.isInline && (
-                      <Badge appearance="outline" size="small">Inline</Badge>
+                      <Badge appearance="outline" size="small">
+                        Inline
+                      </Badge>
                     )}
                   </div>
                   {!isValid && validation?.errorMessage && (
@@ -519,10 +506,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
                 </div>
 
                 {isSelected && isValid && (
-                  <CheckmarkCircleRegular
-                    style={{ color: tokens.colorPaletteGreenForeground1 }}
-                    aria-hidden="true"
-                  />
+                  <CheckmarkCircleRegular style={{ color: tokens.colorPaletteGreenForeground1 }} aria-hidden="true" />
                 )}
               </div>
             );

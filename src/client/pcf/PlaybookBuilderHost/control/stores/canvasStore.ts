@@ -99,8 +99,7 @@ interface CanvasState {
 }
 
 // Generate unique ID for new nodes
-const generateNodeId = () =>
-  `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const generateNodeId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 // Initial state
 const initialState = {
@@ -128,58 +127,51 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   ...initialState,
 
   // Node state setters
-  setNodes: (nodes) => set({ nodes, isDirty: true }),
+  setNodes: nodes => set({ nodes, isDirty: true }),
 
-  onNodesChange: (changes) =>
-    set((state) => ({
+  onNodesChange: changes =>
+    set(state => ({
       nodes: applyNodeChanges(changes, state.nodes) as PlaybookNode[],
       isDirty: true,
     })),
 
-  addNode: (node) =>
-    set((state) => ({
+  addNode: node =>
+    set(state => ({
       nodes: [...state.nodes, node],
       isDirty: true,
     })),
 
   updateNode: (nodeId, data) =>
-    set((state) => ({
-      nodes: state.nodes.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, ...data } }
-          : node
-      ),
+    set(state => ({
+      nodes: state.nodes.map(node => (node.id === nodeId ? { ...node, data: { ...node.data, ...data } } : node)),
       isDirty: true,
     })),
 
-  removeNode: (nodeId) =>
-    set((state) => ({
-      nodes: state.nodes.filter((node) => node.id !== nodeId),
-      edges: state.edges.filter(
-        (edge) => edge.source !== nodeId && edge.target !== nodeId
-      ),
-      selectedNodeId:
-        state.selectedNodeId === nodeId ? null : state.selectedNodeId,
+  removeNode: nodeId =>
+    set(state => ({
+      nodes: state.nodes.filter(node => node.id !== nodeId),
+      edges: state.edges.filter(edge => edge.source !== nodeId && edge.target !== nodeId),
+      selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
       isDirty: true,
     })),
 
   // Edge state setters
-  setEdges: (edges) => set({ edges, isDirty: true }),
+  setEdges: edges => set({ edges, isDirty: true }),
 
-  onEdgesChange: (changes) =>
-    set((state) => ({
+  onEdgesChange: changes =>
+    set(state => ({
       edges: applyEdgeChanges(changes, state.edges),
       isDirty: true,
     })),
 
-  onConnect: (connection) =>
-    set((state) => {
+  onConnect: connection =>
+    set(state => {
       // Determine edge type based on source node and handle
       let edgeType = 'smoothstep';
       let animated = true;
 
       // Check if source is a condition node
-      const sourceNode = state.nodes.find((n) => n.id === connection.source);
+      const sourceNode = state.nodes.find(n => n.id === connection.source);
       if (sourceNode?.data.type === 'condition' && connection.sourceHandle) {
         // Use branch-specific edge types for condition nodes
         if (connection.sourceHandle === 'true') {
@@ -204,14 +196,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       };
     }),
 
-  removeEdge: (edgeId) =>
-    set((state) => ({
-      edges: state.edges.filter((edge) => edge.id !== edgeId),
+  removeEdge: edgeId =>
+    set(state => ({
+      edges: state.edges.filter(edge => edge.id !== edgeId),
       isDirty: true,
     })),
 
   // Selection
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+  selectNode: nodeId => set({ selectedNodeId: nodeId }),
 
   // Drag and drop handler
   onDrop: (position, nodeType, label) => {
@@ -222,8 +214,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     };
 
     // Set type-specific defaults for structural nodes
-    if (nodeType === "deliverOutput") {
-      baseData.deliveryType = "markdown";
+    if (nodeType === 'deliverOutput') {
+      baseData.deliveryType = 'markdown';
     }
 
     const newNode: PlaybookNode = {

@@ -146,12 +146,7 @@ interface PaletteItem {
   type: PlaybookNodeType;
   label: string;
   icon: React.ReactNode;
-  iconStyle:
-    | 'nodeIconAi'
-    | 'nodeIconCondition'
-    | 'nodeIconDelivery'
-    | 'nodeIconIntegration'
-    | 'nodeIconWait';
+  iconStyle: 'nodeIconAi' | 'nodeIconCondition' | 'nodeIconDelivery' | 'nodeIconIntegration' | 'nodeIconWait';
 }
 
 const paletteItems: PaletteItem[] = [
@@ -214,15 +209,15 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
   // Track selected node for auto-opening properties panel
-  const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
+  const selectedNodeId = useCanvasStore(state => state.selectedNodeId);
 
   // Execution state
-  const stopExecution = useExecutionStore((state) => state.stopExecution);
+  const stopExecution = useExecutionStore(state => state.stopExecution);
 
   // AI Assistant state
-  const isAiAssistantOpen = useAiAssistantStore((state) => state.isOpen);
-  const toggleAiAssistant = useAiAssistantStore((state) => state.toggleModal);
-  const sendMessage = useAiAssistantStore((state) => state.sendMessage);
+  const isAiAssistantOpen = useAiAssistantStore(state => state.isOpen);
+  const toggleAiAssistant = useAiAssistantStore(state => state.toggleModal);
+  const sendMessage = useAiAssistantStore(state => state.sendMessage);
 
   // Handler for sending AI chat messages
   const handleSendMessage = useCallback(
@@ -243,45 +238,29 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
   }, [selectedNodeId]);
 
   // Handle drag start from palette
-  const onDragStart = useCallback(
-    (event: DragEvent<HTMLDivElement>, type: PlaybookNodeType, label: string) => {
-      event.dataTransfer.setData(
-        'application/reactflow',
-        JSON.stringify({ type, label })
-      );
-      event.dataTransfer.effectAllowed = 'move';
-    },
-    []
-  );
+  const onDragStart = useCallback((event: DragEvent<HTMLDivElement>, type: PlaybookNodeType, label: string) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, label }));
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
 
   return (
     <div className={styles.container}>
       {/* Left Sidebar - Node Palette */}
-      <aside
-        className={mergeClasses(
-          styles.sidebar,
-          styles.leftSidebar,
-          !leftPanelOpen && styles.sidebarCollapsed
-        )}
-      >
+      <aside className={mergeClasses(styles.sidebar, styles.leftSidebar, !leftPanelOpen && styles.sidebarCollapsed)}>
         <Text className={styles.sectionTitle} weight="semibold" size={200}>
           Drag nodes to canvas
         </Text>
 
-        {paletteItems.map((item) => (
+        {paletteItems.map(item => (
           <Card
             key={item.type}
             className={styles.paletteItem}
             size="small"
             draggable
-            onDragStart={(e) => onDragStart(e, item.type, item.label)}
+            onDragStart={e => onDragStart(e, item.type, item.label)}
           >
             <CardHeader
-              image={
-                <div className={mergeClasses(styles.nodeIcon, styles[item.iconStyle])}>
-                  {item.icon}
-                </div>
-              }
+              image={<div className={mergeClasses(styles.nodeIcon, styles[item.iconStyle])}>{item.icon}</div>}
               header={<Text size={200}>{item.label}</Text>}
             />
           </Card>
@@ -336,13 +315,7 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
       </main>
 
       {/* Right Sidebar - Properties Panel */}
-      <aside
-        className={mergeClasses(
-          styles.sidebar,
-          styles.rightSidebar,
-          !rightPanelOpen && styles.sidebarCollapsed
-        )}
-      >
+      <aside className={mergeClasses(styles.sidebar, styles.rightSidebar, !rightPanelOpen && styles.sidebarCollapsed)}>
         <PropertiesPanel />
       </aside>
 

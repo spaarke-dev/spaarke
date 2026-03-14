@@ -39,11 +39,7 @@ import {
   Link12Regular,
   DismissRegular,
 } from '@fluentui/react-icons';
-import {
-  useAiAssistantStore,
-  type ChatMessage,
-  type CanvasOperation,
-} from '../../stores/aiAssistantStore';
+import { useAiAssistantStore, type ChatMessage, type CanvasOperation } from '../../stores/aiAssistantStore';
 import { ClarificationOptions } from './ClarificationOptions';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,9 +272,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
   const { messages, isStreaming, streamingState, error, setError, respondToClarification } = useAiAssistantStore();
 
   // Apply message limit if specified
-  const displayMessages = maxMessages
-    ? messages.slice(-maxMessages)
-    : messages;
+  const displayMessages = maxMessages ? messages.slice(-maxMessages) : messages;
 
   // Auto-scroll to bottom when new messages arrive or during streaming
   useEffect(() => {
@@ -342,39 +336,28 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
         </div>
 
         {/* Operation badges for assistant messages */}
-        {showOperations &&
-          isAssistant &&
-          message.canvasOperations &&
-          message.canvasOperations.length > 0 && (
-            <div
-              className={styles.operationsContainer}
-              role="list"
-              aria-label="Canvas operations"
-            >
-              {message.canvasOperations.map((op, idx) => {
-                const { icon, color } = getOperationIcon(op.type);
-                return (
-                  <Badge
-                    key={`${message.id}-op-${idx}`}
-                    appearance="filled"
-                    color={color}
-                    size="small"
-                    className={styles.operationBadge}
-                    icon={icon}
-                  >
-                    {getOperationLabel(op)}
-                  </Badge>
-                );
-              })}
-            </div>
-          )}
+        {showOperations && isAssistant && message.canvasOperations && message.canvasOperations.length > 0 && (
+          <div className={styles.operationsContainer} role="list" aria-label="Canvas operations">
+            {message.canvasOperations.map((op, idx) => {
+              const { icon, color } = getOperationIcon(op.type);
+              return (
+                <Badge
+                  key={`${message.id}-op-${idx}`}
+                  appearance="filled"
+                  color={color}
+                  size="small"
+                  className={styles.operationBadge}
+                  icon={icon}
+                >
+                  {getOperationLabel(op)}
+                </Badge>
+              );
+            })}
+          </div>
+        )}
 
         {/* Timestamp */}
-        {showTimestamps && !isSystem && (
-          <Text className={styles.timestamp}>
-            {formatTime(message.timestamp)}
-          </Text>
-        )}
+        {showTimestamps && !isSystem && <Text className={styles.timestamp}>{formatTime(message.timestamp)}</Text>}
       </div>
     );
   };
@@ -384,42 +367,22 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
     if (!isStreaming) return null;
 
     return (
-      <div
-        className={styles.streamingIndicator}
-        role="status"
-        aria-live="polite"
-        aria-label="AI is responding"
-      >
+      <div className={styles.streamingIndicator} role="status" aria-live="polite" aria-label="AI is responding">
         <Spinner size="tiny" />
         <Text className={styles.streamingText}>
           {streamingState.currentStep || 'AI is thinking...'}
-          {streamingState.operationCount > 0 && (
-            <span> ({streamingState.operationCount} changes)</span>
-          )}
+          {streamingState.operationCount > 0 && <span> ({streamingState.operationCount} changes)</span>}
         </Text>
       </div>
     );
   };
 
   return (
-    <div
-      className={styles.container}
-      role="log"
-      aria-label="Chat history"
-      aria-live="polite"
-    >
-      <div
-        ref={messageListRef}
-        className={styles.messageList}
-        role="list"
-        aria-label="Messages"
-      >
+    <div className={styles.container} role="log" aria-label="Chat history" aria-live="polite">
+      <div ref={messageListRef} className={styles.messageList} role="list" aria-label="Messages">
         {/* Error display */}
         {error && (
-          <MessageBar
-            className={styles.errorBar}
-            intent="error"
-          >
+          <MessageBar className={styles.errorBar} intent="error">
             <MessageBarBody>
               <MessageBarTitle>Error</MessageBarTitle>
               {error}

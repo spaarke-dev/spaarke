@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  makeStyles,
-  tokens,
-  TabList,
-  Tab,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, TabList, Tab } from '@fluentui/react-components';
 import {
   SaveRegular,
   // V1: Disabled icons - uncomment for future releases
@@ -111,13 +106,9 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
   const styles = useStyles();
 
   // Filter tabs based on host type
-  const availableTabs = TAB_CONFIGS.filter((tab) =>
-    tab.availableFor.includes(hostType)
-  );
+  const availableTabs = TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
 
-  const tabListClassName = compact
-    ? `${styles.tabList} ${styles.tabListCompact}`
-    : styles.tabList;
+  const tabListClassName = compact ? `${styles.tabList} ${styles.tabListCompact}` : styles.tabList;
 
   return (
     <nav className={styles.navigation} aria-label="Task pane navigation">
@@ -128,13 +119,8 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
         disabled={disabled}
         size={compact ? 'small' : 'medium'}
       >
-        {availableTabs.map((tab) => (
-          <Tab
-            key={tab.value}
-            value={tab.value}
-            icon={tab.icon}
-            aria-label={tab.label}
-          >
+        {availableTabs.map(tab => (
+          <Tab key={tab.value} value={tab.value} icon={tab.icon} aria-label={tab.label}>
             {!compact && tab.label}
           </Tab>
         ))}

@@ -200,7 +200,7 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        // TODO: Look up sprk_analysisoutput to find associated document ID
+        // TRACKED: GitHub #233 - Look up sprk_analysisoutput for document ID
         // For now, analysis records are tied to in-memory state and don't have
         // persistent Dataverse storage. When sprk_analysisoutput storage is implemented,
         // we'll look up the document ID and authorize via IAiAuthorizationService.

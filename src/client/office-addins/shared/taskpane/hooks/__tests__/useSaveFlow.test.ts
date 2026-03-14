@@ -74,9 +74,7 @@ describe('useSaveFlow', () => {
 
   describe('Initial State', () => {
     it('starts with idle flow state', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.flowState).toBe('idle');
       expect(result.current.selectedEntity).toBeNull();
@@ -85,9 +83,7 @@ describe('useSaveFlow', () => {
     });
 
     it('has default processing options enabled', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.processingOptions).toEqual({
         profileSummary: true,
@@ -97,17 +93,13 @@ describe('useSaveFlow', () => {
     });
 
     it('has empty attachment selection', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.selectedAttachmentIds.size).toBe(0);
     });
 
     it('defaults to include body', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.includeBody).toBe(true);
     });
@@ -115,9 +107,7 @@ describe('useSaveFlow', () => {
 
   describe('Entity Selection', () => {
     it('sets selected entity', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -128,9 +118,7 @@ describe('useSaveFlow', () => {
     });
 
     it('persists last association to sessionStorage', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -142,9 +130,7 @@ describe('useSaveFlow', () => {
     });
 
     it('clears entity selection', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -161,9 +147,7 @@ describe('useSaveFlow', () => {
 
   describe('Attachment Selection', () => {
     it('sets selected attachment IDs', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedAttachmentIds(new Set(['att-1', 'att-2']));
@@ -177,9 +161,7 @@ describe('useSaveFlow', () => {
 
   describe('Processing Options', () => {
     it('toggles profile summary option', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.processingOptions.profileSummary).toBe(true);
 
@@ -191,9 +173,7 @@ describe('useSaveFlow', () => {
     });
 
     it('toggles RAG index option', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.processingOptions.ragIndex).toBe(true);
 
@@ -205,9 +185,7 @@ describe('useSaveFlow', () => {
     });
 
     it('toggles deep analysis option', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.processingOptions.deepAnalysis).toBe(false);
 
@@ -219,9 +197,7 @@ describe('useSaveFlow', () => {
     });
 
     it('sets all processing options at once', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setProcessingOptions({
@@ -241,9 +217,7 @@ describe('useSaveFlow', () => {
 
   describe('Include Body', () => {
     it('toggles include body setting', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       expect(result.current.includeBody).toBe(true);
 
@@ -263,9 +237,7 @@ describe('useSaveFlow', () => {
         json: async () => mockSaveResponse,
       });
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       // Save without selecting an entity - should work (document-only save)
       await act(async () => {
@@ -284,9 +256,7 @@ describe('useSaveFlow', () => {
         json: async () => mockSaveResponse,
       });
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -308,9 +278,7 @@ describe('useSaveFlow', () => {
         json: async () => mockSaveResponse,
       });
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -348,9 +316,7 @@ describe('useSaveFlow', () => {
         json: async () => mockSaveResponse,
       });
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -470,9 +436,7 @@ describe('useSaveFlow', () => {
     });
 
     it('clears error', () => {
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         // Trigger an error by trying to save without entity
@@ -497,9 +461,7 @@ describe('useSaveFlow', () => {
         json: async () => mockSaveResponse,
       });
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);
@@ -526,9 +488,7 @@ describe('useSaveFlow', () => {
       // First call fails
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-      const { result } = renderHook(() =>
-        useSaveFlow({ getAccessToken: mockGetAccessToken })
-      );
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
         result.current.setSelectedEntity(mockEntity);

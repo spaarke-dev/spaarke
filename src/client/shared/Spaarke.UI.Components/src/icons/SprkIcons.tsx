@@ -14,40 +14,40 @@
 
 import * as React from 'react';
 import {
-    // File operations
-    Add24Regular,
-    Delete24Regular,
-    ArrowUpload24Regular,
-    ArrowDownload24Regular,
-    DocumentAdd24Regular,
-    DocumentEdit24Regular,
-    FolderOpen24Regular,
+  // File operations
+  Add24Regular,
+  Delete24Regular,
+  ArrowUpload24Regular,
+  ArrowDownload24Regular,
+  DocumentAdd24Regular,
+  DocumentEdit24Regular,
+  FolderOpen24Regular,
 
-    // Navigation
-    Home24Regular,
-    Settings24Regular,
-    People24Regular,
-    Apps24Regular,
+  // Navigation
+  Home24Regular,
+  Settings24Regular,
+  People24Regular,
+  Apps24Regular,
 
-    // Status
-    CheckmarkCircle24Regular,
-    ErrorCircle24Regular,
-    Warning24Regular,
-    Info24Regular,
+  // Status
+  CheckmarkCircle24Regular,
+  ErrorCircle24Regular,
+  Warning24Regular,
+  Info24Regular,
 
-    // Actions
-    Save24Regular,
-    Dismiss24Regular,
-    Edit24Regular,
-    Search24Regular,
-    Filter24Regular,
-    MoreVertical24Regular,
+  // Actions
+  Save24Regular,
+  Dismiss24Regular,
+  Edit24Regular,
+  Search24Regular,
+  Filter24Regular,
+  MoreVertical24Regular,
 
-    // Common
-    ChevronRight24Regular,
-    ChevronDown24Regular,
-    ChevronLeft24Regular,
-    ChevronUp24Regular,
+  // Common
+  ChevronRight24Regular,
+  ChevronDown24Regular,
+  ChevronLeft24Regular,
+  ChevronUp24Regular,
 } from '@fluentui/react-icons';
 
 /**
@@ -63,40 +63,40 @@ import {
  * - Common: ChevronRight, ChevronDown, ChevronLeft, ChevronUp
  */
 export const SprkIcons = {
-    // File Operations
-    Add: Add24Regular,
-    Delete: Delete24Regular,
-    Upload: ArrowUpload24Regular,
-    Download: ArrowDownload24Regular,
-    DocumentAdd: DocumentAdd24Regular,
-    DocumentEdit: DocumentEdit24Regular,
-    FolderOpen: FolderOpen24Regular,
+  // File Operations
+  Add: Add24Regular,
+  Delete: Delete24Regular,
+  Upload: ArrowUpload24Regular,
+  Download: ArrowDownload24Regular,
+  DocumentAdd: DocumentAdd24Regular,
+  DocumentEdit: DocumentEdit24Regular,
+  FolderOpen: FolderOpen24Regular,
 
-    // Navigation
-    Home: Home24Regular,
-    Settings: Settings24Regular,
-    People: People24Regular,
-    Apps: Apps24Regular,
+  // Navigation
+  Home: Home24Regular,
+  Settings: Settings24Regular,
+  People: People24Regular,
+  Apps: Apps24Regular,
 
-    // Status
-    Success: CheckmarkCircle24Regular,
-    Error: ErrorCircle24Regular,
-    Warning: Warning24Regular,
-    Info: Info24Regular,
+  // Status
+  Success: CheckmarkCircle24Regular,
+  Error: ErrorCircle24Regular,
+  Warning: Warning24Regular,
+  Info: Info24Regular,
 
-    // Actions
-    Save: Save24Regular,
-    Cancel: Dismiss24Regular,
-    Edit: Edit24Regular,
-    Search: Search24Regular,
-    Filter: Filter24Regular,
-    More: MoreVertical24Regular,
+  // Actions
+  Save: Save24Regular,
+  Cancel: Dismiss24Regular,
+  Edit: Edit24Regular,
+  Search: Search24Regular,
+  Filter: Filter24Regular,
+  More: MoreVertical24Regular,
 
-    // Common
-    ChevronRight: ChevronRight24Regular,
-    ChevronDown: ChevronDown24Regular,
-    ChevronLeft: ChevronLeft24Regular,
-    ChevronUp: ChevronUp24Regular,
+  // Common
+  ChevronRight: ChevronRight24Regular,
+  ChevronDown: ChevronDown24Regular,
+  ChevronLeft: ChevronLeft24Regular,
+  ChevronUp: ChevronUp24Regular,
 } as const;
 
 /**
@@ -119,5 +119,5 @@ export type SprkIconName = keyof typeof SprkIcons;
  * <IconComponent />
  */
 export function getIcon(name: SprkIconName): React.ComponentType {
-    return SprkIcons[name];
+  return SprkIcons[name];
 }

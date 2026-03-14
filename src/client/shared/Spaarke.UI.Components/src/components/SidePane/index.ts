@@ -8,4 +8,4 @@
  * @see Task 108 - Extract shared side pane components
  */
 
-export { SidePaneShell, type SidePaneShellProps } from "./SidePaneShell";
+export { SidePaneShell, type SidePaneShellProps } from './SidePaneShell';

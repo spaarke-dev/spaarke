@@ -34,10 +34,7 @@ export interface SlashCommand {
 // Node Type Metadata
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const NODE_TYPE_INFO: Record<
-  PlaybookNodeType,
-  { label: string; description: string; emoji: string }
-> = {
+export const NODE_TYPE_INFO: Record<PlaybookNodeType, { label: string; description: string; emoji: string }> = {
   aiAnalysis: {
     label: 'AI Analysis',
     description: 'Analyze documents or data using AI',
@@ -89,7 +86,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Add a new node to the canvas',
     category: 'nodes',
     argsHint: '<node-type>',
-    execute: (args) => {
+    execute: args => {
       const nodeType = args.trim().toLowerCase();
       if (nodeType) {
         return `Add a ${nodeType} node to my playbook`;
@@ -131,7 +128,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Connect two nodes together',
     category: 'nodes',
     argsHint: '<from> to <to>',
-    execute: (args) => {
+    execute: args => {
       if (args.trim()) {
         return `Connect ${args}`;
       }
@@ -144,7 +141,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Configure the selected node',
     category: 'nodes',
     argsHint: '<setting>',
-    execute: (args) => {
+    execute: args => {
       if (args.trim()) {
         return `Configure the selected node: ${args}`;
       }
@@ -157,7 +154,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Remove a node from the canvas',
     category: 'nodes',
     argsHint: '<node>',
-    execute: (args) => {
+    execute: args => {
       if (args.trim()) {
         return `Remove the ${args} node`;
       }
@@ -229,7 +226,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Add a skill to the selected node',
     category: 'scopes',
     argsHint: '<skill-name>',
-    execute: (args) => {
+    execute: args => {
       if (args.trim()) {
         return `Add the ${args} skill to the selected node`;
       }
@@ -242,7 +239,7 @@ export const COMMANDS: SlashCommand[] = [
     description: 'Add knowledge to the selected node',
     category: 'scopes',
     argsHint: '<knowledge-source>',
-    execute: (args) => {
+    execute: args => {
       if (args.trim()) {
         return `Add ${args} as a knowledge source to the selected node`;
       }
@@ -276,8 +273,7 @@ export const COMMANDS: SlashCommand[] = [
     label: 'Help',
     description: 'Show available commands and how to use them',
     category: 'help',
-    execute: () =>
-      'What can you help me with? Show me the available commands and how to build a playbook.',
+    execute: () => 'What can you help me with? Show me the available commands and how to build a playbook.',
   },
   {
     name: 'explain',
@@ -291,16 +287,14 @@ export const COMMANDS: SlashCommand[] = [
     label: 'Suggest Next Step',
     description: 'Get suggestions for what to do next',
     category: 'help',
-    execute: () =>
-      'Based on my current playbook, what should I do next? Suggest improvements or next steps.',
+    execute: () => 'Based on my current playbook, what should I do next? Suggest improvements or next steps.',
   },
   {
     name: 'examples',
     label: 'Show Examples',
     description: 'Show example playbook patterns',
     category: 'help',
-    execute: () =>
-      'Show me some example playbook patterns I can use as templates',
+    execute: () => 'Show me some example playbook patterns I can use as templates',
   },
 ];
 
@@ -316,7 +310,7 @@ export function filterCommands(query: string): SlashCommand[] {
   if (!lowerQuery) return COMMANDS;
 
   return COMMANDS.filter(
-    (cmd) =>
+    cmd =>
       cmd.name.toLowerCase().includes(lowerQuery) ||
       cmd.label.toLowerCase().includes(lowerQuery) ||
       cmd.description.toLowerCase().includes(lowerQuery)
@@ -326,26 +320,22 @@ export function filterCommands(query: string): SlashCommand[] {
 /**
  * Get commands by category
  */
-export function getCommandsByCategory(
-  category: SlashCommand['category']
-): SlashCommand[] {
-  return COMMANDS.filter((cmd) => cmd.category === category);
+export function getCommandsByCategory(category: SlashCommand['category']): SlashCommand[] {
+  return COMMANDS.filter(cmd => cmd.category === category);
 }
 
 /**
  * Find a command by name
  */
 export function findCommand(name: string): SlashCommand | undefined {
-  return COMMANDS.find((cmd) => cmd.name.toLowerCase() === name.toLowerCase());
+  return COMMANDS.find(cmd => cmd.name.toLowerCase() === name.toLowerCase());
 }
 
 /**
  * Parse a slash command from input text
  * Returns null if not a slash command
  */
-export function parseSlashCommand(
-  input: string
-): { command: string; args: string } | null {
+export function parseSlashCommand(input: string): { command: string; args: string } | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith('/')) return null;
 
@@ -376,12 +366,6 @@ export const CATEGORY_LABELS: Record<SlashCommand['category'], string> = {
 /**
  * Category order for display
  */
-export const CATEGORY_ORDER: SlashCommand['category'][] = [
-  'nodes',
-  'canvas',
-  'scopes',
-  'test',
-  'help',
-];
+export const CATEGORY_ORDER: SlashCommand['category'][] = ['nodes', 'canvas', 'scopes', 'test', 'help'];
 
 export default COMMANDS;

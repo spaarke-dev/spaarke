@@ -33,8 +33,7 @@ function detectThemeType(): OfficeThemeType {
     const officeTheme = Office.context.officeTheme;
 
     // High contrast detection
-    if (officeTheme.controlBackgroundColor === '#000000' ||
-        officeTheme.bodyBackgroundColor === '#000000') {
+    if (officeTheme.controlBackgroundColor === '#000000' || officeTheme.bodyBackgroundColor === '#000000') {
       return 'high-contrast';
     }
 

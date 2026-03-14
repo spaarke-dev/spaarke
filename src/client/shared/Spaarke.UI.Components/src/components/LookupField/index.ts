@@ -1,1 +1,1 @@
-export { LookupField, type ILookupFieldProps } from "./LookupField";
+export { LookupField, type ILookupFieldProps } from './LookupField';

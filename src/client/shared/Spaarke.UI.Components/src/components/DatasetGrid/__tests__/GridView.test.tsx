@@ -19,7 +19,7 @@ describe('GridView', () => {
       order: 0,
       visualSizeFactor: 2,
       isHidden: false,
-      isPrimary: true
+      isPrimary: true,
     },
     {
       name: 'email',
@@ -29,8 +29,8 @@ describe('GridView', () => {
       order: 1,
       visualSizeFactor: 1,
       isHidden: false,
-      isPrimary: false
-    }
+      isPrimary: false,
+    },
   ];
 
   const mockRecords: IDatasetRecord[] = [
@@ -47,7 +47,7 @@ describe('GridView', () => {
         if (column === 'email') return 'john@example.com';
         return null;
       },
-      getNamedReference: jest.fn()
+      getNamedReference: jest.fn(),
     },
     {
       id: '2',
@@ -62,8 +62,8 @@ describe('GridView', () => {
         if (column === 'email') return 'jane@example.com';
         return null;
       },
-      getNamedReference: jest.fn()
-    }
+      getNamedReference: jest.fn(),
+    },
   ];
 
   const defaultProps = {
@@ -77,7 +77,7 @@ describe('GridView', () => {
     scrollBehavior: 'Auto' as const,
     loading: false,
     hasNextPage: false,
-    loadNextPage: jest.fn()
+    loadNextPage: jest.fn(),
   };
 
   describe('Rendering', () => {
@@ -113,8 +113,8 @@ describe('GridView', () => {
           order: 2,
           visualSizeFactor: 1,
           isHidden: true,
-          isPrimary: false
-        }
+          isPrimary: false,
+        },
       ];
 
       renderWithProviders(<GridView {...defaultProps} columns={columnsWithHidden} />);
@@ -140,9 +140,7 @@ describe('GridView', () => {
     it('should handle selection change', () => {
       const onSelectionChange = jest.fn();
 
-      renderWithProviders(
-        <GridView {...defaultProps} onSelectionChange={onSelectionChange} />
-      );
+      renderWithProviders(<GridView {...defaultProps} onSelectionChange={onSelectionChange} />);
 
       expect(screen.getByRole('grid')).toBeInTheDocument();
     });
@@ -172,9 +170,7 @@ describe('GridView', () => {
       const user = userEvent.setup();
       const loadNextPage = jest.fn();
 
-      renderWithProviders(
-        <GridView {...defaultProps} hasNextPage={true} loadNextPage={loadNextPage} />
-      );
+      renderWithProviders(<GridView {...defaultProps} hasNextPage={true} loadNextPage={loadNextPage} />);
 
       const loadMoreButton = screen.getByText(/load more/i);
       await user.click(loadMoreButton);
@@ -190,12 +186,10 @@ describe('GridView', () => {
         entityName: 'contact',
         getFormattedValue: () => `Record ${i}`,
         getValue: () => `Record ${i}`,
-        getNamedReference: jest.fn()
+        getNamedReference: jest.fn(),
       }));
 
-      renderWithProviders(
-        <GridView {...defaultProps} records={largeRecordSet} enableVirtualization={true} />
-      );
+      renderWithProviders(<GridView {...defaultProps} records={largeRecordSet} enableVirtualization={true} />);
 
       // Virtualized grid should be rendered
       expect(screen.getByRole('grid')).toBeInTheDocument();

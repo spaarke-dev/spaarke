@@ -8,27 +8,9 @@
 
 import * as React from 'react';
 import { useCallback, useMemo } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Label,
-  Dropdown,
-  Option,
-  Badge,
-  shorthands,
-} from '@fluentui/react-components';
-import type {
-  DropdownProps,
-  SelectionEvents,
-  OptionOnSelectData,
-} from '@fluentui/react-components';
-import {
-  useModelStore,
-  useCanvasStore,
-  type ModelDeploymentItem,
-  type PlaybookNodeData,
-} from '../../stores';
+import { makeStyles, tokens, Text, Label, Dropdown, Option, Badge, shorthands } from '@fluentui/react-components';
+import type { DropdownProps, SelectionEvents, OptionOnSelectData } from '@fluentui/react-components';
+import { useModelStore, useCanvasStore, type ModelDeploymentItem, type PlaybookNodeData } from '../../stores';
 
 const useStyles = makeStyles({
   container: {
@@ -84,8 +66,8 @@ export const ModelSelector = React.memo(function ModelSelector({
   const styles = useStyles();
 
   // Get chat-capable models from store
-  const getChatModels = useModelStore((state) => state.getChatModels);
-  const getModelById = useModelStore((state) => state.getModelById);
+  const getChatModels = useModelStore(state => state.getChatModels);
+  const getModelById = useModelStore(state => state.getModelById);
 
   const chatModels = useMemo(() => getChatModels(), [getChatModels]);
   const selectedModel = useMemo(
@@ -117,12 +99,10 @@ export const ModelSelector = React.memo(function ModelSelector({
         <Option key="none" value="" text="Auto (recommended)">
           <div className={styles.optionContent}>
             <span>Auto (recommended)</span>
-            <Text className={styles.optionDescription}>
-              Automatically selects the best model for this operation
-            </Text>
+            <Text className={styles.optionDescription}>Automatically selects the best model for this operation</Text>
           </div>
         </Option>
-        {chatModels.map((model) => (
+        {chatModels.map(model => (
           <Option key={model.id} value={model.id} text={model.name}>
             <div className={styles.optionContent}>
               <div className={styles.optionHeader}>
@@ -136,11 +116,7 @@ export const ModelSelector = React.memo(function ModelSelector({
                   {model.provider}
                 </Badge>
               </div>
-              {model.description && (
-                <Text className={styles.optionDescription}>
-                  {model.description}
-                </Text>
-              )}
+              {model.description && <Text className={styles.optionDescription}>{model.description}</Text>}
             </div>
           </Option>
         ))}

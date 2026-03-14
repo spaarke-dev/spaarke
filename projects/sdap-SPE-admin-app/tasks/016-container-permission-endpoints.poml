@@ -1,0 +1,46 @@
+<task id="SPE-016" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Container Permission CRUD Endpoints</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-013, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement full CRUD endpoints for container permissions so administrators can manage who has access to each SPE container and at what role level. Permission changes are security-sensitive and must be audit logged.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>Complete permission management endpoints (list, add, update, remove) with role-based access control and audit logging.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container permissions control who can access container contents. SPE supports four roles: reader, writer, manager, and owner. Administrators need to list current permissions, grant new permissions, change roles, and revoke access. All permission changes must be audit logged as they are security-sensitive operations.</background>
+  </context>
+  <steps>
+    <step order="1" name="Implement GET permissions">Add GET /api/spe/containers/{id}/permissions?configId={id} to list all permissions on a container via Graph API.</step>
+    <step order="2" name="Implement POST permission">Add POST /api/spe/containers/{id}/permissions?configId={id} to grant a new permission, accepting userId/groupId and role (reader, writer, manager, owner).</step>
+    <step order="3" name="Implement PATCH permission">Add PATCH /api/spe/containers/{id}/permissions/{permissionId}?configId={id} to update an existing permission's role.</step>
+    <step order="4" name="Implement DELETE permission">Add DELETE /api/spe/containers/{id}/permissions/{permissionId}?configId={id} to revoke a permission.</step>
+    <step order="5" name="Validate roles">Validate that the role parameter is one of the four supported values. Return 400 for invalid roles.</step>
+    <step order="6" name="Audit permission changes">Write audit log entries for all permission mutations (PermissionGranted, PermissionUpdated, PermissionRevoked) including the affected user/group and role.</step>
+    <step order="7" name="Test all CRUD operations">Verify the full lifecycle: list, add, update, remove permissions with correct audit trail.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerPermissionEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET returns all permissions on a container with user/group identity and role.</criterion>
+    <criterion testable="true">POST grants a new permission with a valid role (reader, writer, manager, owner).</criterion>
+    <criterion testable="true">PATCH updates an existing permission's role.</criterion>
+    <criterion testable="true">DELETE revokes a permission from the container.</criterion>
+    <criterion testable="true">Invalid role values return 400 Bad Request.</criterion>
+    <criterion testable="true">All permission mutations write audit log entries with appropriate categories.</criterion>
+  </acceptance-criteria>
+</task>

@@ -521,7 +521,7 @@ public static class EmailEndpoints
             var shouldQueueAi = request.QueueForAiProcessing ?? emailOptions.Value.AutoEnqueueAi;
             if (shouldQueueAi)
             {
-                // TODO: Queue AI processing job for documentId and attachment documents
+                // TRACKED: GitHub #233 - Queue AI processing job for attachments
                 logger.LogInformation(
                     "AI processing queue for document {DocumentId} (to be implemented in Phase 2)",
                     documentId);

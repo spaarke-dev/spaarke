@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Audit Dependency Health and Security</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>007, 008, 032</blocks>
+    <tags>audit, dependencies, security</tags>
+  </metadata>
+
+  <prompt>
+    Perform a comprehensive dependency health audit across all Spaarke projects. Run Trivy container
+    and filesystem scan, dotnet list --vulnerable across all .NET projects, and npm audit across
+    all PCF and Code Page projects. Identify outdated packages, pre-release dependencies in
+    production code, known vulnerability counts by severity, and the MimeKit 4.14.0 known issue.
+    Produce a structured audit report establishing the baseline dependency health score.
+  </prompt>
+
+  <role>
+    Senior DevSecOps engineer and dependency management expert. Familiar with Trivy, OWASP
+    dependency checking, NuGet vulnerability advisories, and npm audit findings.
+  </role>
+
+  <goal>
+    A structured audit report at projects/code-quality-and-assurance-r1/notes/audit-dependencies.md
+    listing all identified vulnerabilities by severity (critical/high/medium/low), outdated packages
+    with current vs. latest versions, pre-release dependencies, and a specific investigation of the
+    MimeKit 4.14.0 known issue. Report includes a dependency health score (A-F) feeding task 007
+    (scorecard) and a prioritized remediation list for task 008 and task 032.
+  </goal>
+
+  <context>
+    <background>
+      Dependency security is a primary quality concern for an AI-assisted codebase where packages
+      are added frequently. The Spaarke repository has:
+
+      - Multiple .NET projects (BFF API, plugins, shared libraries, test projects) each with their
+        own .csproj files and NuGet dependencies
+      - Multiple PCF control projects under src/client/pcf/ each with their own package.json
+      - Multiple Code Page projects under src/client/code-pages/ each with their own package.json
+      - The shared UI component library at src/client/shared/Spaarke.UI.Components/ with its own
+        package.json
+
+      Known issue from spec: MimeKit 4.14.0 has a known problem that must be investigated.
+      MimeKit is used in the email communication features of the BFF API.
+
+      The existing CI pipeline (sdap-ci.yml) already has a Trivy security scan job — this audit
+      must review that job's findings as the starting baseline, then supplement with dotnet list
+      and npm audit for a complete picture.
+
+      The success criteria for this project includes: "No critical/high dependency vulnerabilities"
+      — this audit establishes the current count that needs to reach zero.
+
+      Pre-release dependencies (alpha, beta, rc, preview packages) in production code are a quality
+      risk — they may have breaking changes or be abandoned. They should be documented.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/sdap-ci.yml (read — security-scan job for existing Trivy config)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (read — NuGet dependencies)</file>
+      <file>src/client/pcf/ (read — npm dependencies across PCF projects)</file>
+      <file>src/client/code-pages/ (read — npm dependencies across Code Page projects)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">The target is zero critical/high dependency vulnerabilities. Report every critical and high finding with CVE number, affected package, current version, fix version.</constraint>
+    <constraint source="spec">Pre-release dependencies (alpha, beta, rc, preview) are not permitted in production packages (.csproj files for BFF API, package.json for PCF/Code Pages). Identify and list all such dependencies.</constraint>
+    <constraint source="spec">MimeKit 4.14.0 known issue must be specifically investigated and documented — what is the issue, what version fixes it, what is the remediation path.</constraint>
+    <constraint source="spec">Audit is analysis-only — do NOT modify any project files during this task. Document findings only.</constraint>
+    <constraint source="spec">Dependency updates are task 032 — this task only identifies and documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the existing Trivy security-scan job in sdap-ci.yml — understand what is being scanned (filesystem scan, container scan) and what severity thresholds are configured</step>
+    <step order="2">Run Trivy filesystem scan: `trivy fs . --severity CRITICAL,HIGH,MEDIUM --format json --output trivy-results.json` (if Trivy is not locally available, document the command to be run in CI and reference the last CI scan results)</step>
+    <step order="3">Run dotnet vulnerability audit: `dotnet list package --vulnerable --include-transitive` from the repository root — capture all vulnerable packages with CVE IDs and severity</step>
+    <step order="4">Run npm audit for each PCF project: navigate to each project under src/client/pcf/ and run `npm audit --json` — capture vulnerability counts by severity</step>
+    <step order="5">Run npm audit for each Code Page project: navigate to each project under src/client/code-pages/ and run `npm audit --json` — capture vulnerability counts by severity</step>
+    <step order="6">Run npm audit for the shared UI library: navigate to src/client/shared/Spaarke.UI.Components/ and run `npm audit --json`</step>
+    <step order="7">Investigate MimeKit 4.14.0: identify which project references MimeKit, look up the known issue (check NuGet advisories, GitHub releases), document the issue and the minimum version that resolves it</step>
+    <step order="8">Identify outdated NuGet packages: run `dotnet list package --outdated` for major projects — list packages where current version is more than 2 major versions behind latest</step>
+    <step order="9">Identify outdated npm packages: run `npm outdated` for major TypeScript projects — list packages more than 1 major version behind</step>
+    <step order="10">Identify pre-release dependencies: search all .csproj and package.json files for version strings containing "alpha", "beta", "rc", "preview", "-pre"</step>
+    <step order="11">Compile all findings — total counts by severity (critical/high/medium/low), assign dependency health grade (A-F), list top 5 remediation priorities ranked by CVE severity</step>
+    <step order="12">Write the complete audit report to projects/code-quality-and-assurance-r1/notes/audit-dependencies.md</step>
+    <step order="13">Update TASK-INDEX.md: change task 005 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/audit-dependencies.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>audit-dependencies.md exists and covers all five audit areas: Trivy scan results, dotnet vulnerable packages, npm audit results, outdated packages, pre-release dependencies</criterion>
+    <criterion>Total vulnerability counts reported by severity (critical, high, medium, low) across all scan tools</criterion>
+    <criterion>Every critical and high vulnerability listed with: CVE number, affected package name, current version, minimum fix version, affected projects</criterion>
+    <criterion>MimeKit 4.14.0 issue specifically documented with issue description and remediation path</criterion>
+    <criterion>All pre-release dependencies (alpha/beta/rc/preview) in production code listed with file paths</criterion>
+    <criterion>Packages significantly outdated (2+ major versions behind) listed</criterion>
+    <criterion>Dependency health grade (A-F) assigned with justification</criterion>
+    <criterion>Top 5 remediation priorities listed ranked by CVE severity</criterion>
+    <criterion>No project files were modified during this audit task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

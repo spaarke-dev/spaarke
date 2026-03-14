@@ -17,11 +17,7 @@ export class ApiError extends Error {
   public readonly status: number;
   public readonly problemDetails: IProblemDetails | null;
 
-  constructor(
-    message: string,
-    status: number,
-    problemDetails: IProblemDetails | null = null,
-  ) {
+  constructor(message: string, status: number, problemDetails: IProblemDetails | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;

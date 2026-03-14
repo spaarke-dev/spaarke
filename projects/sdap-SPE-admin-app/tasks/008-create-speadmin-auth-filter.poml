@@ -1,0 +1,42 @@
+<task id="SPE-008" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SpeAdminAuthorizationFilter</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, auth, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-005</dependencies>
+  </metadata>
+  <prompt>Create the SpeAdminAuthorizationFilter endpoint filter that restricts access to SPE Admin endpoints to users with an admin role. This filter implements IEndpointFilter and checks the user's role claims, returning a ProblemDetails 403 response for unauthorized users. It follows the ADR-008 pattern of endpoint filters rather than global middleware.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>SpeAdminAuthorizationFilter compiles, returns 403 ProblemDetails for non-admin users, and passes admin users through to the endpoint.</goal>
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware. Each route group applies its own authorization filter.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App manages sensitive infrastructure and must be restricted to authorized administrators. The existing BFF API uses endpoint filters (not global middleware) for resource-level authorization. The SpeAdminAuthorizationFilter checks for an admin role claim and short-circuits the request with a 403 ProblemDetails response if the user lacks the required role. Reference DocumentAuthorizationFilter.cs for the established pattern.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create filter file">Create SpeAdminAuthorizationFilter.cs in src/server/api/Sprk.Bff.Api/Api/Filters/ following the pattern from DocumentAuthorizationFilter.cs.</step>
+    <step order="2" name="Implement IEndpointFilter">Implement the InvokeAsync method that checks the user's claims for the admin role.</step>
+    <step order="3" name="Return 403 ProblemDetails">When the user lacks the admin role, return a ProblemDetails response with status 403, appropriate title and detail messages.</step>
+    <step order="4" name="Pass through for admins">When the user has the admin role, call next(context) to continue the pipeline.</step>
+    <step order="5" name="Verify compilation">Run dotnet build to confirm the filter compiles correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminAuthorizationFilter.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminAuthorizationFilter.cs exists and implements IEndpointFilter.</criterion>
+    <criterion testable="true">Non-admin users receive a 403 ProblemDetails response.</criterion>
+    <criterion testable="true">Admin users pass through to the endpoint handler.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

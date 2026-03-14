@@ -10,9 +10,7 @@ const renderWithProvider = (ui: React.ReactElement) => {
 
 describe('TaskPaneNavigation', () => {
   it('renders all navigation tabs', () => {
-    renderWithProvider(
-      <TaskPaneNavigation selectedTab="save" onTabChange={() => {}} />
-    );
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} />);
 
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /share/i })).toBeInTheDocument();
@@ -21,9 +19,7 @@ describe('TaskPaneNavigation', () => {
   });
 
   it('highlights selected tab', () => {
-    renderWithProvider(
-      <TaskPaneNavigation selectedTab="share" onTabChange={() => {}} />
-    );
+    renderWithProvider(<TaskPaneNavigation selectedTab="share" onTabChange={() => {}} />);
 
     const shareTab = screen.getByRole('tab', { name: /share/i });
     expect(shareTab).toHaveAttribute('aria-selected', 'true');
@@ -34,9 +30,7 @@ describe('TaskPaneNavigation', () => {
 
   it('calls onTabChange when tab is clicked', () => {
     const handleTabChange = jest.fn();
-    renderWithProvider(
-      <TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} />
-    );
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} />);
 
     fireEvent.click(screen.getByRole('tab', { name: /share/i }));
     expect(handleTabChange).toHaveBeenCalledWith('share');
@@ -46,26 +40,14 @@ describe('TaskPaneNavigation', () => {
   });
 
   it('disables tabs when disabled prop is true', () => {
-    renderWithProvider(
-      <TaskPaneNavigation
-        selectedTab="save"
-        onTabChange={() => {}}
-        disabled={true}
-      />
-    );
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} disabled={true} />);
 
     const tablist = screen.getByRole('tablist');
     expect(tablist).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('renders smaller tabs in compact mode', () => {
-    renderWithProvider(
-      <TaskPaneNavigation
-        selectedTab="save"
-        onTabChange={() => {}}
-        compact={true}
-      />
-    );
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} compact={true} />);
 
     // In compact mode, tab text should not be visible (icon only)
     // The tab should still exist but with just the icon

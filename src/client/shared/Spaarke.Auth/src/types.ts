@@ -27,12 +27,7 @@ export interface ITokenResult {
 }
 
 /** Identifies which strategy provided a token. */
-export type TokenSource =
-  | 'bridge'
-  | 'cache'
-  | 'xrm'
-  | 'msal-silent'
-  | 'msal-popup';
+export type TokenSource = 'bridge' | 'cache' | 'xrm' | 'msal-silent' | 'msal-popup';
 
 /** Entry stored in the in-memory token cache. */
 export interface TokenCacheEntry {

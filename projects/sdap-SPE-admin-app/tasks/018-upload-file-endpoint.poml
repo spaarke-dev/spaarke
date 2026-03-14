@@ -1,0 +1,44 @@
+<task id="SPE-018" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Upload File Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>bff-api, api, graph, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-017, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement the Upload File endpoint so administrators can upload files into SPE containers through the admin UI. The endpoint must handle both small files (direct PUT) and large files (resumable upload session) to support all file sizes reliably.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Microsoft Graph</role>
+  <goal>A working file upload endpoint that handles small files via direct PUT and large files via Graph upload sessions, with audit logging.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>File upload is essential for testing and managing container content. The Graph API uses different upload mechanisms based on file size: files under 4MB can use a simple PUT request, while larger files require creating an upload session and uploading in chunks. The endpoint accepts multipart form data and routes to the appropriate upload strategy.</background>
+  </context>
+  <steps>
+    <step order="1" name="Implement POST endpoint">Add POST /api/spe/containers/{id}/items/upload?configId={id} to ContainerItemEndpoints.cs accepting multipart form data with file and optional folderId.</step>
+    <step order="2" name="Handle small files">For files under 4MB, use a direct PUT to the Graph API drive item content endpoint.</step>
+    <step order="3" name="Handle large files">For files 4MB and above, create a Graph upload session and upload the file in chunks using the resumable upload protocol.</step>
+    <step order="4" name="Support target folder">Accept optional folderId to upload into a specific folder within the container.</step>
+    <step order="5" name="Audit log upload">Write an audit log entry to sprk_speauditlog with category "FileUploaded" including file name, size, and target container/folder.</step>
+    <step order="6" name="Test upload">Verify upload works for both small and large files, audit entries are created, and errors are handled gracefully.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerItemEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">POST upload with a file under 4MB successfully creates the file in the container via direct PUT.</criterion>
+    <criterion testable="true">POST upload with a file 4MB or larger successfully creates the file via resumable upload session.</criterion>
+    <criterion testable="true">Successful upload writes an audit log entry with category "FileUploaded".</criterion>
+    <criterion testable="true">Upload to a specific folder (via folderId) places the file in the correct location.</criterion>
+    <criterion testable="true">Missing or empty file in request returns 400 Bad Request.</criterion>
+  </acceptance-criteria>
+</task>

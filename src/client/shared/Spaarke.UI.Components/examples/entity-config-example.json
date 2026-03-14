@@ -12,7 +12,14 @@
   "entityConfigs": {
     "sprk_document": {
       "viewMode": "Grid",
-      "enabledCommands": ["open", "create", "delete", "refresh", "upload", "download"],
+      "enabledCommands": [
+        "open",
+        "create",
+        "delete",
+        "refresh",
+        "upload",
+        "download"
+      ],
       "customCommands": {
         "upload": {
           "label": "Upload to SPE",

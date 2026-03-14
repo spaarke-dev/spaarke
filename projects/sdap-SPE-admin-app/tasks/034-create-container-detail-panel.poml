@@ -1,0 +1,40 @@
+<task id="SPE-034" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainerDetail Side Panel</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-033</dependencies>
+  </metadata>
+  <prompt>Create the ContainerDetail side panel component that opens when a container row is clicked. It shows detailed container information organized in tabs (Details, Permissions, Columns, Custom Properties) and loads data from the container detail API endpoint.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>ContainerDetail panel opens on row click, displays container information across four tabs, and loads data from GET /api/spe/containers/{id}.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse SidePaneShell from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>When an administrator clicks a container row in the ContainersPage grid, this side panel slides open to show comprehensive container details. The tabbed layout organizes information into logical groups: basic details, permission assignments, custom columns, and custom properties defined on the container.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-component">Create components/containers/ContainerDetail.tsx using SidePaneShell from the shared library.</step>
+    <step order="2" name="tabs">Add Fluent v9 TabList with tabs: Details, Permissions, Columns, Custom Properties.</step>
+    <step order="3" name="details-tab">Implement Details tab showing container name, ID, status, created/modified dates, storage info.</step>
+    <step order="4" name="api-integration">Load container data from GET /api/spe/containers/{id} when the panel opens.</step>
+    <step order="5" name="wire-open">Wire the panel to open on row click from ContainersPage grid.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/containers/ContainerDetail.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Detail panel opens when a container row is clicked in the grid.</criterion>
+    <criterion testable="true">Tabs switch between Details, Permissions, Columns, and Custom Properties content.</criterion>
+    <criterion testable="true">Container data loads from the API on panel open.</criterion>
+  </acceptance-criteria>
+</task>

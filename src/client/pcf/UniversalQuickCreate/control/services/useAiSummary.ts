@@ -4,11 +4,11 @@
  */
 export { useAiSummary } from '@spaarke/ui-components/src/hooks';
 export type {
-    ExtractedEntities,
-    DocumentAnalysisResult,
-    SummaryStatus,
-    DocumentSummaryState,
-    SummaryDocument,
-    UseAiSummaryOptions,
-    UseAiSummaryResult,
+  ExtractedEntities,
+  DocumentAnalysisResult,
+  SummaryStatus,
+  DocumentSummaryState,
+  SummaryDocument,
+  UseAiSummaryOptions,
+  UseAiSummaryResult,
 } from '@spaarke/ui-components/src/hooks';

@@ -249,7 +249,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
     {
         try
         {
-            // TODO: Implement actual Dataverse query when sprk_invoice entity methods are added
+            // TRACKED: GitHub #229 - Implement Dataverse query for sprk_invoice
             // For now, return minimal record to allow compilation
             // In production, this would query sprk_invoice entity with fields:
             // - sprk_invoicenumber, sprk_invoicedate, sprk_totalamount, sprk_currency
@@ -304,9 +304,9 @@ public class InvoiceIndexingJobHandler : IJobHandler
             {
                 DocumentId = documentId,
                 FileName = document.FileName ?? "unknown",
-                ExtractedText = null, // TODO: Load from actual field when available
-                TenantId = null, // TODO: Load from actual tenant context
-                ProjectId = null // TODO: Load if document has project association
+                ExtractedText = null, // TRACKED: GitHub #233 - Load from actual field when available
+                TenantId = null, // TRACKED: GitHub #233 - Load from actual tenant context
+                ProjectId = null // TRACKED: GitHub #233 - Load if document has project association
             };
         }
         catch (Exception ex)

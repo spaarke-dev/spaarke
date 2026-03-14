@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Implement Claude Code PostToolUse Lint Hook</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011, 016</dependencies>
+    <blocks>043</blocks>
+    <tags>automation, hooks, claude-code, linting</tags>
+  </metadata>
+
+  <prompt>
+    Create a Claude Code PostToolUse hook script at scripts/quality/post-edit-lint.sh. The hook detects
+    the file type of the edited file and runs the appropriate linter: .cs files use dotnet format
+    --include {file}, .ts and .tsx files use npx eslint {file}, and .ps1 files use Invoke-ScriptAnalyzer
+    -Path {file}. Register the hook in .claude/settings.json. The hook must complete in under 5 seconds
+    per file and must handle errors gracefully without crashing the Claude Code session.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Claude Code hooks and developer tooling. Expert in shell scripting
+    for cross-platform environments and integrating linters into automated workflows.
+  </role>
+
+  <goal>
+    A registered PostToolUse hook that automatically lints each file immediately after Claude Code edits
+    it, providing instant feedback on code quality issues. The hook must be fast (under 5 seconds),
+    error-tolerant, and produce clear output that Claude Code can read and respond to.
+  </goal>
+
+  <context>
+    <background>
+      Claude Code's Hooks system (February 2026) allows custom shell commands to fire at specific
+      points in a session. The PostToolUse hook fires after any tool use matching the configured
+      matcher. For edit operations, this enables instant per-file linting without waiting for a
+      full CI run.
+
+      The hook receives context via stdin (JSON with tool name, file path, and result). The script
+      extracts the file path, determines the file type, and dispatches to the correct linter:
+      - .cs → `dotnet format --include {file} --verify-no-changes` (verify mode, report violations)
+      - .ts/.tsx → `npx eslint {file} --format compact` (compact format for easy parsing)
+      - .ps1 → `Invoke-ScriptAnalyzer -Path {file} -Severity Warning,Error` via pwsh
+
+      Critical: The hook MUST NOT cause Claude Code to crash or hang. Use a strict timeout (4s)
+      with `timeout` command. Exit with 0 even on lint violations (violations are advisory, not
+      blocking). Only exit non-zero if the linter itself errors (e.g., file not found, config error).
+
+      The hook is registered in .claude/settings.json under hooks.PostToolUse with matcher "Edit".
+      The existing .claude/settings.json must be read first to understand current structure before
+      modifying it.
+    </background>
+    <relevant-files>
+      <file>scripts/quality/post-edit-lint.sh (create)</file>
+      <file>.claude/settings.json (modify — register hook)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Hook MUST complete in under 5 seconds per file. Use `timeout 4` command wrapper on all linter invocations.</constraint>
+    <constraint source="spec">Hook MUST NOT crash the Claude Code session. All errors must be caught and reported as non-fatal. Exit code 0 for lint violations, non-zero only for hook infrastructure errors.</constraint>
+    <constraint source="spec">Hook must handle the case where a linter is not installed (dotnet not in PATH, ESLint not installed, PSScriptAnalyzer not available) by skipping gracefully with a warning message.</constraint>
+    <constraint source="spec">Only the Edit tool matcher should trigger this hook — do not fire on Read, Bash, or other tool uses.</constraint>
+    <constraint source=".claude/settings.json">Must read existing .claude/settings.json before modifying. Preserve all existing keys and values. Merge the new hook registration into the existing hooks structure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/settings.json to understand the current structure, existing hooks (if any), and permission settings that must be preserved.</step>
+    <step order="2">Design the hook script structure: read stdin JSON to extract the file path argument, use file extension detection (basename and case/if logic) to dispatch to the correct linter.</step>
+    <step order="3">Create scripts/quality/ directory if it does not exist. Create scripts/quality/post-edit-lint.sh with bash shebang and executable permissions.</step>
+    <step order="4">Implement the stdin parsing section: use `jq` or `python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))"` to extract the file path from the PostToolUse JSON payload.</step>
+    <step order="5">Implement the .cs branch: check if dotnet is available in PATH, then run `timeout 4 dotnet format --include "$FILE" --verify-no-changes 2>&1`. Capture and print output. Exit 0 regardless of violations.</step>
+    <step order="6">Implement the .ts/.tsx branch: check if npx is available, then run `timeout 4 npx eslint "$FILE" --format compact 2>&1`. Capture and print output. Exit 0 on violations.</step>
+    <step order="7">Implement the .ps1 branch: check if pwsh is available, then run `timeout 4 pwsh -Command "Invoke-ScriptAnalyzer -Path '$FILE' -Severity Warning,Error | Format-Table -AutoSize" 2>&1`. Capture and print output.</step>
+    <step order="8">Add the fallback case: if the file extension is not .cs, .ts, .tsx, or .ps1, exit 0 silently (no linter for this file type).</step>
+    <step order="9">Add a global error trap at the top of the script: `set -euo pipefail` with a `trap 'echo "Hook error (non-fatal): $BASH_COMMAND" >&2; exit 0' ERR` to ensure the hook never crashes Claude Code.</step>
+    <step order="10">Update .claude/settings.json: add the PostToolUse hook entry under the hooks key with matcher "Edit" and command pointing to the script. Use an absolute path or a path relative to the repository root.</step>
+    <step order="11">Verify the script is executable: `chmod +x scripts/quality/post-edit-lint.sh`. Document how to test the hook manually.</step>
+    <step order="12">Update TASK-INDEX.md: change task 022 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">scripts/quality/post-edit-lint.sh</output>
+    <output type="file">.claude/settings.json (updated with hook registration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>scripts/quality/post-edit-lint.sh exists and is executable (chmod +x)</criterion>
+    <criterion>Script correctly dispatches to dotnet format for .cs files, eslint for .ts/.tsx files, PSScriptAnalyzer for .ps1 files</criterion>
+    <criterion>Script exits 0 on lint violations (violations are advisory, not blocking)</criterion>
+    <criterion>Script handles missing linter tools gracefully with a warning and exit 0</criterion>
+    <criterion>Global error trap prevents any hook error from propagating to Claude Code</criterion>
+    <criterion>timeout 4 wraps all linter invocations to enforce the 5-second budget</criterion>
+    <criterion>.claude/settings.json contains PostToolUse hook registration with matcher "Edit"</criterion>
+    <criterion>All existing .claude/settings.json keys and values are preserved (no accidental deletions)</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

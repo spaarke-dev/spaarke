@@ -4,22 +4,12 @@
  * Used on the Report Card tab to show performance trends per area
  */
 
-import * as React from "react";
-import {
-  Card,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  ArrowUpRegular,
-  ArrowDownRegular,
-  SubtractRegular,
-} from "@fluentui/react-icons";
-import type { DrillInteraction } from "../types";
+import * as React from 'react';
+import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { ArrowUpRegular, ArrowDownRegular, SubtractRegular } from '@fluentui/react-icons';
+import type { DrillInteraction } from '../types';
 
-export type TrendDirection = "up" | "down" | "flat";
+export type TrendDirection = 'up' | 'down' | 'flat';
 
 export interface ITrendCardProps {
   /** Area name displayed as card label */
@@ -38,17 +28,17 @@ export interface ITrendCardProps {
 
 const useStyles = makeStyles({
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     padding: tokens.spacingVerticalL,
     gap: tokens.spacingVerticalS,
-    minWidth: "200px",
-    minHeight: "160px",
+    minWidth: '200px',
+    minHeight: '160px',
   },
   cardFillContainer: {
-    width: "100%",
-    minWidth: "unset",
-    minHeight: "unset",
+    width: '100%',
+    minWidth: 'unset',
+    minHeight: 'unset',
   },
   areaName: {
     fontSize: tokens.fontSizeBase300,
@@ -56,8 +46,8 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   averageContainer: {
-    display: "flex",
-    alignItems: "baseline",
+    display: 'flex',
+    alignItems: 'baseline',
     gap: tokens.spacingHorizontalS,
   },
   averageValue: {
@@ -71,8 +61,8 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   trendContainer: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightMedium,
@@ -87,20 +77,20 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   trendIcon: {
-    fontSize: "16px",
+    fontSize: '16px',
   },
   sparklineContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "40px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '40px',
     color: tokens.colorBrandForeground1,
   },
   sparklineNoData: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "40px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '40px',
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase100,
     border: `1px dashed ${tokens.colorNeutralStroke2}`,
@@ -115,7 +105,7 @@ const useStyles = makeStyles({
  * Formats a historical average value for display
  */
 const formatAverage = (avg: number | null): string => {
-  if (avg === null) return "N/A";
+  if (avg === null) return 'N/A';
   return avg.toFixed(2);
 };
 
@@ -124,12 +114,12 @@ const formatAverage = (avg: number | null): string => {
  */
 const getTrendLabel = (dir: TrendDirection): string => {
   switch (dir) {
-    case "up":
-      return "Improving";
-    case "down":
-      return "Declining";
-    case "flat":
-      return "Stable";
+    case 'up':
+      return 'Improving';
+    case 'down':
+      return 'Declining';
+    case 'flat':
+      return 'Stable';
   }
 };
 
@@ -137,11 +127,11 @@ const getTrendLabel = (dir: TrendDirection): string => {
  * Simple SVG sparkline component
  * Renders a mini line chart from an array of values
  */
-const Sparkline: React.FC<{ data: number[]; width?: number; height?: number }> = ({
-  data,
-  width = 200,
-  height = 40,
-}) => {
+const Sparkline: React.FC<{
+  data: number[];
+  width?: number;
+  height?: number;
+}> = ({ data, width = 200, height = 40 }) => {
   if (data.length < 2) return null;
 
   const padding = 4;
@@ -158,7 +148,7 @@ const Sparkline: React.FC<{ data: number[]; width?: number; height?: number }> =
     return `${x},${y}`;
   });
 
-  const pathD = `M ${points.join(" L ")}`;
+  const pathD = `M ${points.join(' L ')}`;
 
   return (
     <svg
@@ -167,21 +157,14 @@ const Sparkline: React.FC<{ data: number[]; width?: number; height?: number }> =
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label={`Sparkline showing ${data.length} data points`}
-      style={{ display: "block" }}
+      style={{ display: 'block' }}
     >
-      <path
-        d={pathD}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d={pathD} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
       {/* Dot on the last data point */}
       {data.length > 0 && (
         <circle
-          cx={parseFloat(points[points.length - 1].split(",")[0])}
-          cy={parseFloat(points[points.length - 1].split(",")[1])}
+          cx={parseFloat(points[points.length - 1].split(',')[0])}
+          cy={parseFloat(points[points.length - 1].split(',')[1])}
           r={3}
           fill="currentColor"
         />
@@ -205,30 +188,23 @@ export const TrendCard: React.FC<ITrendCardProps> = ({
 
   const getTrendStyle = (dir: TrendDirection): string => {
     switch (dir) {
-      case "up":
+      case 'up':
         return styles.trendUp;
-      case "down":
+      case 'down':
         return styles.trendDown;
-      case "flat":
+      case 'flat':
         return styles.trendFlat;
     }
   };
 
   const TrendIcon =
-    trendDirection === "up"
-      ? ArrowUpRegular
-      : trendDirection === "down"
-        ? ArrowDownRegular
-        : SubtractRegular;
+    trendDirection === 'up' ? ArrowUpRegular : trendDirection === 'down' ? ArrowDownRegular : SubtractRegular;
 
   const hasData = historicalAverage !== null;
 
   return (
     <Card
-      className={mergeClasses(
-        styles.card,
-        fillContainer && styles.cardFillContainer,
-      )}
+      className={mergeClasses(styles.card, fillContainer && styles.cardFillContainer)}
       aria-label={`${areaName}: Average ${formatAverage(historicalAverage)}. Trend: ${getTrendLabel(trendDirection)}.`}
     >
       {/* Area name */}
@@ -236,12 +212,7 @@ export const TrendCard: React.FC<ITrendCardProps> = ({
 
       {/* Historical average */}
       <div className={styles.averageContainer}>
-        <Text
-          className={mergeClasses(
-            styles.averageValue,
-            !hasData && styles.noData,
-          )}
-        >
+        <Text className={mergeClasses(styles.averageValue, !hasData && styles.noData)}>
           {formatAverage(historicalAverage)}
         </Text>
         {hasData && <Text className={styles.averageLabel}>avg</Text>}
@@ -249,12 +220,7 @@ export const TrendCard: React.FC<ITrendCardProps> = ({
 
       {/* Trend indicator */}
       {hasData && (
-        <div
-          className={mergeClasses(
-            styles.trendContainer,
-            getTrendStyle(trendDirection),
-          )}
-        >
+        <div className={mergeClasses(styles.trendContainer, getTrendStyle(trendDirection))}>
           <TrendIcon className={styles.trendIcon} />
           <span>{getTrendLabel(trendDirection)}</span>
         </div>
@@ -267,7 +233,7 @@ export const TrendCard: React.FC<ITrendCardProps> = ({
         </div>
       ) : (
         <div className={styles.sparklineNoData}>
-          {trendData.length === 1 ? "Need 2+ data points for sparkline" : "No trend data"}
+          {trendData.length === 1 ? 'Need 2+ data points for sparkline' : 'No trend data'}
         </div>
       )}
     </Card>

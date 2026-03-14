@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Stricten ESLint Rules Across PCF and Code-Page Projects</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>012, 017, 033</blocks>
+    <tags>tooling, typescript, linting, eslint</tags>
+  </metadata>
+
+  <prompt>
+    Review all existing ESLint configurations across PCF and code-page projects. Promote key rules from WARN or OFF to ERROR: no-unused-vars, @typescript-eslint/no-explicit-any, prefer-const, no-console. Add two custom rules that enforce ADR compliance: one detecting hard-coded color values (ADR-021) and one detecting React 18 imports in PCF projects (ADR-022). Create a shared ESLint base configuration that all frontend projects extend, so future rule changes propagate from a single location.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in TypeScript tooling, ESLint plugin authoring, and frontend quality standards.
+  </role>
+
+  <goal>
+    A shared ESLint base config that all PCF and code-page projects extend. Key rules upgraded to ERROR level for new violations. ADR-021 and ADR-022 enforced via custom rules or plugin configuration. Existing violations do not block PRs (WARN level for existing code, ERROR only catches new violations going forward).
+  </goal>
+
+  <context>
+    <background>
+      The TypeScript/PCF audit (Task 002) and configuration audit (Task 006) identified that ESLint rules are inconsistently configured across the multiple PCF controls and code-page projects. Many important rules are set to WARN or OFF. This task tightens the rules gradually: existing violations become WARN (visible but non-blocking), while the rules themselves are set to ERROR for any new code. ADR-021 requires no hard-coded colors and Fluent v9 only; ADR-022 requires PCF projects to use only React 16 APIs. Both are currently unenforced by tooling. Task 033 (remediation) will then fix the existing WARN-level violations.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/eslint.config.mjs (modify - tighten rules, extend shared config)</file>
+      <file>src/client/code-pages/eslint.config.mjs (modify - tighten rules, extend shared config)</file>
+      <file>src/client/shared/eslint.config.mjs (modify if present, otherwise create shared base)</file>
+      <file>.eslintrc-base.mjs (create at repo root - shared base configuration)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">Changes must be gradual — set rules to WARN for existing violations that will be fixed in Task 033, ERROR only for new violations. Do not set all rules to ERROR at once or every PR will fail.</constraint>
+    <constraint source="ADR-021">Enforce no hard-coded color values (no hex codes, rgb(), rgba() in TypeScript/TSX files). No Fluent UI v8 imports. Fluent UI v9 (@fluentui/react-components) is the only permitted Fluent import.</constraint>
+    <constraint source="ADR-022">PCF projects only: detect and error on React 18 imports (react-dom/client, createRoot) and @fluentui/react (v8). These are invalid in PCF context which only has React 16/17 platform-provided.</constraint>
+    <constraint source="spec.md NFR-01">ESLint must complete in under 2 minutes on full project for PR checks. Avoid rules with extreme computational cost.</constraint>
+    <constraint source="spec.md NFR-08">All ESLint configurations must be version-controlled. No eslint configuration stored outside the repository.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md</file>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read all existing eslint.config.mjs files in src/client/pcf/ and src/client/code-pages/ to understand current rule states (WARN, ERROR, OFF).</step>
+    <step order="2">Create a shared base ESLint configuration file (e.g., eslint.config.base.mjs at repo root or src/client/) that defines common rules. Export as a reusable config object.</step>
+    <step order="3">Upgrade these rules to ERROR in the shared base config: @typescript-eslint/no-unused-vars, prefer-const, no-var. Use WARN (not ERROR) for: @typescript-eslint/no-explicit-any, no-console (these have too many existing violations to block immediately).</step>
+    <step order="4">Add a custom rule or no-restricted-syntax rule to detect hard-coded hex colors (#RRGGBB, #RGB) and rgb()/rgba() literals in .tsx/.ts files. Set to WARN initially. Document in rule comment: "ADR-021: Use Fluent UI tokens instead of hard-coded colors".</step>
+    <step order="5">Add no-restricted-imports rules for ADR-021: forbid @fluentui/react (v8) and @fluentui/react-northstar imports. Set to ERROR.</step>
+    <step order="6">Add a PCF-specific ESLint config overlay (extend base, add PCF-only rules): no-restricted-imports for react-dom/client and createRoot. Set to ERROR. Document: "ADR-022: PCF controls use React 16 platform-provided, not React 18".</step>
+    <step order="7">Update each PCF project's eslint.config.mjs to extend the shared base config instead of defining rules inline.</step>
+    <step order="8">Update each code-page project's eslint.config.mjs to extend the shared base config.</step>
+    <step order="9">Run npm run lint in src/client/pcf/ and count WARN vs ERROR violations. Document baseline violation counts by rule in a comment at the top of the shared config or in notes/.</step>
+    <step order="10">Update TASK-INDEX.md to mark task 011 complete.</step>
+  </steps>
+
+  <outputs>
+    <output>eslint.config.base.mjs — Shared ESLint base configuration used by all frontend projects</output>
+    <output>Updated src/client/pcf/eslint.config.mjs — Extends shared base, adds PCF-specific ADR-022 rules</output>
+    <output>Updated src/client/code-pages/eslint.config.mjs — Extends shared base</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All PCF and code-page ESLint configs extend the shared base configuration</criterion>
+    <criterion>no-unused-vars and prefer-const are set to ERROR in shared base</criterion>
+    <criterion>no-explicit-any and no-console are set to WARN in shared base (not ERROR)</criterion>
+    <criterion>@fluentui/react (v8) import is set to ERROR (ADR-021 enforcement)</criterion>
+    <criterion>react-dom/client and createRoot import restriction is ERROR in PCF config only (ADR-022)</criterion>
+    <criterion>npm run lint executes without crashing in both src/client/pcf/ and src/client/code-pages/</criterion>
+    <criterion>Baseline violation counts per rule are documented</criterion>
+  </acceptance-criteria>
+</task>

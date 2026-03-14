@@ -32,16 +32,16 @@ const BFF_APP_ID = '1e40baad-e065-4aea-a8d4-4b7ab273458c';
  * @param _bffApiUrl BFF API base URL (reserved for future use)
  */
 export async function initializeAuth(_bffApiUrl: string): Promise<void> {
-    console.info('[authInit] Initializing @spaarke/auth for RelatedDocumentCount...');
+  console.info('[authInit] Initializing @spaarke/auth for RelatedDocumentCount...');
 
-    const config: IAuthConfig = {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-        redirectUri: 'https://spaarkedev1.crm.dynamics.com',
-        bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
-    };
+  const config: IAuthConfig = {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
+    bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
+  };
 
-    await initAuth(config);
+  await initAuth(config);
 
-    console.info('[authInit] @spaarke/auth initialized successfully for RelatedDocumentCount');
+  console.info('[authInit] @spaarke/auth initialized successfully for RelatedDocumentCount');
 }

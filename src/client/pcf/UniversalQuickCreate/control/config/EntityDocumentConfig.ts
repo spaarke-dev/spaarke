@@ -15,32 +15,32 @@
  * Configuration for a parent entity that supports document uploads
  */
 export interface EntityDocumentConfig {
-    /** Entity logical name (e.g., "sprk_matter") */
-    entityName: string;
+  /** Entity logical name (e.g., "sprk_matter") */
+  entityName: string;
 
-    /** Lookup field name on Document entity (e.g., "sprk_matter") */
-    lookupFieldName: string;
+  /** Lookup field name on Document entity (e.g., "sprk_matter") */
+  lookupFieldName: string;
 
-    /**
-     * Relationship schema name for metadata queries (e.g., "sprk_matter_document")
-     * Used by MetadataService to query navigation properties dynamically
-     */
-    relationshipSchemaName: string;
+  /**
+   * Relationship schema name for metadata queries (e.g., "sprk_matter_document")
+   * Used by MetadataService to query navigation properties dynamically
+   */
+  relationshipSchemaName: string;
 
-    /**
-     * Navigation property name for OData @odata.bind (DEPRECATED - use MetadataService instead)
-     * @deprecated Use MetadataService.getLookupNavProp() for case-sensitive accuracy
-     */
-    navigationPropertyName?: string;
+  /**
+   * Navigation property name for OData @odata.bind (DEPRECATED - use MetadataService instead)
+   * @deprecated Use MetadataService.getLookupNavProp() for case-sensitive accuracy
+   */
+  navigationPropertyName?: string;
 
-    /** Container ID field name on parent entity (e.g., "sprk_containerid") */
-    containerIdField: string;
+  /** Container ID field name on parent entity (e.g., "sprk_containerid") */
+  containerIdField: string;
 
-    /** Display name field on parent entity (e.g., "sprk_matternumber") */
-    displayNameField: string;
+  /** Display name field on parent entity (e.g., "sprk_matternumber") */
+  displayNameField: string;
 
-    /** Entity set name for OData (e.g., "sprk_matters") */
-    entitySetName: string;
+  /** Entity set name for OData (e.g., "sprk_matters") */
+  entitySetName: string;
 }
 
 /**
@@ -55,87 +55,87 @@ export interface EntityDocumentConfig {
  * No code changes needed - configuration-driven!
  */
 export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
-    /**
-     * Matter Entity (sprk_matter)
-     * Legal matters with associated documents
-     *
-     * CRITICAL: navigationPropertyName is CASE-SENSITIVE!
-     * Validated via metadata query: sprk_Matter (capital M)
-     */
-    'sprk_matter': {
-        entityName: 'sprk_matter',
-        lookupFieldName: 'sprk_matter',
-        relationshipSchemaName: 'sprk_matter_document',
-        navigationPropertyName: 'sprk_Matter',  // ⚠️ CAPITAL M - from metadata validation
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'sprk_matternumber',
-        entitySetName: 'sprk_matters'
-    },
+  /**
+   * Matter Entity (sprk_matter)
+   * Legal matters with associated documents
+   *
+   * CRITICAL: navigationPropertyName is CASE-SENSITIVE!
+   * Validated via metadata query: sprk_Matter (capital M)
+   */
+  sprk_matter: {
+    entityName: 'sprk_matter',
+    lookupFieldName: 'sprk_matter',
+    relationshipSchemaName: 'sprk_matter_document',
+    navigationPropertyName: 'sprk_Matter', // ⚠️ CAPITAL M - from metadata validation
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_matternumber',
+    entitySetName: 'sprk_matters',
+  },
 
-    /**
-     * Project Entity (sprk_project)
-     * Projects with associated documents
-     */
-    'sprk_project': {
-        entityName: 'sprk_project',
-        lookupFieldName: 'sprk_project',
-        relationshipSchemaName: 'sprk_Project_Document_1n',  // ⚠️ Actual relationship name in Dataverse
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'sprk_projectname',
-        entitySetName: 'sprk_projects'
-    },
+  /**
+   * Project Entity (sprk_project)
+   * Projects with associated documents
+   */
+  sprk_project: {
+    entityName: 'sprk_project',
+    lookupFieldName: 'sprk_project',
+    relationshipSchemaName: 'sprk_Project_Document_1n', // ⚠️ Actual relationship name in Dataverse
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_projectname',
+    entitySetName: 'sprk_projects',
+  },
 
-    /**
-     * Invoice Entity (sprk_invoice)
-     * Invoices with associated documents (receipts, supporting docs)
-     */
-    'sprk_invoice': {
-        entityName: 'sprk_invoice',
-        lookupFieldName: 'sprk_invoice',
-        relationshipSchemaName: 'sprk_invoice_document',
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'sprk_invoicenumber',
-        entitySetName: 'sprk_invoices'
-    },
+  /**
+   * Invoice Entity (sprk_invoice)
+   * Invoices with associated documents (receipts, supporting docs)
+   */
+  sprk_invoice: {
+    entityName: 'sprk_invoice',
+    lookupFieldName: 'sprk_invoice',
+    relationshipSchemaName: 'sprk_invoice_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_invoicenumber',
+    entitySetName: 'sprk_invoices',
+  },
 
-    /**
-     * Account Entity (account)
-     * Standard Dynamics account with documents
-     */
-    'account': {
-        entityName: 'account',
-        lookupFieldName: 'sprk_account',
-        relationshipSchemaName: 'account_document',
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'name',
-        entitySetName: 'accounts'
-    },
+  /**
+   * Account Entity (account)
+   * Standard Dynamics account with documents
+   */
+  account: {
+    entityName: 'account',
+    lookupFieldName: 'sprk_account',
+    relationshipSchemaName: 'account_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'name',
+    entitySetName: 'accounts',
+  },
 
-    /**
-     * Contact Entity (contact)
-     * Standard Dynamics contact with documents
-     */
-    'contact': {
-        entityName: 'contact',
-        lookupFieldName: 'sprk_contact',
-        relationshipSchemaName: 'contact_document',
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'fullname',
-        entitySetName: 'contacts'
-    },
+  /**
+   * Contact Entity (contact)
+   * Standard Dynamics contact with documents
+   */
+  contact: {
+    entityName: 'contact',
+    lookupFieldName: 'sprk_contact',
+    relationshipSchemaName: 'contact_document',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'fullname',
+    entitySetName: 'contacts',
+  },
 
-    /**
-     * Communication Entity (sprk_communication)
-     * Email communications with document attachments
-     */
-    'sprk_communication': {
-        entityName: 'sprk_communication',
-        lookupFieldName: 'sprk_communication',
-        relationshipSchemaName: 'sprk_Communication_Document_1n',
-        containerIdField: 'sprk_containerid',
-        displayNameField: 'sprk_name',
-        entitySetName: 'sprk_communications'
-    }
+  /**
+   * Communication Entity (sprk_communication)
+   * Email communications with document attachments
+   */
+  sprk_communication: {
+    entityName: 'sprk_communication',
+    lookupFieldName: 'sprk_communication',
+    relationshipSchemaName: 'sprk_Communication_Document_1n',
+    containerIdField: 'sprk_containerid',
+    displayNameField: 'sprk_name',
+    entitySetName: 'sprk_communications',
+  },
 };
 
 /**
@@ -154,7 +154,7 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
  * ```
  */
 export function getEntityDocumentConfig(entityName: string): EntityDocumentConfig | null {
-    return ENTITY_DOCUMENT_CONFIGS[entityName] || null;
+  return ENTITY_DOCUMENT_CONFIGS[entityName] || null;
 }
 
 /**
@@ -173,7 +173,7 @@ export function getEntityDocumentConfig(entityName: string): EntityDocumentConfi
  * ```
  */
 export function isEntitySupported(entityName: string): boolean {
-    return entityName in ENTITY_DOCUMENT_CONFIGS;
+  return entityName in ENTITY_DOCUMENT_CONFIGS;
 }
 
 /**
@@ -188,5 +188,5 @@ export function isEntitySupported(entityName: string): boolean {
  * ```
  */
 export function getSupportedEntities(): string[] {
-    return Object.keys(ENTITY_DOCUMENT_CONFIGS);
+  return Object.keys(ENTITY_DOCUMENT_CONFIGS);
 }

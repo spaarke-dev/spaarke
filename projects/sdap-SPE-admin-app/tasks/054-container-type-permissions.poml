@@ -1,0 +1,47 @@
+<task id="SPE-054" project="SDAP SPE Admin App">
+  <metadata>
+    <title>List Container Type App Permissions Endpoint</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, graph, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-050</dependencies>
+  </metadata>
+  <prompt>Implement the endpoint to list current application permissions for a container type. Administrators need to view which permissions have been granted to consuming applications to audit and manage access control for container types.</prompt>
+  <role>Senior .NET Backend Developer with Microsoft Graph API expertise</role>
+  <goal>A working GET endpoint that returns the current application permissions for a container type from Graph API, verified by tests.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>After a container type is registered with application permissions, administrators need to review what permissions have been granted to which consuming applications. This read-only endpoint provides visibility into the permission configuration for compliance and auditing purposes.</background>
+  </context>
+  <steps>
+    <step order="1" name="define-dto">Define ContainerTypePermissionDto with appId, delegatedPermissions, applicationPermissions fields</step>
+    <step order="2" name="add-graph-method">Add GetContainerTypePermissionsAsync to SpeAdminGraphService that queries Graph API for container type permissions</step>
+    <step order="3" name="add-endpoint">Add GET /api/spe/containertypes/{typeId}/permissions?configId={id} endpoint</step>
+    <step order="4" name="apply-auth-filter">Apply SpeAdminAuthFilter to the endpoint</step>
+    <step order="5" name="add-tests">Write unit tests covering success, not-found, and empty permissions scenarios</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/ContainerTypePermissionDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/ContainerTypePermissionTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/containertypes/{typeId}/permissions returns JSON array of app permissions</criterion>
+    <criterion testable="true">Non-existent container type returns 404</criterion>
+    <criterion testable="true">Empty permissions list returns 200 with empty array</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied</criterion>
+    <criterion testable="true">Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

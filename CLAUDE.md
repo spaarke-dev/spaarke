@@ -1012,7 +1012,11 @@ public class ValidationPlugin : IPlugin
 | Test all | `dotnet test` |
 | Test with coverage | `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings` |
 | Run API | `dotnet run --project src/server/api/Sprk.Bff.Api/` |
-| Format code | `dotnet format` |
+| Format C# code | `dotnet format` |
+| Format TS/JSON | `npx prettier --check .` |
+| Fix TS/JSON formatting | `npx prettier --write .` |
+| Lint PCF TypeScript | `cd src/client/pcf && npx eslint .` |
+| Run pre-commit checks | `npx lint-staged` |
 
 **API Endpoints**: `https://localhost:5001` · Health check: `GET /healthz`
 

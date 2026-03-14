@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Verify All Quality Tools Working Together on Test PR</title>
+    <phase>2: Tooling Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 011, 012, 013, 014, 015, 016</dependencies>
+    <blocks>020</blocks>
+    <tags>tooling, verification, integration-test</tags>
+  </metadata>
+
+  <prompt>
+    Perform end-to-end verification that all quality tools installed in Phase 2 (Tasks 010-016) work together correctly. Create a test branch with a small intentional change, open a pull request, and verify: pre-commit hooks fire before commit, CodeRabbit posts a review comment, Claude Code Action posts an architecture review comment, the sdap-ci.yml build passes, the format check passes, the lint check passes, and SonarCloud runs. Document any integration issues and produce a tooling verification report.
+  </prompt>
+
+  <role>
+    QA engineer responsible for integration testing of developer tooling and CI/CD pipeline verification.
+  </role>
+
+  <goal>
+    Written evidence that all Phase 2 quality tools operate correctly in combination. Integration issues identified, documented, and either resolved or recorded as follow-up items. A tooling-verification.md report committed to the project notes directory.
+  </goal>
+
+  <context>
+    <background>
+      Individual tools were configured and spot-tested in Tasks 010-016, but this task performs a full end-to-end integration test using a real PR workflow. The goal is to catch tool conflicts, timing issues, or configuration gaps that only manifest when all tools run together. The spec requires all PR-time checks combined to complete in under 5 minutes (NFR-01) and pre-commit hooks in under 10 seconds (NFR-03). This task measures actual timings and documents them. Any failures discovered here should be fixed before Phase 3 (Automation Pipelines) begins.
+    </background>
+    <relevant-files>
+      <file>.prettierrc.json (verify)</file>
+      <file>.prettierignore (verify)</file>
+      <file>eslint.config.base.mjs (verify)</file>
+      <file>.husky/pre-commit (verify)</file>
+      <file>.lintstagedrc.json (verify)</file>
+      <file>.coderabbit.yaml (verify)</file>
+      <file>.github/workflows/claude-code-review.yml (verify)</file>
+      <file>sonar-project.properties (verify)</file>
+      <file>.github/workflows/nightly-quality.yml (verify stub)</file>
+      <file>PSScriptAnalyzerSettings.psd1 (verify)</file>
+      <file>scripts/quality/Invoke-PSAnalysis.ps1 (verify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-01">All PR-time quality checks combined must complete in under 5 minutes. If timing exceeds this, investigate and optimize before signing off on Phase 2.</constraint>
+    <constraint source="spec.md NFR-03">Pre-commit hook must complete in under 10 seconds for the test change. Measure and document actual timing.</constraint>
+    <constraint source="spec.md NFR-04">CodeRabbit and Claude Code Action must NOT appear as blocking status checks. Verify they are advisory-only by checking GitHub branch protection rules.</constraint>
+    <constraint source="project">Do not merge the test PR. Open it for verification purposes only, then close/delete the branch after verification is complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create a test branch from the project feature branch: git checkout -b test/tooling-verification-phase2.</step>
+    <step order="2">Make a small intentional change: modify a TypeScript file with a minor formatting inconsistency (e.g., missing trailing comma) and add a harmless console.log statement to trigger ESLint warnings. Stage the file.</step>
+    <step order="3">Attempt git commit and observe the pre-commit hook. Measure elapsed time. Verify Prettier reformats the file, ESLint runs and reports the console.log warning, and the commit completes. Document: hook fired (yes/no), time elapsed (seconds), any errors.</step>
+    <step order="4">Push the branch to GitHub: git push origin test/tooling-verification-phase2.</step>
+    <step order="5">Open a pull request targeting the project feature branch (not master). Title it "test: Phase 2 tooling verification — DO NOT MERGE".</step>
+    <step order="6">Wait for GitHub Actions to complete. Record results for each check: sdap-ci.yml (pass/fail, time), claude-code-review.yml (pass/fail, time, comment posted), SonarCloud scan if triggered (pass/fail).</step>
+    <step order="7">Verify CodeRabbit posts a review comment on the PR. If not, check CodeRabbit app installation status and .coderabbit.yaml configuration.</step>
+    <step order="8">Verify Claude Code Action posts a review comment labeled "Claude Code Architecture Review (Advisory)". If not, check workflow logs for errors.</step>
+    <step order="9">Check GitHub branch protection rules to confirm CodeRabbit and Claude Code Action are NOT listed as required status checks.</step>
+    <step order="10">Verify total PR check time is under 5 minutes. If over 5 minutes, identify the bottleneck job and document it as a follow-up item.</step>
+    <step order="11">Test Invoke-PSAnalysis.ps1 locally on the scripts/ directory to confirm PSScriptAnalyzer integration is working: ./scripts/quality/Invoke-PSAnalysis.ps1 -Path scripts/ -Severity Warning,Error.</step>
+    <step order="12">Create projects/code-quality-and-assurance-r1/notes/tooling-verification.md. Document results in a table: tool name, verification result (pass/fail/partial), measured time, notes. Include any integration issues and recommended follow-up actions.</step>
+    <step order="13">Close the test PR and delete the test branch: git branch -d test/tooling-verification-phase2 (or via GitHub UI).</step>
+    <step order="14">Update TASK-INDEX.md to mark task 017 complete and note Phase 2 as complete.</step>
+  </steps>
+
+  <outputs>
+    <output>projects/code-quality-and-assurance-r1/notes/tooling-verification.md — Integration verification report documenting pass/fail results, timing measurements, and any follow-up items for all Phase 2 tools</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pre-commit hook fires and completes in under 10 seconds on a 1-3 file staged change</criterion>
+    <criterion>CodeRabbit posts a review comment on the test PR</criterion>
+    <criterion>Claude Code Action posts a review comment labeled "Claude Code Architecture Review (Advisory)"</criterion>
+    <criterion>sdap-ci.yml build and format check jobs pass on the test PR</criterion>
+    <criterion>ESLint lint check runs (pass or expected warnings only — no configuration errors)</criterion>
+    <criterion>SonarCloud analysis runs (either triggered by PR or confirmed running on schedule)</criterion>
+    <criterion>PSScriptAnalyzer wrapper script runs against scripts/ directory without errors</criterion>
+    <criterion>Total PR check time is under 5 minutes (all jobs combined)</criterion>
+    <criterion>CodeRabbit and Claude Code Action are NOT required status checks</criterion>
+    <criterion>tooling-verification.md committed to projects/code-quality-and-assurance-r1/notes/</criterion>
+  </acceptance-criteria>
+</task>

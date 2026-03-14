@@ -321,11 +321,7 @@ export function isProblemDetails(response: unknown): response is ProblemDetails 
   }
 
   const obj = response as Record<string, unknown>;
-  return (
-    typeof obj.type === 'string' &&
-    typeof obj.title === 'string' &&
-    typeof obj.status === 'number'
-  );
+  return typeof obj.type === 'string' && typeof obj.title === 'string' && typeof obj.status === 'number';
 }
 
 // Export error codes for reference

@@ -1,10 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-  type Theme,
-} from '@fluentui/react-components';
+import { webLightTheme, webDarkTheme, teamsHighContrastTheme, type Theme } from '@fluentui/react-components';
 
 /**
  * Theme storage key for user preference persistence.
@@ -57,20 +52,13 @@ function detectSystemTheme(): ResolvedThemeType {
     const officeTheme = Office.context.officeTheme;
 
     // High contrast detection
-    if (
-      officeTheme.controlBackgroundColor === '#000000' ||
-      officeTheme.bodyBackgroundColor === '#000000'
-    ) {
+    if (officeTheme.controlBackgroundColor === '#000000' || officeTheme.bodyBackgroundColor === '#000000') {
       return 'high-contrast';
     }
 
     // Dark mode detection based on background color
     const bgColor = officeTheme.bodyBackgroundColor?.toLowerCase() || '';
-    if (
-      bgColor.startsWith('#1') ||
-      bgColor.startsWith('#2') ||
-      bgColor.startsWith('#0')
-    ) {
+    if (bgColor.startsWith('#1') || bgColor.startsWith('#2') || bgColor.startsWith('#0')) {
       return 'dark';
     }
 
@@ -131,10 +119,7 @@ function getThemeForType(themeType: ResolvedThemeType): Theme {
 /**
  * Resolves the effective theme type based on user preference and system settings.
  */
-function resolveThemeType(
-  preference: ThemePreference,
-  systemTheme: ResolvedThemeType
-): ResolvedThemeType {
+function resolveThemeType(preference: ThemePreference, systemTheme: ResolvedThemeType): ResolvedThemeType {
   // High contrast always takes precedence
   if (systemTheme === 'high-contrast') {
     return 'high-contrast';
@@ -171,12 +156,8 @@ function resolveThemeType(
  * ```
  */
 export function useTheme(): UseThemeResult {
-  const [preference, setPreferenceState] = useState<ThemePreference>(() =>
-    getStoredPreference()
-  );
-  const [systemTheme, setSystemTheme] = useState<ResolvedThemeType>(() =>
-    detectSystemTheme()
-  );
+  const [preference, setPreferenceState] = useState<ThemePreference>(() => getStoredPreference());
+  const [systemTheme, setSystemTheme] = useState<ResolvedThemeType>(() => detectSystemTheme());
 
   // Set up system theme detection listeners
   useEffect(() => {
@@ -223,16 +204,12 @@ export function useTheme(): UseThemeResult {
 
   // Toggle through themes: auto -> light -> dark -> auto
   const toggleTheme = useCallback(() => {
-    const nextPreference: ThemePreference =
-      preference === 'auto' ? 'light' : preference === 'light' ? 'dark' : 'auto';
+    const nextPreference: ThemePreference = preference === 'auto' ? 'light' : preference === 'light' ? 'dark' : 'auto';
     setPreference(nextPreference);
   }, [preference, setPreference]);
 
   // Compute resolved values
-  const resolvedType = useMemo(
-    () => resolveThemeType(preference, systemTheme),
-    [preference, systemTheme]
-  );
+  const resolvedType = useMemo(() => resolveThemeType(preference, systemTheme), [preference, systemTheme]);
 
   const theme = useMemo(() => getThemeForType(resolvedType), [resolvedType]);
   const isDarkMode = resolvedType === 'dark';

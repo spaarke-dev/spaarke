@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+build/
+out/
+bin/
+obj/
+
+# Coverage
+coverage/
+
+# Generated files
+*.min.js
+*_generated.*
+
+# C# files (handled by dotnet format + .editorconfig)
+*.cs
+*.csproj
+*.sln
+*.props
+*.targets
+
+# PowerShell (not Prettier's domain)
+*.ps1
+*.psm1
+*.psd1
+
+# Dataverse solution XML
+src/solutions/
+
+# Git hooks
+.husky/
+
+# CI/CD workflows (YAML formatting is opinionated — preserve manual formatting)
+.github/
+
+# Config files that should not be reformatted
+config/coverlet.runsettings
+infrastructure/
+
+# Lock files
+package-lock.json
+
+# Markdown (preserve intentional formatting)
+*.md
+
+# Images and binaries
+*.png
+*.jpg
+*.gif
+*.ico
+*.woff
+*.woff2
+*.eot
+*.ttf
+*.svg

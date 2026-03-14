@@ -5,8 +5,8 @@
 import {
   IConfigurationSchema,
   IResolvedConfiguration,
-  ICustomCommandConfiguration
-} from "../types/EntityConfigurationTypes";
+  ICustomCommandConfiguration,
+} from '../types/EntityConfigurationTypes';
 
 export class EntityConfigurationService {
   private static schema: IConfigurationSchema | null = null;
@@ -24,7 +24,7 @@ export class EntityConfigurationService {
       const parsed = JSON.parse(configJson);
 
       // Validate schema version
-      if (parsed.schemaVersion !== "1.0") {
+      if (parsed.schemaVersion !== '1.0') {
         console.warn(`Unsupported schema version: ${parsed.schemaVersion}. Using defaults.`);
         this.schema = this.getDefaultSchema();
         return;
@@ -32,7 +32,7 @@ export class EntityConfigurationService {
 
       this.schema = parsed as IConfigurationSchema;
     } catch (error) {
-      console.error("Failed to parse entity configuration JSON", error);
+      console.error('Failed to parse entity configuration JSON', error);
       this.schema = this.getDefaultSchema();
     }
   }
@@ -47,17 +47,18 @@ export class EntityConfigurationService {
 
     // Merge entity config with defaults
     return {
-      viewMode: entityConfig.viewMode ?? defaultConfig.viewMode ?? "Grid",
-      enabledCommands: entityConfig.enabledCommands ?? defaultConfig.enabledCommands ?? ["open", "create", "delete", "refresh"],
+      viewMode: entityConfig.viewMode ?? defaultConfig.viewMode ?? 'Grid',
+      enabledCommands: entityConfig.enabledCommands ??
+        defaultConfig.enabledCommands ?? ['open', 'create', 'delete', 'refresh'],
       compactToolbar: entityConfig.compactToolbar ?? defaultConfig.compactToolbar ?? false,
       enableVirtualization: entityConfig.enableVirtualization ?? defaultConfig.enableVirtualization ?? true,
       rowHeight: entityConfig.rowHeight ?? defaultConfig.rowHeight ?? 44,
-      scrollBehavior: entityConfig.scrollBehavior ?? defaultConfig.scrollBehavior ?? "Auto",
+      scrollBehavior: entityConfig.scrollBehavior ?? defaultConfig.scrollBehavior ?? 'Auto',
       toolbarShowOverflow: entityConfig.toolbarShowOverflow ?? defaultConfig.toolbarShowOverflow ?? true,
       customCommands: {
         ...(defaultConfig.customCommands ?? {}),
-        ...(entityConfig.customCommands ?? {})
-      }
+        ...(entityConfig.customCommands ?? {}),
+      },
     };
   }
 
@@ -81,40 +82,43 @@ export class EntityConfigurationService {
    */
   private static getDefaultSchema(): IConfigurationSchema {
     return {
-      schemaVersion: "1.0",
+      schemaVersion: '1.0',
       defaultConfig: {
-        viewMode: "Grid",
-        enabledCommands: ["open", "create", "delete", "refresh"],
+        viewMode: 'Grid',
+        enabledCommands: ['open', 'create', 'delete', 'refresh'],
         compactToolbar: false,
         enableVirtualization: true,
         rowHeight: 44,
-        scrollBehavior: "Auto",
+        scrollBehavior: 'Auto',
         toolbarShowOverflow: true,
-        customCommands: {}
+        customCommands: {},
       },
-      entityConfigs: {}
+      entityConfigs: {},
     };
   }
 
   /**
    * Validate configuration schema (optional, for development)
    */
-  static validateConfiguration(configJson: string): { valid: boolean; errors: string[] } {
+  static validateConfiguration(configJson: string): {
+    valid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     try {
       const parsed = JSON.parse(configJson);
 
       if (!parsed.schemaVersion) {
-        errors.push("Missing schemaVersion");
+        errors.push('Missing schemaVersion');
       }
 
       if (!parsed.defaultConfig) {
-        errors.push("Missing defaultConfig");
+        errors.push('Missing defaultConfig');
       }
 
       if (!parsed.entityConfigs) {
-        errors.push("Missing entityConfigs");
+        errors.push('Missing entityConfigs');
       }
 
       // Validate custom commands
@@ -130,12 +134,12 @@ export class EntityConfigurationService {
 
       return {
         valid: errors.length === 0,
-        errors
+        errors,
       };
     } catch (error) {
       return {
         valid: false,
-        errors: [`Invalid JSON: ${(error as Error).message}`]
+        errors: [`Invalid JSON: ${(error as Error).message}`],
       };
     }
   }

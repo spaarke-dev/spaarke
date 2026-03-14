@@ -902,7 +902,7 @@ public class DocumentCheckoutService
 
         // Desktop URL format: ms-word:ofe|u|https://...
         // The actual URL construction would need the web URL from Graph
-        return null; // TODO: Implement when we have the full web URL from Graph
+        return null; // TRACKED: GitHub #233 - Implement when full web URL from Graph available
     }
 
     private DocumentRecord? MapToDocumentRecord(JsonElement data)

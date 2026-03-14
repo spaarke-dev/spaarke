@@ -233,7 +233,9 @@ describe('ApiClient', () => {
         json: jest.fn().mockResolvedValue(mockResponse),
       });
 
-      const mockFile = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const mockFile = new File(['test content'], 'test.txt', {
+        type: 'text/plain',
+      });
       const result = await apiClient.uploadFile('/api/upload', mockFile, 'test.txt');
 
       expect(mockFetch).toHaveBeenCalledWith(
@@ -266,7 +268,9 @@ describe('ApiClient', () => {
         json: jest.fn().mockResolvedValue(mockResponse),
       });
 
-      const mockBlob = new Blob(['blob content'], { type: 'application/octet-stream' });
+      const mockBlob = new Blob(['blob content'], {
+        type: 'application/octet-stream',
+      });
       const result = await apiClient.uploadFile('/api/upload', mockBlob, 'data.bin');
 
       expect(result).toEqual(mockResponse);
@@ -276,9 +280,7 @@ describe('ApiClient', () => {
       (authService.getAccessToken as jest.Mock).mockResolvedValue(null);
 
       const mockFile = new File(['test'], 'test.txt', { type: 'text/plain' });
-      await expect(apiClient.uploadFile('/api/upload', mockFile, 'test.txt')).rejects.toThrow(
-        'Not authenticated'
-      );
+      await expect(apiClient.uploadFile('/api/upload', mockFile, 'test.txt')).rejects.toThrow('Not authenticated');
     });
 
     it('should handle upload error', async () => {
@@ -295,11 +297,11 @@ describe('ApiClient', () => {
         json: jest.fn().mockResolvedValue(errorResponse),
       });
 
-      const mockFile = new File(['test'], 'test.exe', { type: 'application/x-msdownload' });
+      const mockFile = new File(['test'], 'test.exe', {
+        type: 'application/x-msdownload',
+      });
 
-      await expect(apiClient.uploadFile('/api/upload', mockFile, 'test.exe')).rejects.toThrow(
-        ApiClientError
-      );
+      await expect(apiClient.uploadFile('/api/upload', mockFile, 'test.exe')).rejects.toThrow(ApiClientError);
     });
   });
 
@@ -312,9 +314,7 @@ describe('ApiClient', () => {
 
       await apiClient.get('/api/test');
 
-      expect(authService.getAccessToken).toHaveBeenCalledWith([
-        `api://${mockBffApiClientId}/.default`,
-      ]);
+      expect(authService.getAccessToken).toHaveBeenCalledWith([`api://${mockBffApiClientId}/.default`]);
     });
   });
 });

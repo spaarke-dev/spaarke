@@ -4,7 +4,7 @@
  * See authInit.ts for the migration wrapper.
  */
 
-import { Configuration, LogLevel } from "@azure/msal-browser";
+import { Configuration, LogLevel } from '@azure/msal-browser';
 
 /**
  * @deprecated Use @spaarke/auth instead. See authInit.ts for the migration wrapper.
@@ -35,7 +35,7 @@ import { Configuration, LogLevel } from "@azure/msal-browser";
  * From: Sparke DSM-SPE Dev 2 App Registration
  * Azure Portal → Azure Active Directory → App registrations → Sparke DSM-SPE Dev 2 → Overview
  */
-const CLIENT_ID = "170c98e1-d486-4355-bcbe-170454e0207c";
+const CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
 
 /**
  * Azure AD Tenant (Directory) ID
@@ -43,7 +43,7 @@ const CLIENT_ID = "170c98e1-d486-4355-bcbe-170454e0207c";
  * From: Sparke DSM-SPE Dev 2 App Registration
  * Azure Portal → Azure Active Directory → App registrations → Sparke DSM-SPE Dev 2 → Overview
  */
-const TENANT_ID = "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+const TENANT_ID = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 
 /**
  * Dataverse Environment Redirect URI
@@ -56,7 +56,7 @@ const TENANT_ID = "a221a95e-6abc-4434-aecc-e48338a1b2f2";
  *
  * Important: You may need to add this redirect URI to the Azure App Registration if not already present.
  */
-const REDIRECT_URI = "https://spaarkedev1.crm.dynamics.com";
+const REDIRECT_URI = 'https://spaarkedev1.crm.dynamics.com';
 
 // ============================================================================
 // MSAL Browser Configuration
@@ -123,7 +123,7 @@ export const msalConfig: Configuration = {
      *
      * SDAP uses sessionStorage for security (tokens cleared on tab close).
      */
-    cacheLocation: "sessionStorage",
+    cacheLocation: 'sessionStorage',
 
     /**
      * Whether to store auth state in cookie
@@ -230,9 +230,7 @@ export const loginRequest = {
    * IMPORTANT: Do NOT request Graph scopes here. BFF handles Graph scopes via OBO.
    * Requesting Graph scopes here breaks the OBO flow and causes token validation errors.
    */
-  scopes: [
-    "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"
-  ],
+  scopes: ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'],
 
   /**
    * Login hint (user email)
@@ -261,30 +259,30 @@ export const loginRequest = {
  */
 export function validateMsalConfig(): void {
   // Check CLIENT_ID
-  if (!CLIENT_ID || CLIENT_ID.includes("YOUR_CLIENT_ID")) {
+  if (!CLIENT_ID || CLIENT_ID.includes('YOUR_CLIENT_ID')) {
     throw new Error(
-      "[MSAL Config] CLIENT_ID not set. " +
-        "Update msalConfig.ts with actual Azure App Registration Client ID. " +
-        "Find at: Azure Portal → App registrations → SDAP → Overview → Application (client) ID"
+      '[MSAL Config] CLIENT_ID not set. ' +
+        'Update msalConfig.ts with actual Azure App Registration Client ID. ' +
+        'Find at: Azure Portal → App registrations → SDAP → Overview → Application (client) ID'
     );
   }
 
   // Check TENANT_ID
-  if (!TENANT_ID || TENANT_ID.includes("YOUR_TENANT_ID")) {
+  if (!TENANT_ID || TENANT_ID.includes('YOUR_TENANT_ID')) {
     throw new Error(
-      "[MSAL Config] TENANT_ID not set. " +
-        "Update msalConfig.ts with actual Azure AD Tenant ID. " +
-        "Find at: Azure Portal → App registrations → SDAP → Overview → Directory (tenant) ID"
+      '[MSAL Config] TENANT_ID not set. ' +
+        'Update msalConfig.ts with actual Azure AD Tenant ID. ' +
+        'Find at: Azure Portal → App registrations → SDAP → Overview → Directory (tenant) ID'
     );
   }
 
   // Check REDIRECT_URI
-  if (!REDIRECT_URI || REDIRECT_URI.includes("your-org")) {
+  if (!REDIRECT_URI || REDIRECT_URI.includes('your-org')) {
     throw new Error(
-      "[MSAL Config] REDIRECT_URI not set. " +
-        "Update msalConfig.ts with actual Dataverse environment URL. " +
-        "Format: https://<your-org>.crm.dynamics.com " +
-        "Must match: Azure Portal → App registrations → SDAP → Authentication → Redirect URIs"
+      '[MSAL Config] REDIRECT_URI not set. ' +
+        'Update msalConfig.ts with actual Dataverse environment URL. ' +
+        'Format: https://<your-org>.crm.dynamics.com ' +
+        'Must match: Azure Portal → App registrations → SDAP → Authentication → Redirect URIs'
     );
   }
 
@@ -294,26 +292,26 @@ export function validateMsalConfig(): void {
   if (!guidRegex.test(CLIENT_ID)) {
     throw new Error(
       `[MSAL Config] CLIENT_ID has invalid GUID format: "${CLIENT_ID}". ` +
-        "Expected format: 12345678-1234-1234-1234-123456789abc"
+        'Expected format: 12345678-1234-1234-1234-123456789abc'
     );
   }
 
   if (!guidRegex.test(TENANT_ID)) {
     throw new Error(
       `[MSAL Config] TENANT_ID has invalid GUID format: "${TENANT_ID}". ` +
-        "Expected format: 12345678-1234-1234-1234-123456789abc"
+        'Expected format: 12345678-1234-1234-1234-123456789abc'
     );
   }
 
   // Validate REDIRECT_URI format
-  if (!REDIRECT_URI.startsWith("https://") || !REDIRECT_URI.includes(".dynamics.com")) {
+  if (!REDIRECT_URI.startsWith('https://') || !REDIRECT_URI.includes('.dynamics.com')) {
     throw new Error(
       `[MSAL Config] REDIRECT_URI has invalid format: "${REDIRECT_URI}". ` +
-        "Expected format: https://<org>.crm.dynamics.com (or .crm2, .crm3, etc.)"
+        'Expected format: https://<org>.crm.dynamics.com (or .crm2, .crm3, etc.)'
     );
   }
 
-  console.info("[MSAL Config] Configuration validation passed ✅");
+  console.info('[MSAL Config] Configuration validation passed ✅');
 }
 
 /**
@@ -326,8 +324,8 @@ export function validateMsalConfig(): void {
  */
 export function getMsalConfigDebugInfo(): Record<string, unknown> {
   return {
-    clientId: CLIENT_ID.replace(/./g, "*").slice(0, 8) + "...", // Mask client ID
-    tenantId: TENANT_ID.replace(/./g, "*").slice(0, 8) + "...", // Mask tenant ID
+    clientId: CLIENT_ID.replace(/./g, '*').slice(0, 8) + '...', // Mask client ID
+    tenantId: TENANT_ID.replace(/./g, '*').slice(0, 8) + '...', // Mask tenant ID
     redirectUri: REDIRECT_URI,
     authority: msalConfig.auth.authority,
     cacheLocation: msalConfig.cache?.cacheLocation,

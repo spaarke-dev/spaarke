@@ -1,0 +1,51 @@
+<task id="SPE-065" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create CustomPropertyEditor</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-034</dependencies>
+  </metadata>
+  <prompt>Create the CustomPropertyEditor component as a tab within ContainerDetail that allows administrators to manage custom properties on a container. Custom properties are key-value pairs with an optional searchable flag, enabling metadata classification and search filtering for containers.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working CustomPropertyEditor tab in ContainerDetail with a properties grid and add/edit functionality including searchable toggle.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Custom properties on containers are key-value pairs that provide business-specific metadata. Each property has a name (key), value, and isSearchable flag. When isSearchable is true, the property is indexed and can be used in search queries to find containers. Administrators use this editor to tag containers with metadata for organization, filtering, and discovery.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-property-editor">Create components/containers/CustomPropertyEditor.tsx as a tab component within ContainerDetail</step>
+    <step order="2" name="add-properties-grid">Add UniversalDatasetGrid showing properties with name, value, and isSearchable columns</step>
+    <step order="3" name="add-property-dialog">Create AddEditPropertyDialog.tsx with: name input, value input, isSearchable toggle with description explaining search indexing</step>
+    <step order="4" name="add-delete-action">Add delete action for removing individual properties</step>
+    <step order="5" name="wire-api-calls">Wire up to GET/PUT /api/spe/containers/{id}/customproperties endpoints</step>
+    <step order="6" name="add-batch-save">Implement batch save behavior — accumulate changes locally and save all via PUT</step>
+    <step order="7" name="add-loading-error-states">Add loading and error states</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/containers/CustomPropertyEditor.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/containers/AddEditPropertyDialog.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">CustomPropertyEditor renders as a tab in ContainerDetail</criterion>
+    <criterion testable="true">Grid displays existing properties with name, value, isSearchable</criterion>
+    <criterion testable="true">Add button opens dialog with name, value, and searchable toggle</criterion>
+    <criterion testable="true">Edit action populates dialog with existing property data</criterion>
+    <criterion testable="true">Delete removes property from the list</criterion>
+    <criterion testable="true">Save button sends all properties via PUT endpoint</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

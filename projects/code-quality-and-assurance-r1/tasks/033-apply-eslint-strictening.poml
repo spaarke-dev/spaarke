@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Apply ESLint Strictening Fixes to TypeScript Codebase</title>
+    <phase>4: Remediation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>008, 011</dependencies>
+    <blocks>035, 043</blocks>
+    <tags>remediation, typescript, linting, eslint</tags>
+  </metadata>
+
+  <prompt>
+    Apply the strictened ESLint rules configured in task 011 to the existing TypeScript codebase.
+    Fix violations introduced by the new stricter rules focusing on four categories: unused variables
+    (remove or use them), explicit any replacements (replace `any` with proper types), prefer-const
+    (replace `let` with `const` for non-reassigned variables), and no-console removal (replace with
+    proper logging or remove debug statements). Use eslint --fix for automatic fixes, then manually
+    fix complex cases. Test after fixing each project to verify no runtime behavior changes.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer specializing in ESLint configuration and type safety. Expert at
+    systematic codebase lint cleanup and replacing `any` types with proper TypeScript type annotations.
+  </role>
+
+  <goal>
+    A TypeScript codebase with zero ESLint violations under the strictened rule set established in
+    task 011. All PCF and Code Page projects pass `npx eslint src/client/ --max-warnings 0` cleanly.
+    Fixes are safe — no runtime behavior changes — and each project still builds successfully.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 configured stricter ESLint rules across the TypeScript codebase. These rules likely
+      introduced violations in existing code that was written under the previous, less strict
+      configuration. This task fixes those violations.
+
+      Focus areas and fix strategies:
+      1. Unused variables (@typescript-eslint/no-unused-vars): Either remove the unused variable/import,
+         or prefix with underscore (_varName) if it must exist for interface compliance. For unused
+         function parameters in callbacks, use the underscore prefix convention.
+      2. Explicit any (@typescript-eslint/no-explicit-any): Determine the correct type from usage context.
+         If the actual type is unknown at development time, use `unknown` with a type guard instead of
+         `any`. For PCF context parameters, consult .claude/adr/ADR-022.md for the correct PCF types.
+      3. Prefer-const (prefer-const rule): Auto-fixable. Run `eslint --fix` to convert all `let`
+         declarations that are never reassigned to `const`.
+      4. No-console (no-console rule): Remove `console.log` debug statements. Replace meaningful
+         `console.error` calls with the project's logging pattern (check existing code for the pattern —
+         may be a LoggingService or structured logging approach).
+
+      Process: Work project by project (pcf controls first, then code-pages, then shared). Run
+      `eslint --fix` on each project first for auto-fixable violations, then manually address
+      remaining violations. Build each project after fixing to verify.
+
+      The audit report at projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md
+      has the initial violation counts by rule — use this to understand the scope before starting.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/ (modify — fix ESLint violations in PCF controls)</file>
+      <file>src/client/code-pages/ (modify — fix ESLint violations in code pages)</file>
+      <file>src/client/shared/ (modify — fix ESLint violations in shared library)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md (read — initial violation counts from task 008)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Fixes MUST NOT change runtime behavior. Only change types and variable declarations — do not alter logic, conditionals, or API calls as part of lint fixes.</constraint>
+    <constraint source="spec">Run `npm run build` in each affected project after fixing it to verify the build is clean. Do not proceed to the next project until the current project builds.</constraint>
+    <constraint source="ADR-022">PCF controls use React 16 platform-provided libraries. When replacing `any` types in PCF code, use the correct PCF framework types (ComponentFramework types) — do not use React 18 type definitions.</constraint>
+    <constraint source="spec">For `any` types that genuinely cannot be typed without significant refactoring (e.g., complex discriminated unions from external APIs), add `// eslint-disable-next-line @typescript-eslint/no-explicit-any` with a comment explaining why. This is a last resort — target fewer than 5 suppressions total.</constraint>
+    <constraint source="spec">Do not remove console.error calls that are the only error reporting mechanism in a catch block — replace with the project's logging pattern instead. Removing error logging silently breaks observability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md to understand the initial violation counts and which projects have the most violations. Plan the order of remediation (highest violations first for maximum impact).</step>
+    <step order="2">Run `npx eslint src/client/ --format compact 2>&1 | wc -l` to get the current total violation count before starting fixes. Record this baseline.</step>
+    <step order="3">For the first project (highest violations), run `npx eslint {project-path} --fix` to auto-fix prefer-const and other auto-fixable rules. Run `npm run build` in that project to verify. Commit the auto-fix changes as a batch.</step>
+    <step order="4">Manually fix the remaining unused variable violations in the first project: remove dead code, use underscore prefix for interface-required parameters. Build and verify.</step>
+    <step order="5">Manually fix explicit any violations in the first project: determine correct types from usage context. Use `unknown` + type guard for genuinely unknown types. Apply sparingly-used eslint-disable comments where no safe type exists. Build and verify.</step>
+    <step order="6">Fix no-console violations in the first project: remove debug console.log calls, replace console.error in catch blocks with the project's logging pattern. Build and verify.</step>
+    <step order="7">Repeat steps 3-6 for each remaining project (pcf controls, code-pages, shared) in order of violation count.</step>
+    <step order="8">Run `npx eslint src/client/ --max-warnings 0` across all client projects to verify the final clean state. Record the final violation count.</step>
+    <step order="9">Run `dotnet test` to verify that API-touching TypeScript changes (if any) did not break integration tests.</step>
+    <step order="10">Document in a brief note: initial violation count, final violation count, number of eslint-disable suppressions added (with justifications), any violations deferred to future tasks.</step>
+    <step order="11">Update TASK-INDEX.md: change task 033 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="changes">src/client/pcf/ (ESLint violations resolved)</output>
+    <output type="changes">src/client/code-pages/ (ESLint violations resolved)</output>
+    <output type="changes">src/client/shared/ (ESLint violations resolved)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`npx eslint src/client/ --max-warnings 0` exits with code 0 (zero violations)</criterion>
+    <criterion>All four violation categories addressed: unused variables, explicit any, prefer-const, no-console</criterion>
+    <criterion>Fewer than 5 eslint-disable-next-line suppressions added (each with justification comment)</criterion>
+    <criterion>No runtime behavior changes: all projects build with `npm run build` after fixes</criterion>
+    <criterion>PCF controls use correct PCF framework types (not React 18 types) per ADR-022</criterion>
+    <criterion>No console.error calls removed from catch blocks without replacement logging</criterion>
+    <criterion>Initial and final violation counts documented</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

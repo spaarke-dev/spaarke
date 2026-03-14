@@ -14,13 +14,7 @@
  *      with dynamic wizard steps via WizardShell.addDynamicStep.
  */
 import * as React from 'react';
-import {
-  Card,
-  Text,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import {
   PersonRegular,
   DocumentTextRegular,
@@ -85,11 +79,7 @@ export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
 };
 
 /** Canonical order for dynamic follow-on steps in the sidebar. */
-export const FOLLOW_ON_CANONICAL_ORDER = [
-  'followon-assign-counsel',
-  'followon-draft-summary',
-  'followon-send-email',
-];
+export const FOLLOW_ON_CANONICAL_ORDER = ['followon-assign-counsel', 'followon-draft-summary', 'followon-send-email'];
 
 // ---------------------------------------------------------------------------
 // Props
@@ -252,16 +242,10 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
       aria-label={`${def.label}: ${def.description}${selected ? ' — selected' : ''}`}
     >
       <div className={styles.cardTopRow}>
-        <span
-          className={mergeClasses(styles.cardIcon, !selected && styles.cardIconNeutral)}
-          aria-hidden="true"
-        >
+        <span className={mergeClasses(styles.cardIcon, !selected && styles.cardIconNeutral)} aria-hidden="true">
           {def.icon}
         </span>
-        <span
-          className={mergeClasses(styles.checkboxIcon, !selected && styles.checkboxIconNeutral)}
-          aria-hidden="true"
-        >
+        <span className={mergeClasses(styles.checkboxIcon, !selected && styles.checkboxIconNeutral)} aria-hidden="true">
           {selected ? <CheckboxCheckedRegular fontSize={22} /> : <CheckboxUncheckedRegular fontSize={22} />}
         </span>
       </div>
@@ -289,12 +273,10 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
   const handleToggle = React.useCallback(
     (id: FollowOnActionId) => {
       if (selectedActions.includes(id)) {
-        onSelectionChange(selectedActions.filter((a) => a !== id));
+        onSelectionChange(selectedActions.filter(a => a !== id));
       } else {
-        const orderedIds = CARD_DEFS.map((d) => d.id);
-        const next = orderedIds.filter(
-          (orderedId) => selectedActions.includes(orderedId) || orderedId === id
-        );
+        const orderedIds = CARD_DEFS.map(d => d.id);
+        const next = orderedIds.filter(orderedId => selectedActions.includes(orderedId) || orderedId === id);
         onSelectionChange(next);
       }
     },
@@ -308,19 +290,14 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
           Next steps
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
-          Optionally select follow-on actions to complete after the {entityLabel} is
-          created. You can skip all and handle these from the {entityLabel} record.
+          Optionally select follow-on actions to complete after the {entityLabel} is created. You can skip all and
+          handle these from the {entityLabel} record.
         </Text>
       </div>
 
       <div className={styles.cardRow} role="group" aria-label="Follow-on actions">
-        {CARD_DEFS.map((def) => (
-          <CheckboxCard
-            key={def.id}
-            def={def}
-            selected={selectedActions.includes(def.id)}
-            onToggle={handleToggle}
-          />
+        {CARD_DEFS.map(def => (
+          <CheckboxCard key={def.id} def={def} selected={selectedActions.includes(def.id)} onToggle={handleToggle} />
         ))}
       </div>
 

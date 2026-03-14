@@ -62,19 +62,8 @@ export interface SseConnection {
  * connection.close();
  * ```
  */
-export function createSseConnection(
-  url: string,
-  options: SseClientOptions
-): SseConnection {
-  const {
-    accessToken,
-    onEvent,
-    onError,
-    onClose,
-    onOpen,
-    lastEventId,
-    timeout = 30000,
-  } = options;
+export function createSseConnection(url: string, options: SseClientOptions): SseConnection {
+  const { accessToken, onEvent, onError, onClose, onOpen, lastEventId, timeout = 30000 } = options;
 
   let abortController: AbortController | null = new AbortController();
   let isConnected = false;
@@ -126,10 +115,7 @@ export function createSseConnection(
             // Parse data as JSON if possible
             let parsedData: unknown;
             try {
-              parsedData =
-                typeof currentEvent.data === 'string'
-                  ? JSON.parse(currentEvent.data)
-                  : currentEvent.data;
+              parsedData = typeof currentEvent.data === 'string' ? JSON.parse(currentEvent.data) : currentEvent.data;
             } catch {
               parsedData = currentEvent.data;
             }
@@ -161,9 +147,7 @@ export function createSseConnection(
         } else {
           field = line.slice(0, colonIndex);
           // Skip single space after colon if present
-          value = line.charAt(colonIndex + 1) === ' '
-            ? line.slice(colonIndex + 2)
-            : line.slice(colonIndex + 1);
+          value = line.charAt(colonIndex + 1) === ' ' ? line.slice(colonIndex + 2) : line.slice(colonIndex + 1);
         }
 
         switch (field) {
@@ -172,9 +156,7 @@ export function createSseConnection(
             break;
           case 'data':
             // Data can be multi-line, append with newline
-            currentEvent.data = currentEvent.data
-              ? `${currentEvent.data}\n${value}`
-              : value;
+            currentEvent.data = currentEvent.data ? `${currentEvent.data}\n${value}` : value;
             break;
           case 'id':
             currentEvent.id = value;

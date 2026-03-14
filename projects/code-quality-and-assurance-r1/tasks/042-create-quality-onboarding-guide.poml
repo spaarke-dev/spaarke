@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Create Code Quality Onboarding Guide</title>
+    <phase>5: Enforcement &amp; Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>043</blocks>
+    <tags>documentation, onboarding</tags>
+  </metadata>
+
+  <prompt>
+    Create a code quality onboarding guide for new contributors and AI agents at
+    docs/guides/code-quality-onboarding.md. Cover: how pre-commit hooks work (Husky), what PR quality
+    expectations are, how to read CodeRabbit and Claude Code review comments, how to check the SonarCloud
+    dashboard, how to run all quality checks locally, and what the quality metrics mean. The guide
+    should be practical and task-oriented — someone new to the repository should be productive with
+    the quality system after reading it once.
+  </prompt>
+
+  <role>
+    Technical writer specializing in developer onboarding documentation. Expert at writing guides that
+    serve both human developers and AI coding assistants, with clear task-oriented structure.
+  </role>
+
+  <goal>
+    A comprehensive but concise onboarding guide that enables a new contributor or AI agent to
+    understand and work effectively within the quality system from day one. The guide covers both
+    the day-to-day experience (pre-commit hooks, PR reviews) and the background understanding
+    (what metrics mean, why gates exist).
+  </goal>
+
+  <context>
+    <background>
+      New contributors and AI agents (Claude Code instances working on this repository) need a
+      single guide that answers the practical questions they will encounter:
+
+      "Why did my commit fail?" → Pre-commit hooks section (Husky)
+      "What does this CodeRabbit comment mean?" → Reading AI review comments section
+      "My PR shows a failing quality gate — what do I do?" → SonarCloud and CI checks section
+      "How do I check if my changes will pass CI before pushing?" → Run locally section
+      "What does 70% new-code coverage mean?" → Quality metrics section
+
+      The guide should be structured as a FAQ/task-oriented reference, not a narrative essay.
+      Each section answers a specific question a contributor would have.
+
+      Sections to include:
+      1. Quick Start (3-bullet overview of the quality system)
+      2. Pre-Commit Hooks (Husky) — what runs, what to do when it fails
+      3. PR Quality Expectations — what checks must pass, what is advisory
+      4. Reading AI Review Comments (CodeRabbit + Claude Code Action) — how to interpret them,
+         when to accept vs. dismiss suggestions
+      5. SonarCloud Dashboard — how to access, what the quality gate means, how to read coverage
+      6. Running Quality Checks Locally — all commands in one place
+      7. Quality Metrics Reference — what each metric means, target values
+
+      This guide should cross-reference the detailed procedure documents (ci-cd-workflow.md,
+      testing-and-code-quality.md) for deep dives, but stand alone for the common cases.
+
+      AI-agent specific note: Include a brief section "For AI Agents (Claude Code)" noting that the
+      post-edit-lint hook (task 022) and task-completion hook (task 023) run automatically, what
+      to do when they report violations, and that nightly reviews are advisory.
+    </background>
+    <relevant-files>
+      <file>docs/guides/code-quality-onboarding.md (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">The guide must be accurate to the actual implementation — read the deployed workflow files and hook scripts before writing about them. Do not describe planned or ideal behavior that was not implemented.</constraint>
+    <constraint source="spec">Each section must include at least one concrete command or example. Abstract descriptions without examples are not sufficient for an onboarding guide.</constraint>
+    <constraint source="spec">The "Run Quality Checks Locally" section must be a comprehensive command reference — all commands needed to reproduce CI checks locally, in copy-paste ready format.</constraint>
+    <constraint source="spec">The guide must acknowledge that AI review comments (CodeRabbit, Claude Code Action) are advisory — new contributors should not feel obligated to resolve every AI comment before merging.</constraint>
+    <constraint source="spec">Keep the guide concise — target under 400 lines. Link to detailed procedure docs for depth. This is a quick-reference guide, not comprehensive documentation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read docs/procedures/ci-cd-workflow.md and docs/procedures/testing-and-code-quality.md (as updated by task 041) to extract accurate technical details for each section. Note the key facts: hook scripts, CI job names, local commands, dashboard URLs.</step>
+    <step order="2">Draft the guide outline: list all sections with a one-sentence description of what each covers. Verify the outline answers the six "new contributor questions" listed in the background.</step>
+    <step order="3">Write the Quick Start section: 3 bullet points summarizing the quality system (what runs pre-commit, what runs on PR, what runs nightly). Link to relevant sections for detail.</step>
+    <step order="4">Write the Pre-Commit Hooks section: what Husky checks (lint, format verification), what to do when a hook fails (fix the violation, not skip the hook), the emergency bypass command (git commit --no-verify) with a note requiring justification in the commit message.</step>
+    <step order="5">Write the PR Quality Expectations section: table showing required checks (build, tests, ESLint, Prettier, architecture tests) vs. advisory reviews (CodeRabbit, Claude Code Action). What a PR author must fix vs. what is optional.</step>
+    <step order="6">Write the Reading AI Review Comments section: how CodeRabbit and Claude Code Action comments appear in PRs, the difference between "must fix" and "consider" suggestions, how to dismiss a suggestion with a justification comment.</step>
+    <step order="7">Write the SonarCloud Dashboard section: how to access (URL), what the quality gate status means (passed/failed), how new-code coverage differs from overall coverage, the 70% threshold and why it applies to new code only.</step>
+    <step order="8">Write the Running Quality Checks Locally section: a consolidated command reference table covering all checks (dotnet build, dotnet test, eslint, prettier --check, arch tests, dotnet format --verify-no-changes). Format as a copy-paste ready code block.</step>
+    <step order="9">Write the Quality Metrics Reference section: brief definitions of each metric (coverage %, quality gate, violation count, TODO/FIXME count) with their target values and where to view current state.</step>
+    <step order="10">Write the "For AI Agents (Claude Code)" section: how the post-edit-lint and task-completion hooks work automatically, what to do when they report violations, and that nightly review findings are advisory.</step>
+    <step order="11">Review the complete guide for accuracy, conciseness (target under 400 lines), and completeness. Verify all cross-references to other docs are correct.</step>
+    <step order="12">Update TASK-INDEX.md: change task 042 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">docs/guides/code-quality-onboarding.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>docs/guides/code-quality-onboarding.md exists and covers all seven sections listed in the background</criterion>
+    <criterion>Guide includes a "For AI Agents (Claude Code)" section describing hook behavior</criterion>
+    <criterion>"Running Quality Checks Locally" section contains copy-paste ready commands for all CI checks</criterion>
+    <criterion>Each section includes at least one concrete command or example</criterion>
+    <criterion>Guide accurately reflects the actual implementation (not idealized behavior)</criterion>
+    <criterion>AI review comments (CodeRabbit, Claude Code Action) are described as advisory</criterion>
+    <criterion>Guide is under 400 lines</criterion>
+    <criterion>Emergency bypass (git commit --no-verify) is documented with the required justification note</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

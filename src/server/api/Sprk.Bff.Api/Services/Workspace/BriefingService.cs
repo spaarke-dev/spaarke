@@ -166,7 +166,7 @@ public class BriefingService
     /// </summary>
     private Task<TopMatterSummary?> GetTopPriorityMatterAsync(string userId, CancellationToken ct)
     {
-        // TODO: Replace with actual Dataverse query when matter entity schema is finalized.
+        // TRACKED: GitHub #229 - Replace with Dataverse query when schema finalized
         // The query should retrieve active matters (statecode eq 0) and order by
         //   overdueeventcount DESC, (sprk_invoicedamount / sprk_budgetamount) DESC
         // returning: sprk_matterid, sprk_name, sprk_overdueeventcount,
@@ -174,7 +174,7 @@ public class BriefingService
         //
         // For now, return mock top-priority matter derived from mock portfolio data.
         _logger.LogInformation(
-            "TODO: Querying top-priority matter from Dataverse. UserId={UserId} — returning mock data.",
+            "STUB: Querying top-priority matter from Dataverse. UserId={UserId} — returning mock data. See GitHub #229.",
             userId);
 
         // Mock: Matter C from PortfolioService mock data (3 overdue events → highest urgency)

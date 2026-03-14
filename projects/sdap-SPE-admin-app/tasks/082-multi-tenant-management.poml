@@ -1,0 +1,58 @@
+<task id="SPE-082" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Multi-Tenant Consuming Tenant Management</title>
+    <status>completed</status>
+    <estimated-effort>4h</estimated-effort>
+    <tags>bff-api, frontend, auth, phase-3</tags>
+    <phase>phase-3</phase>
+    <dependencies>SPE-072</dependencies>
+  </metadata>
+  <prompt>Extend the admin app configuration to support multiple consuming applications per container type, enabling multi-tenant scenarios. This allows a single container type to be used by multiple consuming apps from different tenants, with UI for managing these consuming tenant registrations.</prompt>
+  <role>Full-Stack Developer with Azure AD multi-tenant and Microsoft Graph expertise</role>
+  <goal>Extended config model supporting multiple consuming apps per container type, with BFF endpoints and UI for managing consuming tenant registrations.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-007">Do not leak Graph SDK types above the service facade</constraint>
+    <constraint source="ADR-012">Use shared UI components from @spaarke/ui-components</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>In multi-tenant SharePoint Embedded scenarios, a single container type owned by one application can be consumed by multiple applications from different tenants. Each consuming app needs its own registration with specific permissions. The admin UI needs to show which consuming apps are registered for each container type and allow administrators to add new consuming tenant registrations or modify existing ones.</background>
+  </context>
+  <steps>
+    <step order="1" name="extend-config-model">Extend SpeContainerTypeConfig to support a list of consuming app registrations (appId, tenantId, displayName, permissions)</step>
+    <step order="2" name="add-list-endpoint">Add GET /api/spe/containertypes/{typeId}/consumers endpoint to list consuming app registrations</step>
+    <step order="3" name="add-register-endpoint">Add POST /api/spe/containertypes/{typeId}/consumers to register a new consuming tenant app</step>
+    <step order="4" name="add-update-endpoint">Add PUT /api/spe/containertypes/{typeId}/consumers/{appId} to update consuming app permissions</step>
+    <step order="5" name="add-remove-endpoint">Add DELETE /api/spe/containertypes/{typeId}/consumers/{appId} to remove a consuming app registration</step>
+    <step order="6" name="apply-auth-filter">Apply SpeAdminAuthFilter to all endpoints</step>
+    <step order="7" name="create-ui">Create components/container-types/ConsumingTenantsPanel.tsx with grid of registered consumers and add/edit/remove actions</step>
+    <step order="8" name="integrate-detail">Add Consuming Tenants tab to ContainerTypeDetail panel</step>
+    <step order="9" name="add-tests">Write unit tests for all new endpoints</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/Models/ConsumingTenantDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminGraphService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Features/SpeAdmin/SpeAdminEndpoints.cs</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/container-types/ConsumingTenantsPanel.tsx</output>
+    <output type="code">tests/Sprk.Bff.Api.Tests/Features/SpeAdmin/MultiTenantTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/containertypes/{typeId}/consumers returns list of consuming app registrations</criterion>
+    <criterion testable="true">POST creates a new consuming app registration with selected permissions</criterion>
+    <criterion testable="true">PUT updates permissions for an existing consuming app</criterion>
+    <criterion testable="true">DELETE removes a consuming app registration</criterion>
+    <criterion testable="true">ConsumingTenantsPanel shows grid with add/edit/remove actions</criterion>
+    <criterion testable="true">ContainerTypeDetail includes Consuming Tenants tab</criterion>
+    <criterion testable="true">SpeAdminAuthFilter is applied to all endpoints</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

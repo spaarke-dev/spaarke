@@ -1,0 +1,41 @@
+<task id="SPE-029" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create AppShell Layout Component</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-025, SPE-028</dependencies>
+  </metadata>
+  <prompt>Create the top-level AppShell layout component that provides the structural foundation for the SPE Admin App code page. This component defines the left navigation panel and main content area layout, ensuring responsive behavior and dark mode support from the start.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>AppShell component renders a responsive layout with left navigation panel and content area, supports dark mode via Fluent v9 design tokens, and serves as the root layout for all admin pages.</goal>
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens; no hard-coded colors; dark mode required.</constraint>
+    <constraint source="ADR-012">Reuse components from @spaarke/ui-components shared library where applicable.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The SPE Admin App is a standalone React 18 code page deployed as a Dataverse web resource. The AppShell is the root layout component that all pages render within. It must provide consistent navigation and content structure across Dashboard, Containers, File Browser, Audit Log, and Settings sections.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-appshell">Create components/layout/AppShell.tsx with a left navigation panel and main content area using Fluent v9 layout components (Drawer, TabList, or Nav).</step>
+    <step order="2" name="responsive-layout">Implement responsive layout that collapses the navigation panel on smaller viewports.</step>
+    <step order="3" name="dark-mode-support">Wire up dark mode support using Fluent v9 FluentProvider and design tokens (webLightTheme / webDarkTheme).</step>
+    <step order="4" name="content-routing">Add content area that renders child page components based on active navigation selection.</step>
+    <step order="5" name="verify">Verify the AppShell renders correctly with placeholder content in both light and dark mode.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/layout/AppShell.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">App renders with a left navigation panel and a main content area.</criterion>
+    <criterion testable="true">Layout is responsive — navigation collapses on narrow viewports.</criterion>
+    <criterion testable="true">Dark mode toggle switches themes correctly using Fluent v9 design tokens.</criterion>
+  </acceptance-criteria>
+</task>

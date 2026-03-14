@@ -31,17 +31,13 @@ describe('useVirtualization', () => {
   });
 
   it('should respect custom threshold', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(150, { threshold: 200 })
-    );
+    const { result } = renderHook(() => useVirtualization(150, { threshold: 200 }));
 
     expect(result.current.shouldVirtualize).toBe(false);
   });
 
   it('should virtualize with custom threshold when exceeded', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(250, { threshold: 200 })
-    );
+    const { result } = renderHook(() => useVirtualization(250, { threshold: 200 }));
 
     expect(result.current.shouldVirtualize).toBe(true);
   });
@@ -53,9 +49,7 @@ describe('useVirtualization', () => {
   });
 
   it('should use custom item height', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(200, { itemHeight: 60 })
-    );
+    const { result } = renderHook(() => useVirtualization(200, { itemHeight: 60 }));
 
     expect(result.current.itemHeight).toBe(60);
   });
@@ -67,34 +61,25 @@ describe('useVirtualization', () => {
   });
 
   it('should use custom overscan count', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(200, { overscanCount: 10 })
-    );
+    const { result } = renderHook(() => useVirtualization(200, { overscanCount: 10 }));
 
     expect(result.current.overscanCount).toBe(10);
   });
 
   it('should not virtualize when explicitly disabled', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(10000, { enabled: false })
-    );
+    const { result } = renderHook(() => useVirtualization(10000, { enabled: false }));
 
     expect(result.current.shouldVirtualize).toBe(false);
   });
 
   it('should virtualize when explicitly enabled above threshold', () => {
-    const { result } = renderHook(() =>
-      useVirtualization(200, { enabled: true })
-    );
+    const { result } = renderHook(() => useVirtualization(200, { enabled: true }));
 
     expect(result.current.shouldVirtualize).toBe(true);
   });
 
   it('should update result when record count changes', () => {
-    const { result, rerender } = renderHook(
-      ({ count }) => useVirtualization(count),
-      { initialProps: { count: 50 } }
-    );
+    const { result, rerender } = renderHook(({ count }) => useVirtualization(count), { initialProps: { count: 50 } });
 
     expect(result.current.shouldVirtualize).toBe(false);
 
@@ -104,10 +89,9 @@ describe('useVirtualization', () => {
   });
 
   it('should update result when config changes', () => {
-    const { result, rerender } = renderHook(
-      ({ config }) => useVirtualization(200, config),
-      { initialProps: { config: { threshold: 100 } } }
-    );
+    const { result, rerender } = renderHook(({ config }) => useVirtualization(200, config), {
+      initialProps: { config: { threshold: 100 } },
+    });
 
     expect(result.current.shouldVirtualize).toBe(true);
 

@@ -29,9 +29,7 @@ Object.assign(navigator, {
 
 // Test wrapper with FluentProvider
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <FluentProvider theme={webLightTheme}>
-    {children}
-  </FluentProvider>
+  <FluentProvider theme={webLightTheme}>{children}</FluentProvider>
 );
 
 // Mock attachments for Outlook scenario
@@ -191,12 +189,7 @@ describe('SaveFlow', () => {
     it('renders processing options', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
@@ -209,12 +202,7 @@ describe('SaveFlow', () => {
     it('renders save button', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
@@ -226,16 +214,13 @@ describe('SaveFlow', () => {
     it('disables save button when no entity is selected', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      const saveButton = screen.getByRole('button', { name: /save to spaarke/i });
+      const saveButton = screen.getByRole('button', {
+        name: /save to spaarke/i,
+      });
       expect(saveButton).toBeDisabled();
     });
   });
@@ -245,16 +230,13 @@ describe('SaveFlow', () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      const profileSwitch = screen.getByRole('switch', { name: /enable profile summary/i });
+      const profileSwitch = screen.getByRole('switch', {
+        name: /enable profile summary/i,
+      });
       expect(profileSwitch).toBeChecked();
 
       await user.click(profileSwitch);
@@ -265,16 +247,13 @@ describe('SaveFlow', () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      const indexSwitch = screen.getByRole('switch', { name: /enable rag indexing/i });
+      const indexSwitch = screen.getByRole('switch', {
+        name: /enable rag indexing/i,
+      });
       expect(indexSwitch).toBeChecked();
 
       await user.click(indexSwitch);
@@ -285,16 +264,13 @@ describe('SaveFlow', () => {
       const user = userEvent.setup();
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      const analysisSwitch = screen.getByRole('switch', { name: /enable deep ai analysis/i });
+      const analysisSwitch = screen.getByRole('switch', {
+        name: /enable deep ai analysis/i,
+      });
       expect(analysisSwitch).not.toBeChecked();
 
       await user.click(analysisSwitch);
@@ -388,12 +364,7 @@ describe('SaveFlow', () => {
     it('has proper labels for processing options', () => {
       render(
         <TestWrapper>
-          <SaveFlow
-            hostType="outlook"
-            itemId="email-123"
-            itemName="Test Email"
-            getAccessToken={mockGetAccessToken}
-          />
+          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 

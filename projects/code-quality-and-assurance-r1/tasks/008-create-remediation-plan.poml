@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Create Prioritized Remediation Plan</title>
+    <phase>1: Initial Code Quality Audit</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>007</dependencies>
+    <blocks>030, 031, 032, 033, 034</blocks>
+    <tags>audit, planning, code-quality</tags>
+  </metadata>
+
+  <prompt>
+    Using the quality scorecard from task 007, create a prioritized remediation plan that maps
+    all audit findings to Phase 4 tasks (030-036). Group findings into three tiers: Critical
+    (must fix before Phase 3 enforcement), Important (should fix during Phase 4), and Nice-to-have
+    (can defer). Produce the remediation plan document that serves as the definitive input for
+    Phase 4 task execution.
+  </prompt>
+
+  <role>
+    Senior engineering lead and technical program manager. Synthesize scorecard findings into
+    a prioritized, actionable remediation plan. Balance quality improvement impact against
+    implementation risk and effort.
+  </role>
+
+  <goal>
+    A comprehensive remediation plan at projects/code-quality-and-assurance-r1/notes/remediation-plan.md
+    that: (1) categorizes all audit findings into Critical/Important/Nice-to-have tiers,
+    (2) maps each finding to a specific Phase 4 task with clear acceptance criteria,
+    (3) provides estimated effort per item, and (4) defines the sequencing constraints between
+    remediation items. This plan is the authoritative guide for Phase 4 execution.
+  </goal>
+
+  <context>
+    <background>
+      This task is the final step of Phase 1. It consumes the quality scorecard (task 007)
+      and produces the remediation plan that drives Phase 4 (tasks 030-036). The plan must be
+      practical — focused on the highest-impact improvements that move the codebase from its
+      current baseline grades toward the project success criteria.
+
+      Phase 4 tasks are pre-defined in the project plan:
+      - Task 030: Refactor Program.cs into feature modules (target: < 500 lines)
+      - Task 031: Resolve TODO/FIXME items (target: < 20 remaining)
+      - Task 032: Fix dependency vulnerabilities (critical/high priority)
+      - Task 033: Apply ESLint rule strictening to existing codebase (fix violations)
+      - Task 034: Apply Prettier formatting to existing TypeScript codebase
+      - Task 035: Update sdap-ci.yml to integrate new quality checks
+      - Task 036: Add README badges (coverage, SonarCloud quality gate)
+
+      The remediation plan must:
+      1. Validate that these Phase 4 tasks are sufficient to address the audit findings
+      2. Flag any critical findings NOT covered by tasks 030-036 (requiring new tasks)
+      3. Provide each Phase 4 task executor with a precise list of the findings they must resolve
+      4. Define what "done" looks like for each remediation item (measurable, not subjective)
+
+      Prioritization tiers:
+      - CRITICAL: Must fix before Phase 3 enforcement gates go live (Weeks 5-8 per spec).
+        Includes: all critical/high dependency vulnerabilities, ADR violations, any finding
+        that would cause immediate CI failures when blocking gates are enabled.
+      - IMPORTANT: Should fix during Phase 4 (Weeks 5-8). Includes: Program.cs refactoring,
+        TODO cleanup, ESLint violations in existing code, medium dependency issues.
+      - NICE-TO-HAVE: Can defer to later cycles. Includes: comment quality improvements,
+        low-severity lint warnings, documentation gaps, minor naming inconsistencies.
+
+      Each remediation item must include:
+      - Finding description (from audit report)
+      - Tier (Critical/Important/Nice-to-have)
+      - Assigned Phase 4 task number
+      - Estimated effort (hours)
+      - Acceptance criterion (measurable definition of done)
+      - Sequencing constraints (if any)
+    </background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-scorecard.md (read — task 007 output)</file>
+      <file>projects/code-quality-and-assurance-r1/plan.md (read — Phase 4 task definitions)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-bff-api.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-typescript-pcf.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-powershell.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-test-suite.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-dependencies.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/audit-configuration.md (read — for finding details)</file>
+      <file>projects/code-quality-and-assurance-r1/notes/remediation-plan.md (create — output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Every critical/high dependency vulnerability from task 005 audit is a CRITICAL tier remediation item — these block Phase 3 enforcement and must be resolved in task 032.</constraint>
+    <constraint source="spec">Program.cs refactoring (task 030) is HIGH RISK — must include a sequencing note that comprehensive tests must pass before and after refactoring, and the approach must be incremental feature module extraction.</constraint>
+    <constraint source="spec">ESLint rule changes (task 011) must happen BEFORE ESLint violation fixing (task 033) — note this sequencing constraint explicitly in the plan.</constraint>
+    <constraint source="spec">Prettier formatting (task 034) should be applied as a single bulk commit to minimize diff noise in future PRs.</constraint>
+    <constraint source="spec">If any critical finding is NOT covered by tasks 030-036, add a new task entry to the plan and flag it for review — do not silently drop findings.</constraint>
+    <constraint source="spec">This task is planning-only — do NOT modify any source files. The remediation plan is a document, not an implementation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/code-quality-and-assurance-r1/notes/quality-scorecard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the quality scorecard (quality-scorecard.md) — extract the top 10 issues and their assigned Phase 4 task mappings as the starting structure</step>
+    <step order="2">Read each of the 6 audit reports to collect all findings with severity ratings — supplement the scorecard's top 10 with any High/Critical findings not already captured</step>
+    <step order="3">Group all findings into three tiers using the prioritization criteria: Critical (blocks Phase 3 enforcement), Important (should fix Phase 4), Nice-to-have (can defer)</step>
+    <step order="4">Map every Critical and Important finding to a Phase 4 task (030-036). Identify any Critical finding not covered by existing tasks — flag these as gaps requiring new task entries</step>
+    <step order="5">For each Phase 4 task, compile the complete list of findings it must resolve — this becomes the task's acceptance criteria supplement</step>
+    <step order="6">Document sequencing constraints: ESLint config (011) must precede ESLint fix (033); tests must pass before Program.cs refactor (030); Prettier (034) should be a single bulk commit</step>
+    <step order="7">Calculate total remediation effort: sum hours per tier, per Phase 4 task, and overall for Phase 4</step>
+    <step order="8">Write the remediation plan with sections: Executive Summary (tier counts, total effort), Critical Items (must fix), Important Items (should fix), Nice-to-have Items, Phase 4 Task Breakdown (findings per task), Sequencing Constraints, Gap Analysis (any findings not addressed by current Phase 4 tasks)</step>
+    <step order="9">Write the complete remediation plan to projects/code-quality-and-assurance-r1/notes/remediation-plan.md</step>
+    <step order="10">Update TASK-INDEX.md: change task 008 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/code-quality-and-assurance-r1/notes/remediation-plan.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>remediation-plan.md exists with all required sections</criterion>
+    <criterion>All findings from the quality scorecard are present in the remediation plan (no findings dropped)</criterion>
+    <criterion>Every finding categorized into exactly one tier: Critical, Important, or Nice-to-have</criterion>
+    <criterion>Every Critical and Important finding mapped to a specific Phase 4 task number</criterion>
+    <criterion>Each Phase 4 task (030-036) has a complete list of findings it must resolve, with measurable acceptance criteria per finding</criterion>
+    <criterion>Gap analysis section present — explicitly states whether any Critical findings lack a Phase 4 task assignment (and if so, proposes new task entries)</criterion>
+    <criterion>Sequencing constraints section present and covers: ESLint config before ESLint fix, test verification around Program.cs refactor, Prettier bulk commit approach</criterion>
+    <criterion>Total estimated effort calculated per tier, per Phase 4 task, and overall</criterion>
+    <criterion>Program.cs refactoring includes explicit risk mitigation note (incremental approach, test verification before/after)</criterion>
+    <criterion>No source files were modified during this task</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

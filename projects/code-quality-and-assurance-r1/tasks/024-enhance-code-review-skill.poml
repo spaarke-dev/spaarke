@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="code-quality-and-assurance-r1">
+  <metadata>
+    <title>Enhance /code-review Skill with Quantitative Metrics and AI Smell Detection</title>
+    <phase>3: Automation Pipelines</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>043</blocks>
+    <tags>automation, skill-enhancement, code-review</tags>
+  </metadata>
+
+  <prompt>
+    Enhance the /code-review skill at .claude/skills/code-review/SKILL.md. Add three new capabilities:
+    (1) quantitative metrics output reporting file size, method count, and cyclomatic complexity estimate
+    for reviewed files, (2) before/after comparison analysis that evaluates whether a change improved
+    or worsened quality relative to the pre-change state, (3) an AI code smell detection checklist
+    targeting five patterns common in AI-generated code: interfaces with single implementations,
+    try/catch log-rethrow, null checks on non-nullable types, code-restating comments, and methods
+    with more than three responsibilities.
+  </prompt>
+
+  <role>
+    Senior software architect and code review expert specializing in AI-generated code quality patterns.
+    Deep expertise in C# and TypeScript code smells, cyclomatic complexity analysis, and structured
+    code review workflows.
+  </role>
+
+  <goal>
+    An enhanced code-review skill that produces richer, more actionable review output. Reviews now
+    include a quantitative metrics section (numbers that can be tracked over time), a quality direction
+    signal (improved/degraded/neutral), and a focused AI code smell checklist that catches the five
+    most common quality issues in AI-generated Spaarke code.
+  </goal>
+
+  <context>
+    <background>
+      The current /code-review skill provides a checklist-driven qualitative review. While valuable,
+      it lacks:
+      1. Quantitative metrics: reviewers cannot answer "is this file getting bigger over time?" or
+         "how many methods does this class have?" without manual analysis.
+      2. Directional signal: does this change improve or degrade quality? Knowing direction matters
+         more than knowing absolute state.
+      3. AI-specific smell detection: AI-generated code has distinctive anti-patterns that generic
+         review checklists miss. The five targeted smells are:
+         a. Interfaces with single implementations (ADR-010 violation — adds abstraction without value)
+         b. Try/catch log-rethrow (catches exception, logs it, rethrows same exception — redundant)
+         c. Null checks on non-nullable types (e.g., `if (string? != null)` when parameter is `string`)
+         d. Code-restating comments (e.g., `// increment counter` above `counter++`)
+         e. Methods with > 3 responsibilities (detected via: multiple unrelated concerns in one method,
+            or method name containing "And", "Or", "Also")
+
+      The enhancement must be additive — the existing SKILL.md structure and checklist must be
+      preserved. New sections are appended/inserted without removing existing content.
+
+      Review-checklist.md should also be updated to include the AI smell detection checklist as a
+      reference document.
+    </background>
+    <relevant-files>
+      <file>.claude/skills/code-review/SKILL.md (modify — add three new sections)</file>
+      <file>.claude/skills/code-review/references/review-checklist.md (modify — add AI smell checklist)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Existing SKILL.md content MUST be preserved. Enhancements are additive only — do not remove or restructure existing steps, sections, or checklists.</constraint>
+    <constraint source="spec">Quantitative metrics must include at minimum: file line count, public method count, constructor parameter count (DI injection check), and a cyclomatic complexity estimate (count of if/else/switch/for/while/catch branches + 1).</constraint>
+    <constraint source="spec">Before/after comparison requires accessing git history: use `git show HEAD~1:{file}` to get the pre-change version and compare metrics. If file is new (no HEAD~1), report metrics as "new file — no baseline".</constraint>
+    <constraint source="spec">AI smell detection checklist must be specific to Spaarke patterns and reference the relevant ADRs for each smell (e.g., interface smell → ADR-010, null check smell → language feature).</constraint>
+    <constraint source="spec">The enhanced skill output format must remain markdown-compatible so it displays cleanly in GitHub PR comments and Claude Code terminal output.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/code-review/references/review-checklist.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read .claude/skills/code-review/SKILL.md in full to understand the current structure, step numbering, and review flow. Map where the three new sections fit naturally without disrupting the existing flow.</step>
+    <step order="2">Read .claude/skills/code-review/references/review-checklist.md to understand what is already covered and where the AI smell checklist should be inserted.</step>
+    <step order="3">Design the quantitative metrics section: define the six metrics to collect (line count, public method count, private method count, constructor parameter count, cyclomatic complexity estimate, interface count). Specify the commands/patterns used to compute each (e.g., `wc -l`, `grep -c "public.*("`, branch counting).</step>
+    <step order="4">Design the before/after comparison section: define the comparison logic — compute metrics for current version, compute metrics for `git show HEAD~1:{file}` version, produce a delta table (metric | before | after | change | signal). Define signal thresholds: file grew > 20% = warning, cyclomatic complexity increased > 3 = warning.</step>
+    <step order="5">Design the AI smell detection checklist: write specific, actionable detection instructions for each of the five smells with example patterns to search for in C# and TypeScript. Link each smell to its relevant ADR or language guideline.</step>
+    <step order="6">Write the quantitative metrics step in SKILL.md: insert as a new step (e.g., Step 2.5 — Quantitative Metrics) that runs before the qualitative review. Include the metric collection instructions and output format (markdown table).</step>
+    <step order="7">Write the before/after comparison step in SKILL.md: insert as a new step after metrics collection (e.g., Step 2.6 — Quality Direction Analysis). Include the git diff approach and delta table format.</step>
+    <step order="8">Write the AI smell detection step in SKILL.md: insert as a new step in the qualitative review section (e.g., Step 4.5 — AI Code Smell Detection). Include all five smell checks with detection patterns.</step>
+    <step order="9">Update .claude/skills/code-review/references/review-checklist.md: add an "AI Code Smells" section at the end with the five smell checklist items formatted as checkboxes. Include concrete examples for each.</step>
+    <step order="10">Review both modified files for consistency — ensure step numbering is logical, cross-references between SKILL.md and review-checklist.md are correct, and no existing content was accidentally removed.</step>
+    <step order="11">Update TASK-INDEX.md: change task 024 status from pending to completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="file">.claude/skills/code-review/SKILL.md (enhanced with three new sections)</output>
+    <output type="file">.claude/skills/code-review/references/review-checklist.md (enhanced with AI smell checklist)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SKILL.md contains a quantitative metrics step with instructions for collecting line count, method count, constructor parameter count, and cyclomatic complexity estimate</criterion>
+    <criterion>SKILL.md contains a before/after comparison step that uses git show HEAD~1:{file} for baseline and produces a delta table</criterion>
+    <criterion>SKILL.md contains an AI smell detection step covering all five targeted smells</criterion>
+    <criterion>All five AI smells have specific, actionable detection instructions (not just descriptions)</criterion>
+    <criterion>AI smell checklist items reference relevant ADRs where applicable (minimum ADR-010 for interface smell)</criterion>
+    <criterion>review-checklist.md contains an "AI Code Smells" section with five checkbox items and concrete examples</criterion>
+    <criterion>All existing SKILL.md content is preserved — no existing steps, sections, or checklist items removed</criterion>
+    <criterion>All existing review-checklist.md content is preserved</criterion>
+    <criterion>TASK-INDEX.md updated to reflect task completion</criterion>
+  </acceptance-criteria>
+</task>

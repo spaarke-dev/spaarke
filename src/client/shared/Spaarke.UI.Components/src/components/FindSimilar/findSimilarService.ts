@@ -9,7 +9,12 @@
  * NOTE: This shared version accepts a service config object so it does not
  * hard-code environment-specific imports (authenticatedFetch, BFF base URL).
  */
-import type { IFindSimilarServiceConfig, IDocumentResult, IRecordResult, IFindSimilarResults } from './findSimilarTypes';
+import type {
+  IFindSimilarServiceConfig,
+  IDocumentResult,
+  IRecordResult,
+  IFindSimilarResults,
+} from './findSimilarTypes';
 
 /** File shape needed by the service — matches IUploadedFile from FileUpload. */
 interface IUploadableFile {
@@ -26,7 +31,7 @@ const LOG_PREFIX = '[FindSimilarService]';
 async function extractTextFromFiles(
   files: IUploadableFile[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/workspace/files/extract-text`;
@@ -59,7 +64,7 @@ async function extractTextFromFiles(
 async function searchDocuments(
   query: string,
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ results: IDocumentResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/ai/search`;
@@ -99,7 +104,7 @@ async function searchRecords(
   query: string,
   recordTypes: string[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ results: IRecordResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
   const url = `${bffBaseUrl}/ai/search/records`;
@@ -146,7 +151,7 @@ async function searchRecords(
 export async function runFindSimilar(
   files: IUploadableFile[],
   config: IFindSimilarServiceConfig,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<IFindSimilarResults> {
   // Step 1: Extract text
   const extractedText = await extractTextFromFiles(files, config, signal);

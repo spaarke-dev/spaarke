@@ -8,12 +8,7 @@
  * Task: 011 - Implement Date Filtering on Dataset
  */
 
-import {
-    CalendarFilter,
-    isSingleDateFilter,
-    isRangeFilter,
-    isClearFilter
-} from "../types";
+import { CalendarFilter, isSingleDateFilter, isRangeFilter, isClearFilter } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -22,27 +17,27 @@ import {
 /**
  * Dataverse field name for due date filtering
  */
-export const DATE_FILTER_FIELD = "sprk_duedate";
+export const DATE_FILTER_FIELD = 'sprk_duedate';
 
 /**
  * PCF ConditionOperator values
  * @see https://docs.microsoft.com/en-us/dotnet/api/microsoft.xrm.sdk.query.conditionoperator
  */
 const ConditionOperator = {
-    Equal: 0 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-    GreaterEqual: 4 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-    LessEqual: 5 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-    OnOrAfter: 25 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-    OnOrBefore: 26 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
-    On: 27 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  Equal: 0 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  GreaterEqual: 4 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  LessEqual: 5 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  OnOrAfter: 25 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  OnOrBefore: 26 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
+  On: 27 as ComponentFramework.PropertyHelper.DataSetApi.Types.ConditionOperator,
 };
 
 /**
  * PCF FilterOperator values
  */
 const FilterOperator = {
-    And: 0 as ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator,
-    Or: 1 as ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator,
+  And: 0 as ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator,
+  Or: 1 as ComponentFramework.PropertyHelper.DataSetApi.Types.FilterOperator,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -53,10 +48,10 @@ const FilterOperator = {
  * Result of buildDateFilter
  */
 export interface DateFilterResult {
-    /** Whether a filter should be applied (false for clear) */
-    shouldFilter: boolean;
-    /** The filter expression (null if clear) */
-    filterExpression: ComponentFramework.PropertyHelper.DataSetApi.FilterExpression | null;
+  /** Whether a filter should be applied (false for clear) */
+  shouldFilter: boolean;
+  /** The filter expression (null if clear) */
+  filterExpression: ComponentFramework.PropertyHelper.DataSetApi.FilterExpression | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,69 +81,67 @@ export interface DateFilterResult {
  * dataset.refresh();
  * ```
  */
-export function buildDateFilter(
-    calendarFilter: CalendarFilter | null | undefined
-): DateFilterResult {
-    // No filter or null - clear
-    if (!calendarFilter) {
-        return {
-            shouldFilter: false,
-            filterExpression: null,
-        };
-    }
-
-    // Clear filter type
-    if (isClearFilter(calendarFilter)) {
-        return {
-            shouldFilter: false,
-            filterExpression: null,
-        };
-    }
-
-    // Single date filter: sprk_duedate eq {date}
-    if (isSingleDateFilter(calendarFilter)) {
-        return {
-            shouldFilter: true,
-            filterExpression: {
-                filterOperator: FilterOperator.And,
-                conditions: [
-                    {
-                        attributeName: DATE_FILTER_FIELD,
-                        conditionOperator: ConditionOperator.On,
-                        value: calendarFilter.date,
-                    },
-                ],
-            },
-        };
-    }
-
-    // Range filter: sprk_duedate ge {start} AND sprk_duedate le {end}
-    if (isRangeFilter(calendarFilter)) {
-        return {
-            shouldFilter: true,
-            filterExpression: {
-                filterOperator: FilterOperator.And,
-                conditions: [
-                    {
-                        attributeName: DATE_FILTER_FIELD,
-                        conditionOperator: ConditionOperator.OnOrAfter,
-                        value: calendarFilter.start,
-                    },
-                    {
-                        attributeName: DATE_FILTER_FIELD,
-                        conditionOperator: ConditionOperator.OnOrBefore,
-                        value: calendarFilter.end,
-                    },
-                ],
-            },
-        };
-    }
-
-    // Unknown filter type - treat as clear
+export function buildDateFilter(calendarFilter: CalendarFilter | null | undefined): DateFilterResult {
+  // No filter or null - clear
+  if (!calendarFilter) {
     return {
-        shouldFilter: false,
-        filterExpression: null,
+      shouldFilter: false,
+      filterExpression: null,
     };
+  }
+
+  // Clear filter type
+  if (isClearFilter(calendarFilter)) {
+    return {
+      shouldFilter: false,
+      filterExpression: null,
+    };
+  }
+
+  // Single date filter: sprk_duedate eq {date}
+  if (isSingleDateFilter(calendarFilter)) {
+    return {
+      shouldFilter: true,
+      filterExpression: {
+        filterOperator: FilterOperator.And,
+        conditions: [
+          {
+            attributeName: DATE_FILTER_FIELD,
+            conditionOperator: ConditionOperator.On,
+            value: calendarFilter.date,
+          },
+        ],
+      },
+    };
+  }
+
+  // Range filter: sprk_duedate ge {start} AND sprk_duedate le {end}
+  if (isRangeFilter(calendarFilter)) {
+    return {
+      shouldFilter: true,
+      filterExpression: {
+        filterOperator: FilterOperator.And,
+        conditions: [
+          {
+            attributeName: DATE_FILTER_FIELD,
+            conditionOperator: ConditionOperator.OnOrAfter,
+            value: calendarFilter.start,
+          },
+          {
+            attributeName: DATE_FILTER_FIELD,
+            conditionOperator: ConditionOperator.OnOrBefore,
+            value: calendarFilter.end,
+          },
+        ],
+      },
+    };
+  }
+
+  // Unknown filter type - treat as clear
+  return {
+    shouldFilter: false,
+    filterExpression: null,
+  };
 }
 
 /**
@@ -161,25 +154,25 @@ export function buildDateFilter(
  * @returns true if filter was applied, false if cleared
  */
 export function applyDateFilter(
-    dataset: ComponentFramework.PropertyTypes.DataSet,
-    calendarFilter: CalendarFilter | null | undefined
+  dataset: ComponentFramework.PropertyTypes.DataSet,
+  calendarFilter: CalendarFilter | null | undefined
 ): boolean {
-    if (!dataset?.filtering) {
-        console.warn("[dateFilter] Dataset filtering API not available");
-        return false;
-    }
+  if (!dataset?.filtering) {
+    console.warn('[dateFilter] Dataset filtering API not available');
+    return false;
+  }
 
-    const result = buildDateFilter(calendarFilter);
+  const result = buildDateFilter(calendarFilter);
 
-    if (result.shouldFilter && result.filterExpression) {
-        // Apply the filter
-        dataset.filtering.setFilter(result.filterExpression);
-        dataset.refresh();
-        return true;
-    } else {
-        // Clear any existing filter
-        dataset.filtering.clearFilter();
-        dataset.refresh();
-        return false;
-    }
+  if (result.shouldFilter && result.filterExpression) {
+    // Apply the filter
+    dataset.filtering.setFilter(result.filterExpression);
+    dataset.refresh();
+    return true;
+  } else {
+    // Clear any existing filter
+    dataset.filtering.clearFilter();
+    dataset.refresh();
+    return false;
+  }
 }

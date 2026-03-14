@@ -17,17 +17,9 @@ interface AiAnalysisNodeProps {
  * AI Analysis node - processes data with AI and produces structured output.
  * Use for: document analysis, entity extraction, classification.
  */
-export const AiAnalysisNode = React.memo(function AiAnalysisNode({
-  data,
-  selected,
-}: AiAnalysisNodeProps) {
+export const AiAnalysisNode = React.memo(function AiAnalysisNode({ data, selected }: AiAnalysisNodeProps) {
   return (
-    <BaseNode
-      data={data}
-      selected={selected}
-      icon={<BrainCircuit20Regular />}
-      typeLabel="AI Analysis"
-    >
+    <BaseNode data={data} selected={selected} icon={<BrainCircuit20Regular />} typeLabel="AI Analysis">
       {data.outputVariable && (
         <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
           Output: {data.outputVariable}

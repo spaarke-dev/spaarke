@@ -1,0 +1,52 @@
+<task id="SPE-064" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ColumnEditor</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-2</tags>
+    <phase>phase-2</phase>
+    <dependencies>SPE-034</dependencies>
+  </metadata>
+  <prompt>Create the ColumnEditor component as a tab within ContainerDetail that allows administrators to manage column definitions for a container. Columns define the metadata schema for items stored in a container, and this editor provides CRUD operations for adding, editing, and removing columns of various types.</prompt>
+  <role>Senior React/TypeScript Developer with Fluent UI v9 expertise</role>
+  <goal>A working ColumnEditor tab in ContainerDetail with a columns grid and add/edit/delete dialog supporting all column types.</goal>
+  <constraints>
+    <constraint source="ADR-012">Use UniversalDatasetGrid from @spaarke/ui-components shared library</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 exclusively — no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-006">Use React Code Page pattern (React 18, bundled) — not PCF</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Container columns define the custom metadata fields available for items within a container. Supported column types are: text, boolean, dateTime, currency, choice, number, personOrGroup, and hyperlinkOrPicture. Each column has a name, description, type, and type-specific settings (e.g., choices for choice columns, format for dateTime columns). Administrators use this editor to build the metadata schema for their containers.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-column-editor">Create components/containers/ColumnEditor.tsx as a tab component within ContainerDetail</step>
+    <step order="2" name="add-columns-grid">Add UniversalDatasetGrid showing existing columns with name, type, description, and required flag</step>
+    <step order="3" name="add-column-dialog">Create AddEditColumnDialog.tsx with: name input, description input, type dropdown (text, boolean, dateTime, currency, choice, number, personOrGroup, hyperlinkOrPicture), required toggle, and dynamic type-specific fields</step>
+    <step order="4" name="add-type-specific-fields">Add type-specific fields: choice values list for choice type, format selector for dateTime, currency code for currency, min/max for number</step>
+    <step order="5" name="add-delete-action">Add delete action with confirmation dialog</step>
+    <step order="6" name="wire-api-calls">Wire up to GET/POST/PATCH/DELETE /api/spe/containers/{id}/columns endpoints</step>
+    <step order="7" name="add-loading-error-states">Add loading and error states</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/src/components/containers/ColumnEditor.tsx</output>
+    <output type="code">src/client/code-pages/spe-admin/src/components/containers/AddEditColumnDialog.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ColumnEditor renders as a tab in ContainerDetail</criterion>
+    <criterion testable="true">Grid displays existing columns with name, type, description</criterion>
+    <criterion testable="true">Add button opens dialog with column type dropdown</criterion>
+    <criterion testable="true">Dialog shows type-specific fields based on selected column type</criterion>
+    <criterion testable="true">Edit action populates dialog with existing column data</criterion>
+    <criterion testable="true">Delete action shows confirmation dialog before deleting</criterion>
+    <criterion testable="true">All CRUD operations call the correct API endpoints</criterion>
+    <criterion testable="true">All UI uses Fluent v9 tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

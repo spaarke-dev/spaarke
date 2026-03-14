@@ -5,12 +5,7 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
-import {
-  useEntitySearch,
-  ALL_ENTITY_TYPES,
-  type EntityType,
-  type EntitySearchResult,
-} from '../useEntitySearch';
+import { useEntitySearch, ALL_ENTITY_TYPES, type EntityType, type EntitySearchResult } from '../useEntitySearch';
 
 // Mock sessionStorage
 const mockSessionStorage = {
@@ -72,9 +67,7 @@ describe('useEntitySearch', () => {
     });
 
     it('uses initial type filter from options', () => {
-      const { result } = renderHook(() =>
-        useEntitySearch({ initialTypeFilter: ['Matter', 'Project'] })
-      );
+      const { result } = renderHook(() => useEntitySearch({ initialTypeFilter: ['Matter', 'Project'] }));
 
       expect(result.current.typeFilter).toEqual(['Matter', 'Project']);
     });
@@ -149,9 +142,7 @@ describe('useEntitySearch', () => {
     });
 
     it('toggleTypeFilter removes type when present', () => {
-      const { result } = renderHook(() =>
-        useEntitySearch({ initialTypeFilter: ['Matter', 'Project'] })
-      );
+      const { result } = renderHook(() => useEntitySearch({ initialTypeFilter: ['Matter', 'Project'] }));
 
       act(() => {
         result.current.toggleTypeFilter('Matter');

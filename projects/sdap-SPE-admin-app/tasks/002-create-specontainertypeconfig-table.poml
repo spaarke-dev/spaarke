@@ -1,0 +1,43 @@
+<task id="SPE-002" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create sprk_specontainertypeconfig Dataverse Table Schema</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>dataverse, schema, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-001</dependencies>
+  </metadata>
+  <prompt>Create the sprk_specontainertypeconfig Dataverse table that stores SharePoint Embedded container type configurations. This is the central entity of the SPE Admin App with 20+ columns covering container type identity, application credentials, billing, permissions, and operational state. It requires lookup relationships to both the environment table and the built-in Business Unit entity.</prompt>
+  <role>Dataverse Platform Engineer</role>
+  <goal>The sprk_specontainertypeconfig table exists in Dataverse with all 20+ columns, BU lookup, and environment lookup relationships working correctly.</goal>
+  <constraints>
+    <constraint source="ADR-002">Thin Dataverse plugins — no HTTP/Graph calls in plugins; keep execution under 50ms p95.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Each container type config represents a SharePoint Embedded container type registration tied to a specific Azure AD application. The table tracks the container type ID, owning application credentials (client ID, Key Vault secret name), billing classification, permission model settings, and operational status. Business unit ownership enables multi-BU isolation within a single Dataverse environment. See spec.md Dataverse Tables section for the full column list.</background>
+  </context>
+  <steps>
+    <step order="1" name="Define table schema">Define the sprk_specontainertypeconfig table with all columns from the spec.md Dataverse Tables section, including: container type identity fields, application credential fields, billing fields, permission model fields, and status/operational fields.</step>
+    <step order="2" name="Create table in Dataverse">Create the table in the Dataverse development environment with all defined columns.</step>
+    <step order="3" name="Create BU lookup">Create a lookup relationship from sprk_specontainertypeconfig to the built-in businessunit entity for business unit ownership.</step>
+    <step order="4" name="Create environment lookup">Create a lookup relationship from sprk_specontainertypeconfig to sprk_speenvironment for environment association.</step>
+    <step order="5" name="Configure optionsets">Create any required optionsets (e.g., billing classification, permission model, status) with appropriate values.</step>
+    <step order="6" name="Add to solution">Add the table, all columns, and all relationships to the target unmanaged solution.</step>
+    <step order="7" name="Verify relationships">Confirm both lookup relationships are navigable and display correctly in the Dataverse maker portal.</step>
+  </steps>
+  <outputs>
+    <output type="dataverse-table">sprk_specontainertypeconfig table with all columns and relationships</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">sprk_specontainertypeconfig table exists in Dataverse with all columns defined in spec.md.</criterion>
+    <criterion testable="true">Business Unit lookup relationship is created and functional.</criterion>
+    <criterion testable="true">Environment lookup to sprk_speenvironment is created and functional.</criterion>
+    <criterion testable="true">All optionsets contain the correct values.</criterion>
+    <criterion testable="true">Table and all components are added to the target unmanaged solution.</criterion>
+  </acceptance-criteria>
+</task>

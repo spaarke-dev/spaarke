@@ -1,0 +1,40 @@
+<task id="SPE-033" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create ContainersPage</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <tags>code-page, frontend, fluent-ui, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-029, SPE-027, SPE-028</dependencies>
+  </metadata>
+  <prompt>Create the ContainersPage component that lists all SPE containers for the selected BU context. It uses a data grid with a command toolbar for container lifecycle operations (Create, Activate, Lock, Unlock, Delete) with row selection support.</prompt>
+  <role>Frontend developer with Fluent UI v9 and React 18 expertise</role>
+  <goal>ContainersPage renders a grid of containers loaded from the API with a functional command toolbar supporting Create, Activate, Lock, Unlock, and Delete actions on selected rows.</goal>
+  <constraints>
+    <constraint source="ADR-012">Reuse UniversalDatasetGrid and CommandToolbar from @spaarke/ui-components shared library.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The Containers page is the primary management interface for SPE storage containers. Administrators use it to view all containers in their selected BU/config context, create new containers, and perform lifecycle operations. Container data includes name, status, creation date, and storage usage.</background>
+  </context>
+  <steps>
+    <step order="1" name="create-page">Create components/containers/ContainersPage.tsx with the container list view.</step>
+    <step order="2" name="data-grid">Add UniversalDatasetGrid showing columns: name, status, created date, storage usage.</step>
+    <step order="3" name="command-toolbar">Add CommandToolbar with Create, Activate, Lock, Unlock, and Delete action buttons.</step>
+    <step order="4" name="row-selection">Implement row selection to enable/disable toolbar actions based on selection state.</step>
+    <step order="5" name="api-integration">Wire grid data loading from the containers API endpoint and toolbar actions to their respective API calls.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/code-pages/spe-admin/components/containers/ContainersPage.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Container list loads from the API and displays in the grid.</criterion>
+    <criterion testable="true">Toolbar actions (Create, Activate, Lock, Unlock, Delete) invoke the correct API endpoints.</criterion>
+    <criterion testable="true">Row selection enables/disables appropriate toolbar actions.</criterion>
+  </acceptance-criteria>
+</task>

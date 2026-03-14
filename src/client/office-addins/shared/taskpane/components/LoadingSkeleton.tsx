@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Skeleton,
-  SkeletonItem,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Skeleton, SkeletonItem } from '@fluentui/react-components';
 
 /**
  * LoadingSkeleton - Skeleton loading state for Office Add-in task pane.

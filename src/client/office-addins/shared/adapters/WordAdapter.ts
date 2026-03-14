@@ -84,7 +84,7 @@ export class WordAdapter implements IHostAdapter {
     }
 
     // Try to get document URL from Office.js
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const document = context.document;
       const properties = document.properties;
 
@@ -116,7 +116,7 @@ export class WordAdapter implements IHostAdapter {
   async getSubject(): Promise<string> {
     this.ensureInitialized();
 
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const properties = context.document.properties;
       properties.load('title');
       await context.sync();
@@ -136,7 +136,7 @@ export class WordAdapter implements IHostAdapter {
   async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
     this.ensureInitialized();
 
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const body = context.document.body;
 
       if (preferredType === 'html') {
@@ -223,7 +223,7 @@ export class WordAdapter implements IHostAdapter {
 
     const format = options?.format ?? 'ooxml';
 
-    return Word.run(async (context) => {
+    return Word.run(async context => {
       const body = context.document.body;
       let content: string;
 
@@ -304,14 +304,9 @@ export class WordAdapter implements IHostAdapter {
    */
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
-      Office.onReady((info) => {
+      Office.onReady(info => {
         if (info.host !== Office.HostType.Word) {
-          reject(
-            this.createError(
-              'INVALID_HOST',
-              `Expected Word host but running in: ${info.host ?? 'unknown'}`
-            )
-          );
+          reject(this.createError('INVALID_HOST', `Expected Word host but running in: ${info.host ?? 'unknown'}`));
           return;
         }
 
@@ -320,8 +315,7 @@ export class WordAdapter implements IHostAdapter {
           reject(
             this.createError(
               'API_NOT_AVAILABLE',
-              `WordApi ${MIN_WORD_API_VERSION} or higher is required. ` +
-              'Please update your Office client.'
+              `WordApi ${MIN_WORD_API_VERSION} or higher is required. ` + 'Please update your Office client.'
             )
           );
           return;
@@ -355,7 +349,7 @@ export class WordAdapter implements IHostAdapter {
     this.ensureInitialized();
 
     try {
-      await Word.run(async (context) => {
+      await Word.run(async context => {
         const selection = context.document.getSelection();
 
         // Create HTML anchor element
@@ -387,11 +381,7 @@ export class WordAdapter implements IHostAdapter {
    * @param _contentType - Ignored
    * @returns Promise resolving to an error result
    */
-  async attachFile(
-    _content: string,
-    _fileName: string,
-    _contentType: string
-  ): Promise<AttachFileResult> {
+  async attachFile(_content: string, _fileName: string, _contentType: string): Promise<AttachFileResult> {
     return {
       success: false,
       errorMessage: 'Attaching files is not supported in Word. This feature is only available in Outlook compose mode.',
@@ -408,10 +398,7 @@ export class WordAdapter implements IHostAdapter {
    */
   private ensureInitialized(): void {
     if (!this._initialized) {
-      throw this.createError(
-        'NOT_INITIALIZED',
-        'WordAdapter has not been initialized. Call initialize() first.'
-      );
+      throw this.createError('NOT_INITIALIZED', 'WordAdapter has not been initialized. Call initialize() first.');
     }
   }
 
@@ -435,10 +422,7 @@ export class WordAdapter implements IHostAdapter {
    * @param message - The error message
    * @returns The error object
    */
-  private createError(
-    code: HostAdapterErrorCode,
-    message: string
-  ): HostAdapterError {
+  private createError(code: HostAdapterErrorCode, message: string): HostAdapterError {
     return { code, message };
   }
 
@@ -455,7 +439,7 @@ export class WordAdapter implements IHostAdapter {
       '"': '&quot;',
       "'": '&#39;',
     };
-    return text.replace(/[&<>"']/g, (char) => htmlEntities[char] || char);
+    return text.replace(/[&<>"']/g, char => htmlEntities[char] || char);
   }
 
   /**
@@ -467,7 +451,7 @@ export class WordAdapter implements IHostAdapter {
     let hash = 0;
     for (let i = 0; i < input.length; i++) {
       const char = input.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash).toString(16);

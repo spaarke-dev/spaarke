@@ -10,25 +10,25 @@
 
 // Types and interfaces
 export type {
-    ITokenProvider,
-    IDataverseClient,
-    DataverseRecordRef,
-    ILogger,
-    SpeFileMetadata,
-    ServiceResult,
-    FileUploadApiRequest,
-    FileDownloadRequest,
-    FileDeleteRequest,
-    FileReplaceRequest,
-    FileUploadRequest,
-    UploadFilesRequest,
-    UploadProgress,
-    UploadFilesResult,
-    ParentContext,
-    DocumentFormData,
-    CreateResult,
-    EntityDocumentConfig,
-    LookupNavigationResponse,
+  ITokenProvider,
+  IDataverseClient,
+  DataverseRecordRef,
+  ILogger,
+  SpeFileMetadata,
+  ServiceResult,
+  FileUploadApiRequest,
+  FileDownloadRequest,
+  FileDeleteRequest,
+  FileReplaceRequest,
+  FileUploadRequest,
+  UploadFilesRequest,
+  UploadProgress,
+  UploadFilesResult,
+  ParentContext,
+  DocumentFormData,
+  CreateResult,
+  EntityDocumentConfig,
+  LookupNavigationResponse,
 } from './types';
 
 export { consoleLogger } from './types';
@@ -43,11 +43,7 @@ export { MultiFileUploadService } from './MultiFileUploadService';
 
 // NavMap Client (navigation property metadata)
 export { NavMapClient } from './NavMapClient';
-export type {
-    NavMapClientOptions,
-    EntitySetNameResponse,
-    CollectionNavigationResponse,
-} from './NavMapClient';
+export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationResponse } from './NavMapClient';
 
 // Document Record Service (Dataverse CRUD)
 export { DocumentRecordService } from './DocumentRecordService';

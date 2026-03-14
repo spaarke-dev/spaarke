@@ -17,11 +17,7 @@
  * by actual Dataverse record GUIDs at deployment time.
  */
 
-import {
-  VisualType,
-  AggregationType,
-  type IChartDefinition,
-} from "../types";
+import { VisualType, AggregationType, type IChartDefinition } from '../types';
 
 // ---------------------------------------------------------------------------
 // Configuration JSON payloads
@@ -35,12 +31,12 @@ import {
  *   - Red   (0.00 - 0.69) : D+, D, D-, F
  */
 const GUIDELINES_CONFIG_JSON = JSON.stringify({
-  icon: "guidelines",
-  contextTemplate: "You have a {grade}% in {area} compliance",
+  icon: 'guidelines',
+  contextTemplate: 'You have a {grade}% in {area} compliance',
   colorRules: [
-    { range: [0.85, 1.00], color: "blue" },
-    { range: [0.70, 0.84], color: "yellow" },
-    { range: [0.00, 0.69], color: "red" },
+    { range: [0.85, 1.0], color: 'blue' },
+    { range: [0.7, 0.84], color: 'yellow' },
+    { range: [0.0, 0.69], color: 'red' },
   ],
 });
 
@@ -50,8 +46,8 @@ const GUIDELINES_CONFIG_JSON = JSON.stringify({
  * thresholds as Guidelines).
  */
 const BUDGET_CONFIG_JSON = JSON.stringify({
-  icon: "budget",
-  contextTemplate: "You have a {grade}% in {area} compliance",
+  icon: 'budget',
+  contextTemplate: 'You have a {grade}% in {area} compliance',
 });
 
 /**
@@ -60,8 +56,8 @@ const BUDGET_CONFIG_JSON = JSON.stringify({
  * thresholds as Guidelines).
  */
 const OUTCOMES_CONFIG_JSON = JSON.stringify({
-  icon: "outcomes",
-  contextTemplate: "You have a {grade}% in {area} compliance",
+  icon: 'outcomes',
+  contextTemplate: 'You have a {grade}% in {area} compliance',
 });
 
 // ---------------------------------------------------------------------------
@@ -76,13 +72,12 @@ const OUTCOMES_CONFIG_JSON = JSON.stringify({
  * Color rules: Blue (85-100%), Yellow (70-84%), Red (0-69%).
  */
 export const GUIDELINES_CARD_CONFIG: IChartDefinition = {
-  sprk_chartdefinitionid: "00000000-0000-0000-0000-000000000030",
-  sprk_name: "Guidelines",
-  sprk_description:
-    "Displays guideline compliance grade for the current matter",
+  sprk_chartdefinitionid: '00000000-0000-0000-0000-000000000030',
+  sprk_name: 'Guidelines',
+  sprk_description: 'Displays guideline compliance grade for the current matter',
   sprk_visualtype: VisualType.ReportCardMetric,
-  sprk_entitylogicalname: "sprk_matter",
-  sprk_aggregationfield: "sprk_guidelinecompliancegrade_current",
+  sprk_entitylogicalname: 'sprk_matter',
+  sprk_aggregationfield: 'sprk_guidelinecompliancegrade_current',
   sprk_aggregationtype: AggregationType.Average,
   sprk_configurationjson: GUIDELINES_CONFIG_JSON,
 };
@@ -95,13 +90,12 @@ export const GUIDELINES_CARD_CONFIG: IChartDefinition = {
  * Uses default color rules (same thresholds as Guidelines).
  */
 export const BUDGET_CARD_CONFIG: IChartDefinition = {
-  sprk_chartdefinitionid: "00000000-0000-0000-0000-000000000031",
-  sprk_name: "Budget",
-  sprk_description:
-    "Displays budget compliance grade for the current matter",
+  sprk_chartdefinitionid: '00000000-0000-0000-0000-000000000031',
+  sprk_name: 'Budget',
+  sprk_description: 'Displays budget compliance grade for the current matter',
   sprk_visualtype: VisualType.ReportCardMetric,
-  sprk_entitylogicalname: "sprk_matter",
-  sprk_aggregationfield: "sprk_budgetcompliancegrade_current",
+  sprk_entitylogicalname: 'sprk_matter',
+  sprk_aggregationfield: 'sprk_budgetcompliancegrade_current',
   sprk_aggregationtype: AggregationType.Average,
   sprk_configurationjson: BUDGET_CONFIG_JSON,
 };
@@ -114,13 +108,12 @@ export const BUDGET_CARD_CONFIG: IChartDefinition = {
  * Uses default color rules (same thresholds as Guidelines).
  */
 export const OUTCOMES_CARD_CONFIG: IChartDefinition = {
-  sprk_chartdefinitionid: "00000000-0000-0000-0000-000000000032",
-  sprk_name: "Outcomes",
-  sprk_description:
-    "Displays outcome compliance grade for the current matter",
+  sprk_chartdefinitionid: '00000000-0000-0000-0000-000000000032',
+  sprk_name: 'Outcomes',
+  sprk_description: 'Displays outcome compliance grade for the current matter',
   sprk_visualtype: VisualType.ReportCardMetric,
-  sprk_entitylogicalname: "sprk_matter",
-  sprk_aggregationfield: "sprk_outcomecompliancegrade_current",
+  sprk_entitylogicalname: 'sprk_matter',
+  sprk_aggregationfield: 'sprk_outcomecompliancegrade_current',
   sprk_aggregationtype: AggregationType.Average,
   sprk_configurationjson: OUTCOMES_CONFIG_JSON,
 };

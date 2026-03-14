@@ -9,8 +9,8 @@
  * @see types/index.ts — DocumentSearchRequest, DocumentSearchResponse
  */
 
-import { BFF_API_BASE_URL, buildAuthHeaders, handleApiResponse } from "./apiBase";
-import type { DocumentSearchRequest, DocumentSearchResponse } from "../types";
+import { BFF_API_BASE_URL, buildAuthHeaders, handleApiResponse } from './apiBase';
+import type { DocumentSearchRequest, DocumentSearchResponse } from '../types';
 
 /**
  * Execute a document semantic search via the BFF API.
@@ -21,14 +21,14 @@ import type { DocumentSearchRequest, DocumentSearchResponse } from "../types";
  * @throws Error on network failure or MSAL token acquisition failure
  */
 export async function search(request: DocumentSearchRequest): Promise<DocumentSearchResponse> {
-    const endpoint = `${BFF_API_BASE_URL}/api/ai/search`;
-    const headers = await buildAuthHeaders();
+  const endpoint = `${BFF_API_BASE_URL}/api/ai/search`;
+  const headers = await buildAuthHeaders();
 
-    const response = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(request),
-    });
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(request),
+  });
 
-    return handleApiResponse<DocumentSearchResponse>(response);
+  return handleApiResponse<DocumentSearchResponse>(response);
 }

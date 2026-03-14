@@ -21,34 +21,34 @@
  * @see https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/clientapi/reference/xrm-utility/getglobalcontext
  */
 interface XrmGlobalContext {
-    /** Returns the base URL of the Dataverse environment (e.g., "https://org.crm.dynamics.com"). */
-    getClientUrl(): string;
+  /** Returns the base URL of the Dataverse environment (e.g., "https://org.crm.dynamics.com"). */
+  getClientUrl(): string;
 
-    /** Returns the current user's unique ID (GUID without braces). */
-    getUserId(): string;
+  /** Returns the current user's unique ID (GUID without braces). */
+  getUserId(): string;
 
-    /** Returns the current user's display name. */
-    getUserName(): string;
+  /** Returns the current user's display name. */
+  getUserName(): string;
 
-    /**
-     * Returns the Dataverse theme information.
-     * Available in model-driven apps to detect dark/light mode.
-     */
-    getCurrentTheme?(): XrmThemeInfo | undefined;
+  /**
+   * Returns the Dataverse theme information.
+   * Available in model-driven apps to detect dark/light mode.
+   */
+  getCurrentTheme?(): XrmThemeInfo | undefined;
 }
 
 /**
  * Theme information returned by Xrm.Utility.getGlobalContext().getCurrentTheme().
  */
 interface XrmThemeInfo {
-    /** Page/content background color (e.g., "#ffffff" or "#1f1f1f"). */
-    backgroundcolor?: string;
-    /** Navigation bar background color (brand color — not light/dark indicator). */
-    navbarbackgroundcolor?: string;
-    /** Navigation bar shelf (secondary nav) color. */
-    navbarshelfcolor?: string;
-    /** Header color. */
-    headercolor?: string;
+  /** Page/content background color (e.g., "#ffffff" or "#1f1f1f"). */
+  backgroundcolor?: string;
+  /** Navigation bar background color (brand color — not light/dark indicator). */
+  navbarbackgroundcolor?: string;
+  /** Navigation bar shelf (secondary nav) color. */
+  navbarshelfcolor?: string;
+  /** Header color. */
+  headercolor?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,8 +59,8 @@ interface XrmThemeInfo {
  * Xrm.Utility namespace — provides helper methods including getGlobalContext().
  */
 interface XrmUtilityNamespace {
-    /** Returns the global context object for the Dataverse environment. */
-    getGlobalContext(): XrmGlobalContext;
+  /** Returns the global context object for the Dataverse environment. */
+  getGlobalContext(): XrmGlobalContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,27 +72,27 @@ interface XrmUtilityNamespace {
  * Used by context detection to identify the active record.
  */
 interface XrmPageEntity {
-    /** Returns the logical name of the entity (e.g., "sprk_matter"). */
-    getEntityName(): string;
-    /** Returns the record GUID (with braces, e.g., "{GUID}"). */
-    getId(): string;
+  /** Returns the logical name of the entity (e.g., "sprk_matter"). */
+  getEntityName(): string;
+  /** Returns the record GUID (with braces, e.g., "{GUID}"). */
+  getId(): string;
 }
 
 /**
  * Xrm.Page.data — provides access to entity data on the current form.
  */
 interface XrmPageData {
-    entity: XrmPageEntity;
+  entity: XrmPageEntity;
 }
 
 /**
  * Xrm.Page — the legacy page context API (still widely available).
  */
 interface XrmPage {
-    data?: XrmPageData;
-    context?: {
-        getAuthToken?(): Promise<string>;
-    };
+  data?: XrmPageData;
+  context?: {
+    getAuthToken?(): Promise<string>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -104,12 +104,12 @@ interface XrmPage {
  * Contains the input object with entity routing info.
  */
 interface XrmPageContext {
-    input?: {
-        /** The logical name of the entity (e.g., "sprk_matter"). */
-        entityName?: string;
-        /** The record GUID. */
-        entityId?: string;
-    };
+  input?: {
+    /** The logical name of the entity (e.g., "sprk_matter"). */
+    entityName?: string;
+    /** The record GUID. */
+    entityId?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -121,12 +121,12 @@ interface XrmPageContext {
  * May exist on window, window.parent, or window.top depending on iframe nesting.
  */
 interface XrmNamespace {
-    Utility: XrmUtilityNamespace & {
-        /** Returns page context with entity routing info. */
-        getPageContext?(): XrmPageContext | undefined;
-    };
-    /** Legacy page context — available when a form is loaded. */
-    Page?: XrmPage;
+  Utility: XrmUtilityNamespace & {
+    /** Returns page context with entity routing info. */
+    getPageContext?(): XrmPageContext | undefined;
+  };
+  /** Legacy page context — available when a form is loaded. */
+  Page?: XrmPage;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,5 +139,5 @@ interface XrmNamespace {
  * (e.g., during local development or testing).
  */
 interface Window {
-    Xrm?: XrmNamespace;
+  Xrm?: XrmNamespace;
 }

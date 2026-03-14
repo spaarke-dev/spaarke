@@ -1,0 +1,44 @@
+<task id="SPE-009" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create SpeAdminEndpoints Route Group Registration</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api, api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-005, SPE-008</dependencies>
+  </metadata>
+  <prompt>Create the SpeAdminEndpoints route group registration that establishes the /api/spe route prefix with RequireAuthorization() and the SpeAdminAuthorizationFilter. This provides the base route group that all SPE Admin endpoints (environments, configs, business units) will be added to.</prompt>
+  <role>Senior .NET API Developer</role>
+  <goal>SpeAdminEndpoints.cs registers the /api/spe route group with authorization and the admin filter, is called from Program.cs, and compiles successfully.</goal>
+  <constraints>
+    <constraint source="ADR-001">Minimal API — use MapGroup() for route organization, not controllers.</constraint>
+    <constraint source="ADR-008">Apply endpoint filters at the route group level for shared authorization concerns.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The BFF API organizes endpoints into route groups using the Minimal API MapGroup() pattern. Each domain area gets its own static class with a MapXxxEndpoints() extension method called from Program.cs. The SpeAdminEndpoints class creates the /api/spe route group and applies RequireAuthorization() plus the SpeAdminAuthorizationFilter so all child endpoints inherit these security constraints. Reference CommunicationEndpoints.cs for the established pattern.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create endpoints file">Create SpeAdminEndpoints.cs in src/server/api/Sprk.Bff.Api/Api/ following the pattern from CommunicationEndpoints.cs.</step>
+    <step order="2" name="Define MapSpeAdminEndpoints">Implement the MapSpeAdminEndpoints(this WebApplication app) extension method that creates a /api/spe route group.</step>
+    <step order="3" name="Apply authorization">Add RequireAuthorization() and AddEndpointFilter of SpeAdminAuthorizationFilter to the route group.</step>
+    <step order="4" name="Register in Program.cs">Add app.MapSpeAdminEndpoints() call in Program.cs after other endpoint registrations.</step>
+    <step order="5" name="Verify compilation">Run dotnet build to confirm the registration compiles correctly.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdminEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminEndpoints.cs exists with MapSpeAdminEndpoints() extension method.</criterion>
+    <criterion testable="true">/api/spe route group is created with RequireAuthorization().</criterion>
+    <criterion testable="true">SpeAdminAuthorizationFilter is applied to the route group.</criterion>
+    <criterion testable="true">MapSpeAdminEndpoints() is called from Program.cs.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+</task>

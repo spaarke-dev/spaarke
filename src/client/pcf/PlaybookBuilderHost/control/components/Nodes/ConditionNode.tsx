@@ -6,20 +6,11 @@
 
 import * as React from 'react';
 import { Handle, Position } from 'react-flow-renderer';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  mergeClasses,
-  shorthands,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, mergeClasses, shorthands } from '@fluentui/react-components';
 import { Branch20Regular } from '@fluentui/react-icons';
 import type { PlaybookNodeData, PlaybookNodeType } from '../../stores';
 
-const nodeColorSchemes: Record<
-  PlaybookNodeType,
-  { background: string; iconColor: string }
-> = {
+const nodeColorSchemes: Record<PlaybookNodeType, { background: string; iconColor: string }> = {
   aiAnalysis: { background: '#0078D4', iconColor: '#ffffff' },
   aiCompletion: { background: '#0078D4', iconColor: '#ffffff' },
   condition: { background: '#FFB900', iconColor: '#000000' },
@@ -107,10 +98,7 @@ interface ConditionNodeProps {
  * Condition node - branches execution flow based on a condition.
  * Has two outputs: true (left) and false (right).
  */
-export const ConditionNode = React.memo(function ConditionNode({
-  data,
-  selected,
-}: ConditionNodeProps) {
+export const ConditionNode = React.memo(function ConditionNode({ data, selected }: ConditionNodeProps) {
   const styles = useStyles();
   const colorScheme = nodeColorSchemes[data.type];
 
@@ -155,18 +143,8 @@ export const ConditionNode = React.memo(function ConditionNode({
       </div>
 
       {/* Source handles (two outputs) */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="true"
-        style={{ left: '25%' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="false"
-        style={{ left: '75%' }}
-      />
+      <Handle type="source" position={Position.Bottom} id="true" style={{ left: '25%' }} />
+      <Handle type="source" position={Position.Bottom} id="false" style={{ left: '75%' }} />
     </div>
   );
 });

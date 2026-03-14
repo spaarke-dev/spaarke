@@ -206,7 +206,10 @@ describe('DialogAuthService', () => {
       };
 
       // Simulate message from dialog
-      messageHandler[1]({ message: JSON.stringify(authCompleteMessage), origin: undefined });
+      messageHandler[1]({
+        message: JSON.stringify(authCompleteMessage),
+        origin: undefined,
+      });
 
       const result = await authPromise;
 
@@ -230,7 +233,10 @@ describe('DialogAuthService', () => {
       };
 
       // Simulate error message from dialog
-      messageHandler[1]({ message: JSON.stringify(authErrorMessage), origin: undefined });
+      messageHandler[1]({
+        message: JSON.stringify(authErrorMessage),
+        origin: undefined,
+      });
 
       await expect(authPromise).rejects.toThrow(DialogAuthError);
       await expect(authPromise).rejects.toMatchObject({
@@ -281,7 +287,10 @@ describe('DialogAuthService', () => {
         (url: string, options: unknown, callback: (result: Office.AsyncResult<Office.Dialog>) => void) => {
           callback({
             status: Office.AsyncResultStatus.Failed,
-            error: { code: 12006, message: 'Dialog already opened' } as Office.Error,
+            error: {
+              code: 12006,
+              message: 'Dialog already opened',
+            } as Office.Error,
             value: undefined,
           } as unknown as Office.AsyncResult<Office.Dialog>);
         }
@@ -361,10 +370,7 @@ describe('DialogAuthService', () => {
 
 describe('DialogAuthError', () => {
   it('should create error with code and message', () => {
-    const error = new DialogAuthError(
-      DialogAuthErrorCode.DIALOG_CLOSED,
-      'Dialog was closed'
-    );
+    const error = new DialogAuthError(DialogAuthErrorCode.DIALOG_CLOSED, 'Dialog was closed');
 
     expect(error.code).toBe(DialogAuthErrorCode.DIALOG_CLOSED);
     expect(error.userMessage).toBe('Dialog was closed');
@@ -374,11 +380,7 @@ describe('DialogAuthError', () => {
 
   it('should include original error when provided', () => {
     const originalError = new Error('Original error');
-    const error = new DialogAuthError(
-      DialogAuthErrorCode.UNKNOWN,
-      'Wrapped error',
-      originalError
-    );
+    const error = new DialogAuthError(DialogAuthErrorCode.UNKNOWN, 'Wrapped error', originalError);
 
     expect(error.originalError).toBe(originalError);
   });

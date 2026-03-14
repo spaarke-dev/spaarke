@@ -1,0 +1,43 @@
+<task id="SPE-023" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Audit Log Query Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api, api, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-009, SPE-007</dependencies>
+  </metadata>
+  <prompt>Implement the Audit Log query endpoint so administrators can search and filter audit log entries from the sprk_speauditlog Dataverse table. This provides the compliance and operational visibility layer for the admin app.</prompt>
+  <role>Senior .NET developer familiar with Minimal APIs and Dataverse Web API</role>
+  <goal>A working endpoint that queries sprk_speauditlog with date range, category, and pagination filters.</goal>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global auth middleware.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>All container mutations, permission changes, and file operations are logged to the sprk_speauditlog Dataverse table. Administrators need to query these logs filtered by configId, date range, and category (e.g., ContainerCreated, PermissionGranted, FileUploaded, FileDeleted). The endpoint must support pagination for large result sets.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create endpoint class">Create AuditLogEndpoints.cs in src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ with static MapAuditLogEndpoints extension method.</step>
+    <step order="2" name="Implement GET endpoint">Add GET /api/spe/audit?configId={id}&amp;from={date}&amp;to={date}&amp;category={cat} that queries sprk_speauditlog via Dataverse Web API.</step>
+    <step order="3" name="Apply filters">Build OData filter expressions for configId (required), from/to date range (optional), and category (optional).</step>
+    <step order="4" name="Support pagination">Accept $top and $skip parameters for pagination, default to 50 results per page.</step>
+    <step order="5" name="Register endpoints">Register MapAuditLogEndpoints in the endpoint registration pipeline.</step>
+    <step order="6" name="Test endpoint">Verify filtered queries return correct results, pagination works, and missing configId returns 400.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/AuditLogEndpoints.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/spe/audit?configId={id} returns audit log entries for the specified config.</criterion>
+    <criterion testable="true">Date range filters (from, to) correctly narrow results.</criterion>
+    <criterion testable="true">Category filter returns only entries matching the specified category.</criterion>
+    <criterion testable="true">Pagination via $top and $skip works correctly with default of 50 results.</criterion>
+    <criterion testable="true">Missing configId returns 400 Bad Request.</criterion>
+  </acceptance-criteria>
+</task>

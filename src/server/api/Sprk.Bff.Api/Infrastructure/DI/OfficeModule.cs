@@ -73,7 +73,7 @@ public static class OfficeModule
         // ============================================================================
         // Authorization Filters (to be added in task 033)
         // ============================================================================
-        // TODO: Add Office-specific authorization filters
+        // TRACKED: GitHub #228 - Add Office-specific authorization filters
         // services.AddScoped<OfficeAuthorizationFilter>();
 
         return services;

@@ -5,58 +5,56 @@
  * Dataverse URL to the component tree.
  */
 
-import { useState, useEffect } from "react";
-import { initializeAuth, getClientUrl, stopTokenRefresh, AuthError } from "../services/authInit";
+import { useState, useEffect } from 'react';
+import { initializeAuth, getClientUrl, stopTokenRefresh, AuthError } from '../services/authInit';
 
 export interface AuthState {
-    isAuthenticated: boolean;
-    isLoading: boolean;
-    error: string | null;
-    dataverseUrl: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+  dataverseUrl: string | null;
 }
 
 export function useAuth(): AuthState {
-    const [state, setState] = useState<AuthState>({
-        isAuthenticated: false,
-        isLoading: true,
-        error: null,
-        dataverseUrl: null,
-    });
+  const [state, setState] = useState<AuthState>({
+    isAuthenticated: false,
+    isLoading: true,
+    error: null,
+    dataverseUrl: null,
+  });
 
-    useEffect(() => {
-        let cancelled = false;
+  useEffect(() => {
+    let cancelled = false;
 
-        (async () => {
-            try {
-                await initializeAuth();
-                if (!cancelled) {
-                    setState({
-                        isAuthenticated: true,
-                        isLoading: false,
-                        error: null,
-                        dataverseUrl: getClientUrl(),
-                    });
-                }
-            } catch (err) {
-                if (!cancelled) {
-                    const message = err instanceof AuthError
-                        ? err.message
-                        : "Authentication failed";
-                    setState({
-                        isAuthenticated: false,
-                        isLoading: false,
-                        error: message,
-                        dataverseUrl: null,
-                    });
-                }
-            }
-        })();
+    (async () => {
+      try {
+        await initializeAuth();
+        if (!cancelled) {
+          setState({
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+            dataverseUrl: getClientUrl(),
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof AuthError ? err.message : 'Authentication failed';
+          setState({
+            isAuthenticated: false,
+            isLoading: false,
+            error: message,
+            dataverseUrl: null,
+          });
+        }
+      }
+    })();
 
-        return () => {
-            cancelled = true;
-            stopTokenRefresh();
-        };
-    }, []);
+    return () => {
+      cancelled = true;
+      stopTokenRefresh();
+    };
+  }, []);
 
-    return state;
+  return state;
 }

@@ -4,7 +4,7 @@
  * Per ADR-021: MUST NOT hard-code colors; MUST use Fluent design tokens
  */
 
-import { tokens } from "@fluentui/react-components";
+import { tokens } from '@fluentui/react-components';
 
 /**
  * Chart color palette type

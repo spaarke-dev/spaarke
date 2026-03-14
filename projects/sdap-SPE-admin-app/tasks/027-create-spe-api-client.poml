@@ -1,0 +1,46 @@
+<task id="SPE-027" project="SDAP SPE Admin App">
+  <metadata>
+    <title>Create speApiClient Service</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <tags>code-page, frontend, auth, phase-1</tags>
+    <phase>1</phase>
+    <dependencies>SPE-024</dependencies>
+  </metadata>
+  <prompt>Create the speApiClient service that wraps authenticatedFetch() from @spaarke/auth for all /api/spe/* endpoint calls. This client provides typed, authenticated access to every BFF API endpoint from the frontend.</prompt>
+  <role>Frontend developer with TypeScript and MSAL authentication expertise</role>
+  <goal>A fully typed API client service with methods for all /api/spe/* endpoint groups, using authenticatedFetch for token management.</goal>
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern — all API calls go through BFF, not direct to Graph.</constraint>
+    <constraint source="ADR-008">Authentication handled by BFF endpoint filters — client just passes bearer token via authenticatedFetch.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>The speApiClient is the single point of access for all BFF API calls from the admin UI. It uses authenticatedFetch() from the @spaarke/auth shared library, which handles MSAL token acquisition and attachment. Every method is typed with request and response interfaces from types/spe.ts. Error handling wraps HTTP errors into user-friendly error objects.</background>
+  </context>
+  <steps>
+    <step order="1" name="Create API client file">Create src/solutions/SpeAdminApp/src/services/speApiClient.ts.</step>
+    <step order="2" name="Implement base helpers">Create typed helper functions for GET, POST, PATCH, DELETE that wrap authenticatedFetch with JSON parsing and error handling.</step>
+    <step order="3" name="Add container methods">Add methods for list containers, get container, create container, update container, activate, lock, unlock.</step>
+    <step order="4" name="Add permission methods">Add methods for list permissions, add permission, update permission, remove permission.</step>
+    <step order="5" name="Add item methods">Add methods for list items, upload file, download file, get preview URL, delete item, create folder.</step>
+    <step order="6" name="Add metadata methods">Add methods for get versions, get thumbnails, create sharing link.</step>
+    <step order="7" name="Add dashboard and audit methods">Add methods for get dashboard metrics, refresh dashboard, query audit log.</step>
+    <step order="8" name="Add error handling">Implement consistent error handling that converts HTTP error responses (ProblemDetails) into typed error objects.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/services/speApiClient.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">API client compiles without TypeScript errors.</criterion>
+    <criterion testable="true">All /api/spe/* endpoint groups have corresponding typed methods.</criterion>
+    <criterion testable="true">All methods use authenticatedFetch() from @spaarke/auth for token management.</criterion>
+    <criterion testable="true">Error responses are converted to typed error objects with user-friendly messages.</criterion>
+    <criterion testable="true">Request and response types match the interfaces defined in types/spe.ts.</criterion>
+  </acceptance-criteria>
+</task>

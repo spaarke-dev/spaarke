@@ -20,27 +20,27 @@
  * @see useSelectionBroadcast in AnalysisWorkspace (emitter side)
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { SprkChatBridge, SelectionChangedPayload } from "../../../services/SprkChatBridge";
-import type { ICrossPaneSelection } from "../types";
-import { CROSS_PANE_SELECTION_MAX_PREVIEW } from "../types";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { SprkChatBridge, SelectionChangedPayload } from '../../../services/SprkChatBridge';
+import type { ICrossPaneSelection } from '../types';
+import { CROSS_PANE_SELECTION_MAX_PREVIEW } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface UseSelectionListenerOptions {
-    /** SprkChatBridge instance to subscribe to (null when bridge is not active) */
-    bridge: SprkChatBridge | null | undefined;
-    /** Whether to listen for selection events (default: true) */
-    enabled?: boolean;
+  /** SprkChatBridge instance to subscribe to (null when bridge is not active) */
+  bridge: SprkChatBridge | null | undefined;
+  /** Whether to listen for selection events (default: true) */
+  enabled?: boolean;
 }
 
 export interface IUseSelectionListenerResult {
-    /** The current cross-pane selection, or null when no selection is active */
-    selection: ICrossPaneSelection | null;
-    /** Programmatically clear the selection state */
-    clearSelection: () => void;
+  /** The current cross-pane selection, or null when no selection is active */
+  selection: ICrossPaneSelection | null;
+  /** Programmatically clear the selection state */
+  clearSelection: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,36 +54,37 @@ export interface IUseSelectionListenerResult {
  * source into the context string. If context is missing or unparseable, we
  * return safe defaults.
  */
-function parseSelectionContext(
-    contextStr: string | undefined
-): { selectedHtml: string; source: string } {
-    if (!contextStr || contextStr === "selection_cleared") {
-        return { selectedHtml: "", source: "" };
-    }
+function parseSelectionContext(contextStr: string | undefined): {
+  selectedHtml: string;
+  source: string;
+} {
+  if (!contextStr || contextStr === 'selection_cleared') {
+    return { selectedHtml: '', source: '' };
+  }
 
-    try {
-        const parsed = JSON.parse(contextStr) as {
-            selectedHtml?: string;
-            source?: string;
-        };
-        return {
-            selectedHtml: typeof parsed.selectedHtml === "string" ? parsed.selectedHtml : "",
-            source: typeof parsed.source === "string" ? parsed.source : "",
-        };
-    } catch {
-        // Malformed context — treat as no context
-        return { selectedHtml: "", source: "" };
-    }
+  try {
+    const parsed = JSON.parse(contextStr) as {
+      selectedHtml?: string;
+      source?: string;
+    };
+    return {
+      selectedHtml: typeof parsed.selectedHtml === 'string' ? parsed.selectedHtml : '',
+      source: typeof parsed.source === 'string' ? parsed.source : '',
+    };
+  } catch {
+    // Malformed context — treat as no context
+    return { selectedHtml: '', source: '' };
+  }
 }
 
 /**
  * Truncate text to the maximum preview length, appending an ellipsis if truncated.
  */
 function truncatePreview(text: string, maxLength: number): string {
-    if (text.length <= maxLength) {
-        return text;
-    }
-    return text.substring(0, maxLength) + "\u2026"; // Unicode ellipsis
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.substring(0, maxLength) + '\u2026'; // Unicode ellipsis
 }
 
 // ---------------------------------------------------------------------------
@@ -111,90 +112,85 @@ function truncatePreview(text: string, maxLength: number): string {
  * />
  * ```
  */
-export function useSelectionListener(
-    options: UseSelectionListenerOptions
-): IUseSelectionListenerResult {
-    const { bridge, enabled = true } = options;
+export function useSelectionListener(options: UseSelectionListenerOptions): IUseSelectionListenerResult {
+  const { bridge, enabled = true } = options;
 
-    const [selection, setSelection] = useState<ICrossPaneSelection | null>(null);
+  const [selection, setSelection] = useState<ICrossPaneSelection | null>(null);
 
-    // Keep a ref to the latest selection for use in callbacks that shouldn't
-    // re-subscribe on every state change.
-    const selectionRef = useRef<ICrossPaneSelection | null>(null);
-    selectionRef.current = selection;
+  // Keep a ref to the latest selection for use in callbacks that shouldn't
+  // re-subscribe on every state change.
+  const selectionRef = useRef<ICrossPaneSelection | null>(null);
+  selectionRef.current = selection;
 
-    /**
-     * Programmatically clear the selection state.
-     * Useful when the user dismisses the refine toolbar or when
-     * the document/record context changes.
-     */
-    const clearSelection = useCallback(() => {
+  /**
+   * Programmatically clear the selection state.
+   * Useful when the user dismisses the refine toolbar or when
+   * the document/record context changes.
+   */
+  const clearSelection = useCallback(() => {
+    setSelection(null);
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Subscribe to bridge selection_changed events
+  // -----------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!enabled || !bridge || bridge.isDisconnected) {
+      // No bridge or disabled — clear any lingering selection and bail
+      if (selectionRef.current !== null) {
         setSelection(null);
-    }, []);
+      }
+      return;
+    }
 
-    // -----------------------------------------------------------------------
-    // Subscribe to bridge selection_changed events
-    // -----------------------------------------------------------------------
+    const handleSelectionChanged = (payload: SelectionChangedPayload): void => {
+      // Determine if this is a selection-clear event
+      const isClear = !payload.text || payload.text.length === 0 || payload.context === 'selection_cleared';
 
-    useEffect(() => {
-        if (!enabled || !bridge || bridge.isDisconnected) {
-            // No bridge or disabled — clear any lingering selection and bail
-            if (selectionRef.current !== null) {
-                setSelection(null);
-            }
-            return;
-        }
+      if (isClear) {
+        setSelection(null);
+        return;
+      }
 
-        const handleSelectionChanged = (payload: SelectionChangedPayload): void => {
-            // Determine if this is a selection-clear event
-            const isClear =
-                !payload.text ||
-                payload.text.length === 0 ||
-                payload.context === "selection_cleared";
+      // Parse the JSON context for selectedHtml, source, etc.
+      const { selectedHtml, source } = parseSelectionContext(payload.context);
 
-            if (isClear) {
-                setSelection(null);
-                return;
-            }
+      // Build the cross-pane selection state
+      const newSelection: ICrossPaneSelection = {
+        text: truncatePreview(payload.text, CROSS_PANE_SELECTION_MAX_PREVIEW),
+        fullText: payload.text,
+        selectedHtml,
+        startOffset: payload.startOffset,
+        endOffset: payload.endOffset,
+        source,
+      };
 
-            // Parse the JSON context for selectedHtml, source, etc.
-            const { selectedHtml, source } = parseSelectionContext(payload.context);
-
-            // Build the cross-pane selection state
-            const newSelection: ICrossPaneSelection = {
-                text: truncatePreview(payload.text, CROSS_PANE_SELECTION_MAX_PREVIEW),
-                fullText: payload.text,
-                selectedHtml,
-                startOffset: payload.startOffset,
-                endOffset: payload.endOffset,
-                source,
-            };
-
-            setSelection(newSelection);
-        };
-
-        // Subscribe — returns an unsubscribe function
-        const unsubscribe = bridge.subscribe("selection_changed", handleSelectionChanged);
-
-        return () => {
-            unsubscribe();
-            // Clear selection state on unsubscribe (bridge disconnect / component unmount)
-            setSelection(null);
-        };
-    }, [bridge, enabled]);
-
-    // -----------------------------------------------------------------------
-    // Clear selection when bridge disconnects mid-lifecycle
-    // -----------------------------------------------------------------------
-
-    useEffect(() => {
-        if (bridge && bridge.isDisconnected && selectionRef.current !== null) {
-            setSelection(null);
-        }
-    }, [bridge]);
-
-    return {
-        selection,
-        clearSelection,
+      setSelection(newSelection);
     };
+
+    // Subscribe — returns an unsubscribe function
+    const unsubscribe = bridge.subscribe('selection_changed', handleSelectionChanged);
+
+    return () => {
+      unsubscribe();
+      // Clear selection state on unsubscribe (bridge disconnect / component unmount)
+      setSelection(null);
+    };
+  }, [bridge, enabled]);
+
+  // -----------------------------------------------------------------------
+  // Clear selection when bridge disconnects mid-lifecycle
+  // -----------------------------------------------------------------------
+
+  useEffect(() => {
+    if (bridge && bridge.isDisconnected && selectionRef.current !== null) {
+      setSelection(null);
+    }
+  }, [bridge]);
+
+  return {
+    selection,
+    clearSelection,
+  };
 }
