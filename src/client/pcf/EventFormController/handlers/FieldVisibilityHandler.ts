@@ -56,10 +56,13 @@ export interface EventTypeFieldConfig {
  * Legacy type alias for backward compatibility
  * @deprecated Use IFieldDefaultStates from @spaarke/ui-components
  */
-export type FieldDefaultStates = Record<string, {
+export type FieldDefaultStates = Record<
+  string,
+  {
     visible: boolean;
     requiredLevel: RequiredLevel;
-  }>;
+  }
+>;
 
 /**
  * Legacy type alias for backward compatibility

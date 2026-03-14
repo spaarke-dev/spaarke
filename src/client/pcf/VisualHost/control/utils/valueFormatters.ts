@@ -71,11 +71,7 @@ export function formatSignedPercentage(value: number): string {
  * @param nullDisplay - Text to show when value is null/undefined (default: "—")
  * @returns Formatted display string
  */
-export function formatValue(
-  value: number | null | undefined,
-  format: ValueFormatType,
-  nullDisplay = '—'
-): string {
+export function formatValue(value: number | null | undefined, format: ValueFormatType, nullDisplay = '—'): string {
   if (value === null || value === undefined) return nullDisplay;
 
   switch (format) {

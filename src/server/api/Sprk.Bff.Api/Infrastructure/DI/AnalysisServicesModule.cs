@@ -68,6 +68,7 @@ public static class AnalysisServicesModule
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AnalysisOptions>(configuration.GetSection(AnalysisOptions.SectionName));
+        services.AddHttpClient<AnalysisActionService>();
         services.AddHttpClient<IScopeResolverService, ScopeResolverService>();
         services.AddScoped<IScopeManagementService, ScopeManagementService>();
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();

@@ -377,7 +377,7 @@ function buildFilterExpression(
   }
 
   // Build condition with type assertion for PCF compatibility
-   
+
   const condition: ComponentFramework.PropertyHelper.DataSetApi.ConditionExpression = {
     attributeName: columnName,
     conditionOperator:
