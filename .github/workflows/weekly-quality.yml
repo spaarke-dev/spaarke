@@ -1,0 +1,450 @@
+# Weekly Quality Summary
+#
+# Runs every Friday at 10 PM UTC (4 PM MST). Aggregates quality metrics from
+# the week's nightly runs (Mon-Fri) into a trend table and creates/updates a
+# GitHub issue labeled 'weekly-quality-summary'.
+#
+# Metrics collected per nightly run:
+#   1. Test coverage % (from coverage.cobertura.xml artifact)
+#   2. New violations count (from ai-review-results.json artifact)
+#   3. TODO/FIXME count (from ai-review-results.json artifact)
+#   4. Vulnerable dependency count (from dependency-audit-results artifact)
+#   5. Build warnings (from test run exit status)
+#
+# Artifact names must match nightly-quality.yml:
+#   - coverage-reports      → coverage.cobertura.xml
+#   - ai-review-results     → ai-review-results.json
+#   - dependency-audit-results → dotnet-audit.md
+#   - test-results          → *.trx
+#   - sonarcloud-status     → sonarcloud-status.json
+
+name: Weekly Quality Summary
+
+on:
+  schedule:
+    # Friday 10 PM UTC (4 PM MST)
+    - cron: '0 22 * * 5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  weekly-summary:
+    name: Weekly Quality Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Collect nightly run artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "## Collecting nightly workflow runs from this week"
+
+          # Find the 5 most recent completed nightly-quality runs
+          # (Mon-Fri schedule means up to 5 runs per week)
+          RUNS_JSON=$(gh run list \
+            --workflow=nightly-quality.yml \
+            --status=completed \
+            --limit=5 \
+            --json databaseId,conclusion,createdAt,displayTitle \
+          )
+
+          RUN_COUNT=$(echo "$RUNS_JSON" | jq 'length')
+          echo "Found $RUN_COUNT completed nightly runs"
+
+          if [ "$RUN_COUNT" -eq 0 ]; then
+            echo "NO_RUNS=true" >> $GITHUB_ENV
+            echo "::warning::No completed nightly runs found. Weekly summary will show empty state."
+            exit 0
+          fi
+
+          echo "NO_RUNS=false" >> $GITHUB_ENV
+
+          # Save run metadata for later steps
+          echo "$RUNS_JSON" > /tmp/nightly-runs.json
+
+          # Download artifacts from each run (parallel where possible)
+          mkdir -p /tmp/weekly-artifacts
+
+          for i in $(seq 0 $((RUN_COUNT - 1))); do
+            RUN_ID=$(echo "$RUNS_JSON" | jq -r ".[$i].databaseId")
+            RUN_DATE=$(echo "$RUNS_JSON" | jq -r ".[$i].createdAt" | cut -dT -f1)
+            CONCLUSION=$(echo "$RUNS_JSON" | jq -r ".[$i].conclusion")
+
+            echo "--- Run $RUN_ID ($RUN_DATE) — $CONCLUSION ---"
+
+            RUN_DIR="/tmp/weekly-artifacts/run-$i"
+            mkdir -p "$RUN_DIR"
+
+            # Save metadata
+            echo "{\"run_id\": $RUN_ID, \"date\": \"$RUN_DATE\", \"conclusion\": \"$CONCLUSION\"}" \
+              > "$RUN_DIR/meta.json"
+
+            if [ "$CONCLUSION" != "success" ] && [ "$CONCLUSION" != "failure" ]; then
+              echo "Skipping artifact download for $CONCLUSION run"
+              continue
+            fi
+
+            # Download each artifact type (continue on error — artifact may not exist)
+            gh run download "$RUN_ID" --name coverage-reports --dir "$RUN_DIR/coverage" 2>/dev/null || \
+              echo "  No coverage-reports artifact"
+
+            gh run download "$RUN_ID" --name ai-review-results --dir "$RUN_DIR/ai-review" 2>/dev/null || \
+              echo "  No ai-review-results artifact"
+
+            gh run download "$RUN_ID" --name dependency-audit-results --dir "$RUN_DIR/dep-audit" 2>/dev/null || \
+              echo "  No dependency-audit-results artifact"
+
+            gh run download "$RUN_ID" --name test-results --dir "$RUN_DIR/test-results" 2>/dev/null || \
+              echo "  No test-results artifact"
+          done &
+
+          wait
+          echo "Artifact collection complete."
+
+      - name: Extract metrics and build trend table
+        if: env.NO_RUNS != 'true'
+        run: |
+          set -euo pipefail
+
+          RUNS_JSON=$(cat /tmp/nightly-runs.json)
+          RUN_COUNT=$(echo "$RUNS_JSON" | jq 'length')
+
+          # Arrays to hold per-day metrics
+          declare -a DATES COVERAGES VIOLATIONS TODOS VULN_DEPS CONCLUSIONS
+
+          for i in $(seq 0 $((RUN_COUNT - 1))); do
+            RUN_DIR="/tmp/weekly-artifacts/run-$i"
+            META=$(cat "$RUN_DIR/meta.json")
+            RUN_DATE=$(echo "$META" | jq -r '.date')
+            CONCLUSION=$(echo "$META" | jq -r '.conclusion')
+
+            # Day of week label
+            DAY_NAME=$(date -d "$RUN_DATE" +%A 2>/dev/null || echo "$RUN_DATE")
+            DATES[$i]="$DAY_NAME ($RUN_DATE)"
+            CONCLUSIONS[$i]="$CONCLUSION"
+
+            # ── Coverage % ──
+            COV="N/A"
+            COV_FILE=$(find "$RUN_DIR/coverage" -name "coverage.cobertura.xml" 2>/dev/null | head -1)
+            if [ -n "$COV_FILE" ] && [ -f "$COV_FILE" ]; then
+              # Extract line-rate from cobertura XML root element
+              LINE_RATE=$(grep -oP 'line-rate="\K[0-9.]+' "$COV_FILE" | head -1 || true)
+              if [ -n "$LINE_RATE" ]; then
+                COV=$(echo "$LINE_RATE * 100" | bc -l 2>/dev/null | xargs printf "%.1f%%" 2>/dev/null || echo "N/A")
+              fi
+            fi
+            COVERAGES[$i]="$COV"
+
+            # ── Violations count (from AI review) ──
+            VIOLS="N/A"
+            AI_FILE="$RUN_DIR/ai-review/ai-review-results.json"
+            if [ -f "$AI_FILE" ]; then
+              # Try to extract violation/finding count from AI review JSON
+              # The AI review output structure may vary; try common patterns
+              VIOLS=$(jq -r '
+                if .violations then (.violations | length)
+                elif .findings then (.findings | length)
+                elif .result then
+                  (.result | tostring | [match("violation|issue|warning|finding"; "gi")] | length)
+                else "N/A"
+                end
+              ' "$AI_FILE" 2>/dev/null || echo "N/A")
+            fi
+            VIOLATIONS[$i]="$VIOLS"
+
+            # ── TODO/FIXME count ──
+            TODO_COUNT="N/A"
+            if [ -f "$AI_FILE" ]; then
+              TODO_COUNT=$(jq -r '
+                if .todo_count then .todo_count
+                elif .result then
+                  (.result | tostring | [match("TODO|FIXME"; "g")] | length)
+                else "N/A"
+                end
+              ' "$AI_FILE" 2>/dev/null || echo "N/A")
+            fi
+            TODOS[$i]="$TODO_COUNT"
+
+            # ── Vulnerable dependencies ──
+            VULN="N/A"
+            DEP_FILE="$RUN_DIR/dep-audit/dotnet-audit.md"
+            if [ -f "$DEP_FILE" ]; then
+              # Count "vulnerable" mentions as a proxy for vulnerability count
+              VULN_MENTIONS=$(grep -ci "vulnerable\|vulnerability" "$DEP_FILE" 2>/dev/null || echo "0")
+              # Check if the report says "No vulnerable" — means 0
+              if grep -qi "No vulnerable" "$DEP_FILE" 2>/dev/null; then
+                VULN="0"
+              elif [ "$VULN_MENTIONS" -gt 0 ]; then
+                VULN="$VULN_MENTIONS"
+              else
+                VULN="0"
+              fi
+            fi
+            VULN_DEPS[$i]="$VULN"
+          done
+
+          # ── Compute trend signals ──
+          # Compare last run vs first run. Arrow indicates direction of change.
+          compute_trend() {
+            local first="$1"
+            local last="$2"
+            local higher_is_better="${3:-true}"
+
+            if [ "$first" = "N/A" ] || [ "$last" = "N/A" ]; then
+              echo "-"
+              return
+            fi
+
+            # Strip % suffix for comparison
+            first_num=$(echo "$first" | sed 's/%//')
+            last_num=$(echo "$last" | sed 's/%//')
+
+            if [ "$(echo "$last_num > $first_num" | bc -l 2>/dev/null)" = "1" ]; then
+              if [ "$higher_is_better" = "true" ]; then echo "^"; else echo "v"; fi
+            elif [ "$(echo "$last_num < $first_num" | bc -l 2>/dev/null)" = "1" ]; then
+              if [ "$higher_is_better" = "true" ]; then echo "v"; else echo "^"; fi
+            else
+              echo "="
+            fi
+          }
+
+          LAST=$((RUN_COUNT - 1))
+
+          TREND_COV=$(compute_trend "${COVERAGES[0]}" "${COVERAGES[$LAST]}" "true")
+          TREND_VIOLS=$(compute_trend "${VIOLATIONS[0]}" "${VIOLATIONS[$LAST]}" "false")
+          TREND_TODOS=$(compute_trend "${TODOS[0]}" "${TODOS[$LAST]}" "false")
+          TREND_DEPS=$(compute_trend "${VULN_DEPS[0]}" "${VULN_DEPS[$LAST]}" "false")
+
+          # ── Build markdown table ──
+          {
+            echo "| Day | Coverage % | New Violations | TODO Count | Vulnerable Deps | Trend |"
+            echo "|-----|-----------|----------------|------------|-----------------|-------|"
+
+            for i in $(seq 0 $((RUN_COUNT - 1))); do
+              STATUS=""
+              if [ "${CONCLUSIONS[$i]}" = "failure" ]; then
+                STATUS=" (run failed)"
+              fi
+              echo "| ${DATES[$i]}${STATUS} | ${COVERAGES[$i]} | ${VIOLATIONS[$i]} | ${TODOS[$i]} | ${VULN_DEPS[$i]} | - |"
+            done
+
+            echo "|---|---|---|---|---|---|"
+            echo "| **Trend (first -> last)** | $TREND_COV | $TREND_VIOLS | $TREND_TODOS | $TREND_DEPS | |"
+          } > /tmp/weekly-trend-table.md
+
+          # ── Build summary paragraph ──
+          {
+            echo ""
+            echo "### Trend Legend"
+            echo ""
+            echo "- **^** = Improved (coverage up, or violations/TODOs/vulnerabilities down)"
+            echo "- **v** = Degraded (coverage down, or violations/TODOs/vulnerabilities up)"
+            echo "- **=** = Stable (no change)"
+            echo "- **-** = Insufficient data"
+          } >> /tmp/weekly-trend-table.md
+
+          echo "Trend table built successfully."
+          cat /tmp/weekly-trend-table.md
+
+      - name: Create or update weekly summary issue
+        if: env.NO_RUNS != 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const now = new Date().toISOString();
+            const weekStart = new Date();
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+            const weekLabel = weekStart.toISOString().split('T')[0];
+
+            // Read the trend table
+            let trendTable = 'No trend data available.';
+            try {
+              trendTable = fs.readFileSync('/tmp/weekly-trend-table.md', 'utf8');
+            } catch (e) {
+              console.log('Could not read trend table:', e.message);
+            }
+
+            // Read run metadata
+            let runsInfo = '';
+            try {
+              const runs = JSON.parse(fs.readFileSync('/tmp/nightly-runs.json', 'utf8'));
+              runsInfo = `**Nightly runs analyzed:** ${runs.length}\n`;
+              runsInfo += `**Date range:** ${runs[runs.length - 1]?.createdAt?.split('T')[0] || '?'} to ${runs[0]?.createdAt?.split('T')[0] || '?'}\n`;
+            } catch (e) {
+              runsInfo = '**Nightly runs analyzed:** unknown\n';
+            }
+
+            // Build issue body
+            let body = `# Weekly Quality Summary\n\n`;
+            body += `**Week of:** ${weekLabel}\n`;
+            body += `**Generated:** ${now}\n`;
+            body += runsInfo;
+            body += `**Branch:** \`${process.env.GITHUB_REF_NAME || 'master'}\`\n\n`;
+            body += `---\n\n`;
+            body += `## Quality Metrics Trend\n\n`;
+            body += trendTable + '\n\n';
+            body += `---\n\n`;
+            body += `## How to Read This Report\n\n`;
+            body += `This report aggregates metrics from the **Nightly Quality** workflow runs (Mon-Fri).\n`;
+            body += `Each row represents one nightly run. The trend row compares the first and last run of the week.\n\n`;
+            body += `- **Coverage %**: Line coverage from Coverlet/Cobertura reports\n`;
+            body += `- **New Violations**: Findings from AI code review\n`;
+            body += `- **TODO Count**: TODO/FIXME markers detected in codebase\n`;
+            body += `- **Vulnerable Deps**: Vulnerable packages from dotnet + npm audit\n\n`;
+            body += `If a nightly run failed or artifacts were unavailable, the cell shows "N/A".\n\n`;
+            body += `---\n\n`;
+            body += `*Automated by [Weekly Quality Summary](../../actions/workflows/weekly-quality.yml)*\n`;
+
+            // ── Ensure label exists ──
+            const label = 'weekly-quality-summary';
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label
+              });
+            } catch (e) {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '0e8a16',
+                description: 'Weekly quality summary report'
+              });
+            }
+
+            // ── Search for existing open issue ──
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 10
+            });
+
+            const existingIssue = issues.find(i =>
+              i.title.includes('Weekly Quality Summary')
+            );
+
+            const issueTitle = `Weekly Quality Summary — Week of ${weekLabel}`;
+
+            if (existingIssue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                title: issueTitle,
+                body: body
+              });
+              console.log(`Updated existing issue #${existingIssue.number}`);
+            } else {
+              const { data: newIssue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: body,
+                labels: [label]
+              });
+              console.log(`Created new issue #${newIssue.number}`);
+            }
+
+      - name: Handle empty week (no nightly runs)
+        if: env.NO_RUNS == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const now = new Date().toISOString();
+            const weekStart = new Date();
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+            const weekLabel = weekStart.toISOString().split('T')[0];
+
+            const label = 'weekly-quality-summary';
+
+            // Ensure label exists
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label
+              });
+            } catch (e) {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '0e8a16',
+                description: 'Weekly quality summary report'
+              });
+            }
+
+            let body = `# Weekly Quality Summary\n\n`;
+            body += `**Week of:** ${weekLabel}\n`;
+            body += `**Generated:** ${now}\n\n`;
+            body += `---\n\n`;
+            body += `## No Data Available\n\n`;
+            body += `No completed nightly quality runs were found for this week.\n`;
+            body += `This may indicate:\n`;
+            body += `- The nightly workflow was disabled or paused\n`;
+            body += `- All nightly runs were cancelled before completion\n`;
+            body += `- This is a new repository with no nightly history yet\n\n`;
+            body += `---\n\n`;
+            body += `*Automated by [Weekly Quality Summary](../../actions/workflows/weekly-quality.yml)*\n`;
+
+            const issueTitle = `Weekly Quality Summary — Week of ${weekLabel}`;
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 10
+            });
+
+            const existingIssue = issues.find(i =>
+              i.title.includes('Weekly Quality Summary')
+            );
+
+            if (existingIssue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                title: issueTitle,
+                body: body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: body,
+                labels: [label]
+              });
+            }
+
+      - name: Workflow summary
+        if: always()
+        run: |
+          echo "## Weekly Quality Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${NO_RUNS}" = "true" ]; then
+            echo "No completed nightly runs found for this week." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Aggregated metrics from nightly runs and created/updated weekly summary issue." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            if [ -f /tmp/weekly-trend-table.md ]; then
+              cat /tmp/weekly-trend-table.md >> $GITHUB_STEP_SUMMARY
+            fi
+          fi

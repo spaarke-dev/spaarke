@@ -101,6 +101,48 @@ jobs:
           name: coverage-${{ matrix.configuration }}
           path: ./TestResults/**/coverage.cobertura.xml
 
+  client-quality:
+    name: Client Quality (Prettier + ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache root npm dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-root-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-root-
+
+      - name: Cache PCF npm dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-pcf-${{ hashFiles('src/client/pcf/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-pcf-
+
+      - name: Install root dependencies (Prettier)
+        run: npm ci --ignore-scripts
+
+      - name: Prettier format check
+        run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+
+      - name: Install PCF dependencies (ESLint)
+        working-directory: src/client/pcf
+        run: npm ci --ignore-scripts
+
+      - name: ESLint strict check
+        working-directory: src/client/pcf
+        run: npx eslint . --max-warnings 0
+
   code-quality:
     name: Code Quality
     runs-on: windows-latest
@@ -166,7 +208,7 @@ jobs:
   integration-readiness:
     name: Integration Readiness
     runs-on: windows-latest
-    needs: [security-scan, build-test, code-quality]
+    needs: [security-scan, build-test, code-quality, client-quality]
     if: github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
 
     steps:
@@ -320,7 +362,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [security-scan, build-test, code-quality, integration-readiness]
+    needs: [security-scan, build-test, code-quality, client-quality, integration-readiness]
     if: always()
 
     steps:
@@ -332,6 +374,7 @@ jobs:
           echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build & Test | ${{ needs.build-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Client Quality | ${{ needs.client-quality.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration Readiness | ${{ needs.integration-readiness.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY

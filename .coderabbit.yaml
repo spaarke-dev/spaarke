@@ -1,0 +1,89 @@
+# CodeRabbit Configuration for Spaarke Repository
+# https://docs.coderabbit.ai/guides/configuration
+#
+# Advisory-only mode during Phase 2 (graduated enforcement).
+# CodeRabbit reviews every PR but does NOT block merges.
+
+language: en-US
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+      - 'feature/**'
+
+  # Advisory tone — informative, not prescriptive
+  profile: assertive
+
+  # Custom review instructions referencing Spaarke ADRs
+  instructions:
+    - |
+      ## Spaarke Architecture Constraints (ADRs)
+
+      When reviewing code, check for these architecture violations:
+
+      **ADR-001 (Minimal API)**: The backend uses .NET 8 Minimal API with BackgroundService workers.
+      - Flag any Azure Functions usage or references
+      - Verify endpoints use MapGet/MapPost patterns
+
+      **ADR-010 (DI Minimalism)**: Maximum 15 non-framework DI registrations using concrete types.
+      - Flag new interface definitions that have only one implementation
+      - Flag AddScoped/AddTransient when AddSingleton would suffice
+
+      **ADR-021 (Fluent UI v9)**: All UI must use Fluent UI v9 (@fluentui/react-components).
+      - Flag imports from @fluentui/react (v8)
+      - Flag hard-coded color values (should use theme tokens)
+      - Flag missing dark mode support
+
+      **ADR-022 (PCF React 16)**: PCF controls use platform-provided React 16.
+      - Flag React 18 createRoot() usage in src/client/pcf/ files
+      - Flag ReactDOM.createRoot in PCF controls
+      - Code Pages (src/client/code-pages/) CAN use React 18
+
+      **ADR-008 (Endpoint Filters)**: Use endpoint filters for authorization, not global middleware.
+      - Flag app.UseMiddleware<*Authorization*> patterns
+      - Verify endpoint filters are used for resource authorization
+
+  path_instructions:
+    - path: 'src/client/pcf/**'
+      instructions: |
+        This is a PCF (Power Apps Component Framework) control.
+        - Must use React 16 APIs (no createRoot, no useId, no useSyncExternalStore)
+        - Must use @fluentui/react-components (Fluent UI v9)
+        - Must support dark mode via FluentProvider theme
+        - Check ControlManifest.Input.xml for proper version bumping
+
+    - path: 'src/client/code-pages/**'
+      instructions: |
+        This is a React Code Page (standalone dialog/page).
+        - Uses React 18 with bundled ReactDOM (not platform-provided)
+        - Must use @fluentui/react-components (Fluent UI v9)
+        - Opened via Xrm.Navigation.navigateTo with pageType: "webresource"
+
+    - path: 'src/server/api/**'
+      instructions: |
+        This is the BFF API (.NET 8 Minimal API).
+        - Use endpoint filters for auth (ADR-008), not global middleware
+        - Use ProblemDetails for all error responses (ADR-019)
+        - Keep DI registrations minimal (ADR-010)
+        - No Azure Functions (ADR-001)
+
+    - path: 'scripts/**'
+      instructions: |
+        PowerShell deployment/automation scripts.
+        - Check for hardcoded credentials or connection strings
+        - Verify error handling with try/catch
+        - Check for Write-Host vs Write-Output usage
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+
+  # Do not auto-resolve conversations — let humans manage
+  auto_resolve:
+    enabled: false
+
+chat:
+  auto_reply: true

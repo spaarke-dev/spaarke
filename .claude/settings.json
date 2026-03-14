@@ -4,6 +4,19 @@
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "command": "bash scripts/quality/post-edit-lint.sh"
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "command": "bash scripts/quality/task-quality-gate.sh"
+      }
+    ]
+  },
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
