@@ -2,7 +2,7 @@
 
 **Purpose:** Utility scripts for SDAP development, deployment, and operations.
 
-**Last Updated:** March 5, 2026
+**Last Updated:** March 14, 2026
 
 ---
 
@@ -414,6 +414,32 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Active Development Scripts
 
 ### PCF & Custom Page Deployment
+
+#### `Deploy-SpeAdminApp.ps1`
+**Purpose:** Deploy SPE Admin App code page (`src/solutions/SpeAdminApp/dist/speadmin.html`) as the `sprk_speadmin` Dataverse web resource. Creates the web resource on first run; updates and publishes on subsequent runs.
+**Usage:** 🟢 Active - Deploy after code page build
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection, built artifact at `src/solutions/SpeAdminApp/dist/speadmin.html`
+**Owner:** SPE Admin Team
+**Last Used:** March 2026 (Task 044 — initial deployment)
+
+**When to Use:**
+- After building the SPE Admin App (`npm run build` in `src/solutions/SpeAdminApp/`)
+- Deploying updates to the SPE Admin App
+- Initial setup of the web resource in a new environment
+
+**Command:**
+```powershell
+# From repo root
+.\scripts\Deploy-SpeAdminApp.ps1
+```
+
+**Notes:**
+- Web resource ID: `5f86c079-cd1f-f111-88b3-7ced8d1dc988` (dev environment)
+- Web resource accessible at: `https://spaarkedev1.crm.dynamics.com/WebResources/sprk_speadmin`
+- Creates on first deploy, updates on subsequent deploys (auto-detects)
+
+---
 
 #### `Deploy-PCFWebResources.ps1`
 **Purpose:** Deploy PCF control web resources to Dataverse

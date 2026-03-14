@@ -130,7 +130,7 @@
 |---|------|--------|------|-----|
 | 042 | Build Code Page and verify | ✅ | 032-041 | 2h |
 | 043 | Deploy BFF API with SPE endpoints | ✅ | 010-023 | 2h |
-| 044 | Deploy Code Page to Dataverse | 🔲 | 042 | 2h |
+| 044 | Deploy Code Page to Dataverse | ✅ | 042 | 2h |
 | 045 | Create Dataverse tables in environment | ✅ | 001-003 | 2h |
 | 046 | Phase 1 end-to-end integration testing | 🔲 | 042-045 | 4h |
 

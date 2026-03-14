@@ -1,7 +1,7 @@
 <task id="SPE-044" project="SDAP SPE Admin App">
   <metadata>
     <title>Deploy Code Page to Dataverse</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
     <tags>deploy, code-page, dataverse, phase-1</tags>
     <phase>1</phase>
