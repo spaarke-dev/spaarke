@@ -184,7 +184,7 @@ public class GraphMessageToEmlConverterTests
 
         var parsed = ParseEml(result);
         parsed.Body.Should().BeOfType<Multipart>();
-        var multipart = (Multipart)parsed.Body;
+        var multipart = (Multipart)parsed.Body!;
         // Body text part + 2 attachment parts
         multipart.Count.Should().Be(3);
     }
@@ -223,7 +223,7 @@ public class GraphMessageToEmlConverterTests
         var parts = parsed.BodyParts.OfType<MimePart>().ToList();
         var inlinePart = parts.FirstOrDefault(p => p.FileName == "logo.png");
         inlinePart.Should().NotBeNull();
-        inlinePart!.ContentDisposition.Disposition.Should().Be(ContentDisposition.Inline);
+        inlinePart!.ContentDisposition!.Disposition.Should().Be(ContentDisposition.Inline);
         inlinePart.ContentId.Should().Contain("logo123");
     }
 

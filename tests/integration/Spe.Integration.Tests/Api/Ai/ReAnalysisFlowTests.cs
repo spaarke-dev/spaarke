@@ -351,7 +351,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("Graph:TenantId", "test-tenant-id");
         builder.UseSetting("Graph:ClientId", "test-client-id");
         builder.UseSetting("Graph:ClientSecret", "test-secret");
-        builder.UseSetting("Cors:AllowedOrigins", "https://localhost:3000");
+        builder.UseSetting("Cors:AllowedOrigins:0", "https://localhost:3000");
         builder.UseSetting("AzureAiSearch:Endpoint", "https://test-search.search.windows.net");
         builder.UseSetting("AzureAiSearch:ApiKey", "test-api-key");
         builder.UseSetting("AzureAiSearch:KnowledgeIndexName", "spaarke-knowledge-index-v2");
@@ -410,6 +410,12 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
+
+            // Semantic Search & Record Search - endpoints are always mapped but services
+            // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
+            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(MockBehavior.Loose).Object);
+
             services.AddSingleton(_ => new Azure.Search.Documents.Indexes.SearchIndexClient(
                 new Uri("https://test-search.search.windows.net"),
                 new Azure.AzureKeyCredential("test-api-key")));
@@ -470,6 +476,14 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             // Register test JWT authentication scheme
             services.AddAuthentication("Test")
                 .AddScheme<TestReAnalysisAuthSchemeOptions, TestReAnalysisAuthHandler>("Test", _ => { });
+
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = "Test";
+                options.DefaultChallengeScheme = "Test";
+            });
         });
 
         builder.UseEnvironment("Testing");
@@ -656,7 +670,7 @@ internal class TestReAnalysisAuthHandler
         var authHeader = Request.Headers.Authorization.ToString();
         if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.NoResult());
+            return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Fail("No Authorization header"));
         }
 
         var token = authHeader["Bearer ".Length..].Trim();

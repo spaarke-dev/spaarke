@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Api.Filters;
@@ -54,7 +55,8 @@ public class AiAuthorizationFilterTests
         var httpContext = new DefaultHttpContext
         {
             User = user,
-            TraceIdentifier = "test-trace-id"
+            TraceIdentifier = "test-trace-id",
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
         };
 
         var contextMock = new Mock<EndpointFilterInvocationContext>();
@@ -142,7 +144,7 @@ public class AiAuthorizationFilterTests
     }
 
     [Fact]
-    public async Task InvokeAsync_NoDocumentInRequest_Returns400()
+    public async Task InvokeAsync_NoDocumentInRequest_ProceedsToNextHandler()
     {
         // Arrange
         var context = CreateContext(CreateUser()); // No arguments
@@ -151,9 +153,8 @@ public class AiAuthorizationFilterTests
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
-        result.Should().BeOfType<ProblemHttpResult>();
-        var problemResult = (ProblemHttpResult)result!;
-        problemResult.StatusCode.Should().Be(400);
+        // When no document IDs are found, the filter passes through to the next handler
+        result.Should().BeOfType<Ok<string>>();
     }
 
     #endregion
@@ -313,7 +314,7 @@ public class AiAuthorizationFilterTests
     }
 
     [Fact]
-    public async Task InvokeAsync_EmptyGuidArgument_Returns400()
+    public async Task InvokeAsync_EmptyGuidArgument_ProceedsToNextHandler()
     {
         // Arrange
         var context = CreateContext(CreateUser(), Guid.Empty);
@@ -322,9 +323,8 @@ public class AiAuthorizationFilterTests
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
-        result.Should().BeOfType<ProblemHttpResult>();
-        var problemResult = (ProblemHttpResult)result!;
-        problemResult.StatusCode.Should().Be(400);
+        // When an empty Guid is provided (no document ID), the filter passes through to the next handler
+        result.Should().BeOfType<Ok<string>>();
     }
 
     #endregion

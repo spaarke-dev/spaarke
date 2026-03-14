@@ -1,0 +1,56 @@
+<task id="PPI-042" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Deployment Slot Configuration (C3)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, deployment</tags>
+    <parallel-group>P5-A</parallel-group>
+    <dependencies>Phase 4 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Configure staging deployment slot for zero-downtime deployments. Deploy to staging, run health
+    checks, then swap to production.
+  </prompt>
+
+  <role>Azure infrastructure engineer with deployment slot expertise</role>
+
+  <goal>Staging slot configured with health check. Swap mechanism operational.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Auto-swap disabled — require manual approval or CI/CD gate</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-deployment-slots</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create staging slot Bicep">Define staging slot with health check endpoint (/healthz).</step>
+    <step order="2" name="Configure slot settings">Mark environment-specific settings as slot settings.</step>
+    <step order="3" name="Configure warm-up">Add warm-up endpoint to prevent cold starts on swap.</step>
+    <step order="4" name="Validate Bicep">Run `az bicep build`.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/deployment-slot.bicep (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Staging slot configured in Bicep</criterion>
+    <criterion testable="true">Health check endpoint configured</criterion>
+    <criterion testable="true">Warm-up endpoint configured</criterion>
+    <criterion testable="true">Bicep validates</criterion>
+  </acceptance-criteria>
+</task>

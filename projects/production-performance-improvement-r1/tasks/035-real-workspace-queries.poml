@@ -1,0 +1,92 @@
+<task id="PPI-035" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Implement Real Workspace Dataverse Queries (F5)</title>
+    <status>completed</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <phase>4</phase>
+    <domain>F</domain>
+    <tags>bff-api, dataverse, workspace</tags>
+    <parallel-group>P4-ALL</parallel-group>
+    <dependencies>Phase 3 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace mock/stub implementations in 3 Workspace services with real Dataverse queries:
+    1. PortfolioService — 100% mock data (matters, spend, budget, health metrics)
+    2. WorkspaceAiService — partial mock (hardcoded entity descriptions)
+    3. TodoGenerationService — rules 2, 4, 5 stubbed (budget alerts, pending invoices, assigned tasks)
+    Beta users would see fake data without these changes.
+  </prompt>
+
+  <role>Senior .NET developer with Dataverse WebAPI and domain modeling expertise</role>
+
+  <goal>
+    All 3 Workspace services return real Dataverse data for the authenticated user. Portfolio
+    dashboard shows real matters. AI Summary shows real entity data. All 5 to-do rules produce
+    results from real Dataverse queries.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Must discover Dataverse entity field names before implementing queries</constraint>
+    <constraint source="ADR-002">Queries should be efficient (explicit column selection per task 013)</constraint>
+    <constraint source="project">Handle case where entities have no data gracefully (empty state)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, workspace-services</topic>
+    <files>
+      <file>.claude/constraints/data.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Discover Dataverse entity schemas">
+      Query Dataverse metadata for sprk_matter, sprk_event, sprk_invoice, sprk_task field names.
+    </step>
+    <step order="2" name="Implement PortfolioService real queries">
+      Replace mock data with real Dataverse queries for matters, spend, budget, health metrics.
+    </step>
+    <step order="3" name="Implement WorkspaceAiService real queries">
+      Replace hardcoded entity descriptions with real Dataverse entity data.
+    </step>
+    <step order="4" name="Implement TodoGenerationService rules 2, 4, 5">
+      Rule 2: Budget alerts from sprk_matter budget vs spend.
+      Rule 4: Pending invoices from sprk_invoice.
+      Rule 5: Assigned tasks from sprk_task.
+    </step>
+    <step order="5" name="Handle empty data gracefully">
+      Return appropriate empty states when no data exists.
+    </step>
+    <step order="6" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceAiService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PortfolioService returns real Dataverse data</criterion>
+    <criterion testable="true">WorkspaceAiService fetches real entity descriptions</criterion>
+    <criterion testable="true">TodoGenerationService rules 2, 4, 5 execute real queries</criterion>
+    <criterion testable="true">Empty data handled gracefully (no errors)</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

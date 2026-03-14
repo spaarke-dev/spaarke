@@ -70,6 +70,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"CreatePlaybook\", \"confidence\": 0.95 }");
 
@@ -92,6 +93,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"AddNode\", \"confidence\": 0.90 }");
 
@@ -114,6 +116,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"Unknown\", \"confidence\": 0.30 }");
 
@@ -144,6 +147,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"summary\": \"Build plan\", \"steps\": [] }");
 
@@ -171,6 +175,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"AddNode\", \"confidence\": 0.90 }");
 
@@ -197,6 +202,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"CreatePlaybook\", \"confidence\": 0.95 }");
 
@@ -228,6 +234,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("{ \"intent\": \"AddNode\", \"confidence\": 0.85 }");
 
@@ -245,6 +252,7 @@ public class AiPlaybookBuilderServiceTests
             x => x.GetCompletionAsync(
                 It.Is<string>(s => s.Contains("Nodes: 1")),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -353,6 +361,7 @@ public class AiPlaybookBuilderServiceTests
             x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -367,6 +376,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("AI response for testing");
 
@@ -389,6 +399,7 @@ public class AiPlaybookBuilderServiceTests
             x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
     }
@@ -403,6 +414,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("AI response for production test");
 
@@ -422,6 +434,7 @@ public class AiPlaybookBuilderServiceTests
             x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
     }
@@ -561,6 +574,7 @@ public class AiPlaybookBuilderServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("AI response");
 

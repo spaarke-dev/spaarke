@@ -89,19 +89,24 @@ public sealed class AgentContentSafetyMiddleware : ISprkChatAgent
     {
         var result = text;
         var modified = false;
+        var patternsMatched = 0;
 
         foreach (var pattern in _patterns)
         {
             if (pattern.Regex.IsMatch(result))
             {
-                // Log warning with pattern name only — NEVER log matched content
-                _logger.LogWarning(
-                    "ChatAgent content safety: detected {PatternName} pattern in response for playbook={PlaybookId}",
-                    pattern.Name, _inner.Context.PlaybookId);
-
                 result = pattern.Regex.Replace(result, FilteredPlaceholder);
                 modified = true;
+                patternsMatched++;
             }
+        }
+
+        if (patternsMatched > 0)
+        {
+            // Log warning with count only — NEVER log matched content (AIPL-057)
+            _logger.LogWarning(
+                "ChatAgent content safety: filtered {PatternsMatched} pattern types in response for playbook={PlaybookId}",
+                patternsMatched, _inner.Context.PlaybookId);
         }
 
         return modified ? result : text;

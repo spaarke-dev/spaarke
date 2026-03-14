@@ -62,7 +62,8 @@ public class PlaybookOrchestrationServiceTests
             OutputVariable = outputVariable ?? name.ToLowerInvariant().Replace(" ", "_"),
             ExecutionOrder = order,
             DependsOn = dependsOn,
-            IsActive = true
+            IsActive = true,
+            NodeType = NodeType.AIAnalysis
         };
 
     private static AnalysisAction CreateAction(Guid? id = null, string? name = null) => new()

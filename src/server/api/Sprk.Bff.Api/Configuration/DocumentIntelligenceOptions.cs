@@ -73,11 +73,13 @@ public class DocumentIntelligenceOptions
     public int EmbeddingDimensions { get; set; } = 3072;
 
     /// <summary>
-    /// Max tokens for summary output. Higher = longer summaries.
-    /// Range: 100-4000. Default: 1000 (~750 words)
+    /// Default max tokens for summary output. Higher = longer summaries.
+    /// Range: 100-4000. Default: 500 (~375 words).
+    /// Per-action overrides can be set via JPS configuration or tool context.
+    /// Reduced from 1000 to 500 for performance -- most analyses complete well under 500 tokens.
     /// </summary>
     [Range(100, 4000, ErrorMessage = "DocumentIntelligence:MaxOutputTokens must be between 100 and 4000")]
-    public int MaxOutputTokens { get; set; } = 1000;
+    public int MaxOutputTokens { get; set; } = 500;
 
     /// <summary>
     /// Temperature for generation. Lower = more deterministic.
@@ -100,6 +102,31 @@ public class DocumentIntelligenceOptions
     /// Store in Key Vault (production) or user-secrets (development).
     /// </summary>
     public string? DocIntelKey { get; set; }
+
+    // === Document Intelligence Resilience Settings ===
+
+    /// <summary>
+    /// Timeout in seconds for Document Intelligence API calls.
+    /// A stuck request will be cancelled after this duration.
+    /// Default: 30 seconds.
+    /// </summary>
+    [Range(5, 300, ErrorMessage = "DocumentIntelligence:DocIntelTimeoutSeconds must be between 5 and 300")]
+    public int DocIntelTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Number of consecutive Document Intelligence failures before the circuit breaker opens.
+    /// When open, requests immediately return a degradation message without calling the service.
+    /// Default: 3 consecutive failures.
+    /// </summary>
+    [Range(1, 20, ErrorMessage = "DocumentIntelligence:DocIntelCircuitBreakerThreshold must be between 1 and 20")]
+    public int DocIntelCircuitBreakerThreshold { get; set; } = 3;
+
+    /// <summary>
+    /// Duration in seconds the circuit breaker stays open before transitioning to half-open.
+    /// Default: 60 seconds.
+    /// </summary>
+    [Range(10, 600, ErrorMessage = "DocumentIntelligence:DocIntelCircuitBreakerBreakSeconds must be between 10 and 600")]
+    public int DocIntelCircuitBreakerBreakSeconds { get; set; } = 60;
 
     // === File Type Configuration ===
 

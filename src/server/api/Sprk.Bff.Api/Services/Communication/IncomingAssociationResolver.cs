@@ -301,10 +301,15 @@ public sealed class IncomingAssociationResolver
     {
         try
         {
+            var patternsTested = 0;
+            var patternsMatched = 0;
+            var timeouts = 0;
+
             foreach (var pattern in MatterReferencePatterns)
             {
                 try
                 {
+                    patternsTested++;
                     var match = pattern.Match(subject);
                     if (!match.Success)
                         continue;
@@ -313,8 +318,7 @@ public sealed class IncomingAssociationResolver
                     if (string.IsNullOrWhiteSpace(referenceNumber))
                         continue;
 
-                    _logger.LogDebug("Extracted reference number '{Reference}' from subject '{Subject}'",
-                        referenceNumber, subject);
+                    patternsMatched++;
 
                     // Also try with prefix variations
                     var matter = await _dataverseService.QueryMatterByReferenceNumberAsync(referenceNumber, ct)
@@ -324,16 +328,21 @@ public sealed class IncomingAssociationResolver
                     {
                         fields["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter.Id);
 
-                        _logger.LogDebug("Subject pattern matched to matter {MatterId} via reference '{Reference}'",
-                            matter.Id, referenceNumber);
+                        _logger.LogDebug(
+                            "Subject pattern matching complete: tested {PatternsTested} patterns, {PatternsMatched} matched, resolved to matter {MatterId}",
+                            patternsTested, patternsMatched, matter.Id);
                         return true;
                     }
                 }
                 catch (RegexMatchTimeoutException)
                 {
-                    _logger.LogWarning("Regex timeout evaluating subject pattern");
+                    timeouts++;
                 }
             }
+
+            _logger.LogDebug(
+                "Subject pattern matching complete: tested {PatternsTested} patterns, {PatternsMatched} matched, {Timeouts} timeouts, no matter resolved",
+                patternsTested, patternsMatched, timeouts);
 
             return false;
         }

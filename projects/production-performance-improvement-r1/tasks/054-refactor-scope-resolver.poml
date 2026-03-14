@@ -1,0 +1,92 @@
+<task id="PPI-054" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Refactor ScopeResolverService God Class (F4)</title>
+    <status>completed</status>
+    <estimated-effort>12 hours</estimated-effort>
+    <phase>6</phase>
+    <domain>F</domain>
+    <tags>bff-api, refactoring, code-quality</tags>
+    <parallel-group>P6-A</parallel-group>
+    <dependencies>Phase 5 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Refactor ScopeResolverService.cs (2,538 lines, 39 public methods) into 5 focused services:
+    AnalysisActionService, AnalysisSkillService, AnalysisKnowledgeService, AnalysisToolService,
+    and ScopeResolverService (scope resolution only). This is post-beta, high-effort refactoring
+    for long-term maintainability.
+  </prompt>
+
+  <role>Senior .NET architect with service decomposition and refactoring expertise</role>
+
+  <goal>
+    ScopeResolverService split into 5 focused services. Each service &lt; 600 lines.
+    All existing tests pass. DI registrations updated per ADR-010.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">≤15 non-framework DI registrations; register concretes</constraint>
+    <constraint source="project">Must not change public API contracts (endpoints still work same way)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>service-architecture, refactoring</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Analyze method groups">
+      Categorize 39 public methods by domain: Actions, Skills, Knowledge, Tools, Scope Resolution.
+    </step>
+    <step order="2" name="Extract AnalysisActionService">
+      Move Action CRUD methods to new service.
+    </step>
+    <step order="3" name="Extract AnalysisSkillService">
+      Move Skill CRUD methods to new service.
+    </step>
+    <step order="4" name="Extract AnalysisKnowledgeService">
+      Move Knowledge CRUD methods to new service.
+    </step>
+    <step order="5" name="Extract AnalysisToolService">
+      Move Tool CRUD methods to new service.
+    </step>
+    <step order="6" name="Update DI registrations">
+      Register all 5 services as concretes per ADR-010. Verify ≤15 total.
+    </step>
+    <step order="7" name="Update callers">
+      Update all callers to use the appropriate focused service.
+    </step>
+    <step order="8" name="Run full test suite">
+      Run `dotnet test`. All existing tests must pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs (reduced)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisSkillService.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisKnowledgeService.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisToolService.cs (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ScopeResolverService reduced to scope resolution only</criterion>
+    <criterion testable="true">4 new focused services created</criterion>
+    <criterion testable="true">Each service &lt; 600 lines</criterion>
+    <criterion testable="true">DI registrations updated, ≤15 non-framework total</criterion>
+    <criterion testable="true">All existing tests pass</criterion>
+  </acceptance-criteria>
+</task>

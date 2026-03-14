@@ -1,0 +1,39 @@
+<task id="PPI-053" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Deployment Slot Swap in CI/CD (D4)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>6</phase>
+    <domain>D</domain>
+    <tags>ci-cd, deployment</tags>
+    <parallel-group>P6-B</parallel-group>
+    <dependencies>042 (C3 - deployment slots), 051 (D2 - IaC)</dependencies>
+  </metadata>
+
+  <prompt>
+    Integrate deployment slot swap into CI/CD pipeline. Deploy to staging slot, run health check,
+    then swap to production with manual approval.
+  </prompt>
+
+  <role>DevOps engineer</role>
+  <goal>CI/CD pipeline deploys to staging slot and swaps to production after health check.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="project">Manual approval before swap</constraint></constraints>
+  <knowledge><topic>deployment-slots, ci-cd</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Deploy to staging slot">Add `az webapp deployment slot` step.</step>
+    <step order="2" name="Run health check">Call /healthz on staging slot after deploy.</step>
+    <step order="3" name="Add swap step">Add `az webapp deployment slot swap` with manual gate.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs><output type="code">.github/workflows/ (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CI/CD deploys to staging slot</criterion>
+    <criterion testable="true">Health check runs after staging deploy</criterion>
+    <criterion testable="true">Slot swap requires approval</criterion>
+  </acceptance-criteria>
+</task>

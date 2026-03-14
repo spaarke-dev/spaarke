@@ -1,0 +1,40 @@
+<task id="PPI-052" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Environment Promotion with Approval Gates (D3)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>6</phase>
+    <domain>D</domain>
+    <tags>ci-cd, deployment</tags>
+    <parallel-group>P6-B</parallel-group>
+    <dependencies>051 (D2 - IaC deployment)</dependencies>
+  </metadata>
+
+  <prompt>
+    Define environment progression: dev → staging → prod. Add manual approval gate for staging → prod
+    promotion. Enable OIDC-based auth for all environments.
+  </prompt>
+
+  <role>DevOps engineer with GitHub Actions environments expertise</role>
+
+  <goal>Environment promotion configured with approval gates in CI/CD.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="project">Manual approval required for staging → prod</constraint></constraints>
+  <knowledge><topic>ci-cd, github-actions</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Define GitHub environments">Create dev, staging, prod environments with protection rules.</step>
+    <step order="2" name="Add approval gate">Configure required reviewers for prod environment.</step>
+    <step order="3" name="Configure promotion workflow">Add promotion steps: dev → staging (auto), staging → prod (manual).</step>
+  </steps>
+
+  <tools><tool name="gh">GitHub CLI</tool></tools>
+  <outputs><output type="code">.github/workflows/ (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Three environments configured (dev, staging, prod)</criterion>
+    <criterion testable="true">Manual approval required for staging → prod</criterion>
+    <criterion testable="true">OIDC auth for all environments</criterion>
+  </acceptance-criteria>
+</task>

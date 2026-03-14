@@ -329,15 +329,13 @@ public static class FieldMappingEndpoints
         string targetEntity,
         CancellationToken ct)
     {
-        // Get profile by entity pair
-        var profile = await dataverseService.GetFieldMappingProfileAsync(sourceEntity, targetEntity, ct);
+        // PPI-024: Use $expand to get profile + rules in a single Dataverse call (2 calls → 1).
+        // Falls back to sequential calls if $expand is not supported by the implementation.
+        var profile = await dataverseService.GetFieldMappingProfileWithRulesAsync(sourceEntity, targetEntity, activeRulesOnly: true, ct);
         if (profile is null)
         {
             return null;
         }
-
-        // Get rules for this profile
-        var rules = await dataverseService.GetFieldMappingRulesAsync(profile.Id, activeOnly: true, ct);
 
         return new FieldMappingProfileWithRulesDto
         {
@@ -347,7 +345,7 @@ public static class FieldMappingEndpoints
             TargetEntity = profile.TargetEntity ?? string.Empty,
             SyncMode = MapSyncModeToString(profile.SyncMode),
             IsActive = profile.IsActive,
-            Rules = rules.Select(MapRuleEntityToDto).ToArray()
+            Rules = (profile.Rules ?? []).Select(MapRuleEntityToDto).ToArray()
         };
     }
 

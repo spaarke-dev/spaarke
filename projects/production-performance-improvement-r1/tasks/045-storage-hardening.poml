@@ -1,0 +1,36 @@
+<task id="PPI-045" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Storage Account Hardening (C6)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, security</tags>
+    <parallel-group>P5-B</parallel-group>
+    <dependencies>040 (C1 - VNet)</dependencies>
+  </metadata>
+
+  <prompt>Disable shared key access, restrict to VNet, add lifecycle management for ai-chunks container.</prompt>
+  <role>Azure infrastructure engineer</role>
+  <goal>Storage account hardened with no shared keys, VNet restricted, lifecycle policies.</goal>
+
+  <inputs><file purpose="spec">projects/production-performance-improvement-r1/spec.md</file></inputs>
+  <constraints><constraint source="project">Ensure App Service identity has RBAC access before disabling shared keys</constraint></constraints>
+  <knowledge><topic>azure-storage, security</topic><files><file>.claude/constraints/azure-deployment.md</file></files></knowledge>
+
+  <steps>
+    <step order="1" name="Disable shared key access">Set allowSharedKeyAccess: false.</step>
+    <step order="2" name="Restrict to VNet">Add network rules for VNet access only.</step>
+    <step order="3" name="Add lifecycle policy">Move ai-chunks to Cool tier after 30 days.</step>
+    <step order="4" name="Validate">Run `az bicep build`.</step>
+  </steps>
+
+  <tools><tool name="az">Azure CLI</tool></tools>
+  <outputs><output type="code">infrastructure/bicep/modules/storage.bicep (modified)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Shared key access disabled</criterion>
+    <criterion testable="true">Network restricted to VNet</criterion>
+    <criterion testable="true">Lifecycle policy for ai-chunks container</criterion>
+  </acceptance-criteria>
+</task>

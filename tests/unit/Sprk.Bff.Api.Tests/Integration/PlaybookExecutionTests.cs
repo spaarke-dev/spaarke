@@ -602,7 +602,7 @@ public class PlaybookExecutionTests
     }
 
     [Fact]
-    public void DeliverOutputNodeExecutor_WithMissingDeliveryType_FailsValidation()
+    public void DeliverOutputNodeExecutor_WithMissingDeliveryType_DefaultsToMarkdown()
     {
         // Arrange
         var templateEngineMock = new Mock<ITemplateEngine>();
@@ -617,8 +617,8 @@ public class PlaybookExecutionTests
         // Act
         var validation = executor.Validate(context);
 
-        // Assert
-        validation.IsValid.Should().BeFalse("Validation should fail without deliveryType");
+        // Assert - deliveryType is optional, defaults to "markdown"
+        validation.IsValid.Should().BeTrue("deliveryType is optional and defaults to markdown");
     }
 
     #endregion
@@ -810,7 +810,8 @@ public class PlaybookExecutionTests
             OutputVariable = outputVariable,
             ExecutionOrder = order,
             DependsOn = dependsOn,
-            IsActive = true
+            IsActive = true,
+            NodeType = NodeType.AIAnalysis
         };
     }
 

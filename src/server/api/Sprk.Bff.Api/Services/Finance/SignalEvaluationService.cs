@@ -144,6 +144,7 @@ public class SignalEvaluationService : ISignalEvaluationService
 
         // 2. Retrieve snapshot field values and evaluate rules
         var totalSignals = 0;
+        var emptySnapshots = 0;
 
         foreach (var snapshotId in snapshotIds)
         {
@@ -155,7 +156,7 @@ public class SignalEvaluationService : ISignalEvaluationService
 
             if (fields.Count == 0)
             {
-                _logger.LogWarning("Snapshot {SnapshotId} returned no fields. Skipping.", snapshotId);
+                emptySnapshots++;
                 continue;
             }
 
@@ -170,14 +171,15 @@ public class SignalEvaluationService : ISignalEvaluationService
                     totalSignals++;
 
                     _telemetry.RecordSignalEmitted(signal.SignalTypeName, matterId.ToString());
-
-                    _logger.LogInformation(
-                        "Signal triggered: {SignalType} for matter {MatterId}. " +
-                        "TriggerValue={TriggerValue:F2}, Threshold={ThresholdValue:F2}, Snapshot={SnapshotId}",
-                        signal.SignalTypeName, matterId,
-                        signal.TriggerValue, signal.ThresholdValue, snapshotId);
                 }
             }
+        }
+
+        if (emptySnapshots > 0)
+        {
+            _logger.LogWarning(
+                "{EmptySnapshots} of {TotalSnapshots} snapshots returned no fields for matter {MatterId}",
+                emptySnapshots, snapshotIds.Length, matterId);
         }
 
         _logger.LogInformation(

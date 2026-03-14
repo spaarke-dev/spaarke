@@ -1,0 +1,89 @@
+<task id="PPI-001" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Bicep Tier Corrections (C0)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <domain>C</domain>
+    <tags>infrastructure, bicep, beta-blocker</tags>
+    <parallel-group>P1-A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Correct the Model 2 Bicep template defaults from development-grade to production-grade tiers.
+    The current defaults (B1 App Service, Basic Redis C0, basic AI Search) will fail at 10+ concurrent
+    users. This is a CRITICAL beta blocker — the system cannot handle beta load without these changes.
+  </prompt>
+
+  <role>Azure infrastructure engineer with Bicep and ARM template expertise</role>
+
+  <goal>
+    All Bicep tier defaults corrected to production-grade. Parameter files updated for dev and prod
+    environments. Bicep validates successfully with `az bicep build`.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="bicep-template">infrastructure/bicep/stacks/model2-full.bicep</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">No Azure Functions — single App Service runtime</constraint>
+    <constraint source="project">Must maintain parameter override capability for dev vs prod</constraint>
+    <constraint source="project">Budget approved for ~$620/month increase</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-infrastructure</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>infrastructure/bicep/stacks/model2-full.bicep</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review current Bicep defaults">
+      Read model2-full.bicep. Identify all tier parameters and their current values.
+    </step>
+    <step order="2" name="Update App Service SKU">
+      Change appServiceSku default from B1 to S1 (line ~31).
+    </step>
+    <step order="3" name="Update Redis tier">
+      Change Redis sku from Basic to Standard, capacity from 0 (C0) to 1 (C1) (lines ~114-115).
+    </step>
+    <step order="4" name="Update AI Search tier">
+      Change aiSearchSku from basic to standard. Set replicaCount to 2 (lines ~35, ~261).
+    </step>
+    <step order="5" name="Update OpenAI capacity">
+      Increase gpt-4o-mini capacity from 120 to 200 (line ~241).
+    </step>
+    <step order="6" name="Create/update parameter files">
+      Ensure dev.bicepparam and prod.bicepparam exist with appropriate overrides.
+      Dev can use lower tiers for cost savings; prod uses production defaults.
+    </step>
+    <step order="7" name="Validate Bicep">
+      Run `az bicep build` to validate template syntax. Check for warnings.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for Bicep validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/stacks/model2-full.bicep (modified)</output>
+    <output type="code">infrastructure/bicep/stacks/dev.bicepparam (created/modified)</output>
+    <output type="code">infrastructure/bicep/stacks/prod.bicepparam (created/modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App Service SKU default is S1 or higher</criterion>
+    <criterion testable="true">Redis SKU default is Standard, capacity is C1 (1GB)</criterion>
+    <criterion testable="true">AI Search SKU default is standard with 2+ replicas</criterion>
+    <criterion testable="true">OpenAI gpt-4o-mini capacity is 200+</criterion>
+    <criterion testable="true">Bicep validates without errors (`az bicep build`)</criterion>
+    <criterion testable="true">Parameter files exist for dev and prod environments</criterion>
+  </acceptance-criteria>
+</task>

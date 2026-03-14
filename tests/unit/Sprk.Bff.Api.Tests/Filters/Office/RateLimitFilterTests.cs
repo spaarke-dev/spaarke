@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -15,17 +16,19 @@ namespace Sprk.Bff.Api.Tests.Filters.Office;
 /// <summary>
 /// Unit tests for <see cref="OfficeRateLimitFilter"/> and <see cref="OfficeRateLimitService"/>.
 /// Tests rate limiting behavior for Office endpoints.
+/// Uses MemoryDistributedCache instead of Mock&lt;IDistributedCache&gt; because
+/// GetStringAsync/SetStringAsync are extension methods that cannot be mocked.
 /// </summary>
 public class RateLimitFilterTests
 {
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly IDistributedCache _cache;
     private readonly Mock<ILogger<OfficeRateLimitService>> _serviceLoggerMock;
     private readonly Mock<ILogger<OfficeRateLimitFilter>> _filterLoggerMock;
     private readonly OfficeRateLimitOptions _options;
 
     public RateLimitFilterTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
         _serviceLoggerMock = new Mock<ILogger<OfficeRateLimitService>>();
         _filterLoggerMock = new Mock<ILogger<OfficeRateLimitFilter>>();
         _options = new OfficeRateLimitOptions
@@ -51,7 +54,15 @@ public class RateLimitFilterTests
     private IOfficeRateLimitService CreateRateLimitService()
     {
         return new OfficeRateLimitService(
-            _cacheMock.Object,
+            _cache,
+            Options.Create(_options),
+            _serviceLoggerMock.Object);
+    }
+
+    private IOfficeRateLimitService CreateRateLimitService(IDistributedCache cache)
+    {
+        return new OfficeRateLimitService(
+            cache,
             Options.Create(_options),
             _serviceLoggerMock.Object);
     }
@@ -60,6 +71,14 @@ public class RateLimitFilterTests
     {
         return new OfficeRateLimitFilter(
             CreateRateLimitService(),
+            category,
+            _filterLoggerMock.Object);
+    }
+
+    private OfficeRateLimitFilter CreateFilter(OfficeRateLimitCategory category, IDistributedCache cache)
+    {
+        return new OfficeRateLimitFilter(
+            CreateRateLimitService(cache),
             category,
             _filterLoggerMock.Object);
     }
@@ -92,6 +111,27 @@ public class RateLimitFilterTests
     private static ValueTask<object?> NextDelegate(EndpointFilterInvocationContext context)
         => ValueTask.FromResult<object?>(Results.Ok("Success"));
 
+    /// <summary>
+    /// A distributed cache implementation that throws on all operations.
+    /// Used to test "fail open" behavior when cache is unavailable.
+    /// </summary>
+    private sealed class ThrowingDistributedCache : IDistributedCache
+    {
+        public byte[]? Get(string key) => throw new InvalidOperationException("Redis unavailable");
+        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) =>
+            throw new InvalidOperationException("Redis unavailable");
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) =>
+            throw new InvalidOperationException("Redis unavailable");
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default) =>
+            throw new InvalidOperationException("Redis unavailable");
+        public void Refresh(string key) => throw new InvalidOperationException("Redis unavailable");
+        public Task RefreshAsync(string key, CancellationToken token = default) =>
+            throw new InvalidOperationException("Redis unavailable");
+        public void Remove(string key) => throw new InvalidOperationException("Redis unavailable");
+        public Task RemoveAsync(string key, CancellationToken token = default) =>
+            throw new InvalidOperationException("Redis unavailable");
+    }
+
     #endregion
 
     #region Rate Limit Service Tests
@@ -115,11 +155,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task RateLimitService_FirstRequest_Allowed()
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
+        // Arrange — fresh cache has no entries, so first request is allowed
         var service = CreateRateLimitService();
 
         // Act
@@ -140,11 +176,7 @@ public class RateLimitFilterTests
     [InlineData(OfficeRateLimitCategory.Recent, 30)]
     public async Task RateLimitService_CorrectLimitsForCategory(OfficeRateLimitCategory category, int expectedLimit)
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
+        // Arrange — fresh cache, no prior requests
         var service = CreateRateLimitService();
 
         // Act
@@ -157,12 +189,9 @@ public class RateLimitFilterTests
     [Fact]
     public async Task RateLimitService_CacheError_FailsOpen()
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis unavailable"));
-
-        var service = CreateRateLimitService();
+        // Arrange — use a cache that throws on all operations
+        var throwingCache = new ThrowingDistributedCache();
+        var service = CreateRateLimitService(throwingCache);
 
         // Act
         var result = await service.CheckAndIncrementAsync("user-123", OfficeRateLimitCategory.Save);
@@ -178,11 +207,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task Filter_RequestAllowed_ProceedsToEndpoint()
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
+        // Arrange — fresh cache, first request is allowed
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(CreateAuthenticatedUser());
 
@@ -202,7 +227,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task Filter_RateLimitExceeded_Returns429()
     {
-        // Arrange - Simulate hitting the limit
+        // Arrange - Pre-populate cache with segment counts that exceed the limit
         var segmentCounts = new Dictionary<long, int>();
         var now = DateTimeOffset.UtcNow;
         var segmentSeconds = _options.WindowSizeSeconds / _options.SegmentsPerWindow;
@@ -215,9 +240,8 @@ public class RateLimitFilterTests
         }
 
         var cachedState = System.Text.Json.JsonSerializer.Serialize(new { SegmentCounts = segmentCounts });
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedState);
+        var cacheKey = $"{_options.KeyPrefix}user-123:Save";
+        await _cache.SetStringAsync(cacheKey, cachedState);
 
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(CreateAuthenticatedUser());
@@ -238,11 +262,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task Filter_UnauthenticatedUser_UsesIpAddress()
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
+        // Arrange — fresh cache, first request allowed
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var anonymousUser = new ClaimsPrincipal(new ClaimsIdentity());
         var context = CreateContext(anonymousUser);
@@ -263,10 +283,6 @@ public class RateLimitFilterTests
     {
         // Arrange
         var userId = "oid-user-123";
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.Is<string>(s => s.Contains(userId)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var user = CreateAuthenticatedUser(userId);
         var context = CreateContext(user);
@@ -274,10 +290,10 @@ public class RateLimitFilterTests
         // Act
         await filter.InvokeAsync(context.Object, NextDelegate);
 
-        // Assert
-        _cacheMock.Verify(
-            c => c.GetStringAsync(It.Is<string>(s => s.Contains(userId)), It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Assert — verify that a cache entry was created with the user's OID in the key
+        var cacheKey = $"{_options.KeyPrefix}{userId}:Save";
+        var cached = await _cache.GetStringAsync(cacheKey);
+        cached.Should().NotBeNull("cache entry should exist with user OID in the key");
     }
 
     [Fact]
@@ -292,20 +308,16 @@ public class RateLimitFilterTests
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var user = new ClaimsPrincipal(identity);
 
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.Is<string>(s => s.Contains(userId)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(user);
 
         // Act
         await filter.InvokeAsync(context.Object, NextDelegate);
 
-        // Assert
-        _cacheMock.Verify(
-            c => c.GetStringAsync(It.Is<string>(s => s.Contains(userId)), It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Assert — verify that a cache entry was created with the user's NameIdentifier in the key
+        var cacheKey = $"{_options.KeyPrefix}{userId}:Save";
+        var cached = await _cache.GetStringAsync(cacheKey);
+        cached.Should().NotBeNull("cache entry should exist with user NameIdentifier in the key");
     }
 
     #endregion
@@ -315,11 +327,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task Filter_SetsCorrectRateLimitHeaders()
     {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
+        // Arrange — fresh cache, first request
         var filter = CreateFilter(OfficeRateLimitCategory.Search);
         var context = CreateContext(CreateAuthenticatedUser());
 
@@ -342,22 +350,9 @@ public class RateLimitFilterTests
     public async Task Filter_DifferentCategories_HaveSeparateLimits()
     {
         // Arrange
-        var userId = "user-123";
-        var saveCategory = "Save";
-        var searchCategory = "Search";
-
-        // Setup separate tracking for each category
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.Is<string>(s => s.Contains(saveCategory)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.Is<string>(s => s.Contains(searchCategory)), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
         var saveFilter = CreateFilter(OfficeRateLimitCategory.Save);
         var searchFilter = CreateFilter(OfficeRateLimitCategory.Search);
-        var context = CreateContext(CreateAuthenticatedUser(userId));
+        var context = CreateContext(CreateAuthenticatedUser("user-123"));
 
         // Act
         var saveResult = await saveFilter.InvokeAsync(context.Object, NextDelegate);
@@ -377,7 +372,7 @@ public class RateLimitFilterTests
     [Fact]
     public async Task Filter_RateLimitExceeded_LogsWarning()
     {
-        // Arrange - Simulate hitting the limit
+        // Arrange - Pre-populate cache with segment counts that exceed the limit
         var segmentCounts = new Dictionary<long, int>();
         var now = DateTimeOffset.UtcNow;
         var segmentSeconds = _options.WindowSizeSeconds / _options.SegmentsPerWindow;
@@ -389,9 +384,8 @@ public class RateLimitFilterTests
         }
 
         var cachedState = System.Text.Json.JsonSerializer.Serialize(new { SegmentCounts = segmentCounts });
-        _cacheMock
-            .Setup(c => c.GetStringAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedState);
+        var cacheKey = $"{_options.KeyPrefix}user-123:Save";
+        await _cache.SetStringAsync(cacheKey, cachedState);
 
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(CreateAuthenticatedUser());

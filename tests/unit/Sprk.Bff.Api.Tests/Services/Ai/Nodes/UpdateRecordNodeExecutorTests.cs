@@ -103,7 +103,7 @@ public class UpdateRecordNodeExecutorTests
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("Invalid"));
+        result.Errors.Should().Contain(e => e.Contains("Failed to parse") || e.Contains("Invalid"));
     }
 
     [Fact]

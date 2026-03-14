@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Spaarke.Dataverse;
@@ -54,7 +55,10 @@ public class AiAuthorizationServiceTests
 
     private static Microsoft.AspNetCore.Http.HttpContext CreateMockHttpContext()
     {
-        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
         context.Request.Headers["Authorization"] = "Bearer mock-token";
         return context;
     }
@@ -132,7 +136,7 @@ public class AiAuthorizationServiceTests
 
         _accessDataSourceMock
             .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string uid, string rid, CancellationToken _) =>
+            .ReturnsAsync((string uid, string rid, string? _, CancellationToken __) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.Read));
 
         // Act
@@ -254,7 +258,7 @@ public class AiAuthorizationServiceTests
 
         _accessDataSourceMock
             .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string uid, string rid, CancellationToken _) =>
+            .ReturnsAsync((string uid, string rid, string? _, CancellationToken __) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.None));
 
         // Act

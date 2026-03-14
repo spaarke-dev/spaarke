@@ -22,6 +22,13 @@ public static class DocumentsModule
         services.AddSingleton<GraphTokenCache>();
 
         // ============================================================================
+        // Phase 3: Graph Metadata Caching (ADR-009: Redis-First, ADR-007: SpeFileStore Facade)
+        // ============================================================================
+        // Caches Graph API metadata: file metadata (5min), folder listings (2min),
+        // container-to-drive mappings (24h). Expected 90%+ hit rate, ~5ms vs 100-300ms.
+        services.AddSingleton<GraphMetadataCache>();
+
+        // ============================================================================
         // SPE Operations (Phase 2: Service Layer Simplification)
         // ============================================================================
         // SPE specialized operation classes (Task 3.2, enhanced Task 4.4)

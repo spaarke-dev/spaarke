@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
@@ -25,11 +26,24 @@ public class AiAnalysisNodeExecutorTests
         _loggerMock = new Mock<ILogger<AiAnalysisNodeExecutor>>();
 
         // AiAnalysisNodeExecutor now takes IServiceProvider to resolve handlers at runtime.
-        // Wire up a mock IServiceProvider that returns the IToolHandlerRegistry when requested.
-        var serviceProviderMock = new Mock<IServiceProvider>();
-        serviceProviderMock
+        // It calls _serviceProvider.CreateScope() which requires IServiceScopeFactory.
+        // Wire up a mock scope chain: IServiceProvider → IServiceScopeFactory → IServiceScope → scoped IServiceProvider.
+        var scopedServiceProviderMock = new Mock<IServiceProvider>();
+        scopedServiceProviderMock
             .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
             .Returns(_toolHandlerRegistryMock.Object);
+
+        var serviceScopeMock = new Mock<IServiceScope>();
+        serviceScopeMock.Setup(s => s.ServiceProvider).Returns(scopedServiceProviderMock.Object);
+
+        var serviceScopeFactoryMock = new Mock<IServiceScopeFactory>();
+        serviceScopeFactoryMock.Setup(f => f.CreateScope()).Returns(serviceScopeMock.Object);
+
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IServiceScopeFactory)))
+            .Returns(serviceScopeFactoryMock.Object);
+
         _executor = new AiAnalysisNodeExecutor(
             serviceProviderMock.Object,
             null!, // ReferenceRetrievalService — not exercised in these unit tests
@@ -117,6 +131,9 @@ public class AiAnalysisNodeExecutorTests
         _toolHandlerRegistryMock
             .Setup(r => r.GetHandler(It.IsAny<string>()))
             .Returns((IAnalysisToolHandler?)null);
+        _toolHandlerRegistryMock
+            .Setup(r => r.GetRegisteredHandlerIds())
+            .Returns(Array.Empty<string>());
 
         var context = CreateValidContext();
 
@@ -273,6 +290,9 @@ public class AiAnalysisNodeExecutorTests
         _toolHandlerRegistryMock
             .Setup(r => r.GetHandler(It.IsAny<string>()))
             .Returns((IAnalysisToolHandler?)null);
+        _toolHandlerRegistryMock
+            .Setup(r => r.GetRegisteredHandlerIds())
+            .Returns(Array.Empty<string>());
 
         var context = CreateValidContext();
 

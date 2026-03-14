@@ -401,6 +401,11 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             "[FetchAttachmentDebug] Found {Count} attachment records in Dataverse for email {EmailId}",
             itemCount, emailActivityId);
 
+        var inlineDecoded = 0;
+        var valueFetched = 0;
+        var fetchFailed = 0;
+        var noContent = 0;
+
         foreach (var item in items.EnumerateArray())
         {
             var attachmentId = GetGuidOrNull(item, "activitymimeattachmentid") ?? Guid.Empty;
@@ -408,10 +413,6 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             var mimeType = GetStringOrNull(item, "mimetype") ?? "application/octet-stream";
             var fileSize = item.TryGetProperty("filesize", out var fs) ? fs.GetInt64() : 0;
             var bodyBase64 = GetStringOrNull(item, "body");
-
-            _logger.LogWarning(
-                "[FetchAttachmentDebug] Processing attachment '{FileName}': fileSize={FileSize}, bodyBase64Length={BodyLength}, hasBody={HasBody}",
-                fileName, fileSize, bodyBase64?.Length ?? 0, !string.IsNullOrEmpty(bodyBase64));
 
             // Check if attachment should be skipped
             var (shouldCreate, skipReason) = EvaluateAttachment(fileName, mimeType, fileSize);
@@ -421,41 +422,29 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             {
                 var bytes = Convert.FromBase64String(bodyBase64);
                 content = new MemoryStream(bytes);
-                _logger.LogWarning(
-                    "[FetchAttachmentDebug] Attachment '{FileName}' decoded to {ByteCount} bytes",
-                    fileName, bytes.Length);
+                inlineDecoded++;
             }
             else if (attachmentId != Guid.Empty)
             {
                 // Body field was empty - try fetching it separately via $value endpoint
                 // This handles cases where Dataverse doesn't return inline body for large attachments
-                _logger.LogWarning(
-                    "[FetchAttachmentDebug] Attachment '{FileName}' body not inline, attempting $value fetch for {AttachmentId}",
-                    fileName, attachmentId);
-
                 try
                 {
                     content = await FetchAttachmentBodyAsync(attachmentId, cancellationToken);
                     if (content != null)
                     {
-                        _logger.LogWarning(
-                            "[FetchAttachmentDebug] Attachment '{FileName}' fetched via $value: {ByteCount} bytes",
-                            fileName, content.Length);
+                        valueFetched++;
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    _logger.LogWarning(ex,
-                        "[FetchAttachmentDebug] Failed to fetch attachment '{FileName}' via $value endpoint",
-                        fileName);
+                    fetchFailed++;
                 }
             }
 
             if (content == null)
             {
-                _logger.LogWarning(
-                    "[FetchAttachmentDebug] Attachment '{FileName}' has NO body content - will be skipped in MIME message",
-                    fileName);
+                noContent++;
             }
 
             attachments.Add(new EmailAttachmentInfo
@@ -471,8 +460,11 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         }
 
         _logger.LogDebug(
-            "Fetched {Count} attachments for email {EmailId}, {SkipCount} will be skipped",
-            attachments.Count, emailActivityId, attachments.Count(a => !a.ShouldCreateDocument));
+            "Fetched {Count} attachments for email {EmailId}: {InlineDecoded} inline decoded, " +
+            "{ValueFetched} fetched via $value, {FetchFailed} fetch failures, {NoContent} without content, " +
+            "{SkipCount} will be skipped",
+            attachments.Count, emailActivityId, inlineDecoded, valueFetched, fetchFailed, noContent,
+            attachments.Count(a => !a.ShouldCreateDocument));
 
         return attachments;
     }
@@ -741,44 +733,35 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                 message.Body?.GetType().Name ?? "null", message.Subject);
 
             var partCount = 0;
+            var skippedParts = 0;
+            var oversizedParts = 0;
 
             // Iterate through all MIME parts to find attachments
             foreach (var part in IterateMimeParts(message.Body))
             {
                 partCount++;
-                _logger.LogInformation(
-                    "[ExtractDebug] Part {PartNum}: Type={PartType}, IsMimePart={IsMimePart}",
-                    partCount, part.GetType().Name, part is MimePart);
 
                 if (part is MimePart mimePart)
                 {
-                    var dispositionValue = mimePart.ContentDisposition?.Disposition;
-                    _logger.LogInformation(
-                        "[ExtractDebug] MimePart: FileName={FileName}, ContentType={ContentType}, IsAttachment={IsAttachment}, Disposition={Disposition}, HasContentId={HasContentId}",
-                        mimePart.FileName ?? "(null)",
-                        mimePart.ContentType?.MimeType ?? "(null)",
-                        mimePart.IsAttachment,
-                        dispositionValue ?? "(null)",
-                        !string.IsNullOrEmpty(mimePart.ContentId));
-
                     // Check if this is an attachment (either explicit attachment or inline with content)
                     var isAttachment = mimePart.IsAttachment ||
                                        mimePart.ContentDisposition?.Disposition == ContentDisposition.Attachment;
                     var isInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline &&
                                    !string.IsNullOrEmpty(mimePart.ContentId);
 
-                    _logger.LogInformation(
-                        "[ExtractDebug] Evaluation: isAttachment={IsAttachment}, isInline={IsInline}",
-                        isAttachment, isInline);
-
                     // Skip parts that are not attachments and not inline images with Content-ID
                     if (!isAttachment && !isInline)
                     {
-                        _logger.LogInformation("[ExtractDebug] Skipping part - not attachment or inline");
+                        skippedParts++;
                         continue;
                     }
 
                     // Get content to memory stream
+                    if (mimePart.Content is null)
+                    {
+                        skippedParts++;
+                        continue;
+                    }
                     var contentStream = new MemoryStream();
                     mimePart.Content.DecodeTo(contentStream);
                     contentStream.Position = 0;
@@ -788,9 +771,7 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                     // Check max size (NFR-05: 250MB)
                     if (sizeBytes > _options.MaxAttachmentSizeBytes)
                     {
-                        _logger.LogWarning(
-                            "Attachment '{FileName}' exceeds max size ({Size} bytes > {MaxSize} bytes), skipping",
-                            mimePart.FileName ?? "unknown", sizeBytes, _options.MaxAttachmentSizeBytes);
+                        oversizedParts++;
                         contentStream.Dispose();
                         continue;
                     }
@@ -835,8 +816,10 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             }
 
             _logger.LogInformation(
-                "[ExtractDebug] Extraction complete: {PartCount} parts scanned, {AttachmentCount} attachments found, {InlineCount} inline, {SkipCount} will be skipped",
-                partCount,
+                "Extraction complete: {PartCount} parts scanned, {SkippedParts} non-attachment parts skipped, " +
+                "{OversizedParts} oversized, {AttachmentCount} attachments found, {InlineCount} inline, " +
+                "{SkipCount} will be skipped",
+                partCount, skippedParts, oversizedParts,
                 attachments.Count,
                 attachments.Count(a => a.IsInline),
                 attachments.Count(a => !a.ShouldCreateDocument));

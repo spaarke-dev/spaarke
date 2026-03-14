@@ -18,15 +18,12 @@ public static class PlaybookRunEndpoints
 
     public static IEndpointRouteBuilder MapPlaybookRunEndpoints(this IEndpointRouteBuilder app)
     {
-        // TODO: Re-enable authorization once MSAL auth is implemented in PlaybookBuilderHost PCF
-        // For development/testing, endpoints are temporarily accessible without authentication.
-        // Production deployment MUST restore .RequireAuthorization() and implement proper auth.
         var playbookGroup = app.MapGroup("/api/ai/playbooks/{id:guid}")
-            .AllowAnonymous()  // TEMPORARY: Allow anonymous for development (was: .RequireAuthorization())
+            .RequireAuthorization()
             .WithTags("AI Playbook Execution");
 
         var runsGroup = app.MapGroup("/api/ai/playbooks/runs")
-            .AllowAnonymous()  // TEMPORARY: Allow anonymous for development (was: .RequireAuthorization())
+            .RequireAuthorization()
             .WithTags("AI Playbook Execution");
 
         // POST /api/ai/playbooks/{id}/validate - Validate playbook graph

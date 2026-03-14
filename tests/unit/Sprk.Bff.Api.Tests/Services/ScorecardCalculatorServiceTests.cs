@@ -58,13 +58,31 @@ public class ScorecardCalculatorServiceTests
     }
 
     /// <summary>
-    /// Sets up the mock to return the given assessments for a specific performance area.
+    /// Sets up the mock to return the given assessments for a specific performance area
+    /// via BatchQueryKpiAssessmentsAsync (PPI-024: batch query).
     /// </summary>
     private void SetupAreaAssessments(Guid matterId, int performanceArea, params KpiAssessmentRecord[] assessments)
     {
+        // Store area data for batch setup
+        _areaData[performanceArea] = assessments;
+        SetupBatchMock(matterId);
+    }
+
+    private readonly Dictionary<int, KpiAssessmentRecord[]> _areaData = new();
+
+    private void SetupBatchMock(Guid matterId)
+    {
+        var result = new Dictionary<int, KpiAssessmentRecord[]>
+        {
+            [Guidelines] = _areaData.GetValueOrDefault(Guidelines, []),
+            [Budget] = _areaData.GetValueOrDefault(Budget, []),
+            [Outcomes] = _areaData.GetValueOrDefault(Outcomes, []),
+        };
+
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(assessments);
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(
+                matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
     }
 
     /// <summary>
@@ -72,9 +90,8 @@ public class ScorecardCalculatorServiceTests
     /// </summary>
     private void SetupAllAreasEmpty(Guid matterId)
     {
-        SetupAreaAssessments(matterId, Guidelines);
-        SetupAreaAssessments(matterId, Budget);
-        SetupAreaAssessments(matterId, Outcomes);
+        _areaData.Clear();
+        SetupBatchMock(matterId);
     }
 
     #endregion
@@ -524,15 +541,12 @@ public class ScorecardCalculatorServiceTests
         // Act
         await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - all three area queries were invoked
+        // Assert - batch query was invoked once with all three areas (PPI-024)
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.BatchQueryKpiAssessmentsAsync(
+                matterId, It.IsAny<string>(),
+                It.Is<int[]>(a => a.Contains(Guidelines) && a.Contains(Budget) && a.Contains(Outcomes)),
+                It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

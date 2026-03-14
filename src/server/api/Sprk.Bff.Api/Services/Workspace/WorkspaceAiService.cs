@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -27,6 +29,7 @@ namespace Sprk.Bff.Api.Services.Workspace;
 public class WorkspaceAiService
 {
     private readonly IPlaybookOrchestrationService _playbookService;
+    private readonly IDataverseService _dataverseService;
     private readonly ILogger<WorkspaceAiService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -50,10 +53,12 @@ public class WorkspaceAiService
     /// </summary>
     public WorkspaceAiService(
         IPlaybookOrchestrationService playbookService,
+        IDataverseService dataverseService,
         ILogger<WorkspaceAiService> logger,
         IConfiguration configuration)
     {
         _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
+        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
@@ -122,42 +127,163 @@ public class WorkspaceAiService
     /// Fetches a human-readable description of the entity from Dataverse.
     /// </summary>
     /// <remarks>
-    /// TODO: Replace mock with real Dataverse Web API call via IDataverseService.
-    /// Query pattern (sprk_event example):
-    ///   GET /api/data/v9.2/sprk_events({entityId})?$select=sprk_name,sprk_description,
-    ///       sprk_todostatus,sprk_priority,sprk_effort,sprk_estimatedminutes
-    /// Return KeyNotFoundException if entity not found (HTTP 404 from Dataverse).
+    /// Retrieves entity by ID using IDataverseService.RetrieveAsync with explicit column selection
+    /// (ADR-002 efficiency). Maps entity fields to a human-readable description for the AI Playbook.
+    /// Throws KeyNotFoundException if entity not found.
     /// </remarks>
-    private Task<string> FetchEntityDescriptionAsync(AiSummaryRequest request, CancellationToken ct)
+    private async Task<string> FetchEntityDescriptionAsync(AiSummaryRequest request, CancellationToken ct)
     {
-        // Mock: Return a representative description based on entity type.
-        // Real implementation: query Dataverse entity by request.EntityId and map fields.
         var entityType = request.EntityType.ToLowerInvariant();
 
-        var description = entityType switch
+        try
         {
-            "sprk_event" =>
-                $"Event ID {request.EntityId}: Deadline review scheduled. " +
-                "Priority: High. Effort: 3 hours. Status: In Progress. " +
-                (request.Context != null ? $"Additional context: {request.Context}" : string.Empty),
+            var description = entityType switch
+            {
+                "sprk_event" => await FetchEventDescriptionAsync(request.EntityId, ct),
+                "sprk_matter" => await FetchMatterDescriptionAsync(request.EntityId, ct),
+                "sprk_project" => await FetchProjectDescriptionAsync(request.EntityId, ct),
+                "sprk_document" => await FetchDocumentDescriptionAsync(request.EntityId, ct),
+                _ => $"Entity {request.EntityType} ID {request.EntityId}."
+            };
 
-            "sprk_matter" =>
-                $"Matter ID {request.EntityId}: Active matter with 2 overdue events. " +
-                "Budget utilization: 87%. Requires immediate attention. " +
-                (request.Context != null ? $"Additional context: {request.Context}" : string.Empty),
+            if (request.Context != null)
+                description += $" Additional context: {request.Context}";
 
-            "sprk_project" =>
-                $"Project ID {request.EntityId}: Active project. " +
-                (request.Context != null ? $"Additional context: {request.Context}" : string.Empty),
+            return description;
+        }
+        catch (Exception ex) when (ex is not KeyNotFoundException && ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Failed to fetch entity description from Dataverse. " +
+                "EntityType={EntityType}, EntityId={EntityId}. Falling back to minimal description.",
+                request.EntityType, request.EntityId);
 
-            "sprk_document" =>
-                $"Document ID {request.EntityId}: Document requiring review. " +
-                (request.Context != null ? $"Additional context: {request.Context}" : string.Empty),
+            // Graceful fallback — return minimal description rather than failing the entire AI summary
+            var fallback = $"Entity {request.EntityType} ID {request.EntityId}.";
+            if (request.Context != null)
+                fallback += $" Additional context: {request.Context}";
+            return fallback;
+        }
+    }
 
-            _ => $"Entity {request.EntityType} ID {request.EntityId}."
+    private async Task<string> FetchEventDescriptionAsync(Guid entityId, CancellationToken ct)
+    {
+        var entity = await _dataverseService.RetrieveAsync(
+            "sprk_event",
+            entityId,
+            new[] { "sprk_eventname", "sprk_description", "sprk_priority", "sprk_duedate", "statuscode" },
+            ct);
+
+        var name = entity.GetAttributeValue<string>("sprk_eventname") ?? "Unknown";
+        var description = entity.GetAttributeValue<string>("sprk_description") ?? "";
+        var priority = entity.GetAttributeValue<OptionSetValue>("sprk_priority")?.Value;
+        var dueDate = entity.GetAttributeValue<DateTime?>("sprk_duedate");
+        var statusCode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0;
+
+        var priorityLabel = priority switch
+        {
+            0 => "Low",
+            1 => "Normal",
+            2 => "High",
+            3 => "Urgent",
+            _ => "Unknown"
+        };
+        var statusLabel = statusCode switch
+        {
+            1 => "Draft",
+            2 => "Planned",
+            3 => "Open",
+            4 => "On Hold",
+            5 => "Completed",
+            6 => "Cancelled",
+            7 => "Deleted",
+            _ => "Unknown"
         };
 
-        return Task.FromResult(description);
+        var parts = new List<string>
+        {
+            $"Event: {name}",
+            $"Priority: {priorityLabel}",
+            $"Status: {statusLabel}"
+        };
+
+        if (dueDate.HasValue)
+            parts.Add($"Due: {dueDate.Value:yyyy-MM-dd}");
+        if (!string.IsNullOrWhiteSpace(description))
+            parts.Add($"Description: {description}");
+
+        return string.Join(". ", parts) + ".";
+    }
+
+    private async Task<string> FetchMatterDescriptionAsync(Guid entityId, CancellationToken ct)
+    {
+        var entity = await _dataverseService.RetrieveAsync(
+            "sprk_matter",
+            entityId,
+            new[] { "sprk_name", "sprk_totalspend", "sprk_totalbudget", "sprk_utilizationpercent", "sprk_overdueeventcount", "sprk_status" },
+            ct);
+
+        var name = entity.GetAttributeValue<string>("sprk_name") ?? "Unknown";
+        var totalSpend = entity.GetAttributeValue<Money>("sprk_totalspend")?.Value ?? 0m;
+        var totalBudget = entity.GetAttributeValue<Money>("sprk_totalbudget")?.Value ?? 0m;
+        var utilization = entity.GetAttributeValue<decimal?>("sprk_utilizationpercent") ?? 0m;
+        var overdueCount = entity.GetAttributeValue<int?>("sprk_overdueeventcount") ?? 0;
+
+        var parts = new List<string>
+        {
+            $"Matter: {name}",
+            $"Budget utilization: {utilization:0.#}%",
+            $"Total spend: {totalSpend:C0}",
+            $"Total budget: {totalBudget:C0}"
+        };
+
+        if (overdueCount > 0)
+            parts.Add($"Overdue events: {overdueCount}");
+
+        return string.Join(". ", parts) + ".";
+    }
+
+    private async Task<string> FetchProjectDescriptionAsync(Guid entityId, CancellationToken ct)
+    {
+        var entity = await _dataverseService.RetrieveAsync(
+            "sprk_project",
+            entityId,
+            new[] { "sprk_name", "sprk_description", "statecode" },
+            ct);
+
+        var name = entity.GetAttributeValue<string>("sprk_name") ?? "Unknown";
+        var description = entity.GetAttributeValue<string>("sprk_description") ?? "";
+        var stateCode = entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
+        var stateLabel = stateCode == 0 ? "Active" : "Inactive";
+
+        var parts = new List<string>
+        {
+            $"Project: {name}",
+            $"Status: {stateLabel}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(description))
+            parts.Add($"Description: {description}");
+
+        return string.Join(". ", parts) + ".";
+    }
+
+    private async Task<string> FetchDocumentDescriptionAsync(Guid entityId, CancellationToken ct)
+    {
+        var doc = await _dataverseService.GetDocumentAsync(entityId.ToString(), ct);
+
+        if (doc is null)
+            throw new KeyNotFoundException($"Document {entityId} not found in Dataverse.");
+
+        var parts = new List<string>
+        {
+            $"Document: {doc.Name ?? "Unknown"}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(doc.MimeType))
+            parts.Add($"Type: {doc.MimeType}");
+
+        return string.Join(". ", parts) + ".";
     }
 
     /// <summary>

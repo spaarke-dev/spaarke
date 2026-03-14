@@ -7,8 +7,10 @@ using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Core.Cache;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -34,7 +36,8 @@ public static class SpaarkeCore
         services.AddScoped<IStorageRetryPolicy, StorageRetryPolicy>();
 
         // Register HttpClient for DataverseAccessDataSource (handles its own authentication)
-        services.AddHttpClient<IAccessDataSource, DataverseAccessDataSource>((sp, client) =>
+        // Step 1: Register the concrete DataverseAccessDataSource with its typed HttpClient
+        services.AddHttpClient<DataverseAccessDataSource>((sp, client) =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
             var dataverseUrl = configuration["Dataverse:ServiceUrl"];
@@ -49,6 +52,18 @@ public static class SpaarkeCore
             }
 
             client.Timeout = TimeSpan.FromSeconds(30);
+        });
+
+        // Step 2: Decorate with CachedAccessDataSource (ADR-009: Redis-first caching for auth data)
+        // Caches authorization DATA (roles, teams, resource access) while decisions are computed fresh.
+        // TTLs: roles/teams = 2 min, resource access = 60s (ADR-003 compliance)
+        services.AddScoped<IAccessDataSource>(sp =>
+        {
+            var inner = sp.GetRequiredService<DataverseAccessDataSource>();
+            var cache = sp.GetRequiredService<IDistributedCache>();
+            var logger = sp.GetRequiredService<ILogger<CachedAccessDataSource>>();
+            var metrics = sp.GetService<CacheMetrics>(); // Optional
+            return new CachedAccessDataSource(inner, cache, logger, metrics);
         });
 
         // Authorization rules

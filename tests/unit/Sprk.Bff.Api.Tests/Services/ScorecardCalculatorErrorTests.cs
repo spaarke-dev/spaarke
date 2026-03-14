@@ -42,6 +42,9 @@ public class ScorecardCalculatorErrorTests
         _service = new ScorecardCalculatorService(_dataverseServiceMock.Object, _loggerMock.Object);
     }
 
+    // Accumulated area data for batch mock setup
+    private Dictionary<int, KpiAssessmentRecord[]> _areaData = new();
+
     #region Helper Methods
 
     /// <summary>
@@ -58,13 +61,36 @@ public class ScorecardCalculatorErrorTests
     }
 
     /// <summary>
-    /// Sets up the mock to return the given assessments for a specific performance area.
+    /// Accumulates assessments for a specific performance area, then sets up the
+    /// BatchQueryKpiAssessmentsAsync mock to return all accumulated area data.
     /// </summary>
     private void SetupAreaAssessments(Guid matterId, int performanceArea, params KpiAssessmentRecord[] assessments)
     {
+        _areaData[performanceArea] = assessments;
+        SetupBatchMock(matterId);
+    }
+
+    /// <summary>
+    /// Configures the BatchQueryKpiAssessmentsAsync mock to return the current _areaData,
+    /// filling in empty arrays for any areas not explicitly set.
+    /// </summary>
+    private void SetupBatchMock(Guid matterId)
+    {
+        var result = new Dictionary<int, KpiAssessmentRecord[]>
+        {
+            [Guidelines] = _areaData.GetValueOrDefault(Guidelines, Array.Empty<KpiAssessmentRecord>()),
+            [Budget] = _areaData.GetValueOrDefault(Budget, Array.Empty<KpiAssessmentRecord>()),
+            [Outcomes] = _areaData.GetValueOrDefault(Outcomes, Array.Empty<KpiAssessmentRecord>())
+        };
+
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), performanceArea, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(assessments);
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(
+                matterId,
+                It.IsAny<string>(),
+                It.IsAny<int[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
     }
 
     /// <summary>
@@ -72,9 +98,8 @@ public class ScorecardCalculatorErrorTests
     /// </summary>
     private void SetupAllAreasEmpty(Guid matterId)
     {
-        SetupAreaAssessments(matterId, Guidelines);
-        SetupAreaAssessments(matterId, Budget);
-        SetupAreaAssessments(matterId, Outcomes);
+        _areaData = new Dictionary<int, KpiAssessmentRecord[]>();
+        SetupBatchMock(matterId);
     }
 
     #endregion
@@ -84,14 +109,14 @@ public class ScorecardCalculatorErrorTests
     [Fact]
     public async Task Error_DataverseQueryThrows_ServicePropagatesException()
     {
-        // Arrange - mock QueryKpiAssessmentsAsync to throw HttpRequestException
+        // Arrange - mock BatchQueryKpiAssessmentsAsync to throw HttpRequestException
         // simulating a Dataverse connectivity or service error
         var matterId = Guid.NewGuid();
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Dataverse service unavailable"));
 
-        // Act & Assert - service propagates the exception since queries run via Task.WhenAll
+        // Act & Assert - service propagates the exception from the batch query
         var act = () => _service.RecalculateGradesAsync(matterId);
         await act.Should().ThrowAsync<HttpRequestException>()
             .WithMessage("*Dataverse service unavailable*");
@@ -145,15 +170,9 @@ public class ScorecardCalculatorErrorTests
         // Act - ignore the exception to verify queries executed
         try { await _service.RecalculateGradesAsync(matterId); } catch { /* expected */ }
 
-        // Assert - all three area queries were invoked despite update failure
+        // Assert - batch query was invoked once despite update failure
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -200,11 +219,11 @@ public class ScorecardCalculatorErrorTests
         cts.Cancel();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid _, string _, int? _, int _, CancellationToken ct) =>
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, string _, int[] _, int _, CancellationToken ct) =>
             {
                 ct.ThrowIfCancellationRequested();
-                return Task.FromResult(Array.Empty<KpiAssessmentRecord>());
+                return Task.FromResult(new Dictionary<int, KpiAssessmentRecord[]>());
             });
 
         // Act & Assert - should throw OperationCanceledException
@@ -215,12 +234,12 @@ public class ScorecardCalculatorErrorTests
     [Fact]
     public async Task Error_CancellationDuringQuery_PropagatesTaskCanceledException()
     {
-        // Arrange - cancellation occurs during Dataverse query execution
+        // Arrange - cancellation occurs during Dataverse batch query execution
         var matterId = Guid.NewGuid();
         using var cts = new CancellationTokenSource();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("The operation was cancelled"));
 
         // Act & Assert
@@ -230,54 +249,41 @@ public class ScorecardCalculatorErrorTests
 
     #endregion
 
-    #region Error Scenario 5: Partial Area Failure
+    #region Error Scenario 5: Batch Query Failure
 
     [Fact]
-    public async Task Error_PartialAreaFailure_PropagatesException()
+    public async Task Error_BatchQueryFailure_PropagatesException()
     {
-        // Arrange - Guidelines query throws, Budget and Outcomes succeed.
-        // Since Task.WhenAll is used, the aggregate exception propagates.
+        // Arrange - BatchQueryKpiAssessmentsAsync throws, simulating a batch-level failure
+        // (e.g., ExecuteMultipleRequest fails in Dataverse).
         var matterId = Guid.NewGuid();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Batch query failed"));
 
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeBPlus));
-
-        // Act & Assert - Task.WhenAll surfaces the first faulted task's exception
+        // Act & Assert - service propagates the batch exception
         var act = () => _service.RecalculateGradesAsync(matterId);
         await act.Should().ThrowAsync<HttpRequestException>()
-            .WithMessage("*Guidelines query failed*");
+            .WithMessage("*Batch query failed*");
     }
 
     [Fact]
-    public async Task Error_PartialAreaFailure_OtherQueriesStillInvoked()
+    public async Task Error_BatchQueryFailure_BatchInvokedOnce()
     {
-        // Arrange - Guidelines throws, but Budget and Outcomes should still be invoked
-        // because Task.WhenAll waits for all tasks before throwing
+        // Arrange - batch query throws; verify it was called exactly once
         var matterId = Guid.NewGuid();
 
         _dataverseServiceMock
-            .Setup(s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("Guidelines query failed"));
-
-        SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
-        SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeBPlus));
+            .Setup(s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Batch query failed"));
 
         // Act - ignore the exception
         try { await _service.RecalculateGradesAsync(matterId); } catch { /* expected */ }
 
-        // Assert - all three area queries were invoked (Task.WhenAll runs them all)
+        // Assert - batch query was invoked exactly once (single round-trip)
         _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Guidelines, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Budget, It.IsAny<int>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        _dataverseServiceMock.Verify(
-            s => s.QueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), Outcomes, It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.BatchQueryKpiAssessmentsAsync(matterId, It.IsAny<string>(), It.IsAny<int[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

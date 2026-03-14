@@ -862,15 +862,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             var root = dataDoc.RootElement;
 
             // Map tool result structures to output type names based on handler ID
-            if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
-            {
-                if (root.TryGetProperty("entities", out var entitiesValue) ||
-                    root.TryGetProperty("Entities", out entitiesValue))
-                {
-                    outputs["Entities"] = JsonSerializer.Serialize(entitiesValue);
-                }
-            }
-            else if (toolResult.HandlerId.Equals("SummaryHandler", StringComparison.OrdinalIgnoreCase))
+            if (toolResult.HandlerId.Equals("SummaryHandler", StringComparison.OrdinalIgnoreCase))
             {
                 if (root.TryGetProperty("fullText", out var fullTextValue) ||
                     root.TryGetProperty("FullText", out fullTextValue))
@@ -971,7 +963,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     }
 
     /// <summary>
-    /// Parse entities JSON from EntityExtractorHandler and populate request fields.
+    /// Parse entities JSON from analysis handler output and populate request fields.
     /// </summary>
     private static void ParseEntitiesJson(string entitiesJson, UpdateDocumentRequest request)
     {

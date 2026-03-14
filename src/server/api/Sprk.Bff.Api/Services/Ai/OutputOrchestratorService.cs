@@ -125,13 +125,11 @@ public class OutputOrchestratorService : IOutputOrchestratorService
             {
                 var value = ResolveFieldValue(fieldMapping.Value, context);
                 fields[fieldMapping.Key] = value;
-
-                _logger.LogDebug(
-                    "Mapped field {FieldName} = {Value} (type: {Type})",
-                    fieldMapping.Key,
-                    value?.ToString() ?? "null",
-                    value?.GetType().Name ?? "null");
             }
+
+            _logger.LogDebug(
+                "Resolved {FieldCount} field mappings for {EntityType}({RecordId})",
+                fields.Count, update.EntityType, recordId);
 
             // 3. Delegate to DataverseUpdateHandler
             await _dataverseUpdateHandler.UpdateAsync(

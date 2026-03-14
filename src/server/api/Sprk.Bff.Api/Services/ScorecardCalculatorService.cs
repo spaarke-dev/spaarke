@@ -72,16 +72,18 @@ public sealed class ScorecardCalculatorService
             "Recalculating scorecard grades for {EntityName} {ParentId}",
             parentEntityName, parentId);
 
-        // Query all assessments per area in parallel for efficiency (NFR-01: < 500ms)
-        var guidelinesTask = _dataverseService.QueryKpiAssessmentsAsync(parentId, parentLookupField, PerformanceArea.Guidelines, ct: ct);
-        var budgetTask = _dataverseService.QueryKpiAssessmentsAsync(parentId, parentLookupField, PerformanceArea.Budget, ct: ct);
-        var outcomesTask = _dataverseService.QueryKpiAssessmentsAsync(parentId, parentLookupField, PerformanceArea.Outcomes, ct: ct);
+        // Batch-query all 3 performance areas in a single Dataverse round-trip (PPI-024).
+        // Uses ExecuteMultipleRequest (SDK) to send 3 queries as 1 request.
+        // Falls back to Task.WhenAll if batch fails.
+        var batchResults = await _dataverseService.BatchQueryKpiAssessmentsAsync(
+            parentId,
+            parentLookupField,
+            [PerformanceArea.Guidelines, PerformanceArea.Budget, PerformanceArea.Outcomes],
+            ct: ct);
 
-        await Task.WhenAll(guidelinesTask, budgetTask, outcomesTask);
-
-        var guidelineAssessments = guidelinesTask.Result;
-        var budgetAssessments = budgetTask.Result;
-        var outcomeAssessments = outcomesTask.Result;
+        var guidelineAssessments = batchResults.GetValueOrDefault(PerformanceArea.Guidelines, []);
+        var budgetAssessments = batchResults.GetValueOrDefault(PerformanceArea.Budget, []);
+        var outcomeAssessments = batchResults.GetValueOrDefault(PerformanceArea.Outcomes, []);
 
         // Task 011: Current grades (latest assessment per area)
         var guidelineCurrent = GetCurrentGrade(guidelineAssessments);

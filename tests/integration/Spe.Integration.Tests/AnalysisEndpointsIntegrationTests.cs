@@ -6,15 +6,29 @@ using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Azure.Search.Documents.Indexes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.RecordSearch;
+using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Xunit;
 
 namespace Spe.Integration.Tests;
@@ -605,24 +619,167 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
         return client;
     }
 
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        builder.ConfigureHostConfiguration(config =>
+        {
+            var dict = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
+                ["UAMI_CLIENT_ID"] = "test-client-id",
+                ["TENANT_ID"] = "test-tenant-id",
+                ["API_APP_ID"] = "test-app-id",
+                ["API_CLIENT_SECRET"] = "test-secret",
+                ["AzureAd:Instance"] = "https://login.microsoftonline.com/",
+                ["AzureAd:TenantId"] = "test-tenant-id",
+                ["AzureAd:ClientId"] = "test-app-id",
+                ["AzureAd:Audience"] = "api://test-app-id",
+                ["Graph:TenantId"] = "test-tenant-id",
+                ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
+                ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
+                ["Dataverse:TenantId"] = "test-tenant-id",
+                ["ServiceBus:ConnectionString"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test",
+                ["ServiceBus:QueueName"] = "sdap-jobs",
+                ["DocumentIntelligence:Enabled"] = "true",
+                ["DocumentIntelligence:OpenAiEndpoint"] = "https://test.openai.azure.com/",
+                ["DocumentIntelligence:OpenAiKey"] = "test-key",
+                ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
+                ["Analysis:Enabled"] = "true",
+                ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
+                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
+                ["Redis:Enabled"] = "false",
+                ["ModelSelector:DefaultModel"] = "gpt-4o",
+
+                // AzureOpenAI options (required by AiModule for IChatClient registration)
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+
+                // AiSearchResilience options (ValidateDataAnnotations)
+                ["AiSearchResilience:MaxRetryAttempts"] = "3",
+                ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["AiSearchResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // GraphResilience options
+                ["GraphResilience:MaxRetryAttempts"] = "3",
+                ["GraphResilience:RetryDelay"] = "00:00:01",
+                ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
+                ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
+            };
+            config.AddInMemoryCollection(dict!);
+        });
+
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureServices(services =>
+        // Use ConfigureTestServices so registrations run AFTER Program.cs,
+        // ensuring our mocks replace the real services.
+        builder.ConfigureTestServices(services =>
         {
-            // Remove real IAnalysisOrchestrationService
-            var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IAnalysisOrchestrationService));
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
-
-            // Register mock IAnalysisOrchestrationService
+            // Remove real IAnalysisOrchestrationService and replace with mock
+            services.RemoveAll<IAnalysisOrchestrationService>();
             services.AddScoped<IAnalysisOrchestrationService>(sp =>
                 new MockAnalysisOrchestrationService(_scenario, _authorizedDocumentIds, _authorizationTracker));
 
             // Configure test authentication
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthenticationSchemeOptions, TestAuthenticationHandler>("Test", options => { });
+
+            // Override Microsoft Identity Web's PostConfigure which replaces our
+            // DefaultAuthenticateScheme/DefaultChallengeScheme.
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+            {
+                options.DefaultAuthenticateScheme = "Test";
+                options.DefaultChallengeScheme = "Test";
+            });
+
+            // Remove hosted services to prevent background work during tests
+            services.RemoveAll<IHostedService>();
+
+            // ---------------------------------------------------------------
+            // Stub services that depend on external infrastructure (Dataverse,
+            // Azure AI Search, Azure OpenAI, ServiceBus) to prevent connection
+            // attempts during integration tests.
+            // ---------------------------------------------------------------
+            services.AddSingleton(_ => new Mock<IRagService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<SearchIndexClient>() { CallBase = false }.Object);
+            services.AddScoped(_ => new Mock<IScopeResolverService>(MockBehavior.Loose).Object);
+            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
+            services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IAiPlaybookBuilderService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookOrchestrationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IRecordSearchService>(MockBehavior.Loose).Object);
+
+            // Mock IAiAuthorizationService - the analysis execute endpoint filter
+            // calls this to authorize document access before reaching the handler.
+            services.RemoveAll<IAiAuthorizationService>();
+            services.AddScoped<IAiAuthorizationService>(sp =>
+                new MockAiAuthorizationService(_scenario, _authorizedDocumentIds));
+
+            services.RemoveAll<IOpenAiClient>();
+            services.AddSingleton(_ => new Mock<IOpenAiClient>(MockBehavior.Loose).Object);
+            services.RemoveAll<ITextExtractor>();
+            services.AddSingleton(_ => new Mock<ITextExtractor>(MockBehavior.Loose).Object);
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(_ => new Mock<IDataverseService>(MockBehavior.Loose).Object);
+
+            // Chat service stubs (ChatEndpoints are always mapped)
+            services.AddScoped(_ => new Mock<IChatDataverseRepository>(MockBehavior.Loose).Object);
+            services.AddScoped(_ => new Mock<IChatContextProvider>(MockBehavior.Loose).Object);
+            services.AddSingleton(_ => new Mock<IChatClient>(MockBehavior.Loose).Object);
+            services.AddSingleton(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var logger = NullLogger<SprkChatAgentFactory>.Instance;
+                return new SprkChatAgentFactory(chatClient, sp, logger);
+            });
+            services.AddScoped(sp =>
+            {
+                var cache = sp.GetRequiredService<IDistributedCache>();
+                var repo = sp.GetRequiredService<IChatDataverseRepository>();
+                var logger = NullLogger<ChatSessionManager>.Instance;
+                return new ChatSessionManager(cache, repo, logger);
+            });
+            services.AddScoped(sp =>
+            {
+                var sessionManager = sp.GetRequiredService<ChatSessionManager>();
+                var repo = sp.GetRequiredService<IChatDataverseRepository>();
+                var logger = NullLogger<ChatHistoryManager>.Instance;
+                return new ChatHistoryManager(sessionManager, repo, logger);
+            });
+            services.AddSingleton<ILogger<SprkChatAgent>>(NullLogger<SprkChatAgent>.Instance);
+
+            // ServiceBus mock
+            services.RemoveAll<Azure.Messaging.ServiceBus.ServiceBusClient>();
+            var mockSbSender = new Mock<Azure.Messaging.ServiceBus.ServiceBusSender>(MockBehavior.Loose);
+            mockSbSender.Setup(s => s.SendMessageAsync(
+                It.IsAny<Azure.Messaging.ServiceBus.ServiceBusMessage>(),
+                It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            var mockSbClient = new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>(MockBehavior.Loose);
+            mockSbClient.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(mockSbSender.Object);
+            services.AddSingleton(mockSbClient.Object);
         });
 
         builder.UseEnvironment("Testing");
@@ -783,4 +940,55 @@ internal class MockAnalysisOrchestrationService : IAnalysisOrchestrationService
 internal class AuthorizationTracker
 {
     public bool FilterCalled { get; set; }
+}
+
+/// <summary>
+/// Mock implementation of IAiAuthorizationService for integration testing.
+/// Returns authorization results based on the configured test scenario.
+/// </summary>
+internal class MockAiAuthorizationService : IAiAuthorizationService
+{
+    private readonly TestScenario _scenario;
+    private readonly List<Guid> _authorizedDocumentIds;
+
+    public MockAiAuthorizationService(TestScenario scenario, List<Guid> authorizedDocumentIds)
+    {
+        _scenario = scenario;
+        _authorizedDocumentIds = authorizedDocumentIds;
+    }
+
+    public Task<Sprk.Bff.Api.Services.Ai.AuthorizationResult> AuthorizeAsync(
+        System.Security.Claims.ClaimsPrincipal user,
+        IReadOnlyList<Guid> documentIds,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        // Track authorized document IDs for test verification
+        foreach (var docId in documentIds)
+        {
+            if (!_authorizedDocumentIds.Contains(docId))
+            {
+                if (_scenario != TestScenario.Unauthorized &&
+                    _scenario != TestScenario.PartialAuthorization)
+                {
+                    _authorizedDocumentIds.Add(docId);
+                }
+            }
+        }
+
+        return _scenario switch
+        {
+            TestScenario.Unauthorized =>
+                Task.FromResult(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Denied(
+                    "User does not have access to document")),
+
+            TestScenario.PartialAuthorization =>
+                Task.FromResult(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Partial(
+                    _authorizedDocumentIds.AsReadOnly(),
+                    "Partial access")),
+
+            _ => Task.FromResult(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Authorized(
+                    documentIds.ToList().AsReadOnly()))
+        };
+    }
 }

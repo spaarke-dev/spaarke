@@ -60,14 +60,14 @@ public class AnalysisEndpointsTests
     }
 
     [Fact]
-    public void AnalysisExecuteRequest_ActionIdIsRequired()
+    public void AnalysisExecuteRequest_ActionIdIsOptional()
     {
-        // Assert - Required attribute should be present
-        var attr = typeof(AnalysisExecuteRequest)
-            .GetProperty(nameof(AnalysisExecuteRequest.ActionId))!
-            .GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute), false);
+        // Assert - ActionId is now optional (nullable Guid) when PlaybookId is provided
+        var prop = typeof(AnalysisExecuteRequest).GetProperty(nameof(AnalysisExecuteRequest.ActionId))!;
+        prop.PropertyType.Should().Be(typeof(Guid?));
 
-        attr.Should().NotBeEmpty();
+        var requiredAttr = prop.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute), false);
+        requiredAttr.Should().BeEmpty("ActionId is optional when PlaybookId is provided");
     }
 
     [Fact]

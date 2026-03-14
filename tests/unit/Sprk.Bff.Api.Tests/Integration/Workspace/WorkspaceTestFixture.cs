@@ -9,9 +9,12 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Integration.Workspace;
@@ -52,7 +55,7 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 ["ConnectionStrings:ServiceBus"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
 
                 // CORS
-                ["Cors:AllowedOrigins"] = "https://localhost:5173",
+                ["Cors:AllowedOrigins:0"] = "https://localhost:5173",
 
                 // Azure AD / UAMI identity
                 ["UAMI_CLIENT_ID"] = "test-client-id",
@@ -69,11 +72,15 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 // Graph options (GraphOptions validator)
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
+                ["Graph:ClientSecret"] = "test-client-secret",
+                ["Graph:UseManagedIdentity"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
+                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ClientId"] = "test-client-id",
+                ["Dataverse:ClientSecret"] = "test-client-secret",
                 ["Dataverse:TenantId"] = "test-tenant-id",
 
                 // ServiceBus options (ServiceBusOptions validator)
@@ -83,18 +90,25 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 // Redis — disabled so Program.cs uses AddDistributedMemoryCache
                 ["Redis:Enabled"] = "false",
 
-                // Document Intelligence — disabled to avoid Azure OpenAI dependencies
-                ["DocumentIntelligence:Enabled"] = "false",
+                // Document Intelligence — enabled so all AI services register
+                ["DocumentIntelligence:Enabled"] = "true",
                 ["DocumentIntelligence:OpenAiEndpoint"] = "https://test.openai.azure.com/",
                 ["DocumentIntelligence:OpenAiKey"] = "test-key",
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
 
-                // Analysis — disabled (requires DocumentIntelligence:Enabled = true)
-                ["Analysis:Enabled"] = "false",
+                // Analysis — enabled so all AI-dependent endpoints can be mapped
+                ["Analysis:Enabled"] = "true",
 
-                // AI Search (required to avoid null-ref in Program.cs service registration)
-                ["DocumentIntelligence:AiSearchEndpoint"] = "",
-                ["DocumentIntelligence:AiSearchKey"] = "",
+                // AI Search (required for IRagService)
+                ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
+                ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
+
+                // AzureOpenAI options (required by AiModule for IChatClient)
+                ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
+                ["AzureOpenAI:ChatModelName"] = "gpt-4o",
+
+                // Record Matching
+                ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
 
                 // AiSearchResilienceOptions defaults (ValidateDataAnnotations)
                 ["AiSearchResilience:MaxRetryAttempts"] = "3",
@@ -154,6 +168,70 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
             })
             .AddScheme<AuthenticationSchemeOptions, FakeAuthHandler>(
                 FakeAuthHandler.SchemeName, _ => { });
+
+            // ---------------------------------------------------------------
+            // HOSTED SERVICES: Remove background workers that depend on
+            // AI services not registered when DocumentIntelligence is disabled.
+            // ---------------------------------------------------------------
+            services.RemoveAll<IHostedService>();
+
+            // ---------------------------------------------------------------
+            // DATAVERSE: Mock to avoid real connection in tests.
+            // ---------------------------------------------------------------
+            var dataverseServiceMock = new Mock<IDataverseService>();
+            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+
+            // PortfolioService calls RetrieveMultipleAsync for matter queries.
+            // Return 3 test matters matching assertions in WorkspaceEndpointsTests.
+            var matterA = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterA["sprk_name"] = "Matter A";
+            matterA["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(125_000m);
+            matterA["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(150_000m);
+            matterA["sprk_overdueeventcount"] = 0;
+            matterA["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var matterB = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterB["sprk_name"] = "Matter B (at risk)";
+            matterB["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(92_000m);
+            matterB["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(80_000m);
+            matterB["sprk_overdueeventcount"] = 2;
+            matterB["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var matterC = new Microsoft.Xrm.Sdk.Entity("sprk_matter", Guid.NewGuid());
+            matterC["sprk_name"] = "Matter C";
+            matterC["sprk_totalspend"] = new Microsoft.Xrm.Sdk.Money(40_000m);
+            matterC["sprk_totalbudget"] = new Microsoft.Xrm.Sdk.Money(60_000m);
+            matterC["sprk_overdueeventcount"] = 0;
+            matterC["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);
+
+            var entityCollection = new Microsoft.Xrm.Sdk.EntityCollection(
+                new List<Microsoft.Xrm.Sdk.Entity> { matterA, matterB, matterC });
+            dataverseServiceMock
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(entityCollection);
+
+            // RetrieveAsync for AI summary entity description (event/matter/project).
+            dataverseServiceMock
+                .Setup(d => d.RetrieveAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(),
+                    It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_entity", Guid.NewGuid()));
+
+            // GetDocumentAsync for AI summary on sprk_document entity type.
+            dataverseServiceMock
+                .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Spaarke.Dataverse.DocumentEntity
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Name = "Test Document",
+                    FileName = "test.pdf",
+                    ContainerId = Guid.NewGuid().ToString()
+                });
+
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(dataverseServiceMock.Object);
         });
     }
 

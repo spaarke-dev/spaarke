@@ -203,7 +203,6 @@ az cognitiveservices account keys regenerate \
 |------------|---------|-------------|--------|
 | `spaarke-records-index` | Record matching (Matters, Projects, etc.) | N/A | Active |
 | `spaarke-knowledge-index-v2` | RAG knowledge retrieval + Document Visualization | 3072 | **Active** |
-| `spaarke-knowledge-index` | RAG knowledge retrieval (R3 legacy) | 1536 | Deprecated |
 
 ### RAG Knowledge Index (`spaarke-knowledge-index-v2`)
 
@@ -237,7 +236,7 @@ The RAG system supports 3 deployment models for multi-tenant isolation:
 
 | Model | Index Location | Use Case |
 |-------|---------------|----------|
-| **Shared** | `spaarke-knowledge-index` with `tenantId` filter | Default, cost-effective |
+| **Shared** | `spaarke-knowledge-index-v2` with `tenantId` filter | Default, cost-effective |
 | **Dedicated** | `{tenantId}-knowledge` in Spaarke subscription | Per-customer isolation |
 | **CustomerOwned** | Customer's own Azure AI Search instance | Full data sovereignty (BYOK) |
 

@@ -1,0 +1,69 @@
+<task id="PPI-015" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Debug Endpoint Removal (A4)</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <domain>A</domain>
+    <tags>bff-api, security, cleanup</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove or conditionally exclude debug and temporary endpoints from non-development environments.
+    Includes /debug/* routes, temporary AllowAnonymous health endpoints, and localhost references.
+  </prompt>
+
+  <role>.NET developer with ASP.NET Core endpoint configuration expertise</role>
+
+  <goal>
+    Zero debug/temporary endpoints accessible in non-Development environments. All wrapped with
+    environment checks.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Program.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Debug endpoints must still work in Development environment</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>asp-net-core, environment-config</topic>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Search for debug endpoints">
+      Find all /debug/* routes and temporary test endpoints.
+    </step>
+    <step order="2" name="Wrap with environment check">
+      Add `if (app.Environment.IsDevelopment())` guard around debug endpoints.
+    </step>
+    <step order="3" name="Remove localhost references">
+      Search for hardcoded localhost URLs in web resources or configuration.
+    </step>
+    <step order="4" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No debug endpoints accessible in non-Development environments</criterion>
+    <criterion testable="true">Debug endpoints still work in Development mode</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -26,7 +26,7 @@ public interface IAnalysisToolHandler
     /// This should match the value stored in AnalysisTool.HandlerClass.
     /// </summary>
     /// <example>
-    /// "EntityExtractorHandler", "ClauseAnalyzerHandler", "CustomToolHandler"
+    /// "GenericAnalysisHandler", "SummaryHandler", "CustomToolHandler"
     /// </example>
     string HandlerId { get; }
 

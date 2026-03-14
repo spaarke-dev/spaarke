@@ -57,8 +57,8 @@ public class IntentClassificationService : IIntentClassificationService
             // Call AI for classification
             var response = await _openAiClient.GetCompletionAsync(
                 prompt,
-                ClassificationModel,
-                cancellationToken);
+                model: ClassificationModel,
+                cancellationToken: cancellationToken);
 
             // Parse the structured response
             var result = ParseClassificationResponse(response, message);

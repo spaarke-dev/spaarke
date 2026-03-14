@@ -124,14 +124,16 @@ public class OpenAiClient : IOpenAiClient
     public async IAsyncEnumerable<string> StreamCompletionAsync(
         string prompt,
         string? model = null,
+        int? maxOutputTokens = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var deploymentName = model ?? _options.SummarizeModel;
+        var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
         {
-            MaxOutputTokenCount = _options.MaxOutputTokens,
+            MaxOutputTokenCount = effectiveMaxTokens,
             Temperature = _options.Temperature
         };
 
@@ -142,7 +144,7 @@ public class OpenAiClient : IOpenAiClient
 
         _logger.LogDebug(
             "Starting streaming completion with model {Model}, MaxTokens={MaxTokens}, Temp={Temperature}",
-            deploymentName, _options.MaxOutputTokens, _options.Temperature);
+            deploymentName, effectiveMaxTokens, _options.Temperature);
 
         // Circuit breaker: wrap the initial call that starts the stream
         // Note: CompleteChatStreamingAsync returns synchronously, async is in iteration
@@ -193,14 +195,16 @@ public class OpenAiClient : IOpenAiClient
     public async Task<string> GetCompletionAsync(
         string prompt,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
         var deploymentName = model ?? _options.SummarizeModel;
+        var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
         {
-            MaxOutputTokenCount = _options.MaxOutputTokens,
+            MaxOutputTokenCount = effectiveMaxTokens,
             Temperature = _options.Temperature
         };
 
@@ -211,7 +215,7 @@ public class OpenAiClient : IOpenAiClient
 
         _logger.LogDebug(
             "Starting completion with model {Model}, MaxTokens={MaxTokens}, Temp={Temperature}",
-            deploymentName, _options.MaxOutputTokens, _options.Temperature);
+            deploymentName, effectiveMaxTokens, _options.Temperature);
 
         try
         {
@@ -510,14 +514,16 @@ public class OpenAiClient : IOpenAiClient
         IEnumerable<ChatMessage> messages,
         IEnumerable<ChatTool> tools,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
         var deploymentName = model ?? _options.SummarizeModel;
+        var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
         {
-            MaxOutputTokenCount = _options.MaxOutputTokens,
+            MaxOutputTokenCount = effectiveMaxTokens,
             Temperature = _options.Temperature
         };
 
@@ -701,9 +707,11 @@ public class OpenAiClient : IOpenAiClient
         BinaryData jsonSchema,
         string schemaName,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
         var deploymentName = model ?? _options.SummarizeModel;
+        var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -712,7 +720,7 @@ public class OpenAiClient : IOpenAiClient
                 schemaName,
                 jsonSchema,
                 jsonSchemaIsStrict: true),
-            MaxOutputTokenCount = _options.MaxOutputTokens,
+            MaxOutputTokenCount = effectiveMaxTokens,
             Temperature = _options.Temperature
         };
 

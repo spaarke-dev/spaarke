@@ -19,7 +19,7 @@ public class ToolFrameworkOptions
     /// List of handler IDs to disable.
     /// Handlers in this list are registered but not returned from GetHandler.
     /// Useful for temporarily disabling specific tools without code changes.
-    /// Example: ["ClauseAnalyzerHandler", "CustomToolHandler"]
+    /// Example: ["GenericAnalysisHandler", "CustomToolHandler"]
     /// </summary>
     public string[] DisabledHandlers { get; set; } = Array.Empty<string>();
 

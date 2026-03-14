@@ -429,7 +429,7 @@ public class EntityResolutionService : IEntityResolutionService
         try
         {
             var response = await _openAiClient.GetCompletionAsync(
-                prompt, model, cancellationToken);
+                prompt, model: model, cancellationToken: cancellationToken);
 
             return ParseAiResponse(response);
         }

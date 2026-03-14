@@ -68,9 +68,6 @@ public class AttachmentFilterService
             if (shouldFilter)
             {
                 filteredCount++;
-                _logger.LogDebug(
-                    "Filtering attachment '{FileName}': {Reason}",
-                    attachment.FileName, reason);
             }
             else
             {

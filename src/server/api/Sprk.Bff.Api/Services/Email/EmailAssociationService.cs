@@ -180,14 +180,17 @@ public class EmailAssociationService : IEmailAssociationService
         if (!string.IsNullOrEmpty(emailData.TrackingToken))
         {
             tokensFound.Add(emailData.TrackingToken);
-            _logger.LogDebug("Found stored tracking token '{Token}'", emailData.TrackingToken);
         }
 
         // Extract tokens from subject line using multiple patterns
+        var patternsTested = 0;
+        var patternsMatched = 0;
+        var timeouts = 0;
         if (!string.IsNullOrEmpty(emailData.Subject))
         {
             foreach (var pattern in TrackingTokenPatterns)
             {
+                patternsTested++;
                 try
                 {
                     var match = pattern.Match(emailData.Subject);
@@ -197,16 +200,21 @@ public class EmailAssociationService : IEmailAssociationService
                         if (!string.IsNullOrWhiteSpace(token))
                         {
                             tokensFound.Add(token);
-                            _logger.LogDebug("Found tracking token '{Token}' in subject via pattern", token);
+                            patternsMatched++;
                         }
                     }
                 }
-                catch (RegexMatchTimeoutException ex)
+                catch (RegexMatchTimeoutException)
                 {
-                    _logger.LogWarning(ex, "Regex timeout evaluating tracking token pattern");
+                    timeouts++;
                 }
             }
         }
+
+        _logger.LogDebug(
+            "Tracking token evaluation: {PatternsTested} patterns tested, {PatternsMatched} matched, " +
+            "{Timeouts} timeouts, {TotalTokens} unique tokens found (including stored)",
+            patternsTested, patternsMatched, timeouts, tokensFound.Count);
 
         // Look up Matter for each token found
         foreach (var token in tokensFound)

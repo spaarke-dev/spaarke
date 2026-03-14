@@ -1,10 +1,12 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -49,10 +51,18 @@ public class MailboxVerificationTests
         var accountService = new CommunicationAccountService(
             _dataverseMock.Object, cacheMock.Object, accountServiceLogger.Object);
 
+        var communicationOptions = Options.Create(new CommunicationOptions
+        {
+            WebhookNotificationUrl = "https://localhost/api/webhooks/graph",
+            WebhookClientState = "test-client-state",
+            ApprovedSenders = [new ApprovedSenderConfig { Email = "test@contoso.com", DisplayName = "Test" }]
+        });
+
         return new MailboxVerificationService(
             _graphClientFactoryMock.Object,
             _dataverseMock.Object,
             accountService,
+            communicationOptions,
             _loggerMock.Object);
     }
 

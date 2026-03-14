@@ -1,0 +1,79 @@
+<task id="PPI-021" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Cache RAG Search Results (E5)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <domain>E</domain>
+    <tags>bff-api, ai, caching, redis</tags>
+    <parallel-group>P3-A</parallel-group>
+    <dependencies>010 (E1 - RAG parallelization)</dependencies>
+  </metadata>
+
+  <prompt>
+    Cache RAG search results in Redis by document+query composite key to avoid redundant Azure AI
+    Search calls when the same document is analyzed multiple times with similar queries.
+    Key pattern: sdap:ai:rag:{indexName}:{queryHash}, TTL: 15 minutes.
+  </prompt>
+
+  <role>Senior .NET developer with Redis caching and Azure AI Search expertise</role>
+
+  <goal>
+    RAG search results cached with 15-minute TTL. Repeat/similar analyses save 2-8 seconds.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="pattern">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/DistributedCacheExtensions.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Use IDistributedCache (Redis). ETag-versioned keys.</constraint>
+    <constraint source="ADR-015">Do not cache document content in logs</constraint>
+    <constraint source="project">Short TTL (15 min) — index updates should be reflected quickly</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>redis-caching, rag, ai-search</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Caching/DistributedCacheExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Caching/CacheMetrics.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify cache insertion point">
+      In the parallel RAG search (from task 010), add cache-aside before each AI Search call.
+    </step>
+    <step order="2" name="Implement query hash key">
+      Create composite key from index name + SHA256 hash of query text.
+    </step>
+    <step order="3" name="Add cache-aside pattern">
+      Check cache before AI Search. Store results after successful search. 15-min TTL.
+    </step>
+    <step order="4" name="Add cache metrics">
+      Track hit/miss rates using CacheMetrics.
+    </step>
+    <step order="5" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RAG results cached with composite key (indexName + queryHash)</criterion>
+    <criterion testable="true">15-minute TTL on cached results</criterion>
+    <criterion testable="true">Cache metrics track hit/miss rates</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

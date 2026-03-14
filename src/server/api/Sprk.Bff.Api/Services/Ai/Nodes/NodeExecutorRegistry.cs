@@ -97,10 +97,7 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
                     continue;
                 }
 
-                _logger.LogDebug(
-                    "Registered executor {ExecutorType} for ActionType {ActionType}",
-                    typeName,
-                    actionType);
+                // Per-executor logging removed — see batch summary below
             }
         }
 

@@ -53,13 +53,18 @@ public static class VisualizationEndpoints
             .ProducesProblem(404)
             .ProducesProblem(500);
 
-        // GET /api/ai/visualization/debug/{documentId} - Debug document retrieval (temporary)
-        group.MapGet("/debug/{documentId:guid}", DebugDocumentRetrieval)
-            .AllowAnonymous()  // Temporary for debugging - remove after testing
-            .WithName("VisualizationDebugDocument")
-            .WithSummary("Debug: Test Dataverse document retrieval")
-            .Produces<object>()
-            .ProducesProblem(500);
+        // Debug endpoint - only available in Development environment
+        var env = app.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        if (env.IsDevelopment())
+        {
+            // GET /api/ai/visualization/debug/{documentId} - Debug document retrieval (Development only)
+            group.MapGet("/debug/{documentId:guid}", DebugDocumentRetrieval)
+                .AllowAnonymous()
+                .WithName("VisualizationDebugDocument")
+                .WithSummary("Debug: Test Dataverse document retrieval (Development only)")
+                .Produces<object>()
+                .ProducesProblem(500);
+        }
 
         return app;
     }
@@ -167,7 +172,7 @@ public static class VisualizationEndpoints
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
-        logger.LogInformation("[DEBUG] Testing document retrieval for {DocumentId}", documentId);
+        logger.LogInformation("Testing document retrieval for {DocumentId}", documentId);
 
         try
         {
@@ -201,7 +206,7 @@ public static class VisualizationEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[DEBUG] Error retrieving document {DocumentId}", documentId);
+            logger.LogError(ex, "Error retrieving document {DocumentId}", documentId);
             return Results.Ok(new
             {
                 status = "ERROR",

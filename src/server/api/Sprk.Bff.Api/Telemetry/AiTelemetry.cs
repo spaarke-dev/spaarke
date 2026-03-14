@@ -308,7 +308,7 @@ public class AiTelemetry : IDisposable
     /// <summary>
     /// Record a tool execution.
     /// </summary>
-    /// <param name="toolId">Tool identifier (e.g., EntityExtractor, ClauseAnalyzer)</param>
+    /// <param name="toolId">Tool identifier (e.g., GenericAnalysisHandler, SummaryHandler)</param>
     /// <param name="durationMs">Execution duration in milliseconds</param>
     /// <param name="success">Whether the operation succeeded</param>
     /// <param name="inputTokens">Number of input tokens used</param>

@@ -1,0 +1,84 @@
+<task id="PPI-003" project="Production Performance Improvement R1">
+  <metadata>
+    <title>Secure Unauthenticated AI Endpoints (F1)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <domain>F</domain>
+    <tags>bff-api, auth, security, beta-blocker</tags>
+    <parallel-group>P1-B</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Restore .RequireAuthorization() on 5 AI endpoint groups currently marked TEMPORARY with
+    .AllowAnonymous(). These endpoints are fully accessible without authentication — a critical
+    security blocker for beta user access. Use the same MSAL bearer auth as all other BFF endpoints.
+  </prompt>
+
+  <role>Senior .NET developer with MSAL authentication and Minimal API expertise</role>
+
+  <goal>
+    All 5 AI endpoint groups require MSAL bearer token authentication. Zero .AllowAnonymous() on
+    production endpoints (except /healthz, /ping). Endpoints return 401 without valid token.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Api/Ai/NodeEndpoints.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization, not global middleware</constraint>
+    <constraint source="owner">Use same MSAL bearer auth as all BFF endpoints</constraint>
+    <constraint source="project">Must not break PlaybookBuilderHost PCF control</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth, endpoint-filters, msal</topic>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit all AllowAnonymous endpoints">
+      Search codebase for .AllowAnonymous(). List all instances. Identify which are TEMPORARY vs intentional.
+    </step>
+    <step order="2" name="Remove AllowAnonymous from AI endpoints">
+      In each of the 5 endpoint files: remove .AllowAnonymous() and add .RequireAuthorization().
+    </step>
+    <step order="3" name="Verify auth pattern matches existing endpoints">
+      Compare with FileAccessEndpoints.cs to ensure consistent auth pattern.
+    </step>
+    <step order="4" name="Test endpoints return 401 without token">
+      Verify endpoints return 401 Unauthorized when called without bearer token.
+    </step>
+    <step order="5" name="Verify build succeeds">
+      Run `dotnet build` and `dotnet test` to ensure no regressions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/NodeEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero .AllowAnonymous() on AI endpoint groups</criterion>
+    <criterion testable="true">All 5 endpoint groups have .RequireAuthorization()</criterion>
+    <criterion testable="true">Endpoints return 401 without valid MSAL bearer token</criterion>
+    <criterion testable="true">Build and existing tests pass</criterion>
+  </acceptance-criteria>
+</task>

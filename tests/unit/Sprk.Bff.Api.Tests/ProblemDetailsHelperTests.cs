@@ -1,6 +1,8 @@
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Xunit;
@@ -11,7 +13,10 @@ public class ProblemDetailsHelperTests
 {
     private static async Task<(int status, string body)> ExecuteResultAsync(IResult result)
     {
-        var ctx = new DefaultHttpContext();
+        var ctx = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
         var ms = new MemoryStream();
         ctx.Response.Body = ms;
         await result.ExecuteAsync(ctx);

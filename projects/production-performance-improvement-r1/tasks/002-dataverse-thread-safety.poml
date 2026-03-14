@@ -1,0 +1,83 @@
+<task id="PPI-002" project="Production Performance Improvement R1">
+  <metadata>
+    <title>DataverseWebApiService Thread-Safety Fixes (B3)</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <domain>B</domain>
+    <tags>bff-api, dataverse, thread-safety, beta-blocker</tags>
+    <parallel-group>P1-A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix two thread-safety issues in DataverseWebApiService that cause correctness bugs under concurrent load:
+    1. Token refresh race condition — multiple threads can trigger simultaneous token refreshes
+    2. Mutable DefaultRequestHeaders on shared HttpClient — concurrent requests corrupt headers
+    These are critical correctness bugs that will manifest with beta users making concurrent requests.
+  </prompt>
+
+  <role>Senior .NET developer with expertise in concurrent programming and HttpClient patterns</role>
+
+  <goal>
+    DataverseWebApiService is thread-safe: token refresh uses SemaphoreSlim, all requests use
+    per-request HttpRequestMessage headers instead of mutable DefaultRequestHeaders. Existing tests pass.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseWebApiService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-002">Plugin/Dataverse operations must be fast (&lt;50ms for plugins)</constraint>
+    <constraint source="project">Must not break existing Dataverse integration tests</constraint>
+    <constraint source="project">Must handle concurrent token refresh without deadlocks</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, thread-safety, httpclient</topic>
+    <files>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseWebApiService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Analyze current implementation">
+      Read DataverseWebApiService.cs. Identify the _currentToken field and DefaultRequestHeaders usage.
+    </step>
+    <step order="2" name="Implement SemaphoreSlim for token refresh">
+      Add SemaphoreSlim(1,1). Guard token refresh with async lock pattern. Use double-check locking
+      to avoid redundant refreshes.
+    </step>
+    <step order="3" name="Replace DefaultRequestHeaders with per-request headers">
+      For each HTTP method (GET, POST, PATCH, DELETE): create new HttpRequestMessage, set Authorization
+      header on the message, not on the shared HttpClient.
+    </step>
+    <step order="4" name="Run existing tests">
+      Run `dotnet test` for Dataverse-related test projects. All must pass.
+    </step>
+    <step order="5" name="Add concurrent access test">
+      Create a test that simulates concurrent requests to verify no race conditions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseWebApiService.cs (modified)</output>
+    <output type="test">tests/ (concurrent access test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Token refresh uses SemaphoreSlim with double-check pattern</criterion>
+    <criterion testable="true">Zero usage of DefaultRequestHeaders.Authorization on shared HttpClient</criterion>
+    <criterion testable="true">All per-request headers set on HttpRequestMessage instances</criterion>
+    <criterion testable="true">All existing Dataverse tests pass</criterion>
+    <criterion testable="true">No deadlock risk (SemaphoreSlim with timeout)</criterion>
+  </acceptance-criteria>
+</task>

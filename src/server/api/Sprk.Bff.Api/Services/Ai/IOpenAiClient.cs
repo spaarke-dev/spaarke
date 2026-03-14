@@ -29,17 +29,27 @@ public interface IOpenAiClient
     /// <summary>
     /// Stream completion tokens as they are generated.
     /// </summary>
+    /// <param name="prompt">The prompt to send to the model.</param>
+    /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
+    /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     IAsyncEnumerable<string> StreamCompletionAsync(
         string prompt,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get a complete response (non-streaming).
     /// </summary>
+    /// <param name="prompt">The prompt to send to the model.</param>
+    /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
+    /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<string> GetCompletionAsync(
         string prompt,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -97,12 +107,14 @@ public interface IOpenAiClient
     /// <param name="messages">The conversation messages including system, user, assistant, and tool messages.</param>
     /// <param name="tools">The available tools the model can call.</param>
     /// <param name="model">Optional model override. Defaults to configured model.</param>
+    /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Chat completion result with either content or tool calls.</returns>
     Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(
         IEnumerable<ChatMessage> messages,
         IEnumerable<ChatTool> tools,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -135,6 +147,7 @@ public interface IOpenAiClient
     /// <param name="jsonSchema">The JSON schema that the response must conform to.</param>
     /// <param name="schemaName">A name identifying the schema (e.g., "prompt_response").</param>
     /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
+    /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The raw JSON string response conforming to the schema.</returns>
     Task<string> GetStructuredCompletionRawAsync(
@@ -142,5 +155,6 @@ public interface IOpenAiClient
         BinaryData jsonSchema,
         string schemaName,
         string? model = null,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
 }

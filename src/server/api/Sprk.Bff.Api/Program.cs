@@ -33,6 +33,10 @@ using Sprk.Bff.Api.Workers.Office;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Startup logger for service registration diagnostics (before app.Build())
+var startupLoggerFactory = LoggerFactory.Create(config => config.AddConsole());
+var startupLog = startupLoggerFactory.CreateLogger("Startup");
+
 // ---- Configuration Validation ----
 
 // Register and validate configuration options with fail-fast behavior
@@ -317,8 +321,7 @@ if (redisEnabled)
         options.TimestampFormat = "HH:mm:ss ";
     });
 
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogInformation(
+    startupLog.LogInformation(
         "Distributed cache: Redis enabled with instance name '{InstanceName}'",
         builder.Configuration["Redis:InstanceName"] ?? "sdap:");
 }
@@ -328,8 +331,7 @@ else
     builder.Services.AddDistributedMemoryCache();
 
 
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogWarning(
+    startupLog.LogWarning(
         "Distributed cache: Using in-memory cache (not distributed). " +
         "This should ONLY be used in local development.");
 }
@@ -382,11 +384,11 @@ if (documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.OpenAiClient>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextExtractor>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.TextExtractorService>());
-    Console.WriteLine("✓ Document Intelligence services enabled");
+    startupLog.LogInformation("Document Intelligence services enabled");
 }
 else
 {
-    Console.WriteLine("⚠ Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
+    startupLog.LogWarning("Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
 }
 
 // ============================================================================
@@ -400,7 +402,12 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.AnalysisOptions.SectionName));
 
     // Analysis services - all scoped due to SpeFileStore dependency
-    // NOTE: ScopeResolverService requires HttpClient, so must use AddHttpClient (not AddScoped)
+    // PPI-054: ScopeResolverService decomposed into 4 focused services + thin orchestrator.
+    // Each service requires its own HttpClient for Dataverse API calls.
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisActionService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisSkillService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisKnowledgeService>();
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.AnalysisToolService>();
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeManagementService, Sprk.Bff.Api.Services.Ai.ScopeManagementService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
@@ -524,11 +531,11 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
         // VisualizationService - Document relationship visualization using vector similarity
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
-        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache + visualization + file indexing)");
+        startupLog.LogInformation("RAG services enabled (hybrid search + embedding cache + visualization + file indexing)");
     }
     else
     {
-        Console.WriteLine("⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
+        startupLog.LogWarning("RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
     }
 
     // TextChunkingService - Splits documents into chunks for RAG indexing and AI tool handlers
@@ -542,7 +549,7 @@ if (analysisEnabled && documentIntelligenceEnabled)
     if (toolFrameworkOptions.GetValue<bool>("Enabled", true))
     {
         builder.Services.AddToolFramework(builder.Configuration);
-        Console.WriteLine("✓ Tool framework enabled");
+        startupLog.LogInformation("Tool framework enabled");
     }
     else
     {
@@ -552,31 +559,31 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Services.Configure<Sprk.Bff.Api.Configuration.ToolFrameworkOptions>(
             builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName));
         builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry, Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>();
-        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
+        startupLog.LogWarning("Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
     }
 
     // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
     builder.Services.AddSemanticSearch();
-    Console.WriteLine("✓ Semantic search enabled");
+    startupLog.LogInformation("Semantic search enabled");
 
     // Record Search - Hybrid search for Dataverse entity records (Matters, Projects, Invoices)
     builder.Services.AddRecordSearch();
-    Console.WriteLine("✓ Record search enabled (index: spaarke-records-index)");
+    startupLog.LogInformation("Record search enabled (index: spaarke-records-index)");
 
     // AI Platform Foundation — DocumentParserRouter, LlamaParseClient, SemanticDocumentChunker, RagQueryBuilder
     // (AIPL-010, AIPL-011, AIPL-012 — Workstream A: Retrieval Foundation)
     builder.Services.AddAiModule(builder.Configuration);
-    Console.WriteLine("✓ AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
+    startupLog.LogInformation("AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
 
-    Console.WriteLine("✓ Analysis services enabled");
+    startupLog.LogInformation("Analysis services enabled");
 }
 else if (!documentIntelligenceEnabled)
 {
-    Console.WriteLine("⚠ Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
+    startupLog.LogWarning("Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
 }
 else
 {
-    Console.WriteLine("⚠ Analysis services disabled (Analysis:Enabled = false)");
+    startupLog.LogWarning("Analysis services disabled (Analysis:Enabled = false)");
 }
 
 // ============================================================================
@@ -590,11 +597,11 @@ if (recordMatchingEnabled)
         sp.GetRequiredService<Sprk.Bff.Api.Services.RecordMatching.DataverseIndexSyncService>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService,
         Sprk.Bff.Api.Services.RecordMatching.RecordMatchService>();
-    Console.WriteLine("✓ Record Matching services enabled (index: {0})", builder.Configuration["DocumentIntelligence:AiSearchIndexName"] ?? "spaarke-records-index");
+    startupLog.LogInformation("Record Matching services enabled (index: {IndexName})", builder.Configuration["DocumentIntelligence:AiSearchIndexName"] ?? "spaarke-records-index");
 }
 else
 {
-    Console.WriteLine("⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
+    startupLog.LogWarning("Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
 }
 
 // ============================================================================
@@ -640,7 +647,7 @@ builder.Services.AddHttpClient("DataversePolling")
         client.Timeout = TimeSpan.FromSeconds(30);
     });
 
-Console.WriteLine("✓ Email-to-Document conversion services registered");
+startupLog.LogInformation("Email-to-Document conversion services registered");
 
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
@@ -714,11 +721,11 @@ builder.Services.Configure<LlamaParseOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<AiSearchOptions>(builder.Configuration.GetSection("AiSearch"));
 
 builder.Logging.AddConsole();
-Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
-Console.WriteLine("✓ Email polling backup service configured");
-Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
-Console.WriteLine("✓ Embedding migration service registered (enable via config)");
-Console.WriteLine("✓ Scheduled RAG indexing service registered (enable via config)");
+startupLog.LogInformation("Job processing configured with Service Bus (queue: sdap-jobs)");
+startupLog.LogInformation("Email polling backup service configured");
+startupLog.LogInformation("Document vector backfill service registered (enable via config)");
+startupLog.LogInformation("Embedding migration service registered (enable via config)");
+startupLog.LogInformation("Scheduled RAG indexing service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -804,31 +811,14 @@ var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get
 var isTestOrDevelopment = builder.Environment.IsDevelopment() ||
                           builder.Environment.EnvironmentName == "Testing";
 
-// Validate configuration
+// Validate configuration - FAIL-FAST in ALL environments (no localhost fallback)
 if (allowedOrigins == null || allowedOrigins.Length == 0)
 {
-    // In development/testing, allow localhost as fallback
-    if (isTestOrDevelopment)
-    {
-        var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-        logger.LogWarning(
-            "CORS: No allowed origins configured. Falling back to localhost (development only).");
-
-        allowedOrigins = new[]
-        {
-            "http://localhost:3000",
-            "http://localhost:3001",
-            "http://127.0.0.1:3000"
-        };
-    }
-    else
-    {
-        // FAIL-CLOSED: Throw exception in non-development environments
-        throw new InvalidOperationException(
-            $"CORS configuration is missing or empty in {builder.Environment.EnvironmentName} environment. " +
-            "Configure 'Cors:AllowedOrigins' with explicit origin URLs. " +
-            "CORS will NOT fall back to AllowAnyOrigin for security reasons.");
-    }
+    throw new InvalidOperationException(
+        $"CORS configuration is missing or empty in {builder.Environment.EnvironmentName} environment. " +
+        "Configure 'Cors:AllowedOrigins' with explicit origin URLs. " +
+        "For local development, add localhost origins to appsettings.Development.json. " +
+        "CORS will NOT fall back to AllowAnyOrigin or localhost for security reasons.");
 }
 
 // Reject wildcard configuration (security violation)
@@ -857,13 +847,10 @@ foreach (var origin in allowedOrigins)
 }
 
 // Log allowed origins for audit trail
-{
-    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
-    logger.LogInformation(
-        "CORS: Configured with {OriginCount} allowed origins: {Origins}",
-        allowedOrigins.Length,
-        string.Join(", ", allowedOrigins));
-}
+startupLog.LogInformation(
+    "CORS: Configured with {OriginCount} allowed origins: {Origins}",
+    allowedOrigins.Length,
+    string.Join(", ", allowedOrigins));
 
 builder.Services.AddCors(options =>
 {
@@ -1136,7 +1123,7 @@ builder.Services
 // Resilient Search Client (for AI Search circuit breaker protection)
 builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.IResilientSearchClient,
     Sprk.Bff.Api.Infrastructure.Resilience.ResilientSearchClient>();
-Console.WriteLine("✓ Circuit breaker registry enabled");
+startupLog.LogInformation("Circuit breaker registry enabled");
 
 var app = builder.Build();
 
@@ -1349,106 +1336,114 @@ app.UseRateLimiter();
 // Health checks endpoints (anonymous for monitoring)
 app.MapHealthChecks("/healthz").AllowAnonymous();
 
-// Dataverse connection test endpoint
-app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
-
-// Dataverse CRUD operations test endpoint
-app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
-
-// DEBUG: Test document retrieval by ID (string param, not GUID constraint)
-app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
+// ============================================================================
+// DEBUG ENDPOINTS - Only available in Development environment
+// ============================================================================
+if (app.Environment.IsDevelopment())
 {
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
-    try
-    {
-        var doc = await dataverseService.GetDocumentAsync(id);
-        if (doc == null)
-        {
-            return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
-        }
-        return Results.Ok(new
-        {
-            status = "FOUND",
-            documentId = doc.Id,
-            name = doc.Name,
-            fileName = doc.FileName,
-            isEmailArchive = doc.IsEmailArchive,
-            parentDocumentId = doc.ParentDocumentId,
-            matterId = doc.MatterId,
-            projectId = doc.ProjectId,
-            invoiceId = doc.InvoiceId,
-            emailConversationIndex = doc.EmailConversationIndex
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-        return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
 
-// DEBUG: Test document retrieval (temporary - remove after debugging)
-app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
-{
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
-    try
-    {
-        var doc = await dataverseService.GetDocumentAsync(id.ToString());
-        if (doc == null)
-        {
-            return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
-        }
-        return Results.Ok(new
-        {
-            status = "FOUND",
-            documentId = doc.Id,
-            name = doc.Name,
-            fileName = doc.FileName,
-            isEmailArchive = doc.IsEmailArchive,
-            parentDocumentId = doc.ParentDocumentId,
-            matterId = doc.MatterId,
-            projectId = doc.ProjectId,
-            invoiceId = doc.InvoiceId,
-            emailConversationIndex = doc.EmailConversationIndex
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-        return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
+    // Dataverse connection test endpoint (debug-only: exposes connection details and error messages)
+    app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 
-// DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
-app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
-{
-    logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
-    try
+    // Dataverse CRUD operations test endpoint (debug-only: performs write operations against Dataverse)
+    app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
+
+    // DEBUG: Test document retrieval by ID (string param, not GUID constraint)
+    app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
     {
-        var children = await dataverseService.GetDocumentsByParentAsync(parentId);
-        var childList = children.ToList();
-        return Results.Ok(new
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+        try
         {
-            status = "OK",
-            parentDocumentId = parentId.ToString(),
-            childCount = childList.Count,
-            children = childList.Select(c => new
+            var doc = await dataverseService.GetDocumentAsync(id);
+            if (doc == null)
             {
-                documentId = c.Id,
-                name = c.Name,
-                fileName = c.FileName,
-                isEmailArchive = c.IsEmailArchive,
-                parentDocumentId = c.ParentDocumentId,
-                createdOn = c.CreatedOn
-            })
-        });
-    }
-    catch (Exception ex)
+                return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
+            }
+            return Results.Ok(new
+            {
+                status = "FOUND",
+                documentId = doc.Id,
+                name = doc.Name,
+                fileName = doc.FileName,
+                isEmailArchive = doc.IsEmailArchive,
+                parentDocumentId = doc.ParentDocumentId,
+                matterId = doc.MatterId,
+                projectId = doc.ProjectId,
+                invoiceId = doc.InvoiceId,
+                emailConversationIndex = doc.EmailConversationIndex
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+            return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Test document retrieval (temporary - remove after debugging)
+    app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
     {
-        logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
-        return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+        try
+        {
+            var doc = await dataverseService.GetDocumentAsync(id.ToString());
+            if (doc == null)
+            {
+                return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
+            }
+            return Results.Ok(new
+            {
+                status = "FOUND",
+                documentId = doc.Id,
+                name = doc.Name,
+                fileName = doc.FileName,
+                isEmailArchive = doc.IsEmailArchive,
+                parentDocumentId = doc.ParentDocumentId,
+                matterId = doc.MatterId,
+                projectId = doc.ProjectId,
+                invoiceId = doc.InvoiceId,
+                emailConversationIndex = doc.EmailConversationIndex
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+            return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
+    app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
+    {
+        logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
+        try
+        {
+            var children = await dataverseService.GetDocumentsByParentAsync(parentId);
+            var childList = children.ToList();
+            return Results.Ok(new
+            {
+                status = "OK",
+                parentDocumentId = parentId.ToString(),
+                childCount = childList.Count,
+                children = childList.Select(c => new
+                {
+                    documentId = c.Id,
+                    name = c.Name,
+                    fileName = c.FileName,
+                    isEmailArchive = c.IsEmailArchive,
+                    parentDocumentId = c.ParentDocumentId,
+                    createdOn = c.CreatedOn
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
+            return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+} // end Development-only debug endpoints (healthz/dataverse, healthz/dataverse/crud, healthz/dataverse/doc, debug/document, debug/children)
 
 // Lightweight ping endpoint for warm-up agents (Task 021)
 // Must be fast (<100ms), unauthenticated, and expose no sensitive info
@@ -1463,274 +1458,281 @@ app.MapGet("/status", () =>
     return TypedResults.Json(new
     {
         service = "Sprk.Bff.Api",
-        version = "1.0.1-debug", // Updated version to verify deployment
-        timestamp = DateTimeOffset.UtcNow,
-        debugEndpoints = new[] { "/healthz/dataverse/doc/{id}" }
+        version = "1.0.1",
+        timestamp = DateTimeOffset.UtcNow
     });
 })
     .AllowAnonymous()
     .WithTags("Health")
     .WithDescription("Service status with metadata (no sensitive info).");
 
-// DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
-app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+// ============================================================================
+// DEBUG ENDPOINTS (Service Bus queues) - Only available in Development environment
+// ============================================================================
+if (app.Environment.IsDevelopment())
 {
-    try
+
+    // DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
+    app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
     {
-        await using var receiver = serviceBusClient.CreateReceiver(
-            "office-upload-finalization",
-            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver(
+                "office-upload-finalization",
+                new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+                {
+                    SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                    ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                });
+
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
             {
-                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
-                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                sequenceNumber = m.SequenceNumber,
+                deadLetterReason = m.DeadLetterReason,
+                deadLetterErrorDescription = m.DeadLetterErrorDescription,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office DLQ");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
+    app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office-indexing queue");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at office-profile queue
+    app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            await using var receiver = serviceBusClient.CreateReceiver("office-profile");
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking office-profile queue");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: Peek at sdap-jobs dead letter queue (to diagnose "No Handler" errors)
+    app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+    {
+        try
+        {
+            var queueName = app.Configuration["ServiceBus:QueueName"] ?? "sdap-jobs";
+            await using var receiver = serviceBusClient.CreateReceiver(
+                queueName,
+                new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+                {
+                    SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                    ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                });
+
+            var messages = await receiver.PeekMessagesAsync(10);
+            var results = messages.Select(m => new
+            {
+                sequenceNumber = m.SequenceNumber,
+                deadLetterReason = m.DeadLetterReason,
+                deadLetterErrorDescription = m.DeadLetterErrorDescription,
+                enqueuedTime = m.EnqueuedTime,
+                messageId = m.MessageId,
+                correlationId = m.CorrelationId,
+                subject = m.Subject,
+                applicationProperties = m.ApplicationProperties.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? "null"),
+                bodyPreview = m.Body.ToString().Length > 800 ? m.Body.ToString()[..800] + "..." : m.Body.ToString()
+            }).ToList();
+
+            return Results.Ok(new { queue = $"{queueName}/$DeadLetterQueue", count = results.Count, messages = results });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error peeking sdap-jobs DLQ");
+            return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+        }
+    }).AllowAnonymous();
+
+    // DEBUG: List all registered job handlers (to diagnose "No Handler" errors)
+    app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger) =>
+    {
+        try
+        {
+            using var scope = sp.CreateScope();
+            var handlers = scope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
+
+            var handlerInfo = handlers.Select(h => new
+            {
+                jobType = h.JobType,
+                handlerType = h.GetType().FullName
+            }).ToList();
+
+            // Also try to resolve AppOnlyDocumentAnalysisJobHandler directly to see if it fails
+            string? directResolutionError = null;
+            try
+            {
+                var directHandler = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+                if (directHandler == null)
+                {
+                    directResolutionError = "Direct resolution returned null (not registered as concrete type)";
+                }
+            }
+            catch (Exception ex)
+            {
+                directResolutionError = $"Direct resolution failed: {ex.Message}";
+                if (ex.InnerException != null)
+                {
+                    directResolutionError += $" → Inner: {ex.InnerException.Message}";
+                }
+            }
+
+            // Try to resolve IAppOnlyAnalysisService
+            string? analysisServiceError = null;
+            try
+            {
+                var analysisService = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
+                if (analysisService == null)
+                {
+                    analysisServiceError = "IAppOnlyAnalysisService returned null";
+                }
+            }
+            catch (Exception ex)
+            {
+                analysisServiceError = $"IAppOnlyAnalysisService failed: {ex.Message}";
+                if (ex.InnerException != null)
+                {
+                    analysisServiceError += $" → Inner: {ex.InnerException.Message}";
+                }
+            }
+
+            return Results.Ok(new
+            {
+                totalHandlers = handlers.Count,
+                handlers = handlerInfo,
+                hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
+                directHandlerResolution = directResolutionError ?? "OK",
+                analysisServiceResolution = analysisServiceError ?? "OK"
             });
-
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
+        }
+        catch (Exception ex)
         {
-            sequenceNumber = m.SequenceNumber,
-            deadLetterReason = m.DeadLetterReason,
-            deadLetterErrorDescription = m.DeadLetterErrorDescription,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG] Error peeking office DLQ");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
-app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG] Error peeking office-indexing queue");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at office-profile queue
-app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        await using var receiver = serviceBusClient.CreateReceiver("office-profile");
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG] Error peeking office-profile queue");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Peek at sdap-jobs dead letter queue (to diagnose "No Handler" errors)
-app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
-{
-    try
-    {
-        var queueName = app.Configuration["ServiceBus:QueueName"] ?? "sdap-jobs";
-        await using var receiver = serviceBusClient.CreateReceiver(
-            queueName,
-            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+            logger.LogError(ex, "Error listing job handlers");
+            return Results.Ok(new
             {
-                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
-                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+                error = ex.Message,
+                innerError = ex.InnerException?.Message,
+                innerInnerError = ex.InnerException?.InnerException?.Message
             });
+        }
+    }).AllowAnonymous();
 
-        var messages = await receiver.PeekMessagesAsync(10);
-        var results = messages.Select(m => new
-        {
-            sequenceNumber = m.SequenceNumber,
-            deadLetterReason = m.DeadLetterReason,
-            deadLetterErrorDescription = m.DeadLetterErrorDescription,
-            enqueuedTime = m.EnqueuedTime,
-            messageId = m.MessageId,
-            correlationId = m.CorrelationId,
-            subject = m.Subject,
-            applicationProperties = m.ApplicationProperties.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? "null"),
-            bodyPreview = m.Body.ToString().Length > 800 ? m.Body.ToString()[..800] + "..." : m.Body.ToString()
-        }).ToList();
-
-        return Results.Ok(new { queue = $"{queueName}/$DeadLetterQueue", count = results.Count, messages = results });
-    }
-    catch (Exception ex)
+    // DEBUG: Diagnose communication BackgroundService resolution and manually trigger subscription management
+    app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<Program> logger) =>
     {
-        logger.LogError(ex, "[DEBUG] Error peeking sdap-jobs DLQ");
-        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
-    }
-}).AllowAnonymous();
+        var results = new Dictionary<string, string>();
 
-// DEBUG: List all registered job handlers (to diagnose "No Handler" errors)
-app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger) =>
-{
-    try
-    {
-        using var scope = sp.CreateScope();
-        var handlers = scope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
-
-        var handlerInfo = handlers.Select(h => new
-        {
-            jobType = h.JobType,
-            handlerType = h.GetType().FullName
-        }).ToList();
-
-        // Also try to resolve AppOnlyDocumentAnalysisJobHandler directly to see if it fails
-        string? directResolutionError = null;
+        // Check if key services resolve
         try
         {
-            var directHandler = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
-            if (directHandler == null)
+            var accountService = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
+            results["CommunicationAccountService"] = "OK";
+
+            // Try to query receive-enabled accounts (the first thing GraphSubscriptionManager does)
+            try
             {
-                directResolutionError = "Direct resolution returned null (not registered as concrete type)";
+                var accounts = await accountService.QueryReceiveEnabledAccountsAsync();
+                results["ReceiveEnabledAccounts"] = $"{accounts.Length} found";
+                foreach (var account in accounts)
+                {
+                    results[$"Account:{account.EmailAddress}"] =
+                        $"SubId={account.SubscriptionId ?? "none"}, Expiry={account.SubscriptionExpiry}, AutoCreate={account.AutoCreateRecords}";
+                }
+            }
+            catch (Exception ex)
+            {
+                results["ReceiveEnabledAccounts"] = $"QUERY FAILED: {ex.Message}";
             }
         }
         catch (Exception ex)
         {
-            directResolutionError = $"Direct resolution failed: {ex.Message}";
-            if (ex.InnerException != null)
-            {
-                directResolutionError += $" → Inner: {ex.InnerException.Message}";
-            }
+            results["CommunicationAccountService"] = $"FAILED: {ex.Message}";
         }
 
-        // Try to resolve IAppOnlyAnalysisService
-        string? analysisServiceError = null;
+        // List Graph subscriptions
         try
         {
-            var analysisService = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
-            if (analysisService == null)
+            var graphFactory = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>();
+            var graphClient = graphFactory.ForApp();
+            var subs = await graphClient.Subscriptions.GetAsync();
+            results["ActiveGraphSubscriptions"] = $"{subs?.Value?.Count ?? 0}";
+            if (subs?.Value != null)
             {
-                analysisServiceError = "IAppOnlyAnalysisService returned null";
+                foreach (var sub in subs.Value)
+                {
+                    results[$"Subscription:{sub.Id}"] =
+                        $"Resource={sub.Resource}, Expires={sub.ExpirationDateTime}, ChangeType={sub.ChangeType}, NotificationUrl={sub.NotificationUrl}";
+                }
             }
         }
         catch (Exception ex)
         {
-            analysisServiceError = $"IAppOnlyAnalysisService failed: {ex.Message}";
-            if (ex.InnerException != null)
-            {
-                analysisServiceError += $" → Inner: {ex.InnerException.Message}";
-            }
+            results["ActiveGraphSubscriptions"] = $"FAILED: {ex.Message}";
         }
 
-        return Results.Ok(new
+        // Check hosted services
+        var hostedServices = sp.GetServices<Microsoft.Extensions.Hosting.IHostedService>().ToList();
+        results["TotalHostedServices"] = hostedServices.Count.ToString();
+        var commServices = hostedServices.Where(s =>
+            s.GetType().Namespace?.Contains("Communication") == true).ToList();
+        foreach (var svc in commServices)
         {
-            totalHandlers = handlers.Count,
-            handlers = handlerInfo,
-            hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
-            directHandlerResolution = directResolutionError ?? "OK",
-            analysisServiceResolution = analysisServiceError ?? "OK"
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "[DEBUG] Error listing job handlers");
-        return Results.Ok(new
-        {
-            error = ex.Message,
-            innerError = ex.InnerException?.Message,
-            innerInnerError = ex.InnerException?.InnerException?.Message
-        });
-    }
-}).AllowAnonymous();
-
-// DEBUG: Diagnose communication BackgroundService resolution and manually trigger subscription management
-app.MapGet("/debug/communication-services", async (IServiceProvider sp, ILogger<Program> logger) =>
-{
-    var results = new Dictionary<string, string>();
-
-    // Check if key services resolve
-    try
-    {
-        var accountService = sp.GetRequiredService<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>();
-        results["CommunicationAccountService"] = "OK";
-
-        // Try to query receive-enabled accounts (the first thing GraphSubscriptionManager does)
-        try
-        {
-            var accounts = await accountService.QueryReceiveEnabledAccountsAsync();
-            results["ReceiveEnabledAccounts"] = $"{accounts.Length} found";
-            foreach (var account in accounts)
-            {
-                results[$"Account:{account.EmailAddress}"] =
-                    $"SubId={account.SubscriptionId ?? "none"}, Expiry={account.SubscriptionExpiry}, AutoCreate={account.AutoCreateRecords}";
-            }
+            results[$"HostedService:{svc.GetType().Name}"] = "Running";
         }
-        catch (Exception ex)
-        {
-            results["ReceiveEnabledAccounts"] = $"QUERY FAILED: {ex.Message}";
-        }
-    }
-    catch (Exception ex)
-    {
-        results["CommunicationAccountService"] = $"FAILED: {ex.Message}";
-    }
 
-    // List Graph subscriptions
-    try
-    {
-        var graphFactory = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>();
-        var graphClient = graphFactory.ForApp();
-        var subs = await graphClient.Subscriptions.GetAsync();
-        results["ActiveGraphSubscriptions"] = $"{subs?.Value?.Count ?? 0}";
-        if (subs?.Value != null)
-        {
-            foreach (var sub in subs.Value)
-            {
-                results[$"Subscription:{sub.Id}"] =
-                    $"Resource={sub.Resource}, Expires={sub.ExpirationDateTime}, ChangeType={sub.ChangeType}, NotificationUrl={sub.NotificationUrl}";
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        results["ActiveGraphSubscriptions"] = $"FAILED: {ex.Message}";
-    }
+        return Results.Ok(results);
+    }).AllowAnonymous();
 
-    // Check hosted services
-    var hostedServices = sp.GetServices<Microsoft.Extensions.Hosting.IHostedService>().ToList();
-    results["TotalHostedServices"] = hostedServices.Count.ToString();
-    var commServices = hostedServices.Where(s =>
-        s.GetType().Namespace?.Contains("Communication") == true).ToList();
-    foreach (var svc in commServices)
-    {
-        results[$"HostedService:{svc.GetType().Name}"] = "Running";
-    }
-
-    return Results.Ok(results);
-}).AllowAnonymous();
+} // end Development-only debug endpoints (Service Bus queues, job handlers, communication services)
 
 // ---- Endpoint Groups ----
 
@@ -1794,24 +1796,14 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 app.MapRagEndpoints();
 
 // Knowledge base management endpoints (AIPL-015 — Workstream A: Retrieval Foundation)
-// Provides: GET /indexes/health, GET /indexes/{indexName}/documents,
-//           DELETE /indexes/{indexName}/documents/{documentId},
-//           POST /indexes/reindex/{documentId}, POST /test-search
 app.MapKnowledgeBaseEndpoints();
 
 // SprkChat session and SSE streaming endpoints (AIPL-054 — Workstream C: SprkChat)
-// Provides: POST /sessions, GET /sessions/{id}/history, POST /sessions/{id}/messages (SSE),
-//           POST /sessions/{id}/refine (SSE), PATCH /sessions/{id}/context, DELETE /sessions/{id}
 app.MapChatEndpoints();
 
 // Semantic Search endpoints for hybrid search (R1)
-// Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)
-if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
-    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-{
-    app.MapSemanticSearchEndpoints();
-    app.MapRecordSearchEndpoints();
-}
+app.MapSemanticSearchEndpoints();
+app.MapRecordSearchEndpoints();
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();
@@ -1828,11 +1820,18 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
 
 // Admin Knowledge endpoints (AIRA-011 — reference knowledge source indexing)
 // Provides: POST /api/admin/knowledge/index-references, POST /index-reference/{id}, DELETE /index-reference/{id}
-app.MapAdminKnowledgeEndpoints();
+// Gated: depends on ReferenceIndexingService registered by AiModule (Analysis:Enabled=true)
+if (app.Configuration.GetValue<bool>("Analysis:Enabled"))
+{
+    app.MapAdminKnowledgeEndpoints();
+}
 
 // Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
-// Allows importing builder scope JSON files into Dataverse
-app.MapBuilderScopeAdminEndpoints();
+// Gated: depends on BuilderScopeImporter registered in Analysis block (Analysis:Enabled=true)
+if (app.Configuration.GetValue<bool>("Analysis:Enabled"))
+{
+    app.MapBuilderScopeAdminEndpoints();
+}
 
 // Legal Operations Workspace endpoints (portfolio aggregation + scoring — home-corporate-workspace-r1)
 app.MapWorkspaceEndpoints();

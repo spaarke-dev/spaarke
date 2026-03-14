@@ -50,6 +50,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -81,8 +82,9 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((_, model, _) =>
+            .Callback<string, string?, int?, CancellationToken>((_, model, _, _) =>
                 capturedModel = model)
             .ReturnsAsync(aiResponse);
 
@@ -110,8 +112,9 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync(CreateValidLeaseAnalysisPlanResponse());
 
@@ -137,8 +140,9 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync(CreateValidLeaseAnalysisPlanResponse());
 
@@ -166,8 +170,9 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync(CreateValidLeaseAnalysisPlanResponse());
 
@@ -205,8 +210,9 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string?, CancellationToken>((prompt, _, _) =>
+            .Callback<string, string?, int?, CancellationToken>((prompt, _, _, _) =>
                 capturedPrompt = prompt)
             .ReturnsAsync(CreateValidLeaseAnalysisPlanResponse());
 
@@ -248,6 +254,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -291,6 +298,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -330,6 +338,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -375,6 +384,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -420,6 +430,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -467,6 +478,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -513,6 +525,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -570,6 +583,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -605,6 +619,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -651,6 +666,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -679,6 +695,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("This is not valid JSON");
 
@@ -712,6 +729,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 
@@ -889,6 +907,7 @@ public class BuildPlanGenerationServiceTests
             .Setup(x => x.GetCompletionAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<int?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResponse);
 

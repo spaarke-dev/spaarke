@@ -44,7 +44,7 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
 
         var content = await response.Content.ReadAsStringAsync();
         content.Should().Contain("Sprk.Bff.Api");
-        content.Should().Contain("1.0.0");
+        content.Should().Contain("1.0.1");
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 

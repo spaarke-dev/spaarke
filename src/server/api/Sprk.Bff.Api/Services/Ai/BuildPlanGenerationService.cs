@@ -67,8 +67,8 @@ public class BuildPlanGenerationService : IBuildPlanGenerationService
             // Call AI for plan generation
             var response = await _openAiClient.GetCompletionAsync(
                 prompt,
-                model,
-                cancellationToken);
+                model: model,
+                cancellationToken: cancellationToken);
 
             // Parse and validate the response
             var plan = ParseBuildPlanResponse(response);

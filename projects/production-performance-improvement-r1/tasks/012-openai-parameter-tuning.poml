@@ -1,0 +1,80 @@
+<task id="PPI-012" project="Production Performance Improvement R1">
+  <metadata>
+    <title>OpenAI Parameter Tuning (E4)</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2</phase>
+    <domain>E</domain>
+    <tags>bff-api, ai, configuration</tags>
+    <parallel-group>P2-ALL</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Tune OpenAI parameters to reduce inference time by 2-5 seconds per analysis:
+    1. Make MaxOutputTokens configurable per action type (default 500, complex actions 1000)
+    2. Support per-action model selection (simple → gpt-4o-mini, complex → gpt-4o)
+    These are configuration changes with immediate performance impact.
+  </prompt>
+
+  <role>Senior .NET developer with Azure OpenAI and AI configuration expertise</role>
+
+  <goal>
+    OpenAI MaxOutputTokens and model selection configurable per analysis action type via
+    appsettings.json or JPS configuration. Default reduced from 1000 to 500 tokens.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/production-performance-improvement-r1/spec.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Rate limit AI endpoints</constraint>
+    <constraint source="ADR-015">Log only identifiers/sizes/timings</constraint>
+    <constraint source="project">Must be backward-compatible — existing actions work without changes</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>openai, ai-configuration</topic>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review current OpenAI configuration">
+      Read OpenAiClient.cs. Find MaxOutputTokens setting and model selection.
+    </step>
+    <step order="2" name="Make MaxOutputTokens configurable">
+      Allow per-action MaxOutputTokens override. Default to 500 (was 1000).
+    </step>
+    <step order="3" name="Add per-action model selection">
+      Support model override in JPS configuration or appsettings. Default gpt-4o-mini.
+    </step>
+    <step order="4" name="Update configuration classes">
+      Extend OpenAI options to support per-action overrides.
+    </step>
+    <step order="5" name="Test and verify">
+      Run `dotnet build` and `dotnet test`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/ (options modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MaxOutputTokens default is 500 (configurable)</criterion>
+    <criterion testable="true">Per-action MaxOutputTokens override supported</criterion>
+    <criterion testable="true">Per-action model selection supported</criterion>
+    <criterion testable="true">Existing actions work without configuration changes</criterion>
+    <criterion testable="true">Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

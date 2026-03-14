@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace Spaarke.Dataverse;
 
@@ -463,6 +464,41 @@ public interface IDataverseService
         int top = 0,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Batch-query KPI assessments for multiple performance areas in a single round-trip.
+    /// Uses ExecuteMultipleRequest (SDK) or $batch (Web API) to reduce 3 sequential calls to 1.
+    /// Falls back to Task.WhenAll if batch execution fails.
+    /// </summary>
+    /// <param name="parentId">Parent record ID (matter or project)</param>
+    /// <param name="parentLookupField">Lookup field name on sprk_kpiassessment (e.g., "sprk_matter" or "sprk_project")</param>
+    /// <param name="performanceAreas">Array of performance area choice values to query (e.g., [100000000, 100000001, 100000002])</param>
+    /// <param name="top">Maximum number of records to return per area (0 = all)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Dictionary mapping each performance area value to its KPI assessment records</returns>
+    Task<Dictionary<int, KpiAssessmentRecord[]>> BatchQueryKpiAssessmentsAsync(
+        Guid parentId,
+        string parentLookupField,
+        int[] performanceAreas,
+        int top = 0,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a field mapping profile with its rules in a single operation.
+    /// Uses $expand (Web API) or batch query to retrieve profile + rules in one round-trip
+    /// instead of two sequential calls (GetFieldMappingProfileAsync + GetFieldMappingRulesAsync).
+    /// Falls back to sequential calls if $expand is not supported.
+    /// </summary>
+    /// <param name="sourceEntity">Source entity logical name</param>
+    /// <param name="targetEntity">Target entity logical name</param>
+    /// <param name="activeRulesOnly">Whether to return only active rules</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Profile with rules populated, or null if not found</returns>
+    Task<FieldMappingProfileEntity?> GetFieldMappingProfileWithRulesAsync(
+        string sourceEntity,
+        string targetEntity,
+        bool activeRulesOnly = true,
+        CancellationToken ct = default);
+
     // ========================================
     // Communication Account Operations (Email Communication R1 — Phase 6)
     // ========================================
@@ -545,6 +581,16 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>First matching sprk_recordtype_ref entity, or null</returns>
     Task<Entity?> QueryRecordTypeRefAsync(string entityLogicalName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Execute a QueryExpression and return the result set.
+    /// Provides testable access to the SDK RetrieveMultiple operation without
+    /// requiring a downcast to the concrete DataverseServiceClientImpl.
+    /// </summary>
+    /// <param name="query">The QueryExpression to execute</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>EntityCollection result</returns>
+    Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
 
     /// <summary>
     /// Looks up a Dataverse systemuser by Azure AD Object ID.

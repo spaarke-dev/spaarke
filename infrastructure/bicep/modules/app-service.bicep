@@ -22,6 +22,9 @@ param keyVaultName string = ''
 @description('Enable managed identity')
 param enableManagedIdentity bool = true
 
+@description('Subnet ID for VNet integration (outbound traffic). Leave empty to disable.')
+param vnetIntegrationSubnetId string = ''
+
 @description('Tags for the resource')
 param tags object = {}
 
@@ -36,6 +39,8 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
   properties: {
     serverFarmId: appServicePlanId
     httpsOnly: true
+    virtualNetworkSubnetId: !empty(vnetIntegrationSubnetId) ? vnetIntegrationSubnetId : null
+    vnetRouteAllEnabled: !empty(vnetIntegrationSubnetId)
     siteConfig: {
       linuxFxVersion: runtimeStack
       alwaysOn: true
