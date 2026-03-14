@@ -33,7 +33,7 @@ jobs:
 
       - name: Run ADR architecture tests
         id: adr-tests
-        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-restore --logger "trx;LogFileName=adr-audit-results.trx" --results-directory ./TestResults
+        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --logger "trx;LogFileName=adr-audit-results.trx" --results-directory ./TestResults
         continue-on-error: true
 
       - name: Parse results and create/update tracking issue

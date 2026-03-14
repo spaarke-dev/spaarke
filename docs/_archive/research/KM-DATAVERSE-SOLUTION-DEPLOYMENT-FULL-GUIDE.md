@@ -89,7 +89,7 @@ For **Spaarke Dev 1** and all development environments, **ALWAYS deploy Unmanage
 
 | Environment | URL | Purpose | User |
 |------------|-----|---------|------|
-| **Spaarke Dev 1** | https://spaarkedev1.crm.dynamics.com/ | Development/Testing | ralph.schroeder@spaarke.com |
+| **Spaarke Dev 1** | https://spaarkedev1.crm.dynamics.com/ | Development/Testing | admin-dev@spaarke.com |
 | HIPC Dev 2 | https://hipc-dev-2.crm.dynamics.com/ | Reference | ralph.schroeder@heliosip.com |
 
 ### Authentication Profile
@@ -101,7 +101,7 @@ pac auth list
 # Expected output
 # Index Active Kind      Name                 User                         Environment   Environment Url
 # [1]          UNIVERSAL                      ralph.schroeder@heliosip.com HIPC DEV 2    https://hipc-dev-2.crm.dynamics.com/
-# [2]   *      UNIVERSAL SpaarkeDevDeployment ralph.schroeder@spaarke.com  SPAARKE DEV 1 https://spaarkedev1.crm.dynamics.com/
+# [2]   *      UNIVERSAL SpaarkeDevDeployment admin-dev@spaarke.com  SPAARKE DEV 1 https://spaarkedev1.crm.dynamics.com/
 ```
 
 ---
@@ -715,7 +715,7 @@ pac auth create --url https://spaarkedev1.crm.dynamics.com/ --name SpaarkeDevDep
 
 # This will:
 # 1. Open browser for authentication
-# 2. Prompt for credentials: ralph.schroeder@spaarke.com
+# 2. Prompt for credentials: admin-dev@spaarke.com
 # 3. Create authentication profile
 # 4. Mark as active (*)
 ```
@@ -772,7 +772,7 @@ pac solution delete \
 
 **Expected Output:**
 ```
-Connected as ralph.schroeder@spaarke.com
+Connected as admin-dev@spaarke.com
 Connected to... SPAARKE DEV 1
 
 Deleting Dataverse Solution...
@@ -815,7 +815,7 @@ pac solution import \
 
 **Expected Output:**
 ```
-Connected as ralph.schroeder@spaarke.com
+Connected as admin-dev@spaarke.com
 Connected to... SPAARKE DEV 1
 
 Solution Importing...

@@ -21,7 +21,7 @@ if (-not $pnpModule) {
 Import-Module PnP.PowerShell -ErrorAction Stop
 
 Write-Host "Step 1: Connect to SharePoint Admin Center" -ForegroundColor Yellow
-Write-Host "You'll be prompted to sign in with your user account (e.g., ralph.schroeder@spaarke.com)" -ForegroundColor Gray
+Write-Host "You'll be prompted to sign in with your user account (e.g., admin-dev@spaarke.com)" -ForegroundColor Gray
 Write-Host ""
 
 # Construct admin center URL

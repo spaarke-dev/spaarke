@@ -15,7 +15,6 @@ on:
   push:
     branches:
       - master
-      - main
     paths:
       - 'infrastructure/bicep/**'
   workflow_dispatch:
