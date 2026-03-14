@@ -22,10 +22,10 @@
 
 | # | Task | Status | Deps | Est |
 |---|------|--------|------|-----|
-| 001 | Create sprk_speenvironment table schema | 🔲 | — | 2h |
-| 002 | Create sprk_specontainertypeconfig table schema | 🔲 | 001 | 3h |
-| 003 | Create sprk_speauditlog table schema | 🔲 | 001, 002 | 2h |
-| 004 | Add SPE Admin sitemap entry | 🔲 | — | 1h |
+| 001 | Create sprk_speenvironment table schema | ✅ | — | 2h |
+| 002 | Create sprk_specontainertypeconfig table schema | ✅ | 001 | 3h |
+| 003 | Create sprk_speauditlog table schema | ✅ | 001, 002 | 2h |
+| 004 | Add SPE Admin sitemap entry | ✅ | — | 1h |
 
 ### 1.2 BFF API — Infrastructure
 
@@ -131,7 +131,7 @@
 | 042 | Build Code Page and verify | 🔲 | 032-041 | 2h |
 | 043 | Deploy BFF API with SPE endpoints | 🔲 | 010-023 | 2h |
 | 044 | Deploy Code Page to Dataverse | 🔲 | 042 | 2h |
-| 045 | Create Dataverse tables in environment | 🔲 | 001-003 | 2h |
+| 045 | Create Dataverse tables in environment | ✅ | 001-003 | 2h |
 | 046 | Phase 1 end-to-end integration testing | 🔲 | 042-045 | 4h |
 
 ---
