@@ -59,7 +59,8 @@ When Claude Code is asked to "deploy to production" or "set up production enviro
 16. [Dataverse Solution Lifecycle](#16-dataverse-solution-lifecycle)
 17. [Managed vs Unmanaged Solutions](#17-managed-vs-unmanaged-solutions)
 18. [Dataverse CI/CD and Deployment Automation](#18-dataverse-cicd-and-deployment-automation)
-19. [CI/CD Pipelines (Azure)](#19-cicd-pipelines-azure)
+19. [SharePoint Embedded (SPE) Setup](#19-sharepoint-embedded-spe-setup)
+20. [CI/CD Pipelines (Azure)](#20-cicd-pipelines-azure)
 
 ---
 
@@ -1273,7 +1274,139 @@ Claude Code can automate steps 1, 2, and 4. Step 3 (export) requires the dev env
 
 ---
 
-## 19. CI/CD Pipelines (Azure)
+## 19. SharePoint Embedded (SPE) Setup
+
+SPE provides document storage for Spaarke. Each production environment needs a **Container Type** (the blueprint) and the BFF API registered as a **guest application** to access it.
+
+> **Reference**: See [HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md](./HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) for the full SPE setup guide.
+
+### Architecture
+
+```
+┌───────────────────────────────────────────────────────────┐
+│ Container Type (one per production environment)            │
+│   - Owned by: spaarke-bff-api-prod app registration       │
+│   - Container Type ID: stored in Key Vault                │
+│                                                           │
+│   Registered Applications:                                 │
+│   ├── Owning App: spaarke-bff-api-prod (full permissions) │
+│   └── Guest Apps: (additional apps if needed)             │
+│                                                           │
+│   Containers (created on-demand per customer):             │
+│   ├── demo → Container (Drive ID)                         │
+│   ├── acme → Container (Drive ID)                         │
+│   └── ...                                                 │
+└───────────────────────────────────────────────────────────┘
+```
+
+### Current State
+
+| Component | Dev | Production |
+|-----------|-----|------------|
+| Container Type | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` (owned by PCF app `170c98e1`) | **NOT CREATED** |
+| BFF API registered | Yes (as guest app `1e40baad`) | **NOT REGISTERED** |
+| Containers | Exist (on-demand) | **NONE** (no container type) |
+
+### Step 1: Create Production Container Type
+
+**[HUMAN]** Requires SharePoint Administrator or Global Administrator. This is a one-time operation per production environment.
+
+```powershell
+# Option A: Use existing script (update parameters for production)
+.\scripts\Create-ContainerType-PowerShell.ps1 `
+    -ContainerTypeName "Spaarke Document Storage Prod" `
+    -OwningAppId "<spaarke-bff-api-prod-client-id>" `
+    -AdminCenterUrl "https://spaarke-admin.sharepoint.com"
+
+# Option B: Manual via SharePoint Online Management Shell
+Connect-SPOService -Url "https://spaarke-admin.sharepoint.com"
+New-SPOContainerType `
+    -ContainerTypeName "Spaarke Document Storage Prod" `
+    -OwningApplicationId "<spaarke-bff-api-prod-client-id>" `
+    -AzureSubscriptionId "<subscription-id>"
+```
+
+**Output**: A new `ContainerTypeId` (GUID). Save this — it's needed for all subsequent steps.
+
+> **Decision**: In dev, the PCF app (`170c98e1`) owns the container type and the BFF API (`1e40baad`) is a guest. For production, the **BFF API app** (`spaarke-bff-api-prod`) should be the owning application since it performs all SPE operations server-side.
+
+### Step 2: Register Applications with Container Type
+
+**[AI]** After container type is created, register the BFF API:
+
+```powershell
+.\scripts\Register-BffApiWithContainerType.ps1 `
+    -ContainerTypeId "<new-prod-container-type-id>" `
+    -BffApiAppId "<spaarke-bff-api-prod-client-id>" `
+    -OwningAppId "<spaarke-bff-api-prod-client-id>" `
+    -OwningAppSecret "<secret>" `
+    -TenantId "a221a95e-6abc-4434-aecc-e48338a1b2f2"
+```
+
+This registers the app with `full` delegated and appOnly permissions on the container type via the Graph API (`/storage/fileStorage/containerTypes/{id}/applications`).
+
+### Step 3: Store ContainerTypeId in Key Vault
+
+**[AI]** Claude Code runs:
+
+```powershell
+az keyvault secret set `
+    --vault-name sprk-platform-prod-kv `
+    --name "Spe--ContainerTypeId" `
+    --value "<new-prod-container-type-id>"
+```
+
+### Step 4: Configure BFF API App Setting
+
+**[AI]** Add the Key Vault reference to App Service:
+
+```powershell
+az webapp config appsettings set `
+    -g rg-spaarke-platform-prod `
+    -n spaarke-bff-prod `
+    --settings "Spe__ContainerTypeId=@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Spe--ContainerTypeId)"
+```
+
+### Step 5: Verify SPE Setup
+
+**[AI]** After restarting the BFF API, verify:
+
+```powershell
+# Health check should still pass
+curl https://api.spaarke.com/healthz
+
+# SPE-specific verification (requires auth token):
+# The BFF API creates containers on-demand when a customer first accesses document storage.
+# Verify by checking the container type exists via Graph API:
+az rest --method GET `
+    --url "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/<container-type-id>" `
+    --headers "Content-Type=application/json"
+```
+
+### Entra ID Permissions for SPE
+
+The BFF API app registration (`spaarke-bff-api-prod`) needs these Graph API permissions for SPE:
+
+| Permission | Type | Purpose |
+|-----------|------|---------|
+| `FileStorageContainer.Selected` | Application | Access selected SPE containers |
+| `Files.Read.All` | Application | Read files in containers |
+
+These should already be configured by `Register-EntraAppRegistrations.ps1` (Phase 2). Verify with:
+
+```powershell
+.\scripts\Test-EntraAppRegistrations.ps1
+```
+
+### Container Creation
+
+Containers are created **on-demand** by the BFF API when a customer first accesses document storage. The `Provision-Customer.ps1` step 8 validates that the BFF API is healthy but does NOT pre-create containers — they are created when the application needs them.
+
+Each customer gets their own container, identified by the customer's tenant registry entry. Container IDs (Drive IDs) are stored in the BFF API's tenant registry.
+
+---
+
+## 20. CI/CD Pipelines (Azure)
 
 Three GitHub Actions workflows automate deployment after initial setup:
 
@@ -1345,31 +1478,39 @@ PHASE 2: ENTRA ID                                           [AI + HUMAN]
   6. Test-EntraAppRegistrations.ps1                          (verify)
   7. Grant managed identity Key Vault RBAC (both slots!)     [AI]
 
-PHASE 3: SECRETS & SETTINGS                                  [AI]
-  8. Seed-ProductionKeyVault.ps1                             (seed secrets)
-  9. Configure-ProductionAppSettings.ps1                     (KV references)
+PHASE 3: SPE (SHAREPOINT EMBEDDED)                           [HUMAN + AI]
+  8. Create SPE container type (SharePoint Admin Center)     [HUMAN]
+  9. Register BFF API app with container type                [AI]
+  10. Store ContainerTypeId in Key Vault                     [AI]
 
-PHASE 4: BFF API                                             [AI]
-  10. Deploy-BffApi.ps1 -Environment production -UseSlotDeploy (deploy, 3-5 min)
+PHASE 4: SECRETS & SETTINGS                                  [AI]
+  11. Seed-ProductionKeyVault.ps1                            (seed secrets)
+  12. Configure-ProductionAppSettings.ps1                    (KV references)
 
-PHASE 5: CUSTOM DOMAIN                                       [AI + HUMAN]
-  11. Configure-CustomDomain.ps1 -ShowDnsInstructions        (get DNS values)
-  12. Create CNAME + TXT DNS records                         [HUMAN]
-  13. Wait for DNS propagation                               [HUMAN]
-  14. Configure-CustomDomain.ps1                             (bind domain + SSL)
-  15. Test-CustomDomain.ps1                                  (verify)
+PHASE 5: BFF API                                             [AI]
+  13. Deploy-BffApi.ps1 -Environment production -UseSlotDeploy (deploy, 3-5 min)
 
-PHASE 6: FIRST CUSTOMER                                      [AI]
-  16. Provision-Customer.ps1 -CustomerId demo -WhatIf        (preview)
-  17. Provision-Customer.ps1 -CustomerId demo                (provision, 20-30 min)
-  18. Load-DemoSampleData.ps1                                (sample data)
-  19. Invite-DemoUsers.ps1                                   (demo access)
+PHASE 6: CUSTOM DOMAIN                                       [AI + HUMAN]
+  14. Configure-CustomDomain.ps1 -ShowDnsInstructions        (get DNS values)
+  15. Create CNAME + TXT DNS records                         [HUMAN]
+  16. Wait for DNS propagation                               [HUMAN]
+  17. Configure-CustomDomain.ps1                             (bind domain + SSL)
+  18. Test-CustomDomain.ps1                                  (verify)
 
-PHASE 7: VERIFY                                              [AI]
-  20. Test-Deployment.ps1 -EnvironmentName prod              (17 smoke tests)
+PHASE 7: DATAVERSE SOLUTIONS                                  [AI]
+  19. Deploy-DataverseSolutions.ps1 -Environment prod         (import managed, 10-30 min)
+
+PHASE 8: FIRST CUSTOMER                                      [AI]
+  20. Provision-Customer.ps1 -CustomerId demo -WhatIf        (preview)
+  21. Provision-Customer.ps1 -CustomerId demo                (provision, 20-30 min)
+  22. Load-DemoSampleData.ps1                                (sample data)
+  23. Invite-DemoUsers.ps1                                   (demo access)
+
+PHASE 9: VERIFY                                              [AI]
+  24. Test-Deployment.ps1 -EnvironmentName prod              (17 smoke tests)
 ```
 
-**Total estimated time**: 2-4 hours (first deployment). Steps 1-10 and 16-20 are fully automatable by Claude Code.
+**Total estimated time**: 3-5 hours (first deployment). Steps 1-2, 9-13, 17-18, 19-24 are fully automatable by Claude Code.
 
 ---
 
