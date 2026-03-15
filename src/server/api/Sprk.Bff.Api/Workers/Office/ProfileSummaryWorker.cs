@@ -38,7 +38,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
     private readonly ILogger<ProfileSummaryWorker> _logger;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IDistributedCache _cache;
-    private readonly IDataverseService _dataverseService;
+    private readonly IProcessingJobService _processingJobService;
     private readonly IJobStatusService _jobStatusService;
     private readonly IAppOnlyAnalysisService _analysisService;
     private readonly ServiceBusOptions _serviceBusOptions;
@@ -59,7 +59,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         ILogger<ProfileSummaryWorker> logger,
         ServiceBusClient serviceBusClient,
         IDistributedCache cache,
-        IDataverseService dataverseService,
+        IProcessingJobService processingJobService,
         IJobStatusService jobStatusService,
         IAppOnlyAnalysisService analysisService,
         IOptions<ServiceBusOptions> serviceBusOptions)
@@ -67,7 +67,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
@@ -456,7 +456,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                     : (DateTime?)null
             };
 
-            await _dataverseService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
+            await _processingJobService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -504,7 +504,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
             CompletedDate = DateTime.UtcNow
         };
 
-        await _dataverseService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
+        await _processingJobService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
     }
 
     private async Task QueueIndexingAsync(

@@ -338,20 +338,8 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({ onDownload
     }
   }, [fullResults, testExecution.mode, onDownload]);
 
-  // Don't render if no results
-  if (nodesWithResults.length === 0) {
-    return (
-      <div className={styles.emptyState}>
-        <DocumentText20Regular className={styles.emptyIcon} />
-        <Text size={400} weight="semibold">
-          No Results Yet
-        </Text>
-        <Text size={200}>Run a test to see results here</Text>
-      </div>
-    );
-  }
-
   // Default open items (first node and any failed nodes)
+  // NOTE: Must be called before early return to satisfy Rules of Hooks
   const defaultOpenItems = useMemo(() => {
     const items: string[] = [];
     if (nodesWithResults.length > 0) {
@@ -364,6 +352,19 @@ export const TestResultPreview: React.FC<TestResultPreviewProps> = ({ onDownload
     });
     return items;
   }, [nodesWithResults]);
+
+  // Don't render if no results
+  if (nodesWithResults.length === 0) {
+    return (
+      <div className={styles.emptyState}>
+        <DocumentText20Regular className={styles.emptyIcon} />
+        <Text size={400} weight="semibold">
+          No Results Yet
+        </Text>
+        <Text size={200}>Run a test to see results here</Text>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>

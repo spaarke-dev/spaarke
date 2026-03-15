@@ -68,6 +68,7 @@ public class ArchivalFlowTests
 
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -79,6 +80,7 @@ public class ArchivalFlowTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            dvService,
             dvService,
             emlGenerationService ?? null!,
             speFileStore ?? null!,

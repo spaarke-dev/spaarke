@@ -11,7 +11,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public class AnalysisDocumentLoader
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IAnalysisDataverseService _analysisService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ISpeFileOperations _speFileStore;
     private readonly ITextExtractor _textExtractor;
     private readonly IDistributedCache _cache;
@@ -32,14 +33,16 @@ public class AnalysisDocumentLoader
     };
 
     public AnalysisDocumentLoader(
-        IDataverseService dataverseService,
+        IAnalysisDataverseService analysisService,
+        IDocumentDataverseService documentService,
         ISpeFileOperations speFileStore,
         ITextExtractor textExtractor,
         IDistributedCache cache,
         IHttpContextAccessor httpContextAccessor,
         ILogger<AnalysisDocumentLoader> logger)
     {
-        _dataverseService = dataverseService;
+        _analysisService = analysisService;
+        _documentService = documentService;
         _speFileStore = speFileStore;
         _textExtractor = textExtractor;
         _cache = cache;
@@ -203,7 +206,7 @@ public class AnalysisDocumentLoader
     {
         _logger.LogInformation("Reloading analysis {AnalysisId} from Dataverse", analysisId);
 
-        var analysisRecord = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
+        var analysisRecord = await _analysisService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
 
         string? documentText = null;
@@ -213,7 +216,7 @@ public class AnalysisDocumentLoader
         {
             try
             {
-                var document = await _dataverseService.GetDocumentAsync(
+                var document = await _documentService.GetDocumentAsync(
                     analysisRecord.DocumentId.ToString(), cancellationToken);
 
                 if (document != null)
@@ -279,7 +282,7 @@ public class AnalysisDocumentLoader
 
         _logger.LogInformation("Analysis {AnalysisId} not in cache, loading from Dataverse (lite)", analysisId);
 
-        var record = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
+        var record = await _analysisService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
 
         var chatHistory = DeserializeChatHistory(record.ChatHistory, analysisId);
@@ -337,12 +340,12 @@ public class AnalysisDocumentLoader
 
     /// <summary>
     /// Get a document from Dataverse by ID.
-    /// Exposes the underlying IDataverseService.GetDocumentAsync for callers that need
+    /// Exposes the underlying IDocumentDataverseService.GetDocumentAsync for callers that need
     /// document metadata without the full text extraction pipeline.
     /// </summary>
     public Task<DocumentEntity?> GetDocumentAsync(string documentId, CancellationToken cancellationToken)
     {
-        return _dataverseService.GetDocumentAsync(documentId, cancellationToken);
+        return _documentService.GetDocumentAsync(documentId, cancellationToken);
     }
 
     /// <summary>

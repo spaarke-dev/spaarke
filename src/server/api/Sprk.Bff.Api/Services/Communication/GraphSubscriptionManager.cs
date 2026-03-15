@@ -27,7 +27,7 @@ public sealed class GraphSubscriptionManager : BackgroundService
 
     private readonly CommunicationAccountService _accountService;
     private readonly IGraphClientFactory _graphClientFactory;
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<GraphSubscriptionManager> _logger;
     private readonly string _notificationUrl;
     private readonly string _clientState;
@@ -35,13 +35,13 @@ public sealed class GraphSubscriptionManager : BackgroundService
     public GraphSubscriptionManager(
         CommunicationAccountService accountService,
         IGraphClientFactory graphClientFactory,
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         IOptions<CommunicationOptions> communicationOptions,
         ILogger<GraphSubscriptionManager> logger)
     {
         _accountService = accountService ?? throw new ArgumentNullException(nameof(accountService));
         _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var options = communicationOptions?.Value ?? throw new ArgumentNullException(nameof(communicationOptions));
@@ -435,7 +435,7 @@ public sealed class GraphSubscriptionManager : BackgroundService
             ["sprk_graphsubscriptionstatus"] = new OptionSetValue(100000000) // Active
         };
 
-        await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
+        await _genericEntityService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
 
         _logger.LogDebug(
             "Updated Dataverse account {AccountId} with subscription {SubscriptionId}, expiry {Expiry}",

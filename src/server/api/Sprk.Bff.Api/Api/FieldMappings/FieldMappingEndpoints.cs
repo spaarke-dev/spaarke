@@ -139,7 +139,7 @@ public static class FieldMappingEndpoints
         [FromQuery] string? sourceEntity,
         [FromQuery] string? targetEntity,
         [FromQuery] bool? isActive,
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -183,7 +183,7 @@ public static class FieldMappingEndpoints
     /// Queries field mapping profiles from Dataverse.
     /// </summary>
     private static async Task<FieldMappingProfileDto[]> QueryFieldMappingProfilesAsync(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         string? sourceEntity,
         string? targetEntity,
         bool isActive,
@@ -253,7 +253,7 @@ public static class FieldMappingEndpoints
     private static async Task<IResult> GetProfileByEntityPairAsync(
         string sourceEntity,
         string targetEntity,
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -324,7 +324,7 @@ public static class FieldMappingEndpoints
     /// Queries a field mapping profile with its rules from Dataverse by entity pair.
     /// </summary>
     private static async Task<FieldMappingProfileWithRulesDto?> QueryProfileWithRulesByEntityPairAsync(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         string sourceEntity,
         string targetEntity,
         CancellationToken ct)
@@ -398,7 +398,7 @@ public static class FieldMappingEndpoints
     /// <returns>Push result with counts of updated, failed, and skipped records.</returns>
     private static async Task<IResult> PushFieldMappingsAsync(
         [FromBody] PushFieldMappingsRequest request,
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -584,7 +584,7 @@ public static class FieldMappingEndpoints
     /// Retrieves field values from the source record.
     /// </summary>
     private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsync(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         string entityLogicalName,
         Guid recordId,
         string[] fields,
@@ -605,7 +605,7 @@ public static class FieldMappingEndpoints
     /// Queries child records related to the source record.
     /// </summary>
     private static async Task<(Guid[] RecordIds, int TotalCount)> QueryChildRecordsAsync(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         string sourceEntity,
         Guid sourceRecordId,
         string targetEntity,
@@ -644,7 +644,7 @@ public static class FieldMappingEndpoints
     /// Applies mapping rules to each child record and updates them.
     /// </summary>
     private static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService dataverseService,
         FieldMappingRuleDto[] rules,
         Dictionary<string, object?> sourceValues,
         string targetEntity,

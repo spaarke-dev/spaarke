@@ -21,9 +21,9 @@
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
 | 010 | Decompose OfficeService.cs → 4 focused services | ✅ | refactoring, dotnet, bff-api | 001 | 8h |
-| 011 | Decompose AnalysisOrchestrationService → 3 services | 🔲 | refactoring, dotnet, bff-api, ai | 001 | 8h |
+| 011 | Decompose AnalysisOrchestrationService → 3 services | ✅ | refactoring, dotnet, bff-api, ai | 001 | 8h |
 | 012 | Segregate IDataverseService → 9 focused interfaces | ✅ | refactoring, dotnet, architecture | — | 5h |
-| 013 | Migrate IDataverseService consumers to narrow interfaces | 🔲 | refactoring, dotnet, bff-api | 010, 011, 012 | 4h |
+| 013 | Migrate IDataverseService consumers to narrow interfaces | ✅ | refactoring, dotnet, bff-api | 010, 011, 012 | 4h |
 | 014 | Build verification + integration test pass | 🔲 | testing, dotnet, verification | 013 | 2h |
 
 ### Phase 3: Frontend Structural Decomposition
@@ -31,10 +31,10 @@
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
 | 020 | Extract useAuth + useDocumentResolution hooks | ✅ | refactoring, typescript, pcf | 004 | 3h |
-| 021 | Extract useAnalysisData + useAnalysisExecution hooks | 🔲 | refactoring, typescript, pcf | 020 | 3h |
-| 022 | Extract useWorkingDocumentSave + useChatState hooks | 🔲 | refactoring, typescript, pcf | 020 | 3h |
-| 023 | Extract usePanelResize + finalize component | 🔲 | refactoring, typescript, pcf | 021, 022 | 2h |
-| 024 | PCF build verification | 🔲 | testing, typescript, verification | 023 | 1h |
+| 021 | Extract useAnalysisData + useAnalysisExecution hooks | ✅ | refactoring, typescript, pcf | 020 | 3h |
+| 022 | Extract useWorkingDocumentSave + useChatState hooks | ✅ | refactoring, typescript, pcf | 020 | 3h |
+| 023 | Extract usePanelResize + finalize component | ✅ | refactoring, typescript, pcf | 021, 022 | 2h |
+| 024 | PCF build verification | ✅ | testing, typescript, verification | 023 | 1h |
 
 ### Phase 4: Architecture Compliance
 

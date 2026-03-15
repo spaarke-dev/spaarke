@@ -25,7 +25,7 @@ public static class DataverseDocumentsEndpoints
         // POST /api/v1/documents - Create new document
         documentsGroup.MapPost("/", async (
             [FromBody] CreateDocumentRequest request,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -73,7 +73,7 @@ public static class DataverseDocumentsEndpoints
         // GET /api/v1/documents/{id} - Get document by ID
         documentsGroup.MapGet("/{id}", async (
             string id,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -129,7 +129,7 @@ public static class DataverseDocumentsEndpoints
         documentsGroup.MapPut("/{id}", async (
             string id,
             [FromBody] UpdateDocumentRequest request,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -195,7 +195,7 @@ public static class DataverseDocumentsEndpoints
         // DELETE /api/v1/documents/{id} - Delete document
         documentsGroup.MapDelete("/{id}", async (
             string id,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -247,7 +247,7 @@ public static class DataverseDocumentsEndpoints
         // Users can't download these files directly because they lack SPE container permissions.
         documentsGroup.MapGet("/{id}/download", async (
             string id,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
             DocumentTelemetry documentTelemetry,
             ILogger<Program> logger,
@@ -396,7 +396,7 @@ public static class DataverseDocumentsEndpoints
             string? containerId,
             int? skip,
             int? take,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -469,7 +469,7 @@ public static class DataverseDocumentsEndpoints
             string containerId,
             int? skip,
             int? take,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             ILogger<Program> logger,
             HttpContext context) =>
         {

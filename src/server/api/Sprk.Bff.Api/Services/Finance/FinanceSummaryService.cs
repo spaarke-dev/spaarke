@@ -50,6 +50,8 @@ public interface IFinanceSummaryService
 /// </remarks>
 public class FinanceSummaryService : IFinanceSummaryService
 {
+    // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries.
+    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
     private readonly IDistributedCache _cache;
     private readonly FinanceOptions _options;

@@ -26,14 +26,17 @@ public sealed class ScorecardCalculatorService
     /// <summary>Number of recent assessments to include in trend data for sparkline graphs.</summary>
     private const int TrendCount = 5;
 
-    private readonly IDataverseService _dataverseService;
+    private readonly IKpiDataverseService _kpiService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<ScorecardCalculatorService> _logger;
 
     public ScorecardCalculatorService(
-        IDataverseService dataverseService,
+        IKpiDataverseService kpiService,
+        IFieldMappingDataverseService fieldMappingService,
         ILogger<ScorecardCalculatorService> logger)
     {
-        _dataverseService = dataverseService;
+        _kpiService = kpiService;
+        _fieldMappingService = fieldMappingService;
         _logger = logger;
     }
 
@@ -75,7 +78,7 @@ public sealed class ScorecardCalculatorService
         // Batch-query all 3 performance areas in a single Dataverse round-trip (PPI-024).
         // Uses ExecuteMultipleRequest (SDK) to send 3 queries as 1 request.
         // Falls back to Task.WhenAll if batch fails.
-        var batchResults = await _dataverseService.BatchQueryKpiAssessmentsAsync(
+        var batchResults = await _kpiService.BatchQueryKpiAssessmentsAsync(
             parentId,
             parentLookupField,
             [PerformanceArea.Guidelines, PerformanceArea.Budget, PerformanceArea.Outcomes],
@@ -218,7 +221,7 @@ public sealed class ScorecardCalculatorService
             ["sprk_outcomecompliancegrade_average"] = outcomeAverage
         };
 
-        await _dataverseService.UpdateRecordFieldsAsync(entityName, parentId, fields, ct);
+        await _fieldMappingService.UpdateRecordFieldsAsync(entityName, parentId, fields, ct);
 
         _logger.LogDebug("Updated {EntityName} {ParentId} grade fields", entityName, parentId);
     }

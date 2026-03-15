@@ -23,7 +23,7 @@ public sealed class MailboxVerificationService
     private static readonly TimeSpan SubscriptionLifetime = TimeSpan.FromDays(3);
 
     private readonly IGraphClientFactory _graphClientFactory;
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly CommunicationAccountService _accountService;
     private readonly ILogger<MailboxVerificationService> _logger;
     private readonly string _notificationUrl;
@@ -31,13 +31,13 @@ public sealed class MailboxVerificationService
 
     public MailboxVerificationService(
         IGraphClientFactory graphClientFactory,
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         CommunicationAccountService accountService,
         IOptions<CommunicationOptions> communicationOptions,
         ILogger<MailboxVerificationService> logger)
     {
         _graphClientFactory = graphClientFactory;
-        _dataverseService = dataverseService;
+        _genericEntityService = genericEntityService;
         _accountService = accountService;
         _logger = logger;
 
@@ -62,7 +62,7 @@ public sealed class MailboxVerificationService
         CommunicationAccount? account = null;
         try
         {
-            var entity = await _dataverseService.RetrieveAsync(
+            var entity = await _genericEntityService.RetrieveAsync(
                 "sprk_communicationaccount",
                 accountId,
                 new[]
@@ -258,7 +258,7 @@ public sealed class MailboxVerificationService
                 ["sprk_verificationstatus"] = new OptionSetValue((int)status)
             };
 
-            await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
+            await _genericEntityService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
         }
         catch (Exception ex)
         {
@@ -286,7 +286,7 @@ public sealed class MailboxVerificationService
                 ["sprk_verificationmessage"] = verificationMessage ?? string.Empty
             };
 
-            await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
+            await _genericEntityService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
 
             _logger.LogDebug(
                 "Updated verification result for account {AccountId}: Status={Status}, VerifiedAt={VerifiedAt}",
@@ -361,7 +361,7 @@ public sealed class MailboxVerificationService
                 ["sprk_graphsubscriptionexpiry"] = result.ExpirationDateTime!.Value.UtcDateTime,
                 ["sprk_graphsubscriptionstatus"] = new OptionSetValue(100000000) // Active
             };
-            await _dataverseService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
+            await _genericEntityService.UpdateAsync("sprk_communicationaccount", accountId, fields, ct);
 
             return true;
         }

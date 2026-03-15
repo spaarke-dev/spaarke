@@ -168,7 +168,7 @@ public static class VisualizationEndpoints
     /// </summary>
     private static async Task<IResult> DebugDocumentRetrieval(
         Guid documentId,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {

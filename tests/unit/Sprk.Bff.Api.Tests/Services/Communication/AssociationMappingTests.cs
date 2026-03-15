@@ -64,6 +64,7 @@ public class AssociationMappingTests
 
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -85,6 +86,7 @@ public class AssociationMappingTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             emlGenerationService,
             speFileStore,

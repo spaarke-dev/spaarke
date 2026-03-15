@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// }
 /// </code>
 /// <para>
-/// Uses IDataverseService (Singleton) to PATCH records via the Dataverse Web API.
+/// Uses IFieldMappingDataverseService (Singleton) to PATCH records via the Dataverse Web API.
 /// </para>
 /// </remarks>
 public sealed class UpdateRecordNodeExecutor : INodeExecutor
@@ -49,16 +49,16 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly ITemplateEngine _templateEngine;
-    private readonly IDataverseService _dataverseService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<UpdateRecordNodeExecutor> _logger;
 
     public UpdateRecordNodeExecutor(
         ITemplateEngine templateEngine,
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService fieldMappingService,
         ILogger<UpdateRecordNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
-        _dataverseService = dataverseService;
+        _fieldMappingService = fieldMappingService;
         _logger = logger;
     }
 
@@ -202,7 +202,7 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                 updatePayload.Count);
 
             // PATCH the Dataverse record via IDataverseService
-            await _dataverseService.UpdateRecordFieldsAsync(
+            await _fieldMappingService.UpdateRecordFieldsAsync(
                 config.EntityLogicalName!,
                 recordId,
                 updatePayload,

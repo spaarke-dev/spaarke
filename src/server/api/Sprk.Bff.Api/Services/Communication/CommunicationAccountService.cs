@@ -17,16 +17,19 @@ public sealed class CommunicationAccountService
     private const string ReceiveEnabledCacheKey = "comm:accounts:receive-enabled";
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
-    private readonly IDataverseService _dataverseService;
+    private readonly ICommunicationDataverseService _communicationService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly IDistributedCache _cache;
     private readonly ILogger<CommunicationAccountService> _logger;
 
     public CommunicationAccountService(
-        IDataverseService dataverseService,
+        ICommunicationDataverseService communicationService,
+        IGenericEntityService genericEntityService,
         IDistributedCache cache,
         ILogger<CommunicationAccountService> logger)
     {
-        _dataverseService = dataverseService;
+        _communicationService = communicationService;
+        _genericEntityService = genericEntityService;
         _cache = cache;
         _logger = logger;
     }
@@ -102,7 +105,7 @@ public sealed class CommunicationAccountService
         CommunicationAccount[] accounts;
         try
         {
-            var entities = await _dataverseService.QueryCommunicationAccountsAsync(filter, select, ct);
+            var entities = await _communicationService.QueryCommunicationAccountsAsync(filter, select, ct);
             accounts = entities.Select(MapToCommunicationAccount).ToArray();
             _logger.LogDebug("Retrieved {Count} communication accounts from Dataverse ({Key})", accounts.Length, cacheKey);
         }
@@ -181,13 +184,13 @@ public sealed class CommunicationAccountService
     public async Task IncrementSendCountAsync(Guid accountId, CancellationToken ct = default)
     {
         // Read current value directly from Dataverse (bypass cache for accuracy)
-        var entity = await _dataverseService.RetrieveAsync(
+        var entity = await _genericEntityService.RetrieveAsync(
             "sprk_communicationaccount", accountId, new[] { "sprk_sendstoday" }, ct);
 
         var currentCount = entity.GetAttributeValue<int>("sprk_sendstoday");
         var newCount = currentCount + 1;
 
-        await _dataverseService.UpdateAsync(
+        await _genericEntityService.UpdateAsync(
             "sprk_communicationaccount",
             accountId,
             new Dictionary<string, object> { ["sprk_sendstoday"] = newCount },
@@ -213,7 +216,7 @@ public sealed class CommunicationAccountService
         Entity[] entities;
         try
         {
-            entities = await _dataverseService.QueryCommunicationAccountsAsync(filter, select, ct);
+            entities = await _communicationService.QueryCommunicationAccountsAsync(filter, select, ct);
         }
         catch (Exception ex)
         {
@@ -231,7 +234,7 @@ public sealed class CommunicationAccountService
             .Select(e => (e.Id, new Dictionary<string, object> { ["sprk_sendstoday"] = 0 }))
             .ToList();
 
-        await _dataverseService.BulkUpdateAsync("sprk_communicationaccount", updates, ct);
+        await _genericEntityService.BulkUpdateAsync("sprk_communicationaccount", updates, ct);
 
         _logger.LogInformation(
             "Reset daily send counts for {Count} communication accounts", entities.Length);

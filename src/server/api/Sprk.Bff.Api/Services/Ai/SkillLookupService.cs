@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class SkillLookupService : ISkillLookupService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<SkillLookupService> _logger;
 
@@ -30,11 +30,11 @@ public class SkillLookupService : ISkillLookupService
     private const string CacheKeyPrefix = "skill:code:";
 
     public SkillLookupService(
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         IMemoryCache memoryCache,
         ILogger<SkillLookupService> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -84,7 +84,7 @@ public class SkillLookupService : ISkillLookupService
             };
 
             // Retrieve using alternate key (indexed, fast)
-            var entity = await _dataverseService.RetrieveByAlternateKeyAsync(
+            var entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
                 "sprk_analysisskill",
                 alternateKeyValues,
                 columns,

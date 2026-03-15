@@ -21,7 +21,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
 {
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly TextExtractorService _textExtractorService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<InvoiceIndexingJobHandler> _logger;
@@ -40,14 +40,14 @@ public class InvoiceIndexingJobHandler : IJobHandler
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         TextExtractorService textExtractorService,
         FinanceTelemetry telemetry,
         ILogger<InvoiceIndexingJobHandler> logger)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
         _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -292,7 +292,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
     {
         try
         {
-            var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), ct);
+            var document = await _documentService.GetDocumentAsync(documentId.ToString(), ct);
             if (document == null)
                 return null;
 

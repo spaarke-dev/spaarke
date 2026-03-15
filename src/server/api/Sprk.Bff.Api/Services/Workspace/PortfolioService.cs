@@ -54,7 +54,7 @@ internal sealed class MatterRecord
 public class PortfolioService
 {
     private readonly IDistributedCache _cache;
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<PortfolioService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -70,11 +70,11 @@ public class PortfolioService
     /// <param name="logger">Logger for diagnostics.</param>
     public PortfolioService(
         IDistributedCache cache,
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         ILogger<PortfolioService> logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -283,7 +283,7 @@ public class PortfolioService
         EntityCollection results;
         try
         {
-            results = await _dataverseService.RetrieveMultipleAsync(query, ct);
+            results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
         }
         catch (Exception ex)
         {

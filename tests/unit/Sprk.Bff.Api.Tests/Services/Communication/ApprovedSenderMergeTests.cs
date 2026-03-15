@@ -51,6 +51,7 @@ public class ApprovedSenderMergeTests
 
         var accountService = new CommunicationAccountService(
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             _accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 

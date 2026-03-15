@@ -39,7 +39,7 @@ public class ScorecardCalculatorErrorTests
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
         _loggerMock = new Mock<ILogger<ScorecardCalculatorService>>();
-        _service = new ScorecardCalculatorService(_dataverseServiceMock.Object, _loggerMock.Object);
+        _service = new ScorecardCalculatorService(_dataverseServiceMock.Object, _dataverseServiceMock.Object, _loggerMock.Object);
     }
 
     // Accumulated area data for batch mock setup

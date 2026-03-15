@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Services.Office;
 public class OfficeService : IOfficeService
 {
     private readonly IJobStatusService _jobStatusService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IProcessingJobService _jobService;
     private readonly OfficeEmailEnricher _emailEnricher;
     private readonly OfficeDocumentPersistence _documentPersistence;
     private readonly OfficeJobQueue _jobQueue;
@@ -41,7 +41,7 @@ public class OfficeService : IOfficeService
 
     public OfficeService(
         IJobStatusService jobStatusService,
-        IDataverseService dataverseService,
+        IProcessingJobService jobService,
         OfficeEmailEnricher emailEnricher,
         OfficeDocumentPersistence documentPersistence,
         OfficeJobQueue jobQueue,
@@ -50,7 +50,7 @@ public class OfficeService : IOfficeService
         ILogger<OfficeService> logger)
     {
         _jobStatusService = jobStatusService;
-        _dataverseService = dataverseService;
+        _jobService = jobService;
         _emailEnricher = emailEnricher;
         _documentPersistence = documentPersistence;
         _jobQueue = jobQueue;
@@ -152,7 +152,7 @@ public class OfficeService : IOfficeService
             try
             {
                 // Create ProcessingJob in Dataverse using existing IDataverseService
-                jobId = await _dataverseService.CreateProcessingJobAsync(new
+                jobId = await _jobService.CreateProcessingJobAsync(new
                 {
                     Name = $"{request.ContentType} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     JobType = (int)jobType,
@@ -477,7 +477,7 @@ public class OfficeService : IOfficeService
 
         try
         {
-            var processingJob = await _dataverseService.GetProcessingJobAsync(jobId, cancellationToken);
+            var processingJob = await _jobService.GetProcessingJobAsync(jobId, cancellationToken);
             if (processingJob != null)
             {
                 // Map Dataverse ProcessingJob to JobStatusResponse

@@ -49,7 +49,7 @@ public class MailboxVerificationTests
         var cacheMock = new Mock<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
         var accountServiceLogger = new Mock<ILogger<CommunicationAccountService>>();
         var accountService = new CommunicationAccountService(
-            _dataverseMock.Object, cacheMock.Object, accountServiceLogger.Object);
+            _dataverseMock.Object, _dataverseMock.Object, cacheMock.Object, accountServiceLogger.Object);
 
         var communicationOptions = Options.Create(new CommunicationOptions
         {

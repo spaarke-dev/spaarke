@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class ScopeManagementService : IScopeManagementService
 {
+    // INTENTIONAL: Keeps IDataverseService — scaffolding service with no method calls yet.
+    // Will be narrowed to specific interface(s) when Dataverse entity operations are implemented.
     private readonly IDataverseService _dataverseService;
     private readonly IScopeResolverService _scopeResolver;
     private readonly ILogger<ScopeManagementService> _logger;

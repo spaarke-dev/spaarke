@@ -115,6 +115,7 @@ public class InboundPipelineTests
 
         return new CommunicationAccountService(
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             _cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
     }
@@ -506,8 +507,10 @@ public class InboundPipelineTests
         return new IncomingCommunicationProcessor(
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
                 _graphClientFactoryMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
@@ -810,8 +813,10 @@ public class InboundPipelineTests
         var sut = new IncomingCommunicationProcessor(
             _graphClientFactoryMock.Object,
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
                 _graphClientFactoryMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),

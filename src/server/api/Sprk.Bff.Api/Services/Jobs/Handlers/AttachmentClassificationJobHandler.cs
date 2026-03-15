@@ -24,7 +24,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
     private readonly IInvoiceAnalysisService _invoiceAnalysisService;
     private readonly ISpeFileOperations _speFileOperations;
     private readonly TextExtractorService _textExtractorService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly IIdempotencyService _idempotencyService;
     private readonly IRecordMatchService _recordMatchService;
     private readonly FinanceTelemetry _telemetry;
@@ -42,7 +42,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
         IInvoiceAnalysisService invoiceAnalysisService,
         ISpeFileOperations speFileOperations,
         TextExtractorService textExtractorService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         IIdempotencyService idempotencyService,
         IRecordMatchService recordMatchService,
         FinanceTelemetry telemetry,
@@ -51,7 +51,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
         _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _recordMatchService = recordMatchService ?? throw new ArgumentNullException(nameof(recordMatchService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
@@ -440,14 +440,14 @@ public class AttachmentClassificationJobHandler : IJobHandler
         try
         {
             // Load current document to get parent lookup
-            var currentDoc = await _dataverseService.GetDocumentAsync(documentId, ct);
+            var currentDoc = await _documentService.GetDocumentAsync(documentId, ct);
             if (currentDoc?.ParentDocumentId == null)
             {
                 return null;
             }
 
             // Load parent document to get its matter association
-            var parentDoc = await _dataverseService.GetDocumentAsync(currentDoc.ParentDocumentId, ct);
+            var parentDoc = await _documentService.GetDocumentAsync(currentDoc.ParentDocumentId, ct);
             return parentDoc?.MatterId;
         }
         catch (Exception ex)
@@ -513,7 +513,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
             "Writing classification to Dataverse for document {DocumentId}: Classification={Classification}, FieldCount={FieldCount}",
             documentId, classification, fields.Count);
 
-        await _dataverseService.UpdateDocumentFieldsAsync(documentId, fields, ct);
+        await _documentService.UpdateDocumentFieldsAsync(documentId, fields, ct);
 
         _logger.LogInformation(
             "Classification written to Dataverse for document {DocumentId}: {Classification} (confidence: {Confidence})",

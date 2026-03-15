@@ -22,7 +22,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly IAnalysisDataverseService _analysisService;
     private readonly ISpeFileOperations _speFileOperations;
     private readonly ITextExtractor _textExtractor;
     private readonly IPlaybookService _playbookService;
@@ -45,7 +46,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     public const string DefaultPlaybookName = "Document Profile";
 
     public AppOnlyAnalysisService(
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
+        IAnalysisDataverseService analysisService,
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         IPlaybookService playbookService,
@@ -55,7 +57,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IPlaybookOrchestrationService playbookOrchestrator,
         ILogger<AppOnlyAnalysisService> logger)
     {
-        _dataverseService = dataverseService;
+        _documentService = documentService;
+        _analysisService = analysisService;
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _playbookService = playbookService;
@@ -88,7 +91,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         try
         {
             // 1. Get document metadata from Dataverse
-            var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken);
+            var document = await _documentService.GetDocumentAsync(documentId.ToString(), cancellationToken);
             if (document == null)
             {
                 _logger.LogWarning("Document {DocumentId} not found in Dataverse", documentId);
@@ -177,7 +180,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId,
@@ -217,7 +220,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             if (analysisResult.ProfileUpdate != null)
             {
                 analysisResult.ProfileUpdate.SummaryStatus = SummaryStatusCompleted;
-                await _dataverseService.UpdateDocumentAsync(documentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
+                await _documentService.UpdateDocumentAsync(documentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
             }
             else
             {
@@ -317,7 +320,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             if (analysisResult.ProfileUpdate != null)
             {
                 analysisResult.ProfileUpdate.SummaryStatus = SummaryStatusCompleted;
-                await _dataverseService.UpdateDocumentAsync(documentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
+                await _documentService.UpdateDocumentAsync(documentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
             }
 
             _logger.LogInformation(
@@ -533,7 +536,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                         SortOrder = sortOrder++
                     };
 
-                    await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
+                    await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
                     _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
                 }
 
@@ -1051,7 +1054,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         CancellationToken cancellationToken)
     {
         var update = new UpdateDocumentRequest { SummaryStatus = status };
-        await _dataverseService.UpdateDocumentAsync(documentId.ToString(), update, cancellationToken);
+        await _documentService.UpdateDocumentAsync(documentId.ToString(), update, cancellationToken);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1134,7 +1137,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
@@ -1170,7 +1173,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             if (analysisResult.ProfileUpdate != null)
             {
                 analysisResult.ProfileUpdate.SummaryStatus = SummaryStatusCompleted;
-                await _dataverseService.UpdateDocumentAsync(mainDocumentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
+                await _documentService.UpdateDocumentAsync(mainDocumentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
             }
             else
             {
@@ -1197,7 +1200,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private async Task<DocumentEntity?> FindEmailDocumentAsync(Guid emailId, CancellationToken cancellationToken)
     {
         _logger.LogDebug("Searching for .eml document with email lookup {EmailId}", emailId);
-        return await _dataverseService.GetDocumentByEmailLookupAsync(emailId, cancellationToken);
+        return await _documentService.GetDocumentByEmailLookupAsync(emailId, cancellationToken);
     }
 
     /// <summary>
@@ -1275,7 +1278,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IEnumerable<DocumentEntity> childDocuments;
         try
         {
-            childDocuments = await _dataverseService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
+            childDocuments = await _documentService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
         }
         catch (Exception ex)
         {

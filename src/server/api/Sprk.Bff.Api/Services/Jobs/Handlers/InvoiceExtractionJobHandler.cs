@@ -26,7 +26,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
     private readonly IInvoiceAnalysisService _invoiceAnalysisService;
     private readonly ISpeFileOperations _speFileOperations;
     private readonly TextExtractorService _textExtractorService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly IOutputOrchestratorService _outputOrchestrator;
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly FinancialCalculationToolHandler _financialCalculationTool;
@@ -47,7 +47,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         IInvoiceAnalysisService invoiceAnalysisService,
         ISpeFileOperations speFileOperations,
         TextExtractorService textExtractorService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         IOutputOrchestratorService outputOrchestrator,
         IPlaybookLookupService playbookLookup,
         FinancialCalculationToolHandler financialCalculationTool,
@@ -58,7 +58,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _outputOrchestrator = outputOrchestrator ?? throw new ArgumentNullException(nameof(outputOrchestrator));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _financialCalculationTool = financialCalculationTool ?? throw new ArgumentNullException(nameof(financialCalculationTool));
@@ -494,7 +494,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
     {
         try
         {
-            var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), ct);
+            var document = await _documentService.GetDocumentAsync(documentId.ToString(), ct);
             if (document == null)
                 return null;
 
@@ -529,7 +529,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
                 ["sprk_extractionstatus"] = extractionStatus
             };
 
-            await _dataverseService.UpdateDocumentFieldsAsync(invoiceId.ToString(), fields, ct);
+            await _documentService.UpdateDocumentFieldsAsync(invoiceId.ToString(), fields, ct);
 
             _logger.LogInformation(
                 "Updated invoice {InvoiceId} extraction status to Failed",

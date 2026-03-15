@@ -15,6 +15,8 @@ namespace Sprk.Bff.Api.Services.Finance.Tools;
 /// </summary>
 public class FinancialCalculationToolHandler : IAiToolHandler
 {
+    // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
+    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<FinancialCalculationToolHandler> _logger;

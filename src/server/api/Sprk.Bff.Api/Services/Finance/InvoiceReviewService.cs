@@ -120,7 +120,8 @@ public record InvoiceReviewRejectResult
 /// </summary>
 public class InvoiceReviewService : IInvoiceReviewService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<InvoiceReviewService> _logger;
@@ -165,12 +166,14 @@ public class InvoiceReviewService : IInvoiceReviewService
     private const string JobTypeInvoiceExtraction = "InvoiceExtraction";
 
     public InvoiceReviewService(
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
+        IFieldMappingDataverseService fieldMappingService,
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
         ILogger<InvoiceReviewService> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -230,7 +233,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             [DocInvoiceReviewedOn] = DateTime.UtcNow
         };
 
-        await _dataverseService.UpdateDocumentFieldsAsync(
+        await _documentService.UpdateDocumentFieldsAsync(
             documentId.ToString(),
             fields,
             ct);
@@ -290,7 +293,7 @@ public class InvoiceReviewService : IInvoiceReviewService
 
         // Create via UpdateRecordFieldsAsync with a new GUID (upsert pattern)
         var invoiceId = Guid.NewGuid();
-        await _dataverseService.UpdateRecordFieldsAsync(
+        await _fieldMappingService.UpdateRecordFieldsAsync(
             InvoiceEntity,
             invoiceId,
             fields,
@@ -397,7 +400,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             fields[DocInvoiceRejectionNotes] = notes;
         }
 
-        await _dataverseService.UpdateDocumentFieldsAsync(
+        await _documentService.UpdateDocumentFieldsAsync(
             documentId.ToString(),
             fields,
             ct);

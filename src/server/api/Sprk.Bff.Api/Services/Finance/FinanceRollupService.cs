@@ -21,6 +21,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 public sealed class FinanceRollupService
 {
+    // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
+    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
     private readonly ILogger<FinanceRollupService> _logger;
 

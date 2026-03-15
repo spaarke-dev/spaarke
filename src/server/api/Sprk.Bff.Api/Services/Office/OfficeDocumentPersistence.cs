@@ -11,14 +11,17 @@ namespace Sprk.Bff.Api.Services.Office;
 /// </summary>
 public class OfficeDocumentPersistence
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly IProcessingJobService _jobService;
     private readonly ILogger<OfficeDocumentPersistence> _logger;
 
     public OfficeDocumentPersistence(
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
+        IProcessingJobService jobService,
         ILogger<OfficeDocumentPersistence> logger)
     {
-        _dataverseService = dataverseService;
+        _documentService = documentService;
+        _jobService = jobService;
         _logger = logger;
     }
 
@@ -53,7 +56,7 @@ public class OfficeDocumentPersistence
             }
         };
 
-        var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+        var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);
 
         // Update with SPE pointers and additional metadata
@@ -108,7 +111,7 @@ public class OfficeDocumentPersistence
             updateRequest.IsEmailArchive = true;
         }
 
-        await _dataverseService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
+        await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
         _logger.LogInformation(
             "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
@@ -140,7 +143,7 @@ public class OfficeDocumentPersistence
                 _ => 1
             };
 
-            await _dataverseService.UpdateProcessingJobAsync(jobId, new
+            await _jobService.UpdateProcessingJobAsync(jobId, new
             {
                 Status = dataverseStatus,
                 Progress = progress,
@@ -173,7 +176,7 @@ public class OfficeDocumentPersistence
 
         try
         {
-            var existingJob = await _dataverseService.GetProcessingJobByIdempotencyKeyAsync(
+            var existingJob = await _jobService.GetProcessingJobByIdempotencyKeyAsync(
                 idempotencyKey,
                 cancellationToken);
 

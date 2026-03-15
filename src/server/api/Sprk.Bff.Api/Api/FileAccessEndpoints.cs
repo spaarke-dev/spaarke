@@ -107,7 +107,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetPreviewUrl(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
@@ -250,7 +250,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetPreview(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             ILogger<Program> logger,
             HttpContext context,
@@ -314,7 +314,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetContent(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             ILogger<Program> logger,
             HttpContext context,
@@ -383,7 +383,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetOffice(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             ILogger<Program> logger,
             HttpContext context,
@@ -462,7 +462,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetOpenLinks(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             ILogger<Program> logger,
             HttpContext context,
@@ -596,7 +596,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetViewUrl(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             IGraphClientFactory graphFactory,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
@@ -753,7 +753,7 @@ public static class FileAccessEndpoints
         /// </summary>
         static async Task<IResult> GetDownload(
             string documentId,
-            IDataverseService dataverseService,
+            IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
             ILogger<Program> logger,
             HttpContext context,

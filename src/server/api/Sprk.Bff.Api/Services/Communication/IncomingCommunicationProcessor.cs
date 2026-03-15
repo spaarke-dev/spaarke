@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 public sealed class IncomingCommunicationProcessor
 {
     private readonly IGraphClientFactory _graphClientFactory;
-    private readonly IDataverseService _dataverseService;
+    private readonly ICommunicationDataverseService _communicationService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly CommunicationAccountService _accountService;
     private readonly IncomingAssociationResolver _associationResolver;
     private readonly IEmailAttachmentProcessor _attachmentProcessor;
@@ -47,7 +48,8 @@ public sealed class IncomingCommunicationProcessor
 
     public IncomingCommunicationProcessor(
         IGraphClientFactory graphClientFactory,
-        IDataverseService dataverseService,
+        ICommunicationDataverseService communicationService,
+        IGenericEntityService genericEntityService,
         CommunicationAccountService accountService,
         IncomingAssociationResolver associationResolver,
         IEmailAttachmentProcessor attachmentProcessor,
@@ -59,7 +61,8 @@ public sealed class IncomingCommunicationProcessor
         ILogger<IncomingCommunicationProcessor> logger)
     {
         _graphClientFactory = graphClientFactory;
-        _dataverseService = dataverseService;
+        _communicationService = communicationService;
+        _genericEntityService = genericEntityService;
         _accountService = accountService;
         _associationResolver = associationResolver;
         _attachmentProcessor = attachmentProcessor;
@@ -336,7 +339,7 @@ public sealed class IncomingCommunicationProcessor
 
         try
         {
-            return await _dataverseService.ExistsCommunicationByGraphMessageIdAsync(graphMessageId, ct);
+            return await _communicationService.ExistsCommunicationByGraphMessageIdAsync(graphMessageId, ct);
         }
         catch (Exception ex)
         {
@@ -440,7 +443,7 @@ public sealed class IncomingCommunicationProcessor
             }
         }
 
-        return await _dataverseService.CreateAsync(communication, ct);
+        return await _genericEntityService.CreateAsync(communication, ct);
     }
 
     /// <summary>
@@ -516,7 +519,7 @@ public sealed class IncomingCommunicationProcessor
                         ["sprk_graphdriveid"] = driveId,
                     };
 
-                    attachmentDocumentId = await _dataverseService.CreateAsync(attachmentDoc, ct);
+                    attachmentDocumentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
                     _logger.LogInformation(
                         "Created sprk_document for inbound attachment | DocumentId: {DocumentId}, FileName: {FileName}, CommunicationId: {CommunicationId}",
@@ -550,7 +553,7 @@ public sealed class IncomingCommunicationProcessor
                     attachmentRecord["sprk_document"] = new EntityReference("sprk_document", attachmentDocumentId.Value);
                 }
 
-                await _dataverseService.CreateAsync(attachmentRecord, ct);
+                await _genericEntityService.CreateAsync(attachmentRecord, ct);
                 processedCount++;
 
                 _logger.LogDebug(
@@ -629,7 +632,7 @@ public sealed class IncomingCommunicationProcessor
         if (message.ReceivedDateTime.HasValue)
             document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
 
-        var documentId = await _dataverseService.CreateAsync(document, ct);
+        var documentId = await _genericEntityService.CreateAsync(document, ct);
 
         _logger.LogInformation(
             "Created sprk_document record for archived .eml | DocumentId: {DocumentId}, " +

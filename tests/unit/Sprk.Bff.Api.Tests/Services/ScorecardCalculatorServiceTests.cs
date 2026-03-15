@@ -39,7 +39,7 @@ public class ScorecardCalculatorServiceTests
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
         _loggerMock = new Mock<ILogger<ScorecardCalculatorService>>();
-        _service = new ScorecardCalculatorService(_dataverseServiceMock.Object, _loggerMock.Object);
+        _service = new ScorecardCalculatorService(_dataverseServiceMock.Object, _dataverseServiceMock.Object, _loggerMock.Object);
     }
 
     #region Helper Methods

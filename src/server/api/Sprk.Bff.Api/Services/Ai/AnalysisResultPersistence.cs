@@ -16,7 +16,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public class AnalysisResultPersistence
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IAnalysisDataverseService _analysisService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly IWorkingDocumentService _workingDocumentService;
     private readonly IStorageRetryPolicy _storageRetryPolicy;
     private readonly ExportServiceRegistry _exportRegistry;
@@ -25,7 +26,8 @@ public class AnalysisResultPersistence
     private readonly ILogger<AnalysisResultPersistence> _logger;
 
     public AnalysisResultPersistence(
-        IDataverseService dataverseService,
+        IAnalysisDataverseService analysisService,
+        IDocumentDataverseService documentService,
         IWorkingDocumentService workingDocumentService,
         IStorageRetryPolicy storageRetryPolicy,
         ExportServiceRegistry exportRegistry,
@@ -33,7 +35,8 @@ public class AnalysisResultPersistence
         AiTelemetry? telemetry = null,
         JobSubmissionService? jobSubmissionService = null)
     {
-        _dataverseService = dataverseService;
+        _analysisService = analysisService;
+        _documentService = documentService;
         _workingDocumentService = workingDocumentService;
         _storageRetryPolicy = storageRetryPolicy;
         _exportRegistry = exportRegistry;
@@ -116,7 +119,7 @@ public class AnalysisResultPersistence
                 _logger.LogInformation(
                     "Creating new analysis record for Document Profile: DocumentId={DocumentId}",
                     documentId);
-                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
@@ -146,7 +149,7 @@ public class AnalysisResultPersistence
                     SortOrder = sortOrder++
                 };
 
-                await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
+                await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
                 _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
             }
 
@@ -170,7 +173,7 @@ public class AnalysisResultPersistence
 
                     await _storageRetryPolicy.ExecuteAsync(async ct =>
                     {
-                        await _dataverseService.UpdateDocumentFieldsAsync(
+                        await _documentService.UpdateDocumentFieldsAsync(
                             documentId.ToString(),
                             fieldMapping,
                             ct);

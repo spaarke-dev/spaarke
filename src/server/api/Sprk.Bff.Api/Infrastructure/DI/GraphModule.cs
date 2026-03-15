@@ -50,6 +50,19 @@ public static class GraphModule
             return new DataverseServiceClientImpl(config, logger);
         });
 
+        // Narrow interface forwarding registrations (ADR-010: forwarding delegates don't count as new types).
+        // IDataverseService is a composite interface inheriting all 9 narrow interfaces.
+        // These forwarding registrations allow consumers to inject only the narrowest applicable interface.
+        services.AddSingleton<IDocumentDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IAnalysisDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IGenericEntityService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IProcessingJobService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IEventDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IFieldMappingDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IKpiDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<ICommunicationDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        services.AddSingleton<IDataverseHealthService>(sp => sp.GetRequiredService<IDataverseService>());
+
         return services;
     }
 }

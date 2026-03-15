@@ -31,6 +31,7 @@ public class DailySendCountTests
 
         _accountService = new CommunicationAccountService(
             _dataverseMock.Object,
+            _dataverseMock.Object,
             _cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
     }

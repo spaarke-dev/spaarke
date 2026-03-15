@@ -44,6 +44,7 @@ public class EmailAnalysisIntegrationTests
 
         _service = new AppOnlyAnalysisService(
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             _speFileOperationsMock.Object,
             _textExtractorMock.Object,
             _playbookServiceMock.Object,

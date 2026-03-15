@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </summary>
 public sealed class IncomingAssociationResolver
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly ICommunicationDataverseService _communicationService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly IGraphClientFactory _graphClientFactory;
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
@@ -59,11 +60,13 @@ public sealed class IncomingAssociationResolver
     ];
 
     public IncomingAssociationResolver(
-        IDataverseService dataverseService,
+        ICommunicationDataverseService communicationService,
+        IGenericEntityService genericEntityService,
         IGraphClientFactory graphClientFactory,
         ILogger<IncomingAssociationResolver> logger)
     {
-        _dataverseService = dataverseService;
+        _communicationService = communicationService;
+        _genericEntityService = genericEntityService;
         _graphClientFactory = graphClientFactory;
         _logger = logger;
     }
@@ -165,8 +168,8 @@ public sealed class IncomingAssociationResolver
             // Look up parent communication by the In-Reply-To internet message ID.
             // In-Reply-To contains an RFC 2822 internet message ID (e.g., <ABC@contoso.com>).
             // Search sprk_internetmessageid first (exact match), fall back to sprk_graphmessageid.
-            var parentComm = await _dataverseService.GetCommunicationByInternetMessageIdAsync(inReplyTo, ct)
-                             ?? await _dataverseService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
+            var parentComm = await _communicationService.GetCommunicationByInternetMessageIdAsync(inReplyTo, ct)
+                             ?? await _communicationService.GetCommunicationByGraphMessageIdAsync(inReplyTo, ct);
             if (parentComm is null)
             {
                 _logger.LogDebug("No parent communication found for In-Reply-To: {InReplyTo}", inReplyTo);
@@ -252,7 +255,7 @@ public sealed class IncomingAssociationResolver
             var matched = false;
 
             // Try contact match by email
-            var contact = await _dataverseService.QueryContactByEmailAsync(senderEmail, ct);
+            var contact = await _communicationService.QueryContactByEmailAsync(senderEmail, ct);
             if (contact is not null)
             {
                 fields["sprk_regardingperson"] = new EntityReference("contact", contact.Id);
@@ -266,7 +269,7 @@ public sealed class IncomingAssociationResolver
             var domain = ExtractDomain(senderEmail);
             if (!string.IsNullOrEmpty(domain) && !CommonEmailProviders.Contains(domain))
             {
-                var account = await _dataverseService.QueryAccountByDomainAsync(domain, ct);
+                var account = await _communicationService.QueryAccountByDomainAsync(domain, ct);
                 if (account is not null)
                 {
                     fields["sprk_regardingorganization"] = new EntityReference("account", account.Id);
@@ -321,8 +324,8 @@ public sealed class IncomingAssociationResolver
                     patternsMatched++;
 
                     // Also try with prefix variations
-                    var matter = await _dataverseService.QueryMatterByReferenceNumberAsync(referenceNumber, ct)
-                                 ?? await _dataverseService.QueryMatterByReferenceNumberAsync($"MAT-{referenceNumber}", ct);
+                    var matter = await _communicationService.QueryMatterByReferenceNumberAsync(referenceNumber, ct)
+                                 ?? await _communicationService.QueryMatterByReferenceNumberAsync($"MAT-{referenceNumber}", ct);
 
                     if (matter is not null)
                     {
@@ -375,7 +378,7 @@ public sealed class IncomingAssociationResolver
             await PopulateResolverFieldsAsync(fields, ct);
         }
 
-        await _dataverseService.UpdateAsync("sprk_communication", communicationId, fields, ct);
+        await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
 
         _logger.LogDebug(
             "Applied association to communication {CommunicationId} | Status: {Status}, FieldCount: {FieldCount}",
@@ -456,7 +459,7 @@ public sealed class IncomingAssociationResolver
                     var nameField = GetPrimaryNameField(primaryEntityLogicalName);
                     if (nameField is not null)
                     {
-                        var record = await _dataverseService.RetrieveAsync(
+                        var record = await _genericEntityService.RetrieveAsync(
                             primaryEntityLogicalName, primaryRef.Id, [nameField], ct);
                         recordName = record.GetAttributeValue<string>(nameField) ?? "";
                     }
@@ -504,7 +507,7 @@ public sealed class IncomingAssociationResolver
         if (_recordTypeRefCache.TryGetValue(entityLogicalName, out var cached))
             return cached;
 
-        var record = await _dataverseService.QueryRecordTypeRefAsync(entityLogicalName, ct);
+        var record = await _communicationService.QueryRecordTypeRefAsync(entityLogicalName, ct);
         if (record is not null)
         {
             var entry = (

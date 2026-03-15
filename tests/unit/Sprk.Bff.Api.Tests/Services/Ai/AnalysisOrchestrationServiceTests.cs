@@ -63,6 +63,7 @@ public class AnalysisOrchestrationServiceTests
         // Create the 3 extracted services
         var documentLoader = new AnalysisDocumentLoader(
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             speFileOperationsMock.Object,
             textExtractorMock.Object,
             distributedCacheMock.Object,
@@ -78,6 +79,7 @@ public class AnalysisOrchestrationServiceTests
             new Mock<ILogger<AnalysisRagProcessor>>().Object);
 
         var resultPersistence = new AnalysisResultPersistence(
+            _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             _workingDocumentServiceMock.Object,
             storageRetryPolicyMock.Object,

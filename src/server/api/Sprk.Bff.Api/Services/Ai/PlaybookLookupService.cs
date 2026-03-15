@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class PlaybookLookupService : IPlaybookLookupService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<PlaybookLookupService> _logger;
 
@@ -30,11 +30,11 @@ public class PlaybookLookupService : IPlaybookLookupService
     private const string CacheKeyPrefix = "playbook:code:";
 
     public PlaybookLookupService(
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         IMemoryCache memoryCache,
         ILogger<PlaybookLookupService> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -85,7 +85,7 @@ public class PlaybookLookupService : IPlaybookLookupService
             };
 
             // Retrieve using alternate key (indexed, fast)
-            var entity = await _dataverseService.RetrieveByAlternateKeyAsync(
+            var entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
                 "sprk_analysisplaybook",
                 alternateKeyValues,
                 columns,
