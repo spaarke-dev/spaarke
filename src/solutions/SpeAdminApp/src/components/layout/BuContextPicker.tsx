@@ -480,7 +480,7 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
           <Text className={styles.compactLabel}>BU</Text>
           <Combobox
             size="small"
-            placeholder={busLoading ? "Loading…" : "Business unit…"}
+            placeholder={busLoading ? "Loading…" : busError ? "⚠ Load failed" : "Business unit…"}
             value={buInputValue}
             selectedOptions={selectedBu ? [selectedBu.businessUnitId] : []}
             onInput={(e) => setBuInputValue((e.target as HTMLInputElement).value)}
@@ -489,6 +489,7 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
               // Reset input to selected value if user typed but didn't pick
               setBuInputValue(selectedBu?.name ?? "");
             }}
+            title={busError ?? undefined}
             style={{ minWidth: "160px", maxWidth: "220px" }}
           >
             {filteredBus.map((bu) => (
