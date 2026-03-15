@@ -49,6 +49,18 @@ The PCF build (pcf-scripts + webpack) consistently hit Node.js memory limits in 
 
 ---
 
+### 5. PCF Individual Build Dependency Chain
+Building individual PCF controls requires a specific dependency chain that isn't documented anywhere. Controls that import `@spaarke/auth` fail until the shared library's `dist/` directory is built. The sequence: `cd src/client/shared/Spaarke.Auth && npm install --legacy-peer-deps && npm run build` must run before any dependent PCF control can build. Additionally, `npm install --legacy-peer-deps` is required in each control directory, and some controls need the `scheduler` package installed separately.
+
+**Lesson**: PCF build dependencies should be documented in a dependency chain section of the PCF Deployment Guide. Consider a root-level build script that handles shared library compilation before PCF builds.
+
+### 6. Root PCF Build vs Individual Builds
+The root `npm run build` in `src/client/pcf/` compiles TypeScript across all controls but only produces real webpack bundles for controls with certain configurations. Individual control builds (`cd src/client/pcf/{Control} && npm run build`) are more reliable for producing deployable bundles.
+
+**Lesson**: For deployment purposes, always build individual controls rather than relying on the root build. This is especially important after deleting controls, as stale references can cause root build issues.
+
+---
+
 ## C. Recommendations for R3
 
 ### 1. Complete OfficeService.cs Decomposition

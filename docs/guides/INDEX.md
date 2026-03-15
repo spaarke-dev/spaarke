@@ -47,6 +47,11 @@ This directory contains practical guides for implementing features, configuring 
 - [DATAVERSE-NAVMAP-API.md](DATAVERSE-NAVMAP-API.md)
 - [DATAVERSE-PLUGIN-DEVELOPMENT.md](DATAVERSE-PLUGIN-DEVELOPMENT.md)
 
+### Code Quality & Refactoring
+
+- **[SERVICE-DECOMPOSITION-GUIDE.md](SERVICE-DECOMPOSITION-GUIDE.md)** - When and how to decompose God classes — zero-breaking-change strategy, feature module patterns, R2 examples (OfficeService, AnalysisOrchestrationService)
+- **[INTERFACE-SEGREGATION-GUIDE.md](INTERFACE-SEGREGATION-GUIDE.md)** - Interface Segregation Principle applied to Dataverse services — composite interface pattern, consumer migration, R2 examples (IDataverseService → 9 focused interfaces)
+
 ### Deployment & Infrastructure
 
 - [RIBBON-CUSTOMIZATION-GUIDE.md](RIBBON-CUSTOMIZATION-GUIDE.md)

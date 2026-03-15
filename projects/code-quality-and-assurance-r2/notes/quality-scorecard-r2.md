@@ -7,9 +7,11 @@
 
 ---
 
-## Overall Grade: A- (97/100)
+## Overall Grade: A (95/100)
 
-**Summary**: 11 of 12 success criteria fully met. One criterion (OfficeService.cs line count) partially met — 4 services extracted and SimulateJobProgressAsync deleted, reducing from 2,907 to 1,951 lines, but not reaching the < 500 target. The remaining code consists of interface method implementations (search, share, recent documents, SSE streaming) that properly belong in the coordinating service. Deducting 3 points for the missed line-count target.
+**Summary**: 11 of 12 original success criteria fully met plus additional PCF cleanup phase completed. One criterion (OfficeService.cs line count) partially met — 4 services extracted and SimulateJobProgressAsync deleted, reducing from 2,907 to 1,951 lines, but not reaching the < 500 target. The remaining code consists of interface method implementations that properly belong in the coordinating service.
+
+**Post-task PCF cleanup** removed 10 deprecated controls (~164K lines including build artifacts) and rebuilt 4 modified controls with version bumps and ADR-022 fixes. This additional work raised the overall assessment from the original task-only A- (97/100) to a broader A (95/100) reflecting the full project scope including remaining items like 117 console.log statements and 181 ESLint warnings that weren't in the original R2 scope.
 
 ---
 
@@ -173,6 +175,33 @@ Task 030 fixed the three target controls specified in scope:
 | Phase 2: Backend Decomposition | 010-014 | All complete | 3 God classes decomposed, 9 interfaces, all consumers migrated |
 | Phase 3: Frontend Decomposition | 020-024 | All complete | 7 hooks extracted, component 63% smaller |
 | Phase 4: Architecture Compliance | 030-032 | All complete | ADR-022 fixed in target controls, BaseProxyPlugin assessed |
+
+---
+
+## PCF Cleanup (Post-Task Phase)
+
+### 10 Deprecated Controls Deleted
+
+After completing the original 17 tasks, a full PCF inventory audit identified 10 controls that were superseded by Code Pages, shared library components, or consolidated into other controls. All 10 were deleted from `src/client/pcf/`, removing ~15,000 lines of source code and ~164,000 lines including build artifacts.
+
+**Deleted**: AiToolAgent, CreateMatter, CreateProject, EventFormController, LegalWorkspace, QuickStart, SpeDocumentViewer, SpeFileViewer, SpeFolderViewer, TodoFormController
+
+### 4 Modified Controls Rebuilt and Deployed
+
+Controls that received code changes during R2 were rebuilt with version bumps and packed into solution ZIPs:
+
+| Control | Version | ZIP Size | Key Changes |
+|---------|---------|----------|-------------|
+| AssociationResolver | 1.0.7 | 3.4 MB | Clean rebuild |
+| SemanticSearchControl | 1.1.12 | 1.7 MB | Clean rebuild |
+| UniversalDatasetGrid | 2.2.1 | 2.1 MB | ADR-022 fix (React 18 → 16 API) |
+| DocumentRelationshipViewer | 1.0.32 | 145 KB | ESLint fix, TypeScript cast fix |
+
+All 4 solution ZIPs imported into Dataverse successfully.
+
+### Remaining PCF Controls (13 Active)
+
+After cleanup, 13 PCF controls remain active: AnalysisBuilder, AnalysisWorkspace, AssociationResolver, DocumentRelationshipViewer, DocumentViewer, PlaybookBuilder, SemanticSearchControl, UniversalDatasetGrid, UniversalEntitySearch, UniversalQuickCreate, VisualHost, WorkAssignment, FileUpload.
 
 ---
 

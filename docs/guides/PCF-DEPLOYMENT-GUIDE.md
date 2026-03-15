@@ -175,6 +175,32 @@ stat -c '%y' dist/components/YourChanged/YourChanged.js   # Must be newer
 stat -c '%y' src/components/YourChanged/YourChanged.tsx    # Than this
 ```
 
+### Step 1.6: Compile @spaarke/auth (if imported by the control)
+
+**If the PCF control imports from `@spaarke/auth`**, the auth library's `dist/` directory must exist before the PCF build. This is a local file reference (`file:../../shared/Spaarke.Auth`) that needs compilation.
+
+```bash
+cd src/client/shared/Spaarke.Auth
+npm install --legacy-peer-deps
+npm run build
+```
+
+**Verify `dist/` exists** — if `dist/index.js` is missing, the PCF build will fail with module resolution errors.
+
+**Controls that import @spaarke/auth**: UniversalDatasetGrid, SpeFileViewer, SpeDocumentViewer (and potentially others — check `package.json` for `@spaarke/auth` in dependencies/devDependencies).
+
+**Note**: When building individual controls (not using the root `npm run build`), you may also need to install dependencies in the control directory first:
+```bash
+cd src/client/pcf/{ControlName}
+npm install --legacy-peer-deps
+npm run build
+```
+
+Some controls also require the `scheduler` package (React peer dependency) to be installed separately:
+```bash
+npm install scheduler --legacy-peer-deps
+```
+
 ### Step 2: Build Fresh
 
 ```bash
