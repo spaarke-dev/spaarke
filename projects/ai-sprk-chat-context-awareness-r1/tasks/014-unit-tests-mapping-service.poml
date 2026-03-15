@@ -1,0 +1,59 @@
+<task id="014" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Unit tests for ChatContextMappingService</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>testing, bff-api</tags>
+    <estimate>3h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>C</parallel-group>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Write comprehensive unit tests for ChatContextMappingService covering resolution order, Redis caching, fallback behavior, and edge cases.</goal>
+    <context>
+      The mapping service has complex resolution logic (4-tier fallback) and caching behavior
+      that must be thoroughly tested to prevent regressions.
+    </context>
+    <constraints>
+      - MUST test all 4 resolution tiers: exact → entity+any → wildcard+pageType → global
+      - MUST test cache hit path (no Dataverse query)
+      - MUST test cache miss path (Dataverse query + cache write)
+      - MUST test empty result (no mappings exist)
+      - MUST test sort order within tier
+      - MUST mock IDistributedCache and Dataverse client
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create test class ChatContextMappingServiceTests</step>
+    <step>Write tests for exact match resolution</step>
+    <step>Write tests for entity+any fallback</step>
+    <step>Write tests for wildcard+pageType fallback</step>
+    <step>Write tests for global fallback</step>
+    <step>Write tests for empty result (no mappings)</step>
+    <step>Write tests for cache hit (Redis returns data)</step>
+    <step>Write tests for cache miss (Dataverse query, cache populated)</step>
+    <step>Write tests for sort order within tier</step>
+    <step>Run `dotnet test` to verify all tests pass</step>
+  </steps>
+
+  <outputs>
+    <output>New: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatContextMappingServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All resolution tiers tested</criterion>
+    <criterion>Cache hit/miss paths tested</criterion>
+    <criterion>Empty result tested</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

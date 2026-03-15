@@ -1,0 +1,46 @@
+<task id="021" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Implement playbook switching via switchContext()</title>
+    <phase>2</phase>
+    <stream>client</stream>
+    <tags>pcf, react, typescript</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>E</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Enable runtime playbook switching when user selects a different playbook from the context selector, using existing PATCH /sessions/{id}/context + switchContext() hook.</goal>
+    <constraints>
+      - MUST use existing switchContext() from useChatSession hook
+      - MUST call PATCH /sessions/{id}/context with new playbookId
+      - MUST update session in sessionStorage after switch
+      - MUST NOT create a new session on switch (reuse existing)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read switchContext() implementation in useChatSession hook</step>
+    <step>Wire selector onChange to call switchContext() with new playbookId</step>
+    <step>Update sessionStorage with new playbook selection</step>
+    <step>Verify UI updates after switch (new playbook badge, etc.)</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: App.tsx or SprkChatContextSelector (switch handler)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>User can switch playbook from selector</criterion>
+    <criterion>PATCH endpoint called with new context</criterion>
+    <criterion>Session persists across switch</criterion>
+  </acceptance-criteria>
+</task>

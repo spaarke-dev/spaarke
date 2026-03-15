@@ -1,0 +1,42 @@
+<task id="052" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Deploy all phases to dev environment</title>
+    <phase>5</phase>
+    <stream>deploy</stream>
+    <tags>deploy, bff-api, dataverse, pcf</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>J</parallel-group>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Final deployment of all project phases to dev environment with verification.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Deploy BFF API with all Phase 1-4 changes</step>
+    <step>Deploy SprkChatPane code page with Phase 1-2 client changes</step>
+    <step>Verify Dataverse admin form and entity</step>
+    <step>Import seed data if not already present</step>
+    <step>Smoke test all features in dev environment</step>
+  </steps>
+
+  <outputs>
+    <output>All phases deployed to dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All features working in dev environment</criterion>
+    <criterion>Admin form accessible</criterion>
+    <criterion>Context mapping resolution verified</criterion>
+  </acceptance-criteria>
+</task>

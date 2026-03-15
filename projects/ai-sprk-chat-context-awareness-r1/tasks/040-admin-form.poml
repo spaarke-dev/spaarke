@@ -1,0 +1,46 @@
+<task id="040" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Create model-driven form for sprk_aichatcontextmap</title>
+    <phase>4</phase>
+    <stream>dataverse</stream>
+    <tags>dataverse, admin</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>G</parallel-group>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a model-driven app form for sprk_aichatcontextmap that allows admins to view, create, edit, and deactivate mapping records.</goal>
+    <constraints>
+      - MUST support CRUD operations on mapping records
+      - MUST show all fields: name, entityType, pageType, playbook lookup, sortOrder, isDefault, description, isActive
+      - MUST include playbook lookup field with proper filtering
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create main form for sprk_aichatcontextmap entity</step>
+    <step>Add all fields to form layout</step>
+    <step>Configure playbook lookup field</step>
+    <step>Add form to model-driven app navigation</step>
+    <step>Test CRUD operations via the form</step>
+  </steps>
+
+  <outputs>
+    <output>Model-driven form for sprk_aichatcontextmap</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Admin can create new mapping records</criterion>
+    <criterion>Admin can edit existing mappings</criterion>
+    <criterion>Admin can deactivate mappings</criterion>
+    <criterion>Playbook lookup works correctly</criterion>
+  </acceptance-criteria>
+</task>

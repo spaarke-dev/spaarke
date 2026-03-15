@@ -1,0 +1,40 @@
+<task id="023" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Unit/component tests for multi-playbook UX</title>
+    <phase>2</phase>
+    <stream>client</stream>
+    <tags>testing, pcf</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>H</parallel-group>
+    <dependencies>020, 021, 022</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Write tests for Phase 2 features: selector population, playbook switching, sessionStorage caching.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Write tests for SprkChatContextSelector with availablePlaybooks prop</step>
+    <step>Write tests for playbook switch flow (onChange → switchContext)</step>
+    <step>Write tests for sessionStorage caching (TTL, invalidation)</step>
+    <step>Run tests to verify all pass</step>
+  </steps>
+
+  <outputs>
+    <output>New test files for Phase 2 components</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Selector rendering tested</criterion>
+    <criterion>Switch flow tested</criterion>
+    <criterion>Cache behavior tested</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

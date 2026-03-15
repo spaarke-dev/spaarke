@@ -1,0 +1,43 @@
+<task id="090" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>5</phase>
+    <stream>wrap-up</stream>
+    <tags>documentation</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>J</parallel-group>
+    <dependencies>052</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update README status to Complete, create lessons-learned.md, archive project artifacts, clean up ephemeral files.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-context-awareness-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status to "Complete"</step>
+    <step>Check all graduation criteria in README</step>
+    <step>Create notes/lessons-learned.md with key decisions and insights</step>
+    <step>Clean up ephemeral files in notes/ subdirectories</step>
+    <step>Update TASK-INDEX.md with all tasks marked complete</step>
+    <step>Run /repo-cleanup to validate</step>
+  </steps>
+
+  <outputs>
+    <output>Updated README.md (status: Complete)</output>
+    <output>notes/lessons-learned.md</output>
+    <output>Clean project directory</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All graduation criteria checked</criterion>
+    <criterion>Lessons learned documented</criterion>
+  </acceptance-criteria>
+</task>

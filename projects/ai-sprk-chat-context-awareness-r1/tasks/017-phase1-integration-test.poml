@@ -1,0 +1,54 @@
+<task id="017" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Phase 1 end-to-end integration wiring and smoke test</title>
+    <phase>1-integration</phase>
+    <stream>integration</stream>
+    <tags>testing, integration-test, bff-api, pcf</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>D</parallel-group>
+    <dependencies>010, 011, 012, 013, 015, 016</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Wire all Phase 1 components together and verify end-to-end flow: client detects context → calls mapping endpoint → selects playbook → creates session.</goal>
+    <context>
+      Phase 1 streams A, B, C have been implemented independently. This task integrates them
+      and performs smoke testing to verify the full flow works.
+    </context>
+    <constraints>
+      - MUST verify: context detection → API call → playbook selection → session creation
+      - MUST verify: no-mapping fallback (generic chat mode)
+      - MUST verify: Redis cache hit on second request
+      - MUST run full dotnet build and test suite
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run full `dotnet build` to verify all components compile together</step>
+    <step>Run `dotnet test` to verify no regressions</step>
+    <step>Verify DI registration for ChatContextMappingService in Program.cs</step>
+    <step>Verify endpoint registration in ChatEndpoints</step>
+    <step>Build client: `cd src/client/code-pages/SprkChatPane && npm run build`</step>
+    <step>Review integration points for any gaps</step>
+  </steps>
+
+  <outputs>
+    <output>All components integrated and building together</output>
+    <output>All tests passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full solution builds with no errors</criterion>
+    <criterion>All existing tests pass</criterion>
+    <criterion>New unit tests pass</criterion>
+    <criterion>Client builds successfully</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,57 @@
+<task id="030" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Unit tests for system prompt enrichment logic</title>
+    <phase>3</phase>
+    <stream>backend</stream>
+    <tags>testing, bff-api, ai</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>F</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Write unit tests for the enrichment logic BEFORE implementing it (tests-first approach). Test: null guard, budget check, append-not-replace behavior.</goal>
+    <constraints>
+      - MUST write tests before implementation (task 031)
+      - MUST test: EntityName null → no enrichment
+      - MUST test: PageType null/unknown → no enrichment
+      - MUST test: valid EntityName + PageType → enrichment appended
+      - MUST test: enrichment appended AFTER playbook prompt (not replacing)
+      - MUST test: token budget exceeded → enrichment skipped + warning logged
+      - MUST test: enrichment block ≤100 tokens
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-013-ai-architecture.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read PlaybookChatContextProvider to understand current structure</step>
+    <step>Create test class for enrichment behavior</step>
+    <step>Write test: null EntityName → no enrichment block</step>
+    <step>Write test: null PageType → no enrichment block</step>
+    <step>Write test: "unknown" PageType → no enrichment block</step>
+    <step>Write test: valid context → enrichment appended after playbook prompt</step>
+    <step>Write test: token budget exceeded → enrichment skipped, warning logged</step>
+    <step>Write test: enrichment block content format verification</step>
+  </steps>
+
+  <outputs>
+    <output>New: tests for PlaybookChatContextProvider enrichment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All guard conditions tested</criterion>
+    <criterion>Append-not-replace behavior tested</criterion>
+    <criterion>Token budget guard tested</criterion>
+    <criterion>Tests compile (may fail initially — implementation comes in task 031)</criterion>
+  </acceptance-criteria>
+</task>

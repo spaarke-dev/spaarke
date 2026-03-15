@@ -1,0 +1,57 @@
+<task id="013" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Handle null PlaybookId in SprkChatAgent</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, ai</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>C</parallel-group>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update SprkChatAgent to handle null PlaybookId by running in raw conversational AI mode — no system prompt, no tool registration.</goal>
+    <context>
+      When no context mapping exists (FR-05), sessions are created with PlaybookId = null.
+      SprkChatAgent must gracefully handle this by running as a basic conversational AI
+      without playbook-specific system prompt or tool registration.
+    </context>
+    <constraints>
+      - MUST handle null PlaybookId gracefully (no exceptions)
+      - MUST run without system prompt when PlaybookId is null
+      - MUST NOT register any tools when PlaybookId is null
+      - MUST still use IChatClient for raw conversation
+      - MUST NOT affect behavior when PlaybookId is non-null (existing flow unchanged)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-013-ai-architecture.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read SprkChatAgent to understand current PlaybookId usage</step>
+    <step>Add null check for PlaybookId at agent initialization</step>
+    <step>When null: skip PlaybookChatContextProvider call, skip tool registration</step>
+    <step>When null: use IChatClient directly with no system prompt</step>
+    <step>Run `dotnet build` to verify compilation</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: SprkChatAgent with null PlaybookId handling</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Null PlaybookId produces a working chat session</criterion>
+    <criterion>No system prompt or tools in null-playbook sessions</criterion>
+    <criterion>Non-null PlaybookId sessions unchanged</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

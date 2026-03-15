@@ -1,0 +1,62 @@
+<task id="003" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Create sprk_aichatcontextmap Dataverse entity</title>
+    <phase>1B</phase>
+    <stream>dataverse</stream>
+    <tags>dataverse, schema</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create the `sprk_aichatcontextmap` Dataverse entity with all required fields using Web API, in the same solution as sprk_aiplaybook.</goal>
+    <context>
+      This is the core data model for context-aware playbook mapping. Admins create records to map
+      entity type + page type combinations to specific playbooks. The entity must support:
+      - Entity type filtering (e.g., "matter", "contact")
+      - Page type filtering (form, list, dashboard, workspace)
+      - Playbook lookup (references sprk_aiplaybook)
+      - Sort ordering for priority resolution
+      - Default flag and active/inactive status
+    </context>
+    <constraints>
+      - MUST create in same Dataverse solution as sprk_aiplaybook
+      - MUST use Web API approach (not PAC CLI — see DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md)
+      - Fields: sprk_name, sprk_entitytype (text), sprk_pagetype (choice: form/list/dashboard/workspace/any),
+        sprk_playbookid (lookup → sprk_aiplaybook), sprk_sortorder (int), sprk_isdefault (bool),
+        sprk_description (text), sprk_isactive (bool)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Review existing Dataverse entity creation patterns</step>
+    <step>Create entity definition via Web API (EntityDefinitions POST)</step>
+    <step>Create attributes: sprk_name, sprk_entitytype, sprk_pagetype (choice), sprk_playbookid (lookup), sprk_sortorder, sprk_isdefault, sprk_description, sprk_isactive</step>
+    <step>Create lookup relationship to sprk_aiplaybook</step>
+    <step>Publish customizations</step>
+    <step>Verify entity exists and records can be created via API</step>
+  </steps>
+
+  <outputs>
+    <output>sprk_aichatcontextmap entity in Dataverse</output>
+    <output>All fields and relationships configured</output>
+    <output>Entity added to solution</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Entity exists in Dataverse with all specified fields</criterion>
+    <criterion>Lookup to sprk_aiplaybook works</criterion>
+    <criterion>Records can be created via Dataverse API</criterion>
+    <criterion>Entity is part of the correct solution</criterion>
+  </acceptance-criteria>
+</task>

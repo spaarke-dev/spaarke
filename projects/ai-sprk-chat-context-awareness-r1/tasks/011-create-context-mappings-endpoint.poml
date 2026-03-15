@@ -1,0 +1,62 @@
+<task id="011" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Create GET /api/ai/chat/context-mappings endpoint</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, auth</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>B</parallel-group>
+    <dependencies>001, 010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a new GET endpoint at /api/ai/chat/context-mappings that accepts entityType and pageType query parameters, calls ChatContextMappingService, and returns the mapping response with auth filter and tenant extraction.</goal>
+    <context>
+      This endpoint is the client's entry point for discovering which playbooks are available for the
+      current page context. It follows the existing ChatEndpoints pattern with authorization filter,
+      tenant extraction, and ProblemDetails error responses.
+    </context>
+    <constraints>
+      - MUST register in existing ChatEndpoints.MapChatEndpoints() route group
+      - MUST call .AddAiAuthorizationFilter() (ADR-008)
+      - MUST call ExtractTenantId() and return 400 if null (ADR-014)
+      - MUST accept query params: entityType (required), pageType (optional, default "any")
+      - MUST return ChatContextMappingResponse with defaultPlaybook + availablePlaybooks
+      - MUST return 200 with empty response when no mappings found (not 404)
+      - Endpoint latency target: ≤50ms p95 on Redis hit
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-001-minimal-api-and-workers.md</adr>
+      <adr>docs/adr/ADR-008-endpoint-filters-for-auth.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read ChatEndpoints.cs to understand existing endpoint registration pattern</step>
+    <step>Add new MapGet for "/context-mappings" with query parameters</step>
+    <step>Add .AddAiAuthorizationFilter() to the endpoint</step>
+    <step>Implement handler: extract tenantId, validate, call service, return response</step>
+    <step>Run `dotnet build` to verify compilation</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: ChatEndpoints.cs with new context-mappings endpoint</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GET /api/ai/chat/context-mappings?entityType=matter&amp;pageType=form returns 200</criterion>
+    <criterion>Auth filter is applied</criterion>
+    <criterion>Missing tenantId returns 400 ProblemDetails</criterion>
+    <criterion>Empty mapping returns 200 with null defaultPlaybook</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,60 @@
+<task id="002" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Make ChatSession.PlaybookId nullable (Guid?)</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, model</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Change PlaybookId from `Guid` to `Guid?` on ChatSession record and update CreateSessionAsync signature to accept nullable PlaybookId, enabling generic chat mode when no mapping exists.</goal>
+    <context>
+      When no context mapping exists (FR-05), SprkChat should open in generic chat mode with no playbook.
+      This requires ChatSession.PlaybookId to be nullable. CreateSessionAsync must accept `Guid? playbookId = null`.
+      Existing Redis-cached sessions with non-null PlaybookId must continue to deserialize correctly.
+    </context>
+    <constraints>
+      - MUST change ChatSession.PlaybookId from Guid to Guid?
+      - MUST update CreateSessionAsync signature: `Guid? playbookId = null`
+      - MUST NOT break existing session deserialization from Redis
+      - MUST update ChatDataverseRepository to handle null PlaybookId (empty/omit field)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-009-redis-first-caching.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read ChatSession record to identify PlaybookId type and usage</step>
+    <step>Change PlaybookId from Guid to Guid? on the record</step>
+    <step>Update ChatSessionManager.CreateSessionAsync signature to Guid? playbookId = null</step>
+    <step>Update ChatDataverseRepository to handle null PlaybookId on write</step>
+    <step>Find and fix all compilation errors from nullability change</step>
+    <step>Run `dotnet build` to verify compilation</step>
+  </steps>
+
+  <outputs>
+    <output>Modified ChatSession record with Guid? PlaybookId</output>
+    <output>Modified ChatSessionManager with nullable parameter</output>
+    <output>Modified ChatDataverseRepository for null handling</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PlaybookId is Guid? on ChatSession</criterion>
+    <criterion>CreateSessionAsync accepts null playbookId</criterion>
+    <criterion>Build succeeds with no errors</criterion>
+    <criterion>Existing non-null PlaybookId sessions unaffected</criterion>
+  </acceptance-criteria>
+</task>

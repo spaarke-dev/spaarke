@@ -1,0 +1,62 @@
+<task id="031" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Implement system prompt enrichment in PlaybookChatContextProvider</title>
+    <phase>3</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, ai</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>H</parallel-group>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add entity metadata enrichment to PlaybookChatContextProvider that appends context block after playbook system prompt, with null guard and token budget cap.</goal>
+    <context>
+      Phase 3 enriches the AI's system prompt with entity-specific context so it knows what the
+      user is looking at. The enrichment block is: "Context: You are assisting with {entityType}
+      record '{entityName}'. The user is viewing the {humanReadablePageType} view."
+    </context>
+    <constraints>
+      - MUST append enrichment AFTER playbook system prompt (never replace)
+      - MUST guard: skip if EntityName is null or PageType is null/unknown
+      - MUST cap enrichment block at ≤100 tokens
+      - MUST check remaining token budget before appending; skip + log warning if insufficient
+      - MUST use human-readable page types: "main form view", "list view", "dashboard view", "workspace view"
+      - MUST NOT log EntityName in structured telemetry properties (NFR-07)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-013-ai-architecture.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read PlaybookChatContextProvider.GetContextAsync() to identify where to append</step>
+    <step>Add enrichment block generation method</step>
+    <step>Map pageType to human-readable string (form→"main form view", etc.)</step>
+    <step>Add token budget check before appending</step>
+    <step>Append enrichment after playbook system prompt in the builder</step>
+    <step>Log warning (not error) when budget exceeded and enrichment skipped</step>
+    <step>Run unit tests from task 030 — all should pass now</step>
+    <step>Run `dotnet build` and `dotnet test`</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: PlaybookChatContextProvider.cs (enrichment logic)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Enrichment block appended when EntityName + PageType valid</criterion>
+    <criterion>No enrichment when guards fail</criterion>
+    <criterion>Token budget respected</criterion>
+    <criterion>All unit tests from task 030 pass</criterion>
+    <criterion>Existing behavior unchanged when no enrichment context</criterion>
+  </acceptance-criteria>
+</task>

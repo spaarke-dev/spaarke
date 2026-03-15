@@ -1,0 +1,66 @@
+<task id="012" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Add pageType to IHostContext and implement detectPageType()</title>
+    <phase>1C</phase>
+    <stream>client</stream>
+    <tags>pcf, react, typescript</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>B</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add `pageType` to the TypeScript `IHostContext` interface and implement `detectPageType()` in contextService.ts that returns form/list/dashboard/workspace/unknown.</goal>
+    <context>
+      The client needs to detect what type of page the user is on to pass to the context-mappings endpoint.
+      Detection uses Xrm.Utility.getPageContext() as primary, URL pattern matching as fallback,
+      and an explicit allowlist for workspace web resources.
+    </context>
+    <constraints>
+      - MUST add `pageType?: string` to IHostContext interface in shared library types.ts
+      - MUST implement detectPageType() returning: "form" | "list" | "dashboard" | "workspace" | "unknown"
+      - MUST use Xrm.Utility.getPageContext() as primary detection method
+      - MUST use URL pattern matching as fallback (entityrecord, entitylist, dashboard)
+      - MUST use explicit allowlist for workspace detection (sprk_corporateworkspace, sprk_legalworkspace, sprk_analysisworkspace)
+      - MUST NOT use broad `sprk_` prefix matching for workspaces
+      - MUST return "unknown" on any error (never throws)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-006-anti-legacy-js.md</adr>
+      <adr>docs/adr/ADR-022-pcf-platform-libraries.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read IHostContext interface in shared library types.ts</step>
+    <step>Add `pageType?: string` to IHostContext</step>
+    <step>Read contextService.ts to understand existing detection pattern</step>
+    <step>Implement detectPageType() with Xrm primary + URL fallback + workspace allowlist</step>
+    <step>Integrate detectPageType() into detectContext() flow</step>
+    <step>Verify build: `cd src/client/code-pages/SprkChatPane && npm run build`</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: types.ts (IHostContext with pageType)</output>
+    <output>Modified: contextService.ts (detectPageType function)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>IHostContext has pageType field</criterion>
+    <criterion>detectPageType() returns "form" on entity record page</criterion>
+    <criterion>detectPageType() returns "list" on entity list page</criterion>
+    <criterion>detectPageType() returns "workspace" for known web resources</criterion>
+    <criterion>detectPageType() returns "unknown" on error</criterion>
+    <criterion>No workspace detection via broad prefix matching</criterion>
+  </acceptance-criteria>
+</task>

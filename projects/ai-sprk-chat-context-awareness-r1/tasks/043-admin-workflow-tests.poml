@@ -1,0 +1,38 @@
+<task id="043" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Admin workflow tests</title>
+    <phase>4</phase>
+    <stream>dataverse</stream>
+    <tags>testing, dataverse</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>I</parallel-group>
+    <dependencies>042</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Test admin workflow: create mapping → refresh cache → verify SprkChat picks up new playbook.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create a new mapping record via admin form</step>
+    <step>Click "Refresh Mappings" button</step>
+    <step>Verify GET /context-mappings returns the new mapping</step>
+    <step>Verify SprkChat picks up the new playbook on next open</step>
+  </steps>
+
+  <outputs>
+    <output>Admin workflow verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New mapping available after refresh</criterion>
+    <criterion>No 30-min wait required</criterion>
+  </acceptance-criteria>
+</task>

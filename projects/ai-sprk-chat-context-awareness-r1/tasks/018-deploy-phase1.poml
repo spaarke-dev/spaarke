@@ -1,0 +1,42 @@
+<task id="018" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Deploy Phase 1 to dev environment</title>
+    <phase>1-deploy</phase>
+    <stream>deploy</stream>
+    <tags>deploy, bff-api, dataverse</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>D</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy Phase 1 artifacts to dev environment: BFF API, Dataverse entity, seed data, SprkChatPane code page.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Deploy BFF API via Deploy-BffApi.ps1</step>
+    <step>Verify Dataverse entity exists (created in task 003)</step>
+    <step>Import seed data via `pac data import`</step>
+    <step>Build and deploy SprkChatPane code page</step>
+    <step>Smoke test: open SprkChat from matter form, verify playbook auto-selected</step>
+  </steps>
+
+  <outputs>
+    <output>Phase 1 deployed and verified in dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>API responds to context-mappings endpoint</criterion>
+    <criterion>Seed data imported</criterion>
+    <criterion>SprkChat auto-selects playbook on matter form</criterion>
+  </acceptance-criteria>
+</task>

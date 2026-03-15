@@ -1,0 +1,75 @@
+<task id="010" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Create ChatContextMappingService with Redis caching</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, caching</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>B</parallel-group>
+    <dependencies>001, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create ChatContextMappingService that queries sprk_aichatcontextmap from Dataverse with Redis caching (30-min TTL) and implements the resolution order: exact → entity+any → wildcard+pageType → global fallback.</goal>
+    <context>
+      This service resolves which playbook(s) to show for a given entityType + pageType combination.
+      It queries the sprk_aichatcontextmap Dataverse table and caches results in Redis.
+      Resolution follows a priority order: exact match first, then progressively broader fallbacks.
+      Returns: { defaultPlaybook: ChatPlaybookInfo | null, availablePlaybooks: ChatPlaybookInfo[] }
+    </context>
+    <constraints>
+      - MUST check Redis before querying Dataverse (ADR-009)
+      - MUST use 30-min sliding TTL for cache entries
+      - MUST use tenant-scoped cache keys: "chat:ctx-mapping:{entityType}:{pageType}"
+      - MUST implement resolution order: exact → entity+any → wildcard+pageType → */any global
+      - MUST sort within tier by sprk_sortorder ASC
+      - MUST return empty availablePlaybooks[] and null defaultPlaybook when no mapping found
+      - MUST register as concrete (not interface) per ADR-010
+      - MUST NOT block on cold Dataverse query (non-blocking pattern)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-009-redis-first-caching.md</adr>
+      <adr>docs/adr/ADR-010-di-minimalism.md</adr>
+      <adr>docs/adr/ADR-014-ai-caching-reuse-policy.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read ChatSessionManager.cs to follow existing Redis caching pattern</step>
+    <step>Create response records: ChatPlaybookInfo, ChatContextMappingResponse</step>
+    <step>Create ChatContextMappingService class with IDistributedCache + ILogger injection</step>
+    <step>Implement ResolveAsync(entityType, pageType, tenantId) method</step>
+    <step>Implement Redis cache check (GetAsync with JSON deserialization)</step>
+    <step>Implement Dataverse query fallback with resolution order logic</step>
+    <step>Implement cache write (SetAsync with 30-min TTL)</step>
+    <step>Register service in DI (concrete, singleton)</step>
+    <step>Run `dotnet build` to verify compilation</step>
+  </steps>
+
+  <outputs>
+    <output>New: Services/Ai/Chat/ChatContextMappingService.cs</output>
+    <output>New: Models/Ai/Chat/ChatContextMappingResponse.cs (or inline records)</output>
+    <output>DI registration in Program.cs or feature module</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service resolves correct playbook for exact match (entityType + pageType)</criterion>
+    <criterion>Fallback chain works: exact → entity+any → wildcard+pageType → global</criterion>
+    <criterion>Returns null/empty when no mapping exists</criterion>
+    <criterion>Redis cache hit returns in &lt;5ms</criterion>
+    <criterion>Cache TTL is 30 minutes</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

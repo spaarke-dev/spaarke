@@ -1,0 +1,50 @@
+<task id="020" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Wire SprkChatContextSelector to availablePlaybooks</title>
+    <phase>2</phase>
+    <stream>client</stream>
+    <tags>pcf, react, fluent-ui</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>E</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Populate SprkChatContextSelector with availablePlaybooks[] from context-mapping response instead of a hardcoded list.</goal>
+    <constraints>
+      - MUST populate selector from availablePlaybooks[] returned by context-mappings endpoint
+      - MUST show defaultPlaybook as pre-selected
+      - MUST use Fluent v9 components (ADR-021)
+      - MUST support dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-021-fluent-ui-v9-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read SprkChatContextSelector component</step>
+    <step>Update props to accept availablePlaybooks[] from parent</step>
+    <step>Render playbook options from array</step>
+    <step>Pre-select defaultPlaybook</step>
+    <step>Verify dark mode appearance</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: SprkChatContextSelector component</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Selector shows playbooks from API response</criterion>
+    <criterion>Default playbook pre-selected</criterion>
+    <criterion>Dark mode works</criterion>
+  </acceptance-criteria>
+</task>

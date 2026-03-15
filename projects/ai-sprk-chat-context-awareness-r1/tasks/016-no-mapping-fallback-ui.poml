@@ -1,0 +1,61 @@
+<task id="016" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Implement no-mapping fallback UI</title>
+    <phase>1C</phase>
+    <stream>client</stream>
+    <tags>pcf, react, fluent-ui</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>C</parallel-group>
+    <dependencies>012</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>When context-mappings returns null defaultPlaybook, hide the playbook selector and show generic chat UI. Session created with PlaybookId: null.</goal>
+    <context>
+      FR-05 requires that SprkChat is usable even when no context mappings are configured.
+      The pane should open with a generic chat interface — no playbook selector shown,
+      and the session created without a playbook (raw conversational AI).
+    </context>
+    <constraints>
+      - MUST hide SprkChatContextSelector when defaultPlaybook is null
+      - MUST show generic chat UI (text input, message history, no playbook badge)
+      - MUST create session with PlaybookId: null
+      - MUST use Fluent v9 components and semantic tokens (ADR-021)
+      - MUST support dark mode
+      - MUST NOT show error state — this is a valid configuration
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/code-pages/SprkChatPane/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-021-fluent-ui-v9-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read App.tsx and SprkChat component to understand selector rendering</step>
+    <step>Add conditional rendering: hide selector when no defaultPlaybook</step>
+    <step>Pass playbookId={undefined} to SprkChat when no mapping</step>
+    <step>Verify session creation works with null PlaybookId</step>
+    <step>Test dark mode appearance</step>
+    <step>Verify build</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: App.tsx (conditional selector visibility)</output>
+    <output>Modified: SprkChat component (handle undefined playbookId)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pane opens and is usable with no mapping records</criterion>
+    <criterion>No playbook selector shown</criterion>
+    <criterion>User can type and receive AI responses</criterion>
+    <criterion>Works in dark mode</criterion>
+  </acceptance-criteria>
+</task>

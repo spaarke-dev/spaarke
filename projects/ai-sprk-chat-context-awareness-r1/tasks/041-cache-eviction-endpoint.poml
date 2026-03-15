@@ -1,0 +1,57 @@
+<task id="041" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Implement DELETE /api/ai/chat/context-mappings/cache endpoint</title>
+    <phase>4</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, caching</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>G</parallel-group>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a cache eviction endpoint that removes all chat:ctx-mapping:* Redis keys, allowing the admin "Refresh Mappings" button to force immediate updates.</goal>
+    <constraints>
+      - MUST evict all keys matching pattern "chat:ctx-mapping:*"
+      - MUST require authorization (admin-level)
+      - MUST call ExtractTenantId() and return 400 if null
+      - MUST return 204 No Content on success
+      - MUST log cache eviction event
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-008-endpoint-filters-for-auth.md</adr>
+      <adr>docs/adr/ADR-009-redis-first-caching.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Add MapDelete for "/context-mappings/cache" in ChatEndpoints</step>
+    <step>Add authorization filter (admin level)</step>
+    <step>Implement Redis key pattern eviction via ChatContextMappingService</step>
+    <step>Return 204 on success</step>
+    <step>Log cache eviction event</step>
+    <step>Run `dotnet build` and test</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: ChatEndpoints.cs (new DELETE endpoint)</output>
+    <output>Modified: ChatContextMappingService (eviction method)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DELETE endpoint returns 204</criterion>
+    <criterion>Redis keys evicted</criterion>
+    <criterion>Next GET call fetches fresh data from Dataverse</criterion>
+    <criterion>Auth filter applied</criterion>
+  </acceptance-criteria>
+</task>

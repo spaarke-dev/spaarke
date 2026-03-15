@@ -1,0 +1,45 @@
+<task id="022" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Client sessionStorage caching for context mappings</title>
+    <phase>2</phase>
+    <stream>client</stream>
+    <tags>pcf, typescript</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>E</parallel-group>
+    <dependencies>015</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Implement sessionStorage caching for context-mapping results with key "sprkchat-context-{entityType}-{pageType}" and 5-minute TTL.</goal>
+    <constraints>
+      - MUST use sessionStorage (not localStorage) — cleared on tab close
+      - MUST use key format: "sprkchat-context-{entityType}-{pageType}"
+      - MUST implement 5-minute TTL (store timestamp, check on read)
+      - MUST invalidate on context change (different entity/page)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add sessionStorage write after successful API response in resolveContextMapping()</step>
+    <step>Add sessionStorage read before API call (check TTL)</step>
+    <step>Implement TTL check: compare stored timestamp vs now, expire after 5 min</step>
+    <step>Clear stale entries on context change</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: contextService.ts (sessionStorage caching)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Second pane open within 5 min uses cached result</criterion>
+    <criterion>Cache expires after 5 minutes</criterion>
+    <criterion>Different entity/page gets different cache entry</criterion>
+  </acceptance-criteria>
+</task>

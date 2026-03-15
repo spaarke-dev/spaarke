@@ -1,0 +1,45 @@
+<task id="050" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Full end-to-end integration test (all phases)</title>
+    <phase>5</phase>
+    <stream>integration</stream>
+    <tags>testing, integration-test</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>J</parallel-group>
+    <dependencies>023, 033, 043</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Comprehensive end-to-end test of all 4 phases working together: mapping resolution, multi-playbook selector, entity enrichment, and admin cache refresh.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run full `dotnet build` and `dotnet test`</step>
+    <step>Verify mapping resolution flow end-to-end</step>
+    <step>Verify multi-playbook selector populated correctly</step>
+    <step>Verify entity enrichment in AI responses</step>
+    <step>Verify admin cache refresh flow</step>
+    <step>Verify no-mapping fallback (generic chat)</step>
+    <step>Verify backward compatibility (existing sessions)</step>
+    <step>Verify SSE streaming not regressed</step>
+    <step>Build client and verify no errors</step>
+  </steps>
+
+  <outputs>
+    <output>Full integration test report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All graduation criteria from README verified</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>No regressions</criterion>
+  </acceptance-criteria>
+</task>

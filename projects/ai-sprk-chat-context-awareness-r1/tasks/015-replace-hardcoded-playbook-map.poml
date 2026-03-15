@@ -1,0 +1,64 @@
+<task id="015" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Replace DEFAULT_PLAYBOOK_MAP with dynamic API call</title>
+    <phase>1C</phase>
+    <stream>client</stream>
+    <tags>pcf, react, typescript</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>C</parallel-group>
+    <dependencies>011, 012</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Replace the hardcoded DEFAULT_PLAYBOOK_MAP in contextService.ts with a dynamic call to GET /api/ai/chat/context-mappings, adding sessionStorage caching with 5-min TTL.</goal>
+    <context>
+      Currently SprkChatPane uses a static map of entity types to playbook GUIDs. This must be
+      replaced with a call to the new context-mappings endpoint. Results should be cached in
+      sessionStorage to avoid repeated API calls during the same browser session.
+    </context>
+    <constraints>
+      - MUST remove DEFAULT_PLAYBOOK_MAP constant entirely (no hardcoded GUIDs remain)
+      - MUST call GET /api/ai/chat/context-mappings?entityType={}&amp;pageType={} on pane mount
+      - MUST cache response in sessionStorage: key "sprkchat-context-{entityType}-{pageType}", 5-min TTL
+      - MUST check sessionStorage before API call
+      - MUST NOT block pane open on cold API call (show generic UI immediately, update async)
+      - MUST handle API errors gracefully (fall back to generic chat)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+      <file>src/client/code-pages/SprkChatPane/src/App.tsx</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-006-anti-legacy-js.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read contextService.ts to identify DEFAULT_PLAYBOOK_MAP usage</step>
+    <step>Remove DEFAULT_PLAYBOOK_MAP constant</step>
+    <step>Create resolveContextMapping() function that checks sessionStorage then calls API</step>
+    <step>Add sessionStorage caching with 5-min TTL (store timestamp with data)</step>
+    <step>Update App.tsx startup flow to use resolveContextMapping()</step>
+    <step>Implement non-blocking pattern: show generic UI immediately, update when response arrives</step>
+    <step>Handle API errors: log warning, fall back to generic chat mode</step>
+    <step>Verify build</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: contextService.ts (remove hardcoded map, add API call + sessionStorage cache)</output>
+    <output>Modified: App.tsx (wire dynamic mapping into startup)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No hardcoded playbook GUIDs in client code</criterion>
+    <criterion>API called on pane mount when no sessionStorage cache</criterion>
+    <criterion>sessionStorage cache used when available and fresh (&lt;5 min)</criterion>
+    <criterion>Pane opens immediately even when API is slow</criterion>
+    <criterion>API error falls back to generic chat</criterion>
+  </acceptance-criteria>
+</task>

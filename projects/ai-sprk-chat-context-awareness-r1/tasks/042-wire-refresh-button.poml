@@ -1,0 +1,46 @@
+<task id="042" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Wire "Refresh Mappings" button on admin form</title>
+    <phase>4</phase>
+    <stream>dataverse</stream>
+    <tags>dataverse, ribbon</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>H</parallel-group>
+    <dependencies>040, 041</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add a "Refresh Mappings" command bar button on the admin form that calls the cache eviction endpoint to force immediate mapping updates.</goal>
+    <constraints>
+      - MUST add button to sprk_aichatcontextmap form command bar
+      - MUST call DELETE /api/ai/chat/context-mappings/cache on click
+      - MUST show success/failure feedback to admin
+      - MUST use ribbon-edit skill for customization
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create minimal JavaScript web resource for the refresh button action</step>
+    <step>Implement: acquire token → call DELETE endpoint → show confirmation</step>
+    <step>Add command bar button via ribbon customization</step>
+    <step>Test: click button → verify cache evicted → verify fresh data on next load</step>
+  </steps>
+
+  <outputs>
+    <output>New: JavaScript web resource for refresh action</output>
+    <output>Ribbon customization for command bar button</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Button visible on admin form</criterion>
+    <criterion>Click evicts cache and shows success message</criterion>
+    <criterion>Next SprkChat open fetches fresh mappings</criterion>
+  </acceptance-criteria>
+</task>

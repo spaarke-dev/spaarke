@@ -1,0 +1,38 @@
+<task id="051" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Performance validation: endpoint latency and pane-open time</title>
+    <phase>5</phase>
+    <stream>integration</stream>
+    <tags>testing, performance</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>J</parallel-group>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Validate NFR-01 (≤50ms p95 endpoint) and NFR-02 (≤300ms pane-open) performance targets.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Measure context-mappings endpoint latency (Redis warm): target ≤50ms p95</step>
+    <step>Measure pane-open time: target ≤300ms p95</step>
+    <step>Document performance results</step>
+    <step>Identify and fix any performance gaps</step>
+  </steps>
+
+  <outputs>
+    <output>Performance validation report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint ≤50ms p95 on Redis hit</criterion>
+    <criterion>Pane open ≤300ms p95</criterion>
+  </acceptance-criteria>
+</task>

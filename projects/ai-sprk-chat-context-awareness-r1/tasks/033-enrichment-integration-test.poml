@@ -1,0 +1,38 @@
+<task id="033" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Integration test: AI response references entity name</title>
+    <phase>3</phase>
+    <stream>backend</stream>
+    <tags>testing, integration-test, ai</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>I</parallel-group>
+    <dependencies>031</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that AI responses on a matter form reference the matter name when enrichment is active.</goal>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create integration test that sends a chat message with ChatHostContext including EntityName</step>
+    <step>Verify system prompt includes enrichment block</step>
+    <step>Verify AI response references entity context</step>
+    <step>Verify EntityName not in structured logs</step>
+  </steps>
+
+  <outputs>
+    <output>Integration test for enrichment verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AI response acknowledges entity context</criterion>
+    <criterion>No EntityName in structured logs</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,47 @@
+<task id="032" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Audit telemetry for EntityName exclusion</title>
+    <phase>3</phase>
+    <stream>backend</stream>
+    <tags>bff-api, security</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>F</parallel-group>
+    <dependencies>017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Verify that EntityName does NOT appear in structured telemetry properties in AgentTelemetryMiddleware or any other logging path (NFR-07).</goal>
+    <constraints>
+      - MUST audit AgentTelemetryMiddleware for EntityName in structured properties
+      - MUST audit all ILogger calls that might log ChatHostContext
+      - MUST ensure EntityName only appears in Debug-level unstructured messages (if at all)
+      - MUST NOT add EntityName to any Application Insights custom dimensions
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Search for all references to EntityName in server code</step>
+    <step>Audit AgentTelemetryMiddleware for structured property logging</step>
+    <step>Audit any ILogger calls that include ChatHostContext</step>
+    <step>Fix any violations found</step>
+    <step>Document audit results</step>
+  </steps>
+
+  <outputs>
+    <output>Audit report of EntityName usage in telemetry</output>
+    <output>Fixes if violations found</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>EntityName absent from all structured log properties</criterion>
+    <criterion>EntityName absent from Application Insights custom dimensions</criterion>
+    <criterion>Audit documented</criterion>
+  </acceptance-criteria>
+</task>

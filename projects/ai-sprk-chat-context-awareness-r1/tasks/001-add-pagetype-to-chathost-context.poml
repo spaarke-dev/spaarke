@@ -1,0 +1,55 @@
+<task id="001" project="ai-sprk-chat-context-awareness-r1">
+  <metadata>
+    <title>Add PageType to ChatHostContext record</title>
+    <phase>1A</phase>
+    <stream>backend</stream>
+    <tags>bff-api, api, model</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add a nullable `PageType` string property to the `ChatHostContext` C# record, maintaining backward compatibility with existing Redis-cached sessions.</goal>
+    <context>
+      SprkChat currently has a `ChatHostContext` record with EntityType, EntityId, EntityName, and WorkspaceType.
+      We need to add `PageType` so the system knows if the user is on a form, list, dashboard, or workspace view.
+      This must be nullable with default null to ensure backward compatibility (NFR-05).
+    </context>
+    <constraints>
+      - MUST use `string? PageType = null` default (backward-compatible deserialization)
+      - MUST NOT break existing Redis-cached sessions (they lack PageType)
+      - Follow existing record parameter pattern in ChatHostContext.cs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs</file>
+    </files>
+    <adrs>
+      <adr>docs/adr/ADR-001-minimal-api-and-workers.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read current ChatHostContext.cs to understand existing record shape</step>
+    <step>Add `string? PageType = null` parameter to the record constructor</step>
+    <step>Verify IsValid() method does NOT require PageType (it's optional)</step>
+    <step>Run `dotnet build src/server/api/Sprk.Bff.Api/` to confirm no breaking changes</step>
+  </steps>
+
+  <outputs>
+    <output>Modified ChatHostContext.cs with PageType parameter</output>
+    <output>Successful build with no warnings</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ChatHostContext has `string? PageType = null` parameter</criterion>
+    <criterion>Existing code compiles without changes</criterion>
+    <criterion>JSON deserialization of existing sessions (without PageType) works</criterion>
+  </acceptance-criteria>
+</task>
