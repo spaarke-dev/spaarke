@@ -92,8 +92,8 @@ export async function streamSummarize(
             } catch {
               console.warn(`${LOG_PREFIX} Failed to parse result content as JSON`);
             }
-          } else if (chunk.type === 'error' && chunk.content) {
-            throw new Error(chunk.content);
+          } else if (chunk.type === 'error') {
+            throw new Error(chunk.error ?? chunk.content ?? 'Summarization failed');
           } else if (chunk.done) {
             break;
           }
