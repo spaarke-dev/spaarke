@@ -10,11 +10,15 @@
  *   2. Config dropdown filters to configs whose businessUnitId matches the selected BU.
  *   3. Environment is auto-populated (read-only) from the selected config's environment.
  *
+ * Variants:
+ *   "full"    — Three-column horizontal bar, each with label + lookup. Default.
+ *   "compact" — Inline header row: two Comboboxes + environment badge. For AppShell header.
+ *
  * State persistence: handled by BuContext (localStorage). This component only drives
  * the UI and delegates state to useBuContext().
  *
  * ADR-021: All styles via makeStyles + tokens (no hard-coded colors).
- * ADR-012: Uses LookupField from @spaarke/ui-components.
+ * ADR-012: Uses LookupField from @spaarke/ui-components (full variant only).
  * ADR-022: React 18 (Code Page — bundled createRoot). Not PCF.
  */
 
@@ -27,12 +31,15 @@ import {
   MessageBar,
   MessageBarBody,
   Badge,
+  Combobox,
+  Option,
   shorthands,
 } from "@fluentui/react-components";
 import {
   Building20Regular,
   Cube20Regular,
   Globe20Regular,
+  Globe16Regular,
   CheckmarkCircle20Filled,
 } from "@fluentui/react-icons";
 import { LookupField } from "@spaarke/ui-components";
@@ -42,13 +49,25 @@ import { speApiClient } from "../../services/speApiClient";
 import type { BusinessUnit, SpeContainerTypeConfig, SpeEnvironment } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Props
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface BuContextPickerProps {
+  /**
+   * "full"    — Three-column horizontal bar with labels. Use on a dedicated context row.
+   * "compact" — Inline header row: two Comboboxes + environment badge. Use in AppShell header.
+   * @default "full"
+   */
+  variant?: "full" | "compact";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Styles (ADR-021: makeStyles + tokens, zero hard-coded colors)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
   /**
-   * Root container: horizontal flex bar for the three cascading pickers.
-   * Wraps on narrow viewports so each field takes full width.
+   * Root container (full variant): horizontal flex bar for the three cascading pickers.
    */
   root: {
     display: "flex",
@@ -66,9 +85,7 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
   },
 
-  /**
-   * Individual picker column — flex item that shrinks for narrow screens.
-   */
+  /** Individual picker column (full variant). */
   pickerColumn: {
     flex: "1 1 180px",
     minWidth: "160px",
@@ -78,9 +95,7 @@ const useStyles = makeStyles({
     ...shorthands.gap(tokens.spacingVerticalXXS),
   },
 
-  /**
-   * Section label row (icon + label text).
-   */
+  /** Section label row (icon + label text). */
   labelRow: {
     display: "flex",
     flexDirection: "row",
@@ -98,9 +113,7 @@ const useStyles = makeStyles({
     letterSpacing: "0.04em",
   },
 
-  /**
-   * Environment display — read-only pill showing the derived environment.
-   */
+  /** Environment display (full variant) — read-only pill. */
   environmentDisplay: {
     display: "flex",
     flexDirection: "column",
@@ -144,9 +157,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
 
-  /**
-   * Context status bar — shown when all three levels are selected.
-   */
+  /** Context status bar (full variant). */
   statusBar: {
     display: "flex",
     flexDirection: "row",
@@ -174,6 +185,46 @@ const useStyles = makeStyles({
     ...shorthands.gap(tokens.spacingHorizontalS),
     paddingTop: tokens.spacingVerticalXS,
   },
+
+  // ── Compact variant styles ──────────────────────────────────────────────────
+
+  /**
+   * Root container for the compact inline variant.
+   * Renders as a horizontal flex row suitable for embedding in an app header.
+   */
+  compactRoot: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    flexWrap: "nowrap",
+  },
+
+  /** Each compact item (combobox or badge) in the header row. */
+  compactItem: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    ...shorthands.gap(tokens.spacingHorizontalXXS),
+  },
+
+  compactLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    whiteSpace: "nowrap",
+  },
+
+  compactSeparator: {
+    color: tokens.colorNeutralStroke1,
+    fontSize: tokens.fontSizeBase200,
+    userSelect: "none",
+  },
+
+  compactEnvBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    ...shorthands.gap(tokens.spacingHorizontalXXS),
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,22 +246,16 @@ function configToLookupItem(cfg: SpeContainerTypeConfig): ILookupItem {
 /**
  * BuContextPicker — three-level cascading context selector.
  *
- * Renders as a horizontal bar at the top of the SPE Admin App:
+ * Full variant renders as a horizontal bar:
  *   [Business Unit ▼]   [Container Type Config ▼]   [Environment (read-only)]
+ *
+ * Compact variant renders as an inline header row:
+ *   Business Unit [▼]  /  Config [▼]  ·  [Environment badge]
  *
  * All state is managed through the shared BuContext — this component is
  * purely a UI driver that delegates selection to useBuContext().
- *
- * Data loading:
- *   - Business Units: loaded once on mount from /api/spe/businessunits
- *   - Configs: loaded (or re-loaded) whenever selectedBu changes
- *   - Environment: derived from selectedConfig.environmentId / environmentName
- *     (already embedded in the config record — no separate API call needed)
- *
- * Persistence: BuContext writes to localStorage on every setter call, so
- *   selections survive page navigation within the Code Page.
  */
-export const BuContextPicker: React.FC = () => {
+export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "full" }) => {
   const styles = useStyles();
   const {
     selectedBu,
@@ -223,15 +268,17 @@ export const BuContextPicker: React.FC = () => {
 
   // ── Local data state ─────────────────────────────────────────────────────
 
-  /** All business units fetched from the API. */
   const [allBus, setAllBus] = React.useState<BusinessUnit[]>([]);
   const [busLoading, setBusLoading] = React.useState(false);
   const [busError, setBusError] = React.useState<string | null>(null);
 
-  /** Configs for the currently selected BU. */
   const [configs, setConfigs] = React.useState<SpeContainerTypeConfig[]>([]);
   const [configsLoading, setConfigsLoading] = React.useState(false);
   const [configsError, setConfigsError] = React.useState<string | null>(null);
+
+  // Compact variant: track combobox input values separately to support type-to-filter
+  const [buInputValue, setBuInputValue] = React.useState(selectedBu?.name ?? "");
+  const [configInputValue, setConfigInputValue] = React.useState(selectedConfig?.name ?? "");
 
   // ── Load Business Units on mount ─────────────────────────────────────────
 
@@ -283,7 +330,6 @@ export const BuContextPicker: React.FC = () => {
           setConfigs(cfgs);
           setConfigsLoading(false);
 
-          // Validate current selectedConfig still belongs to this BU
           if (selectedConfig && selectedConfig.businessUnitId !== selectedBu.businessUnitId) {
             setSelectedConfig(null);
           }
@@ -304,30 +350,27 @@ export const BuContextPicker: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBu?.businessUnitId]);
 
+  // ── Sync compact input values with context ────────────────────────────────
+
+  React.useEffect(() => {
+    setBuInputValue(selectedBu?.name ?? "");
+  }, [selectedBu]);
+
+  React.useEffect(() => {
+    setConfigInputValue(selectedConfig?.name ?? "");
+  }, [selectedConfig]);
+
   // ── Derive environment from selected config ───────────────────────────────
 
-  /**
-   * Environment is derived from the selected config — the config record embeds
-   * both environmentId and environmentName, so no additional API call is needed.
-   * We construct a minimal SpeEnvironment from those fields and store it in context.
-   */
   React.useEffect(() => {
     if (!selectedConfig) {
-      // Config cleared — clear environment too (BuContext handles this cascade,
-      // but we call explicitly to keep environment in sync with config changes
-      // triggered externally, e.g. stale localStorage validation).
       setSelectedEnvironment(null);
       return;
     }
 
-    // Build a minimal SpeEnvironment from the embedded fields on the config.
-    // Full environment details (tenantId, graphEndpoint, etc.) are available via
-    // GET /api/spe/environments/{id} if any page needs them.
     const derivedEnv: SpeEnvironment = {
       id: selectedConfig.environmentId,
       name: selectedConfig.environmentName,
-      // These fields are not embedded on the config — default to empty strings.
-      // Pages that need full environment details should fetch via speApiClient.environments.
       tenantId: "",
       tenantName: "",
       rootSiteUrl: "",
@@ -340,14 +383,8 @@ export const BuContextPicker: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConfig?.id]);
 
-  // ── LookupField search handlers ───────────────────────────────────────────
+  // ── LookupField search handlers (full variant) ────────────────────────────
 
-  /**
-   * BU search: filter the already-loaded allBus list by name (client-side).
-   * Returns items whose name contains the query string (case-insensitive).
-   * Also returns all items when the query is empty (minSearchLength defaults to 1,
-   * so LookupField won't call this with an empty string).
-   */
   const handleBuSearch = React.useCallback(
     async (query: string): Promise<ILookupItem[]> => {
       const q = query.toLowerCase();
@@ -358,10 +395,6 @@ export const BuContextPicker: React.FC = () => {
     [allBus]
   );
 
-  /**
-   * Config search: filter the already-loaded configs list by name (client-side).
-   * Configs are already scoped to the selected BU by the API call above.
-   */
   const handleConfigSearch = React.useCallback(
     async (query: string): Promise<ILookupItem[]> => {
       const q = query.toLowerCase();
@@ -372,7 +405,7 @@ export const BuContextPicker: React.FC = () => {
     [configs]
   );
 
-  // ── Selection change handlers ─────────────────────────────────────────────
+  // ── Selection change handlers (full variant) ──────────────────────────────
 
   const handleBuChange = React.useCallback(
     (item: ILookupItem | null) => {
@@ -398,7 +431,25 @@ export const BuContextPicker: React.FC = () => {
     [configs, setSelectedConfig]
   );
 
-  // ── Derive current LookupField values ────────────────────────────────────
+  // ── Selection handlers (compact variant) ─────────────────────────────────
+
+  const handleBuOptionSelect = React.useCallback(
+    (_: React.SyntheticEvent, data: { optionValue?: string; optionText?: string }) => {
+      const bu = allBus.find((b) => b.businessUnitId === data.optionValue) ?? null;
+      setSelectedBu(bu);
+    },
+    [allBus, setSelectedBu]
+  );
+
+  const handleConfigOptionSelect = React.useCallback(
+    (_: React.SyntheticEvent, data: { optionValue?: string; optionText?: string }) => {
+      const cfg = configs.find((c) => c.id === data.optionValue) ?? null;
+      setSelectedConfig(cfg);
+    },
+    [configs, setSelectedConfig]
+  );
+
+  // ── Derive current LookupField values (full variant) ─────────────────────
 
   const buLookupValue: ILookupItem | null = selectedBu
     ? { id: selectedBu.businessUnitId, name: selectedBu.name }
@@ -408,11 +459,95 @@ export const BuContextPicker: React.FC = () => {
     ? { id: selectedConfig.id, name: selectedConfig.name }
     : null;
 
-  // Context is "complete" when all three levels are selected
+  // Filter combobox options by current input (compact variant)
+  const filteredBus = allBus.filter((bu) =>
+    bu.name.toLowerCase().includes(buInputValue.toLowerCase())
+  );
+  const filteredConfigs = configs.filter((cfg) =>
+    cfg.name.toLowerCase().includes(configInputValue.toLowerCase())
+  );
+
   const isContextComplete =
     selectedBu !== null && selectedConfig !== null && selectedEnvironment !== null;
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render: compact variant ───────────────────────────────────────────────
+
+  if (variant === "compact") {
+    return (
+      <div className={styles.compactRoot} role="region" aria-label="Context selector">
+        {/* BU Combobox */}
+        <div className={styles.compactItem}>
+          <Text className={styles.compactLabel}>BU</Text>
+          <Combobox
+            size="small"
+            placeholder={busLoading ? "Loading…" : "Business unit…"}
+            value={buInputValue}
+            selectedOptions={selectedBu ? [selectedBu.businessUnitId] : []}
+            onInput={(e) => setBuInputValue((e.target as HTMLInputElement).value)}
+            onOptionSelect={handleBuOptionSelect}
+            onBlur={() => {
+              // Reset input to selected value if user typed but didn't pick
+              setBuInputValue(selectedBu?.name ?? "");
+            }}
+            style={{ minWidth: "160px", maxWidth: "220px" }}
+          >
+            {filteredBus.map((bu) => (
+              <Option key={bu.businessUnitId} value={bu.businessUnitId}>
+                {bu.name}
+              </Option>
+            ))}
+          </Combobox>
+        </div>
+
+        <Text className={styles.compactSeparator}>/</Text>
+
+        {/* Config Combobox */}
+        <div className={styles.compactItem}>
+          <Text className={styles.compactLabel}>Config</Text>
+          <Combobox
+            size="small"
+            placeholder={
+              !selectedBu ? "Select BU first" : configsLoading ? "Loading…" : "Config…"
+            }
+            disabled={!selectedBu || configsLoading}
+            value={configInputValue}
+            selectedOptions={selectedConfig ? [selectedConfig.id] : []}
+            onInput={(e) => setConfigInputValue((e.target as HTMLInputElement).value)}
+            onOptionSelect={handleConfigOptionSelect}
+            onBlur={() => {
+              setConfigInputValue(selectedConfig?.name ?? "");
+            }}
+            style={{ minWidth: "160px", maxWidth: "220px" }}
+          >
+            {filteredConfigs.map((cfg) => (
+              <Option key={cfg.id} value={cfg.id}>
+                {cfg.name}
+              </Option>
+            ))}
+          </Combobox>
+        </div>
+
+        {/* Environment badge (read-only) */}
+        {selectedEnvironment && (
+          <>
+            <Text className={styles.compactSeparator}>·</Text>
+            <div className={styles.compactEnvBadge}>
+              <Globe16Regular aria-hidden="true" style={{ color: tokens.colorNeutralForeground3 }} />
+              <Badge
+                appearance="tint"
+                color={isContextComplete ? "success" : "informative"}
+                size="medium"
+              >
+                {selectedEnvironment.name}
+              </Badge>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── Render: full variant ──────────────────────────────────────────────────
 
   return (
     <>
