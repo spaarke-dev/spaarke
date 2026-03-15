@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Migrate IDataverseService Consumers to Narrow Interfaces</title>
+    <phase>2: Backend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010, 011, 012</dependencies>
+    <blocks>014</blocks>
+    <tags>refactoring, dotnet, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    After IDataverseService has been segregated into 9 narrow interfaces (task 012) and the God
+    classes have been decomposed (tasks 010 and 011), migrate every service that currently injects
+    IDataverseService to instead inject the narrowest applicable interface — or multiple narrow
+    interfaces if the service genuinely uses methods from more than one domain. Register each
+    narrow interface in the relevant DI module so that the container can resolve it.
+  </prompt>
+
+  <role>Senior .NET developer specializing in SOLID principles and service decomposition</role>
+
+  <goal>
+    Every consumer in src/server/api/Sprk.Bff.Api/Services/ injects only the interface(s) that
+    cover the Dataverse methods it actually calls. No service injects IDataverseService unless it
+    uses methods from 4 or more domain groups (genuine orchestrators). Narrow interfaces are
+    registered in DI modules. dotnet build and dotnet test both pass.
+  </goal>
+
+  <context>
+    <background>
+      Task 012 created 9 narrow interfaces and made IDataverseService a composite. However, all
+      existing consumers still inject IDataverseService (the full 63-method composite). This task
+      completes the ISP migration by updating each consumer's constructor to depend only on the
+      interface(s) matching the methods it actually calls. This reduces coupling, simplifies mock
+      setup in tests, and makes the dependency graph legible. The newly extracted services from
+      tasks 010 and 011 (OfficeDocumentPersistence, AnalysisDocumentLoader, etc.) should already
+      use narrow interfaces; verify them first as a reference pattern before migrating the older
+      services.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/ (modify — all services injecting IDataverseService)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (modify — register narrow interfaces per module)</file>
+      <file>src/server/shared/Spaarke.Dataverse/ (read — reference the 9 narrow interface definitions)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">
+      Register narrow interfaces in DI by resolving them from the existing IDataverseService
+      registration. The recommended pattern is:
+        services.AddScoped&lt;IDocumentDataverseService&gt;(sp =&gt; sp.GetRequiredService&lt;IDataverseService&gt;());
+      This avoids registering a second concrete instance. Total non-framework DI registrations
+      across the solution must remain at or below 15; count only registrations of new types, not
+      forwarding delegates.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Grep for all files in src/server/api/Sprk.Bff.Api/ that reference IDataverseService in a
+      constructor parameter or field declaration. Produce a list of all consumers. Include the
+      newly created services from tasks 010 and 011 in this list so they can be verified too.
+    </step>
+    <step order="2">
+      For each consumer, read the class and list every IDataverseService method it calls. Map
+      those calls to the 9 narrow interfaces created in task 012. Record the mapping as a table:
+        Service | Methods Called | Narrow Interface(s) Required
+      This mapping drives all subsequent steps and must be completed before any code changes.
+    </step>
+    <step order="3">
+      Starting with the services extracted in tasks 010 and 011 (OfficeDocumentPersistence,
+      AnalysisDocumentLoader, AnalysisResultPersistence), verify they already use narrow
+      interfaces. If not, update them first as a reference implementation.
+    </step>
+    <step order="4">
+      Migrate each remaining consumer one at a time:
+      (a) Update the constructor parameter type from IDataverseService to the narrowest
+          applicable interface(s).
+      (b) Update the private field declaration to match.
+      (c) If the service uses methods from 2+ domains, inject each required narrow interface as
+          a separate constructor parameter.
+      (d) Run dotnet build after each individual service update — do not batch multiple services
+          and fix errors in bulk.
+    </step>
+    <step order="5">
+      For any service that uses methods from 4 or more domain groups, leave it injecting
+      IDataverseService (the composite) and add a comment explaining why the broad dependency
+      is justified.
+    </step>
+    <step order="6">
+      Register each narrow interface used by at least one consumer in the appropriate DI module
+      using the forwarding pattern:
+        services.AddScoped&lt;IDocumentDataverseService&gt;(sp =&gt; sp.GetRequiredService&lt;IDataverseService&gt;());
+      Add these registrations to the module that owns the consumer service.
+    </step>
+    <step order="7">
+      Run dotnet build from the repository root — verify zero errors across the entire solution.
+    </step>
+    <step order="8">
+      Run dotnet test — verify all existing tests pass. If any tests fail because mock setup
+      now requires a different interface type, update the test mocks to use the narrow interface.
+      Do not change test behavior or skip assertions.
+    </step>
+    <step order="9">
+      Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — mark task 013 complete.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/ (multiple modified consumer files)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (modified DI modules with narrow interface registrations)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every consumer service injects only the interface(s) corresponding to the Dataverse methods it actually calls</criterion>
+    <criterion>No service injects IDataverseService unless it uses methods from 4 or more domain groups, with a justifying comment</criterion>
+    <criterion>Narrow interfaces used by consumers are registered in the appropriate DI modules using the forwarding pattern</criterion>
+    <criterion>dotnet build passes with zero errors across the entire solution</criterion>
+    <criterion>dotnet test passes — all existing tests remain green and no assertions are weakened</criterion>
+  </acceptance-criteria>
+</task>

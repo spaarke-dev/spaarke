@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Extract useAnalysisData + useAnalysisExecution Hooks</title>
+    <phase>3: Frontend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023</blocks>
+    <tags>refactoring, typescript, pcf</tags>
+  </metadata>
+  <prompt>Extract 2 analysis-related hooks from AnalysisWorkspaceApp.tsx: useAnalysisData (loading, error, analysis result, pending execution state) and useAnalysisExecution (execution orchestration with SSE streaming). The inline SSE reader in useAnalysisExecution must be refactored to use the existing useSseStream hook internally rather than duplicating SSE logic.</prompt>
+  <role>Senior React developer specializing in hooks and component architecture</role>
+  <goal>Two new hook files created in control/hooks/ that absorb all analysis data fetching and execution state from AnalysisWorkspaceApp.tsx, eliminating the inline SSE reader duplication with useSseStream.</goal>
+  <context>
+    <background>With auth and document resolution hooks extracted in task 020, this task continues the decomposition by targeting the analysis domain: data loading state and the execution pipeline. The inline SSE reader in AnalysisWorkspaceApp.tsx (lines 533-692) duplicates logic already present in useSseStream from the shared library — this task eliminates that duplication by using useSseStream internally within useAnalysisExecution.</background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modify — extract analysis data and execution state)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (create — 2 new hook files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts (read — reuse for SSE reading inside useAnalysisExecution)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-012">Hooks must be React 16/17 compatible. No React 18-only APIs.</constraint>
+    <constraint source="ADR-022">PCF uses platform-provided React 16/17. Hooks must not introduce React 18 dependencies.</constraint>
+    <constraint source="ADR-010">Do not introduce new service registrations or DI patterns in frontend hooks — keep hooks as pure React state/effect logic.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisWorkspaceApp.tsx lines 386-440 to understand analysis data state: isLoading, error, _analysis, pendingExecution and the loadAnalysis() async function.</step>
+    <step order="2">Read AnalysisWorkspaceApp.tsx lines 533-692 to understand the inline SSE reader used during executeAnalysis().</step>
+    <step order="3">Read src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts to understand its API and how to use it as an internal dependency within useAnalysisExecution.</step>
+    <step order="4">Create src/client/pcf/AnalysisWorkspace/control/hooks/useAnalysisData.ts with UseAnalysisDataOptions and UseAnalysisDataResult types. Absorb: isLoading, error, _analysis, pendingExecution state and loadAnalysis() async function. Return: { isLoading, error, analysis, pendingExecution, loadAnalysis }.</step>
+    <step order="5">Create src/client/pcf/AnalysisWorkspace/control/hooks/useAnalysisExecution.ts with UseAnalysisExecutionOptions and UseAnalysisExecutionResult types. Absorb: isExecuting, executionProgress state and executeAnalysis() callback. Use useSseStream internally for SSE event reading instead of the inline reader — eliminate the duplication.</step>
+    <step order="6">Update AnalysisWorkspaceApp.tsx to import and use both hooks, replacing inline state and the 160-line SSE block with hook calls.</step>
+    <step order="7">Remove all extracted useState, useEffect, useCallback, and inline SSE reader code from AnalysisWorkspaceApp.tsx.</step>
+    <step order="8">Run PCF build: cd src/client/pcf &amp;&amp; npm run build — verify zero TypeScript errors.</step>
+    <step order="9">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 021 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useAnalysisData.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useAnalysisExecution.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>useAnalysisData.ts created in control/hooks/ with UseAnalysisDataOptions and UseAnalysisDataResult types exported.</criterion>
+    <criterion>useAnalysisExecution.ts created in control/hooks/ with UseAnalysisExecutionOptions and UseAnalysisExecutionResult types exported.</criterion>
+    <criterion>useAnalysisExecution uses useSseStream internally — no inline SSE reader code duplicated from the shared library.</criterion>
+    <criterion>AnalysisWorkspaceApp.tsx no longer contains the ~160-line inline SSE reader block (lines 533-692 equivalent).</criterion>
+    <criterion>PCF build passes with zero TypeScript errors.</criterion>
+    <criterion>Analysis loading and execution behavior unchanged.</criterion>
+  </acceptance-criteria>
+</task>
