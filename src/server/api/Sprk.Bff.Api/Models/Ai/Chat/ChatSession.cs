@@ -48,7 +48,7 @@ public record ChatSession(
     string SessionId,
     string TenantId,
     string? DocumentId,
-    Guid PlaybookId,
+    Guid? PlaybookId,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivity,
     IReadOnlyList<ChatMessage> Messages,

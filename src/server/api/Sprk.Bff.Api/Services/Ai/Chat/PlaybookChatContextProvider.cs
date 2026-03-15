@@ -40,7 +40,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
     public async Task<ChatContext> GetContextAsync(
         string documentId,
         string tenantId,
-        Guid playbookId,
+        Guid? playbookId,
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
         CancellationToken cancellationToken = default)
@@ -49,8 +49,51 @@ public class PlaybookChatContextProvider : IChatContextProvider
             "Building ChatContext for document {DocumentId}, tenant {TenantId}, playbook {PlaybookId}",
             documentId, tenantId, playbookId);
 
+        // When no playbook is specified (generic chat mode), return a default context
+        // with no playbook-specific scoping. The agent will use a generic system prompt.
+        if (playbookId is null)
+        {
+            _logger.LogInformation(
+                "No playbook specified for document {DocumentId}; using generic chat context",
+                documentId);
+
+            var defaultPrompt = BuildDefaultSystemPrompt(null);
+
+            // Still load document summary for inline context
+            string? defaultDocSummary = null;
+            IReadOnlyDictionary<string, string>? defaultMetadata = null;
+            try
+            {
+                var doc = await _documentService.GetDocumentAsync(documentId, cancellationToken);
+                if (doc != null)
+                {
+                    defaultDocSummary = doc.Summary ?? doc.Tldr;
+                    var meta = new Dictionary<string, string>();
+                    if (!string.IsNullOrWhiteSpace(doc.DocumentType))
+                        meta["documentType"] = doc.DocumentType;
+                    if (!string.IsNullOrWhiteSpace(doc.Name))
+                        meta["documentName"] = doc.Name;
+                    if (meta.Count > 0)
+                        defaultMetadata = meta;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to load document summary for {DocumentId} in generic chat mode; continuing without",
+                    documentId);
+            }
+
+            return new ChatContext(
+                SystemPrompt: defaultPrompt,
+                DocumentSummary: defaultDocSummary,
+                AnalysisMetadata: defaultMetadata,
+                PlaybookId: null,
+                KnowledgeScope: null);
+        }
+
         // 1. Load playbook to get ActionIds
-        var playbook = await _playbookService.GetPlaybookAsync(playbookId, cancellationToken);
+        var playbook = await _playbookService.GetPlaybookAsync(playbookId.Value, cancellationToken);
 
         // 2. Resolve the system prompt from the playbook's primary Action record
         string systemPrompt;
@@ -84,7 +127,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         // 3. Resolve playbook scopes (Skills, Knowledge, Tools)
         var knowledgeScope = await ResolveKnowledgeScopeAsync(
-            playbookId, documentId, hostContext, additionalDocumentIds, cancellationToken);
+            playbookId.Value, documentId, hostContext, additionalDocumentIds, cancellationToken);
 
         // 4. Enrich system prompt with inline knowledge and skill instructions
         systemPrompt = EnrichSystemPrompt(systemPrompt, knowledgeScope);

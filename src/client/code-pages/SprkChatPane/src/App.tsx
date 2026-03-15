@@ -9,7 +9,7 @@
  *   - SprkChatBridge instance for cross-pane communication
  *   - Independent authentication via Xrm.Utility.getGlobalContext() (authService)
  *   - Automatic host form context detection via contextService
- *   - Default playbook selection based on entity type
+ *   - Async playbook resolution from API with sessionStorage caching (5-min TTL)
  *   - Session persistence via sessionStorage (keyed by pane ID)
  *   - Context-switch dialog when user navigates to a different record
  *   - Responsive layout via makeStyles with Fluent design tokens
@@ -25,7 +25,7 @@
  *
  * Context detection flow (task 014):
  *   1. App mounts -> detectContext() reads URL params, falls back to Xrm APIs
- *   2. Default playbook resolved from configurable entity-type mapping
+ *   2. Default playbook resolved asynchronously from API (pane shows immediately in generic mode)
  *   3. Session state restored from sessionStorage (if pane was reloaded)
  *   4. Context-change polling starts to detect form navigation
  *   5. On mismatch -> ContextSwitchDialog shown (Switch/Keep)
@@ -48,10 +48,12 @@ import type { IHostContext } from '@spaarke/ui-components';
 import { getAccessToken, initializeAuth, clearTokenCache, isXrmAvailable, AuthError } from './services/authInit';
 import {
   detectContext,
+  detectPageType,
   restoreSession,
   saveSession,
   clearSession,
   startContextChangeDetection,
+  resolveContextMapping,
 } from './services/contextService';
 import type { DetectedContext, PersistedSession } from './services/contextService';
 import { ContextSwitchDialog } from './components/ContextSwitchDialog';
@@ -206,6 +208,7 @@ export const App: React.FC<AppProps> = ({
         entityType: restored.entityType,
         entityId: restored.entityId,
         playbookId: restored.playbookId,
+        pageType: detectPageType(),
       };
     }
     // Detect fresh context from URL params or Xrm APIs
@@ -222,7 +225,7 @@ export const App: React.FC<AppProps> = ({
   // ── Context-switch dialog state ─────────────────────────────────────
   const [contextSwitch, setContextSwitch] = useState<ContextSwitchState>({
     open: false,
-    newContext: { entityType: '', entityId: '', playbookId: '' },
+    newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
   });
 
   // ── Auth state ──────────────────────────────────────────────────────
@@ -258,6 +261,41 @@ export const App: React.FC<AppProps> = ({
   useEffect(() => {
     initAuth();
   }, [initAuth]);
+
+  // ── Async playbook resolution ────────────────────────────────────
+  /**
+   * Resolve the playbook from the API after authentication is ready.
+   * The pane renders immediately in generic mode (no playbook); when the
+   * API responds, activeContext is updated with the resolved playbook ID.
+   * Uses sessionStorage caching with a 5-minute TTL to avoid redundant calls.
+   */
+  useEffect(() => {
+    if (authState.status !== 'authenticated') return;
+    // Skip if playbook was explicitly provided via URL params
+    if (activeContext.playbookId) return;
+
+    let cancelled = false;
+
+    resolveContextMapping(
+      activeContext.entityType,
+      activeContext.pageType,
+      apiBaseUrl,
+      authState.token
+    ).then((mapping) => {
+      if (cancelled) return;
+      if (mapping.defaultPlaybook?.id) {
+        setActiveContext((prev) => ({ ...prev, playbookId: mapping.defaultPlaybook!.id }));
+        console.info('[SprkChatPane] Playbook resolved from API:', mapping.defaultPlaybook.id, mapping.defaultPlaybook.name);
+      } else {
+        console.info('[SprkChatPane] No default playbook from API — continuing in generic mode');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authState.status, activeContext.entityType, activeContext.pageType, apiBaseUrl]);
 
   /**
    * Proactive token refresh interval.
@@ -335,6 +373,7 @@ export const App: React.FC<AppProps> = ({
           entityType: payload.entityType,
           entityId: payload.entityId,
           playbookId: payload.playbookId || activeContext.playbookId,
+          pageType: detectPageType(),
         });
       }
     });
@@ -369,11 +408,14 @@ export const App: React.FC<AppProps> = ({
 
   /**
    * User chose "Switch" -- update context, emit bridge event, clear session.
+   * Playbook is resolved asynchronously via resolveContextMapping() after
+   * the context update. The pane immediately switches to the new entity
+   * in generic mode, then updates when the playbook resolves.
    */
   const handleContextSwitch = useCallback((newContext: DetectedContext) => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: '', entityId: '', playbookId: '' },
+      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
     });
 
     // Emit context_changed event via SprkChatBridge so other panes are notified
@@ -389,8 +431,9 @@ export const App: React.FC<AppProps> = ({
     clearSession(DEFAULT_PANE_ID);
     setActiveSessionId('');
 
-    // Update active context -- this triggers SprkChat to re-create the session
-    setActiveContext(newContext);
+    // Update active context with empty playbookId -- the useEffect for async
+    // playbook resolution will pick up the new entityType/pageType and resolve it.
+    setActiveContext({ ...newContext, playbookId: '' });
 
     console.info('[SprkChatPane] Context switched to:', newContext.entityType, newContext.entityId);
   }, []);
@@ -401,7 +444,7 @@ export const App: React.FC<AppProps> = ({
   const handleContextKeep = useCallback(() => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: '', entityId: '', playbookId: '' },
+      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
     });
     console.debug('[SprkChatPane] User chose to keep current context');
   }, []);
@@ -478,7 +521,7 @@ export const App: React.FC<AppProps> = ({
       <div className={styles.chatContainer}>
         <SprkChat
           sessionId={activeSessionId || undefined}
-          playbookId={activeContext.playbookId}
+          playbookId={activeContext.playbookId || undefined}
           documentId={undefined}
           apiBaseUrl={apiBaseUrl}
           accessToken={authState.token}

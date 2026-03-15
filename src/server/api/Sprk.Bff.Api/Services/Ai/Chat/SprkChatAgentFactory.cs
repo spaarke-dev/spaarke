@@ -76,7 +76,7 @@ public sealed class SprkChatAgentFactory
     public async Task<ISprkChatAgent> CreateAgentAsync(
         string sessionId,
         string documentId,
-        Guid playbookId,
+        Guid? playbookId,
         string tenantId,
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
@@ -104,8 +104,10 @@ public sealed class SprkChatAgentFactory
             cancellationToken);
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
-        var capabilities = await GetPlaybookCapabilitiesAsync(
-            scope.ServiceProvider, playbookId, cancellationToken);
+        // When no playbook is specified (generic chat mode), use all capabilities as default.
+        var capabilities = playbookId.HasValue
+            ? await GetPlaybookCapabilitiesAsync(scope.ServiceProvider, playbookId.Value, cancellationToken)
+            : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.All);
 
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
@@ -117,7 +119,7 @@ public sealed class SprkChatAgentFactory
         // and playbook capabilities so tools are gated to only those the playbook declares.
         var tools = ResolveTools(
             scope.ServiceProvider, tenantId, context.KnowledgeScope, capabilities,
-            playbookId, documentId, httpContext, sseWriter, citationContext);
+            playbookId ?? Guid.Empty, documentId, httpContext, sseWriter, citationContext);
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",

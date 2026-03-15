@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 /// <remarks>
 /// Baseline DI count before this module: 89 (per ADR-010 tracking comment in CLAUDE.md).
-/// This module adds 11 non-framework singleton/scoped registrations:
+/// This module adds 12 non-framework singleton/scoped registrations:
 ///   1. AddChatClient&lt;IChatClient&gt;                       — ADR-010 (AIPL-050) — Azure OpenAI IChatClient bridge
 ///   2. AddSingleton&lt;LlamaParseClient&gt;                  — ADR-010 (AIPL-012)
 ///   3. AddSingleton&lt;DocumentIntelligenceService&gt;        — ADR-010 (AIPL-012)
@@ -25,9 +25,10 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///  10. AddScoped&lt;IChatDataverseRepository, ChatDataverseRepository&gt; — ADR-010 (AIPL-052) — Scoped: Dataverse persistence for sessions + messages
 ///  11. AddScoped&lt;ChatSessionManager&gt;                    — ADR-010 (AIPL-052) — Scoped: session lifecycle (Redis + Dataverse)
 ///  12. AddScoped&lt;ChatHistoryManager&gt;                    — ADR-010 (AIPL-052) — Scoped: message history + summarisation
+///  13. AddScoped&lt;ChatContextMappingService&gt;             — ADR-010 (AIPL-053) — Scoped: context mapping resolution (Redis + Dataverse)
 /// Plus 1 framework registration: AddHttpClient&lt;LlamaParseClient&gt; (not counted per ADR-010)
 ///
-/// DI count after: 100 (ReferenceRetrievalService added in AIRA-013; see ADR-010 and NFR-10).
+/// DI count after: 101 (ChatContextMappingService added in AIPL-053; see ADR-010 and NFR-10).
 ///
 /// Prerequisites (must already be registered before calling AddAiModule):
 /// - <c>ITextExtractor</c> — registered in Program.cs when <c>DocumentIntelligence:Enabled = true</c>
@@ -174,6 +175,12 @@ public static class AiModule
         // Manages message addition, history retrieval, summarisation (15 messages), and
         // archiving (50 messages).  Scoped: depends on ChatSessionManager (scoped).
         services.AddScoped<ChatHistoryManager>();
+
+        // ChatContextMappingService — scoped per ADR-010 (AIPL-053).
+        // Resolves which playbook(s) to show for a given entityType + pageType via
+        // sprk_aichatcontextmapping entity. Redis-first with 30-min sliding TTL (ADR-009).
+        // Scoped: depends on IGenericEntityService (singleton); scoping limits per-request visibility.
+        services.AddScoped<ChatContextMappingService>();
 
         return services;
     }

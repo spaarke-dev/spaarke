@@ -109,6 +109,8 @@ interface XrmPageContext {
     entityName?: string;
     /** The record GUID. */
     entityId?: string;
+    /** The page type (e.g., "entityrecord", "entitylist", "dashboard"). */
+    pageType?: string;
   };
 }
 

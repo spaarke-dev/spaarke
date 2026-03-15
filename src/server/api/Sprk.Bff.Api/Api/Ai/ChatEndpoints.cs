@@ -126,6 +126,16 @@ public static class ChatEndpoints
             .Produces<ChatPlaybookListResponse>()
             .ProducesProblem(401);
 
+        // GET /api/ai/chat/context-mappings — resolve playbook mappings for entity/page context
+        group.MapGet("/context-mappings", GetContextMappingsAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("GetChatContextMappings")
+            .WithSummary("Resolve playbook context mappings for a given entity type and page type")
+            .WithDescription("Queries the sprk_aichatcontextmap table (with Redis caching) to resolve which playbook(s) apply for the given entityType + pageType context. Returns defaultPlaybook and availablePlaybooks. Returns 200 with empty results when no mapping exists (never 404).")
+            .Produces<ChatContextMappingResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -609,6 +619,40 @@ public static class ChatEndpoints
         return Results.Ok(new ChatPlaybookListResponse(playbooks.ToArray()));
     }
 
+    /// <summary>
+    /// Resolve playbook context mappings for a given entity type and page type.
+    /// GET /api/ai/chat/context-mappings?entityType=...&amp;pageType=...
+    ///
+    /// Pre-session endpoint — called by the frontend to determine which playbook(s)
+    /// to offer based on where SprkChat is embedded (entity type + page type).
+    /// Returns 200 with empty results when no mapping exists (never 404).
+    /// </summary>
+    private static async Task<IResult> GetContextMappingsAsync(
+        HttpContext httpContext,
+        ChatContextMappingService mappingService,
+        ILogger<ChatContextMappingService> logger,
+        string entityType,
+        string? pageType = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        logger.LogDebug(
+            "GetContextMappings: entityType={EntityType}, pageType={PageType}, tenant={TenantId}",
+            entityType, pageType, tenantId);
+
+        var result = await mappingService.ResolveAsync(entityType, pageType, tenantId, cancellationToken);
+
+        return Results.Ok(result);
+    }
+
     // =========================================================================
     // Private Helpers
     // =========================================================================
@@ -810,7 +854,7 @@ public static class ChatEndpoints
 /// <param name="DocumentId">Optional document ID for the session context.</param>
 /// <param name="PlaybookId">Playbook that governs the agent's system prompt and tools.</param>
 /// <param name="HostContext">Optional host context describing where SprkChat is embedded (entity type, entity ID, workspace).</param>
-public record ChatCreateSessionRequest(string? DocumentId, Guid PlaybookId, ChatHostContext? HostContext = null);
+public record ChatCreateSessionRequest(string? DocumentId, Guid? PlaybookId = null, ChatHostContext? HostContext = null);
 
 /// <summary>Response body for POST /sessions (201 Created).</summary>
 /// <param name="SessionId">The newly created session identifier.</param>

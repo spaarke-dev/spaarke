@@ -41,7 +41,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
         {
             ["sprk_sessionid"] = session.SessionId,
             ["sprk_tenantid"] = session.TenantId,
-            ["sprk_playbookid"] = session.PlaybookId.ToString(),
+            ["sprk_playbookid"] = session.PlaybookId?.ToString(),
             ["sprk_documentid"] = session.DocumentId,
             ["sprk_messagecount"] = 0,
             ["sprk_isarchived"] = false
@@ -98,7 +98,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             SessionId: sessionId,
             TenantId: tenantId,
             DocumentId: null, // Will be populated once AIPL-054 adds FetchXML query support
-            PlaybookId: Guid.Empty, // Will be populated from sprk_aichatsummary in Phase D
+            PlaybookId: null, // Will be populated from sprk_aichatsummary in Phase D
             CreatedAt: messages[0].CreatedAt,
             LastActivity: messages[^1].CreatedAt,
             Messages: messages);

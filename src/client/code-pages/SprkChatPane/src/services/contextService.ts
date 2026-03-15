@@ -3,7 +3,7 @@
  *
  * Handles four responsibilities:
  *   1. Context detection — entityType + entityId from URL params or Xrm APIs
- *   2. Default playbook resolution — configurable entity-type-to-playbook mapping
+ *   2. Dynamic playbook resolution — API-driven entity-type-to-playbook mapping with sessionStorage cache
  *   3. Session persistence — sessionStorage keyed by pane ID
  *   4. Context-change detection — polling for Xrm navigation changes
  *
@@ -15,7 +15,7 @@
  *
  * CONSTRAINTS:
  *   - Session persistence MUST use sessionStorage (not localStorage) — scoped to tab lifetime
- *   - Playbook mapping MUST be configurable (object literal, not switch/case)
+ *   - Playbook mapping MUST come from API (no hardcoded GUIDs); cached in sessionStorage with 5-min TTL
  *   - Context-change detection uses polling (Xrm has no navigation event API for side panes)
  *   - All Xrm API calls have null checks for graceful degradation outside Dataverse
  *
@@ -48,6 +48,9 @@ const SESSION_STORAGE_PREFIX = 'sprkchat-session-';
 /**
  * Detected context describing the active Dataverse record.
  */
+/** Page type describing the Dataverse page where SprkChat is embedded. */
+export type PageType = 'form' | 'list' | 'dashboard' | 'workspace' | 'unknown';
+
 export interface DetectedContext {
   /** Dataverse entity logical name (e.g., "sprk_matter"). Empty if unknown. */
   entityType: string;
@@ -55,6 +58,8 @@ export interface DetectedContext {
   entityId: string;
   /** Resolved playbook ID. Empty if no mapping and no URL param. */
   playbookId: string;
+  /** Detected page type (form, list, dashboard, workspace, or unknown). */
+  pageType: PageType;
 }
 
 /**
@@ -81,65 +86,97 @@ export interface PersistedSession {
 export type ContextChangeCallback = (newContext: DetectedContext, previousContext: DetectedContext) => void;
 
 // ---------------------------------------------------------------------------
-// Default Playbook Mapping (Configurable)
+// Dynamic Context Mapping (API-driven)
 // ---------------------------------------------------------------------------
 
 /**
- * Configurable mapping of entity logical names to default playbook IDs.
- *
- * This is an extensible object literal — add new entity-to-playbook mappings
- * by calling setPlaybookMapping() or by extending DEFAULT_PLAYBOOK_MAP.
- *
- * Playbook IDs are string identifiers that the BFF API resolves to
- * full playbook configurations. These default IDs serve as the
- * "out-of-the-box" mapping; they can be overridden at runtime.
+ * Cache TTL for context mapping responses in sessionStorage (5 minutes).
  */
-const DEFAULT_PLAYBOOK_MAP: Record<string, string> = {
-  // All entity types currently use SprkChat Document Assistant playbook.
-  // Add entity-specific playbook GUIDs here as they are created in Dataverse.
-  sprk_matter: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
-  sprk_project: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
-  sprk_invoice: '5ece14f7-8a17-f111-8343-7ced8d1dc988',
-};
+const CONTEXT_MAPPING_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Fallback playbook when no entity-specific mapping exists.
- * Uses the SprkChat Document Assistant playbook GUID from Dataverse.
+ * SessionStorage key prefix for context mapping cache entries.
  */
-const FALLBACK_PLAYBOOK_ID = '5ece14f7-8a17-f111-8343-7ced8d1dc988';
+const CONTEXT_MAPPING_CACHE_PREFIX = 'sprkchat-context-';
 
 /**
- * Runtime playbook mapping. Initialized from DEFAULT_PLAYBOOK_MAP and
- * can be overridden via setPlaybookMapping().
+ * Response shape from GET /api/ai/chat/context-mappings.
  */
-let activePlaybookMap: Record<string, string> = { ...DEFAULT_PLAYBOOK_MAP };
-
-/**
- * Override the default playbook mapping at runtime.
- * Merges with existing mappings (does not replace the entire map).
- *
- * @param mapping - Partial mapping of entity types to playbook IDs.
- */
-export function setPlaybookMapping(mapping: Record<string, string>): void {
-  activePlaybookMap = { ...activePlaybookMap, ...mapping };
+export interface ContextMappingResponse {
+  /** The default playbook for this entity type + page type combination, or null if none configured. */
+  defaultPlaybook: { id: string; name: string; description?: string } | null;
+  /** All available playbooks the user can switch to. */
+  availablePlaybooks: Array<{ id: string; name: string; description?: string }>;
 }
 
 /**
- * Get the full current playbook mapping (for testing/debugging).
- */
-export function getPlaybookMapping(): Readonly<Record<string, string>> {
-  return { ...activePlaybookMap };
-}
-
-/**
- * Resolve the default playbook ID for an entity type.
+ * Resolve the context mapping (default playbook + available playbooks) from the BFF API.
  *
- * @param entityType - Dataverse entity logical name.
- * @returns The mapped playbook ID, or the fallback "general-assistant".
+ * Uses sessionStorage caching with a 5-minute TTL to avoid repeated API calls
+ * within the same tab session.
+ *
+ * CONSTRAINTS:
+ *   - MUST NOT block pane rendering (caller handles the async result)
+ *   - MUST cache in sessionStorage with 5-min TTL
+ *   - MUST handle API errors gracefully (returns empty/null defaults)
+ *
+ * @param entityType - Dataverse entity logical name (e.g., "sprk_matter").
+ * @param pageType - Detected page type (form, list, dashboard, workspace, unknown).
+ * @param apiBaseUrl - BFF API base URL.
+ * @param accessToken - Bearer token for API authentication.
+ * @returns The resolved context mapping with default and available playbooks.
  */
-export function resolveDefaultPlaybook(entityType: string): string {
-  if (!entityType) return FALLBACK_PLAYBOOK_ID;
-  return activePlaybookMap[entityType] ?? FALLBACK_PLAYBOOK_ID;
+export async function resolveContextMapping(
+  entityType: string,
+  pageType: string,
+  apiBaseUrl: string,
+  accessToken: string
+): Promise<ContextMappingResponse> {
+  // 1. Check sessionStorage cache
+  const cacheKey = `${CONTEXT_MAPPING_CACHE_PREFIX}${entityType}-${pageType}`;
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached) as { data: ContextMappingResponse; timestamp: number };
+      if (Date.now() - timestamp < CONTEXT_MAPPING_CACHE_TTL_MS) {
+        console.debug(`${LOG_PREFIX} Context mapping cache hit: ${cacheKey}`);
+        return data;
+      }
+      // Expired — remove stale entry
+      sessionStorage.removeItem(cacheKey);
+    }
+  } catch {
+    // Corrupted cache entry — continue to API call
+    console.debug(`${LOG_PREFIX} Context mapping cache read failed, fetching from API`);
+  }
+
+  // 2. Call API
+  const url = `${apiBaseUrl}/api/ai/chat/context-mappings?entityType=${encodeURIComponent(entityType)}&pageType=${encodeURIComponent(pageType)}`;
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      console.warn(`${LOG_PREFIX} Context mapping API failed: ${response.status} ${response.statusText}`);
+      return { defaultPlaybook: null, availablePlaybooks: [] };
+    }
+
+    const data: ContextMappingResponse = await response.json();
+
+    // 3. Cache in sessionStorage
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
+      console.debug(`${LOG_PREFIX} Context mapping cached: ${cacheKey}`);
+    } catch {
+      console.debug(`${LOG_PREFIX} Failed to cache context mapping (sessionStorage full?)`);
+    }
+
+    return data;
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Context mapping fetch error:`, err);
+    return { defaultPlaybook: null, availablePlaybooks: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +307,64 @@ function detectContextFromPageContext(): {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Page Type Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Allowlist of known workspace web resource names.
+ * Used for workspace detection via URL matching.
+ * Add new workspace web resource names here as they are created.
+ */
+const WORKSPACE_ALLOWLIST = [
+  'sprk_corporateworkspace',
+  'sprk_legalworkspace',
+  'sprk_analysisworkspace',
+];
+
+/**
+ * Detect the type of Dataverse page where SprkChat is embedded.
+ *
+ * Detection priority:
+ *   1. Xrm.Utility.getPageContext().input.pageType — primary Xrm API
+ *   2. Workspace allowlist — check if URL contains a known workspace web resource
+ *   3. URL pattern matching — fallback heuristic
+ *   4. "unknown" — safe default on any error
+ *
+ * CONSTRAINTS (ADR-006):
+ *   - Returns a constrained union type, never throws
+ *   - Uses explicit allowlist for workspace detection (not broad sprk_ prefix matching)
+ *   - Xrm.Utility.getPageContext() is the primary detection method
+ *
+ * @returns The detected page type.
+ */
+export function detectPageType(): PageType {
+  try {
+    // 1. Primary: Xrm.Utility.getPageContext()
+    const xrm = findXrm();
+    const pageContext = xrm?.Utility?.getPageContext?.();
+    if (pageContext?.input?.pageType) {
+      const pt = pageContext.input.pageType;
+      if (pt === 'entityrecord') return 'form';
+      if (pt === 'entitylist') return 'list';
+      if (pt === 'dashboard') return 'dashboard';
+    }
+
+    // 2. Workspace allowlist — check if current URL contains a known workspace web resource
+    const url = window.location.href.toLowerCase();
+    if (WORKSPACE_ALLOWLIST.some((ws) => url.includes(ws))) return 'workspace';
+
+    // 3. Fallback: URL pattern matching
+    if (url.includes('entityrecord')) return 'form';
+    if (url.includes('entitylist')) return 'list';
+    if (url.includes('dashboard')) return 'dashboard';
+
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /**
  * Detect the current entity context using the priority chain:
  *   1. URL parameters (set by launcher script)
@@ -277,36 +372,38 @@ function detectContextFromPageContext(): {
  *   3. Xrm.Utility.getPageContext() (alternative API)
  *   4. Empty fallback (graceful degradation)
  *
- * Also resolves the default playbook based on the detected entity type,
- * unless a playbookId is explicitly provided via URL parameters.
+ * Playbook resolution is NOT done here — it happens asynchronously via
+ * resolveContextMapping() after authentication is ready. The returned
+ * DetectedContext has playbookId set to the URL parameter value (if provided)
+ * or empty string (to be resolved async by the caller).
  *
  * @param params - The unwrapped URL search parameters.
- * @returns The fully resolved DetectedContext.
+ * @returns The detected context with playbookId empty unless explicitly provided via URL.
  */
 export function detectContext(params: URLSearchParams): DetectedContext {
+  // Detect page type once (shared across all return paths)
+  const pageType = detectPageType();
+
   // Priority 1: URL parameters
   const urlContext = detectContextFromUrl(params);
   if (urlContext) {
     const playbookFromUrl = params.get('playbookId') ?? '';
-    const playbookId = playbookFromUrl || resolveDefaultPlaybook(urlContext.entityType);
-    console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId);
-    return { ...urlContext, playbookId };
+    console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId, `[${pageType}]`);
+    return { ...urlContext, playbookId: playbookFromUrl, pageType };
   }
 
   // Priority 2: Xrm.Page.data.entity
   const xrmPageContext = detectContextFromXrmPage();
   if (xrmPageContext) {
-    const playbookId = resolveDefaultPlaybook(xrmPageContext.entityType);
-    console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId);
-    return { ...xrmPageContext, playbookId };
+    console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId, `[${pageType}]`);
+    return { ...xrmPageContext, playbookId: '', pageType };
   }
 
   // Priority 3: Xrm.Utility.getPageContext()
   const pageContext = detectContextFromPageContext();
   if (pageContext) {
-    const playbookId = resolveDefaultPlaybook(pageContext.entityType);
-    console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId);
-    return { ...pageContext, playbookId };
+    console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId, `[${pageType}]`);
+    return { ...pageContext, playbookId: '', pageType };
   }
 
   // Priority 4: Empty fallback (pane opened without entity context)
@@ -314,7 +411,8 @@ export function detectContext(params: URLSearchParams): DetectedContext {
   return {
     entityType: '',
     entityId: '',
-    playbookId: FALLBACK_PLAYBOOK_ID,
+    playbookId: '',
+    pageType,
   };
 }
 
@@ -436,16 +534,18 @@ export function startContextChangeDetection(
 
     if (hasChanged && !notified) {
       notified = true;
-      const newPlaybookId = resolveDefaultPlaybook(newEntityType);
+      const currentPageType = detectPageType();
       const newContext: DetectedContext = {
         entityType: newEntityType,
         entityId: newEntityId,
-        playbookId: newPlaybookId,
+        playbookId: '', // Resolved async via resolveContextMapping() by caller
+        pageType: currentPageType,
       };
       const previousContext: DetectedContext = {
         entityType: lastEntityType,
         entityId: lastEntityId,
-        playbookId: resolveDefaultPlaybook(lastEntityType),
+        playbookId: '', // Previous playbook no longer relevant during switch
+        pageType: currentPageType,
       };
 
       console.info(

@@ -38,7 +38,7 @@ public interface IChatContextProvider
     Task<ChatContext> GetContextAsync(
         string documentId,
         string tenantId,
-        Guid playbookId,
+        Guid? playbookId,
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
         CancellationToken cancellationToken = default);

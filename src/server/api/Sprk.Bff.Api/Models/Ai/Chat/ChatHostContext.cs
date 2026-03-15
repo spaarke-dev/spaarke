@@ -26,11 +26,17 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// The workspace hosting SprkChat, e.g. "LegalWorkspace", "AnalysisWorkspace", "FinanceWorkspace".
 /// Used for telemetry and future workspace-specific playbook filtering.
 /// </param>
+/// <param name="PageType">
+/// The page or view within the workspace where SprkChat is embedded,
+/// e.g. "MainForm", "AnalysisView", "DocumentPanel".
+/// Used for context-aware prompt selection and telemetry.
+/// </param>
 public sealed record ChatHostContext(
     string EntityType,
     string EntityId,
     string? EntityName = null,
-    string? WorkspaceType = null)
+    string? WorkspaceType = null,
+    string? PageType = null)
 {
     /// <summary>
     /// Validates that the host context has valid required fields.

@@ -80,5 +80,5 @@ public record ChatContext(
     string SystemPrompt,
     string? DocumentSummary,
     IReadOnlyDictionary<string, string>? AnalysisMetadata,
-    Guid PlaybookId,
+    Guid? PlaybookId,
     ChatKnowledgeScope? KnowledgeScope = null);

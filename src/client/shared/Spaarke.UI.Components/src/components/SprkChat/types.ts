@@ -124,6 +124,8 @@ export interface IHostContext {
   entityName?: string;
   /** Workspace hosting SprkChat (e.g., "LegalWorkspace", "AnalysisWorkspace") */
   workspaceType?: string;
+  /** Page type where SprkChat is embedded (e.g., "form", "list", "dashboard", "workspace", "unknown") */
+  pageType?: string;
 }
 
 /** A predefined prompt suggestion shown before the first message. */
@@ -146,8 +148,13 @@ export interface ISprkChatProps {
   sessionId?: string;
   /** Document ID for the chat context */
   documentId?: string;
-  /** Playbook ID (GUID string) governing the agent's behavior */
-  playbookId: string;
+  /**
+   * Playbook ID (GUID string) governing the agent's behavior.
+   * When undefined/omitted, the session is created without a playbook
+   * (generic conversational mode) and the playbook selector is hidden.
+   * This is a valid configuration — not an error state.
+   */
+  playbookId?: string;
   /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net") */
   apiBaseUrl: string;
   /** Bearer token for API authentication */

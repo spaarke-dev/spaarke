@@ -55,7 +55,7 @@ public class ChatSessionManager
     public async Task<ChatSession> CreateSessionAsync(
         string tenantId,
         string? documentId,
-        Guid playbookId,
+        Guid? playbookId = null,
         ChatHostContext? hostContext = null,
         CancellationToken ct = default)
     {
