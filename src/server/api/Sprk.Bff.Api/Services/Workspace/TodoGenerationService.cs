@@ -137,6 +137,8 @@ public sealed class TodoGenerationService : BackgroundService
     // connection fails (transient auth, Key Vault cold start, etc.) it throws,
     // which crashes the host with HTTP 500.30 because BackgroundService
     // resolution happens during IHost.StartAsync().
+    // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries
+    // and uses QueryEventsAsync + CreateAsync across multiple domain groups.
     private IDataverseService? _dataverse;
 
     // ──────────────────────────────────────────────────────────────────────────

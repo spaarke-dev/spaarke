@@ -8,14 +8,17 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </summary>
 public class DataverseUpdateHandler : IDataverseUpdateHandler
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService fieldMappingService,
+        IGenericEntityService genericEntityService,
         ILogger<DataverseUpdateHandler> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -36,7 +39,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         else
         {
             // Simple update - last write wins
-            await _dataverseService.UpdateRecordFieldsAsync(
+            await _fieldMappingService.UpdateRecordFieldsAsync(
                 entityLogicalName, recordId, fields, ct);
 
             _logger.LogInformation(
@@ -70,7 +73,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     attempt, maxRetries, entityLogicalName, recordId);
 
                 // 1. Read current record to get row version
-                var currentRecord = await _dataverseService.RetrieveAsync(
+                var currentRecord = await _genericEntityService.RetrieveAsync(
                     entityLogicalName, recordId, new[] { "versionnumber" }, ct);
 
                 if (currentRecord == null)
@@ -92,7 +95,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 };
 
                 // 3. Update with version check
-                await _dataverseService.UpdateRecordFieldsAsync(
+                await _fieldMappingService.UpdateRecordFieldsAsync(
                     entityLogicalName, recordId, fieldsWithVersion, ct);
 
                 _logger.LogInformation(

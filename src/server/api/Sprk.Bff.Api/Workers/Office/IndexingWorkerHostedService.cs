@@ -36,7 +36,7 @@ public class IndexingWorkerHostedService : BackgroundService
     private readonly ILogger<IndexingWorkerHostedService> _logger;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IJobStatusService _jobStatusService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IProcessingJobService _jobService;
     private readonly IFileIndexingService _fileIndexingService;
     private readonly ServiceBusOptions _serviceBusOptions;
 
@@ -51,14 +51,14 @@ public class IndexingWorkerHostedService : BackgroundService
         ILogger<IndexingWorkerHostedService> logger,
         ServiceBusClient serviceBusClient,
         IJobStatusService jobStatusService,
-        IDataverseService dataverseService,
+        IProcessingJobService jobService,
         IFileIndexingService fileIndexingService,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _jobService = jobService ?? throw new ArgumentNullException(nameof(jobService));
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
@@ -279,7 +279,7 @@ public class IndexingWorkerHostedService : BackgroundService
                 CompletedDate = DateTime.UtcNow
             };
 
-            await _dataverseService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
+            await _jobService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
         }
         catch (Exception ex)
         {

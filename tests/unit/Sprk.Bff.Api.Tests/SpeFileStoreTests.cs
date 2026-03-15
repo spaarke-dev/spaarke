@@ -1,3 +1,4 @@
+using System.Net.Http;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
@@ -22,7 +23,7 @@ public class SpeFileStoreTests
 
         var containerOps = new ContainerOperations(mockFactory, mockContainerLogger);
         var driveItemOps = new DriveItemOperations(mockFactory, mockDriveItemLogger);
-        var uploadManager = new UploadSessionManager(mockFactory, mockUploadLogger);
+        var uploadManager = new UploadSessionManager(mockFactory, new TestHttpClientFactory(), mockUploadLogger);
         var userOps = new UserOperations(mockFactory, mockUserLogger);
 
         _sut = new SpeFileStore(containerOps, driveItemOps, uploadManager, userOps);
@@ -33,6 +34,11 @@ public class SpeFileStoreTests
         public Task<GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default)
             => Task.FromResult<GraphServiceClient>(null!);
         public GraphServiceClient ForApp() => null!;
+    }
+
+    private class TestHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new HttpClient();
     }
 
     private class TestLogger<T> : ILogger<T>

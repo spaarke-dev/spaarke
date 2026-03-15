@@ -18,6 +18,10 @@
  * @version 1.1.0 - Updated to use Record Type lookup instead of OptionSet
  */
 
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('AssociationResolver');
+
 /**
  * Selection data passed when user picks a record
  */
@@ -136,12 +140,12 @@ function buildRecordUrl(entityLogicalName: string, recordId: string): string {
         url.searchParams.set('etn', entityLogicalName);
         url.searchParams.set('id', cleanId);
 
-        console.log(`[RecordSelectionHandler] Built record URL: ${url.toString()}`);
+        logger.logDebug('RecordSelection', `Built record URL: ${url.toString()}`);
         return url.toString();
       }
     }
   } catch (error) {
-    console.warn('[RecordSelectionHandler] Error building record URL, using fallback:', error);
+    logger.logWarn('RecordSelection', 'Error building record URL, using fallback:', error);
   }
 
   // Fallback to relative URL if context not available
@@ -198,7 +202,7 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
   entityConfigsLoading = true;
   entityConfigsLoadPromise.promise = (async () => {
     try {
-      console.log('[RecordSelectionHandler] Loading entity configs from sprk_recordtype_ref...');
+      logger.logInfo('RecordSelection', 'Loading entity configs from sprk_recordtype_ref...');
       const query = `?$filter=statecode eq 0&$select=sprk_recordtype_refid,sprk_recordlogicalname,sprk_recorddisplayname,sprk_regardingfield&$orderby=sprk_recorddisplayname`;
       const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
@@ -211,18 +215,15 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
             regardingField: e.sprk_regardingfield as string,
           }));
 
-        console.log(
-          `[RecordSelectionHandler] Loaded ${dynamicEntityConfigs.length} entity configs:`,
-          dynamicEntityConfigs.map(c => c.logicalName)
-        );
+        logger.logInfo('RecordSelection', `Loaded ${dynamicEntityConfigs.length} entity configs`, dynamicEntityConfigs.map(c => c.logicalName));
         return dynamicEntityConfigs;
       } else {
-        console.warn('[RecordSelectionHandler] No Record Types found, falling back to hardcoded configs');
+        logger.logWarn('RecordSelection', 'No Record Types found, falling back to hardcoded configs');
         dynamicEntityConfigs = [...ENTITY_LOOKUP_CONFIGS];
         return dynamicEntityConfigs;
       }
     } catch (error) {
-      console.error('[RecordSelectionHandler] Error loading entity configs, using fallback:', error);
+      logger.logError('RecordSelection', 'Error loading entity configs, using fallback', error);
       dynamicEntityConfigs = [...ENTITY_LOOKUP_CONFIGS];
       return dynamicEntityConfigs;
     } finally {
@@ -248,7 +249,7 @@ function getXrmPage(): Xrm.Page | null {
     const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
     return xrm?.Page || null;
   } catch (error) {
-    console.warn('[RecordSelectionHandler] Unable to access Xrm.Page:', error);
+    logger.logWarn('RecordSelection', 'Unable to access Xrm.Page', error);
     return null;
   }
 }
@@ -260,7 +261,7 @@ function getXrmPage(): Xrm.Page | null {
 function setLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.warn('[RecordSelectionHandler] Xrm.Page not available');
+    logger.logWarn('RecordSelection', 'Xrm.Page not available');
     return false;
   }
 
@@ -276,14 +277,14 @@ function setLookupValue(fieldName: string, entityType: string, id: string, name:
           entityType: entityType,
         },
       ]);
-      console.log(`[RecordSelectionHandler] Set ${fieldName} to ${name} (${formattedId})`);
+      logger.logDebug('RecordSelection', `Set ${fieldName} to ${name} (${formattedId})`);
       return true;
     } else {
-      console.warn(`[RecordSelectionHandler] Field ${fieldName} not found on form`);
+      logger.logWarn('RecordSelection', `Field ${fieldName} not found on form`);
       return false;
     }
   } catch (error) {
-    console.error(`[RecordSelectionHandler] Error setting ${fieldName}:`, error);
+    logger.logError('RecordSelection', `Error setting ${fieldName}`, error);
     return false;
   }
 }
@@ -295,7 +296,7 @@ function setLookupValue(fieldName: string, entityType: string, id: string, name:
 function clearLookupValue(fieldName: string): boolean {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.warn('[RecordSelectionHandler] Xrm.Page not available');
+    logger.logWarn('RecordSelection', 'Xrm.Page not available');
     return false;
   }
 
@@ -303,14 +304,14 @@ function clearLookupValue(fieldName: string): boolean {
     const attr = xrmPage.getAttribute(fieldName);
     if (attr) {
       attr.setValue(null);
-      console.log(`[RecordSelectionHandler] Cleared ${fieldName}`);
+      logger.logDebug('RecordSelection', `Cleared ${fieldName}`);
       return true;
     } else {
       // Field not on form - not an error, just skip
       return true;
     }
   } catch (error) {
-    console.error(`[RecordSelectionHandler] Error clearing ${fieldName}:`, error);
+    logger.logError('RecordSelection', `Error clearing ${fieldName}`, error);
     return false;
   }
 }
@@ -322,7 +323,7 @@ function clearLookupValue(fieldName: string): boolean {
 function setTextValue(fieldName: string, value: string | null): boolean {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.warn('[RecordSelectionHandler] Xrm.Page not available');
+    logger.logWarn('RecordSelection', 'Xrm.Page not available');
     return false;
   }
 
@@ -330,14 +331,14 @@ function setTextValue(fieldName: string, value: string | null): boolean {
     const attr = xrmPage.getAttribute(fieldName);
     if (attr) {
       attr.setValue(value);
-      console.log(`[RecordSelectionHandler] Set ${fieldName} to "${value}"`);
+      logger.logDebug('RecordSelection', `Set ${fieldName} to "${value}"`);
       return true;
     } else {
-      console.warn(`[RecordSelectionHandler] Field ${fieldName} not found on form`);
+      logger.logWarn('RecordSelection', `Field ${fieldName} not found on form`);
       return false;
     }
   } catch (error) {
-    console.error(`[RecordSelectionHandler] Error setting ${fieldName}:`, error);
+    logger.logError('RecordSelection', `Error setting ${fieldName}`, error);
     return false;
   }
 }
@@ -353,7 +354,7 @@ async function getRecordTypeByEntityLogicalName(
   // Check cache first
   const cached = recordTypeCache.get(entityLogicalName);
   if (cached) {
-    console.log(`[RecordSelectionHandler] Record Type cache hit for ${entityLogicalName}: ${cached.id}`);
+    logger.logDebug('RecordSelection', `Record Type cache hit for ${entityLogicalName}: ${cached.id}`);
     return cached;
   }
 
@@ -370,14 +371,14 @@ async function getRecordTypeByEntityLogicalName(
       // Cache the result
       recordTypeCache.set(entityLogicalName, { id, name });
 
-      console.log(`[RecordSelectionHandler] Found Record Type for ${entityLogicalName}: ${name} (${id})`);
+      logger.logInfo('RecordSelection', `Found Record Type for ${entityLogicalName}: ${name} (${id})`);
       return { id, name };
     } else {
-      console.warn(`[RecordSelectionHandler] No Record Type found for entity: ${entityLogicalName}`);
+      logger.logWarn('RecordSelection', `No Record Type found for entity: ${entityLogicalName}`);
       return null;
     }
   } catch (error) {
-    console.error(`[RecordSelectionHandler] Error querying Record Type for ${entityLogicalName}:`, error);
+    logger.logError('RecordSelection', `Error querying Record Type for ${entityLogicalName}`, error);
     return null;
   }
 }
@@ -417,13 +418,13 @@ export async function handleRecordSelection(
     errors: [],
   };
 
-  console.log(`[RecordSelectionHandler] Processing selection: ${selection.entityType} - ${selection.recordName}`);
+  logger.logInfo('RecordSelection', `Processing selection: ${selection.entityType} - ${selection.recordName}`);
 
   // Find the config for the selected entity type
   const selectedConfig = getEntityConfigs().find(c => c.logicalName === selection.entityType);
   if (!selectedConfig) {
     const error = `Unknown entity type: ${selection.entityType}`;
-    console.error(`[RecordSelectionHandler] ${error}`);
+    logger.logError('RecordSelection', error);
     result.errors.push(error);
     return result;
   }
@@ -490,9 +491,7 @@ export async function handleRecordSelection(
   // Overall success if lookup was set (denormalized fields are secondary)
   result.success = result.lookupFieldSet;
 
-  console.log(
-    `[RecordSelectionHandler] Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}`
-  );
+  logger.logInfo('RecordSelection', `Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}`);
 
   return result;
 }
@@ -501,7 +500,7 @@ export async function handleRecordSelection(
  * Clear all regarding fields (used when clearing selection)
  */
 export function clearAllRegardingFields(): void {
-  console.log('[RecordSelectionHandler] Clearing all regarding fields');
+  logger.logInfo('RecordSelection', 'Clearing all regarding fields');
 
   // Clear all entity-specific lookups
   for (const config of getEntityConfigs()) {
@@ -534,7 +533,7 @@ export function getAllEntityConfigs(): EntityLookupConfig[] {
  */
 export function clearRecordTypeCache(): void {
   recordTypeCache.clear();
-  console.log('[RecordSelectionHandler] Record Type cache cleared');
+  logger.logDebug('RecordSelection', 'Record Type cache cleared');
 }
 
 /**
@@ -560,11 +559,11 @@ export interface IDetectedParentContext {
 export function detectPrePopulatedParent(): IDetectedParentContext | null {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.log('[RecordSelectionHandler] Xrm.Page not available for parent detection');
+    logger.logDebug('RecordSelection', 'Xrm.Page not available for parent detection');
     return null;
   }
 
-  console.log('[RecordSelectionHandler] Checking for pre-populated regarding fields...');
+  logger.logInfo('RecordSelection', 'Checking for pre-populated regarding fields...');
 
   // Check each entity-specific lookup field
   for (const config of getEntityConfigs()) {
@@ -583,19 +582,17 @@ export function detectPrePopulatedParent(): IDetectedParentContext | null {
               recordName: lookupValue.name || '',
               regardingField: config.regardingField,
             };
-            console.log(
-              `[RecordSelectionHandler] Detected pre-populated parent: ${config.displayName} - ${detected.recordName} (${detected.recordId})`
-            );
+            logger.logInfo('RecordSelection', `Detected pre-populated parent: ${config.displayName} - ${detected.recordName} (${detected.recordId})`);
             return detected;
           }
         }
       }
     } catch (error) {
-      console.warn(`[RecordSelectionHandler] Error checking ${config.regardingField}:`, error);
+      logger.logWarn('RecordSelection', `Error checking ${config.regardingField}`, error);
     }
   }
 
-  console.log('[RecordSelectionHandler] No pre-populated regarding field detected');
+  logger.logInfo('RecordSelection', 'No pre-populated regarding field detected');
   return null;
 }
 
@@ -622,9 +619,7 @@ export async function completeAutoDetectedAssociation(
     errors: [],
   };
 
-  console.log(
-    `[RecordSelectionHandler] Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`
-  );
+  logger.logInfo('RecordSelection', `Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`);
 
   // Set denormalized fields
   let denormalizedSuccess = true;
@@ -663,9 +658,7 @@ export async function completeAutoDetectedAssociation(
   result.denormalizedFieldsSet = denormalizedSuccess;
   result.success = denormalizedSuccess;
 
-  console.log(
-    `[RecordSelectionHandler] Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`
-  );
+  logger.logInfo('RecordSelection', `Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`);
 
   return result;
 }

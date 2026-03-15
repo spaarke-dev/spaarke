@@ -412,7 +412,7 @@ public static class RagEndpoints
     private static async Task<IResult> IndexFile(
         FileIndexRequest request,
         IFileIndexingService fileIndexingService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         IOptions<AnalysisOptions> analysisOptions,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -507,7 +507,7 @@ public static class RagEndpoints
     private static async Task<IResult> SendToIndex(
         [FromBody] SendToIndexRequest request,
         IFileIndexingService fileIndexingService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         IOptions<AnalysisOptions> analysisOptions,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,

@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Services.Ai.Visualization;
 public class VisualizationService : IVisualizationService
 {
     private readonly IKnowledgeDeploymentService _deploymentService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<VisualizationService> _logger;
     private readonly DataverseOptions _dataverseOptions;
 
@@ -42,12 +42,12 @@ public class VisualizationService : IVisualizationService
 
     public VisualizationService(
         IKnowledgeDeploymentService deploymentService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         IOptions<DataverseOptions> dataverseOptions,
         ILogger<VisualizationService> logger)
     {
         _deploymentService = deploymentService;
-        _dataverseService = dataverseService;
+        _documentService = documentService;
         _dataverseOptions = dataverseOptions.Value;
         _logger = logger;
     }
@@ -71,7 +71,7 @@ public class VisualizationService : IVisualizationService
         {
             // Step 1: Get source document from Dataverse (always required for relationship lookups)
             _logger.LogDebug("[VIZ-DEBUG] Step 1: Fetching source document {DocumentId} from Dataverse", documentId);
-            var sourceDataverseDoc = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken);
+            var sourceDataverseDoc = await _documentService.GetDocumentAsync(documentId.ToString(), cancellationToken);
 
             if (sourceDataverseDoc == null)
             {
@@ -289,7 +289,7 @@ public class VisualizationService : IVisualizationService
     {
         try
         {
-            var docs = await _dataverseService.GetDocumentsByMatterAsync(matterId, sourceDocumentId, cancellationToken);
+            var docs = await _documentService.GetDocumentsByMatterAsync(matterId, sourceDocumentId, cancellationToken);
             var results = docs.Select(ConvertToVisualizationDocument).ToList();
             _logger.LogDebug("Found {Count} documents for Matter {MatterId}", results.Count, matterId);
             return results;
@@ -311,7 +311,7 @@ public class VisualizationService : IVisualizationService
     {
         try
         {
-            var docs = await _dataverseService.GetDocumentsByProjectAsync(projectId, sourceDocumentId, cancellationToken);
+            var docs = await _documentService.GetDocumentsByProjectAsync(projectId, sourceDocumentId, cancellationToken);
             var results = docs.Select(ConvertToVisualizationDocument).ToList();
             _logger.LogDebug("Found {Count} documents for Project {ProjectId}", results.Count, projectId);
             return results;
@@ -333,7 +333,7 @@ public class VisualizationService : IVisualizationService
     {
         try
         {
-            var docs = await _dataverseService.GetDocumentsByInvoiceAsync(invoiceId, sourceDocumentId, cancellationToken);
+            var docs = await _documentService.GetDocumentsByInvoiceAsync(invoiceId, sourceDocumentId, cancellationToken);
             var results = docs.Select(ConvertToVisualizationDocument).ToList();
             _logger.LogDebug("Found {Count} documents for Invoice {InvoiceId}", results.Count, invoiceId);
             return results;
@@ -362,7 +362,7 @@ public class VisualizationService : IVisualizationService
                 ? conversationIndex[..44]
                 : conversationIndex;
 
-            var docs = await _dataverseService.GetDocumentsByConversationIndexAsync(threadPrefix, sourceDocumentId, cancellationToken);
+            var docs = await _documentService.GetDocumentsByConversationIndexAsync(threadPrefix, sourceDocumentId, cancellationToken);
             var results = docs.Select(ConvertToVisualizationDocument).ToList();
             _logger.LogDebug("Found {Count} documents in email thread (prefix: {Prefix})", results.Count, threadPrefix);
             return results;
@@ -403,7 +403,7 @@ public class VisualizationService : IVisualizationService
             if (sourceDoc.IsEmailArchive == true)
             {
                 _logger.LogDebug("Source document {DocumentId} is email archive, querying children", sourceDocumentId);
-                var children = await _dataverseService.GetDocumentsByParentAsync(sourceDocumentId, cancellationToken);
+                var children = await _documentService.GetDocumentsByParentAsync(sourceDocumentId, cancellationToken);
 
                 foreach (var child in children)
                 {
@@ -419,14 +419,14 @@ public class VisualizationService : IVisualizationService
                 _logger.LogDebug("Source document {DocumentId} has parent {ParentId}, querying siblings", sourceDocumentId, parentId);
 
                 // Get parent document
-                var parent = await _dataverseService.GetDocumentAsync(parentId.ToString(), cancellationToken);
+                var parent = await _documentService.GetDocumentAsync(parentId.ToString(), cancellationToken);
                 if (parent != null)
                 {
                     siblings.Add(ConvertToVisualizationDocument(parent));
                 }
 
                 // Get sibling attachments (children of the same parent)
-                var siblingDocs = await _dataverseService.GetDocumentsByParentAsync(parentId, cancellationToken);
+                var siblingDocs = await _documentService.GetDocumentsByParentAsync(parentId, cancellationToken);
                 foreach (var sibling in siblingDocs)
                 {
                     // Exclude the source document itself
@@ -998,7 +998,7 @@ public class VisualizationService : IVisualizationService
             // Fetch metadata from Dataverse for documents with documentId
             try
             {
-                var entity = await _dataverseService.GetDocumentAsync(doc.DocumentId, cancellationToken);
+                var entity = await _documentService.GetDocumentAsync(doc.DocumentId, cancellationToken);
                 if (entity != null)
                 {
                     metadata[uniqueId] = new DocumentMetadata

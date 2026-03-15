@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Document BaseProxyPlugin ADR-002 Violations + Add Obsolete Markers</title>
+    <phase>4: Architecture Compliance</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>032</blocks>
+    <tags>documentation, dotnet, architecture</tags>
+  </metadata>
+  <prompt>Document all 6 ADR-002 violations in BaseProxyPlugin.cs (a legacy/experimental plugin not in production) and mark both BaseProxyPlugin and GetFilePreviewUrlPlugin with [Obsolete] attributes. Create a detailed assessment note. This is documentation + marking only — no refactoring of the plugin code itself.</prompt>
+  <role>Senior .NET architect with ADR compliance expertise</role>
+  <goal>[Obsolete] attributes added to both plugin classes, and a detailed assessment note created documenting all 6 violations with line numbers, severity, and recommended remediation approach (BFF API + Service Bus worker pattern).</goal>
+  <context>
+    <background>BaseProxyPlugin.cs is a legacy/experimental plugin in the Spaarke.CustomApiProxy assembly — not currently used in production. However, it exists in the codebase and violates ADR-002 in 6 distinct ways. The arch tests updated in task 003 already flag the plugin assembly. This task completes the compliance work by adding [Obsolete] markers (to prevent future use) and creating a written assessment for future developers who might consider extending or reusing this code.</background>
+    <relevant-files>
+      <file>src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/BaseProxyPlugin.cs (modify — add [Obsolete] attribute to class)</file>
+      <file>src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/GetFilePreviewUrlPlugin.cs (modify — add [Obsolete] attribute to class)</file>
+      <file>projects/code-quality-and-assurance-r2/notes/ (create — baseplugin-adr002-assessment.md)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">Dataverse plugins MUST NOT make HTTP calls, use HttpClient, block on async with Thread.Sleep, or perform long-running Dataverse queries. Violations must be documented and the code must not be extended further.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/BaseProxyPlugin.cs in full — identify and note line numbers for each of the 6 known violations: (1) HttpClient constructed inside Execute(), (2) OAuth2 token request via blocking SimpleAuthHelper, (3) Thread.Sleep in retry loop, (4) new HttpClient() per execution causing socket exhaustion, (5) LogRequest + LogResponse doing synchronous Dataverse round-trips, (6) GetServiceConfig doing Dataverse query on every execution.</step>
+    <step order="2">Read src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/GetFilePreviewUrlPlugin.cs to understand its relationship to BaseProxyPlugin.</step>
+    <step order="3">Add [Obsolete("Violates ADR-002: makes HTTP calls, uses Thread.Sleep, and constructs HttpClient per execution. Use BFF API + Service Bus worker pattern instead. See projects/code-quality-and-assurance-r2/notes/baseplugin-adr002-assessment.md")] attribute to the BaseProxyPlugin class declaration.</step>
+    <step order="4">Add [Obsolete("Violates ADR-002 via BaseProxyPlugin. Use BFF API + Service Bus worker pattern instead.")] attribute to the GetFilePreviewUrlPlugin class declaration.</step>
+    <step order="5">Create projects/code-quality-and-assurance-r2/notes/baseplugin-adr002-assessment.md with the following sections: (a) Summary of violations, (b) Violation detail table (violation number, description, line number, ADR-002 rule violated, severity), (c) Recommended remediation (BFF API endpoint + Service Bus queue worker), (d) Why not to fix in place (plugin constraints are architectural, not just code quality).</step>
+    <step order="6">Run dotnet build src/dataverse/ — verify build succeeds. Obsolete warnings are expected and acceptable; errors are not.</step>
+    <step order="7">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 031 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/BaseProxyPlugin.cs (modified — [Obsolete] added)</output>
+    <output type="file">src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/GetFilePreviewUrlPlugin.cs (modified — [Obsolete] added)</output>
+    <output type="file">projects/code-quality-and-assurance-r2/notes/baseplugin-adr002-assessment.md (created)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>BaseProxyPlugin class has [Obsolete] attribute with message referencing ADR-002 and the assessment note path.</criterion>
+    <criterion>GetFilePreviewUrlPlugin class has [Obsolete] attribute with message referencing ADR-002.</criterion>
+    <criterion>Assessment note documents all 6 violations with line numbers.</criterion>
+    <criterion>Assessment note includes recommended remediation (BFF API + Service Bus worker) and explains why the plugin cannot simply be refactored to comply.</criterion>
+    <criterion>dotnet build passes — obsolete warnings are acceptable, errors are not.</criterion>
+  </acceptance-criteria>
+</task>

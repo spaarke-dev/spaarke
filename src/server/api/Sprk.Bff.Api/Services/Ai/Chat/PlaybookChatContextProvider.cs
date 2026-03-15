@@ -14,25 +14,25 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///      <see cref="IScopeResolverService.ResolvePlaybookScopesAsync"/>.
 ///   3. Partition knowledge sources by type: Inline → system prompt, RagIndex → search scope.
 ///   4. Compose skill PromptFragment values into specialized instructions.
-///   5. Load the document summary from <see cref="IDataverseService"/> for inline context.
+///   5. Load the document summary from <see cref="IDocumentDataverseService"/> for inline context.
 ///   6. Return a <see cref="ChatContext"/> with enriched system prompt and knowledge scope.
 /// </summary>
 public class PlaybookChatContextProvider : IChatContextProvider
 {
     private readonly IScopeResolverService _scopeResolver;
     private readonly IPlaybookService _playbookService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<PlaybookChatContextProvider> _logger;
 
     public PlaybookChatContextProvider(
         IScopeResolverService scopeResolver,
         IPlaybookService playbookService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         ILogger<PlaybookChatContextProvider> logger)
     {
         _scopeResolver = scopeResolver;
         _playbookService = playbookService;
-        _dataverseService = dataverseService;
+        _documentService = documentService;
         _logger = logger;
     }
 
@@ -95,7 +95,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         try
         {
-            var document = await _dataverseService.GetDocumentAsync(documentId, cancellationToken);
+            var document = await _documentService.GetDocumentAsync(documentId, cancellationToken);
             if (document != null)
             {
                 // Use the TL;DR or Summary field if populated from prior analysis

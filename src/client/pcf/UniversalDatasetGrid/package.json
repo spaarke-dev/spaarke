@@ -23,12 +23,13 @@
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.311",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "scheduler": "^0.27.0"
   },
   "devDependencies": {
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@eslint/js": "^9.25.1",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^14.2.0",
     "@testing-library/react-hooks": "^8.0.1",

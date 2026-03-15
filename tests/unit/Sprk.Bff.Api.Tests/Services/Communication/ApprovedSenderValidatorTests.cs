@@ -37,6 +37,7 @@ public class ApprovedSenderValidatorTests
     {
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         return new(

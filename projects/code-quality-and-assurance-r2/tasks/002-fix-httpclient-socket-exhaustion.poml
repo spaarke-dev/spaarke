@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Replace new HttpClient() with IHttpClientFactory</title>
+    <phase>1: Quick Wins</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>010</blocks>
+    <tags>remediation, dotnet, graph, networking</tags>
+  </metadata>
+  <prompt>Replace 2 instances of `new HttpClient()` in UploadSessionManager (lines 183 and 411) with IHttpClientFactory to prevent socket exhaustion. Register a named client "GraphUploadSession" in GraphModule.cs and inject IHttpClientFactory into UploadSessionManager.</prompt>
+  <role>Senior .NET backend engineer with expertise in HttpClient lifecycle management and Graph API integration patterns.</role>
+  <goal>Zero `new HttpClient()` instantiations remain in UploadSessionManager.cs. IHttpClientFactory is injected and a named client "GraphUploadSession" is registered. dotnet build passes with zero errors.</goal>
+  <context>
+    <background>UploadSessionManager creates raw HttpClient instances per chunk upload for Graph upload session URLs (pre-authorized, no Bearer token needed). Each `new HttpClient()` consumes a socket that is not returned to the pool until finalizer runs, causing socket exhaustion under concurrent uploads. IHttpClientFactory is already used elsewhere in the project (GraphClientFactory.cs, AiModule.cs), so this is a straightforward consistency fix.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs (modify — primary target; replace both new HttpClient() instances)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs (modify — register named client "GraphUploadSession")</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use a single named or typed HttpClient per upstream service registered via IHttpClientFactory. Never instantiate HttpClient directly in DI-managed classes.</constraint>
+    <constraint source="ADR-010">DI registrations must stay at or below 15 non-framework registrations. Adding one named client registration is acceptable; verify total count remains compliant.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read UploadSessionManager.cs in full — understand the constructor signature, the UploadChunkAsync method (line 183), the UploadChunkAsUserAsync method (line 411), and how each HttpClient instance is used (request headers, base address, dispose behavior).</step>
+    <step order="2">Read GraphModule.cs — understand how existing named/typed clients are registered and where to insert the new named client registration.</step>
+    <step order="3">Add a named client registration to GraphModule.cs: `builder.Services.AddHttpClient("GraphUploadSession")` with no base address and no default auth headers (upload session URLs are pre-authorized by Graph).</step>
+    <step order="4">Add IHttpClientFactory as a constructor parameter in UploadSessionManager. Store as a private readonly field _httpClientFactory.</step>
+    <step order="5">Replace the `new HttpClient()` on line 183 (UploadChunkAsync) with `_httpClientFactory.CreateClient("GraphUploadSession")`.</step>
+    <step order="6">Replace the `new HttpClient()` on line 411 (UploadChunkAsUserAsync) with `_httpClientFactory.CreateClient("GraphUploadSession")`.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` and resolve any compilation errors.</step>
+    <step order="8">Verify with: grep -rn "new HttpClient()" src/server/ -- confirm zero results in DI-managed classes.</step>
+    <step order="9">Update TASK-INDEX.md: change task 002 status from pending (🔲) to completed (✅).</step>
+  </steps>
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs (modified — IHttpClientFactory injected, both new HttpClient() replaced)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs (modified — "GraphUploadSession" named client registered)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero `new HttpClient()` instantiations remain in UploadSessionManager.cs (verified by grep).</criterion>
+    <criterion>Named client "GraphUploadSession" is registered in GraphModule.cs with no base address and no default auth headers.</criterion>
+    <criterion>IHttpClientFactory is injected into UploadSessionManager via constructor and stored as a private readonly field.</criterion>
+    <criterion>Both UploadChunkAsync and UploadChunkAsUserAsync use _httpClientFactory.CreateClient("GraphUploadSession").</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` passes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+</task>

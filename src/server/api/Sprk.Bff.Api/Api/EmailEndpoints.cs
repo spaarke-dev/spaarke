@@ -361,7 +361,7 @@ public static class EmailEndpoints
         ConvertEmailToDocumentRequest? request,
         IEmailToEmlConverter emlConverter,
         SpeFileStore speFileStore,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         IOptions<EmailProcessingOptions> emailOptions,
         ILogger<Program> logger,
         HttpContext context,
@@ -563,7 +563,7 @@ public static class EmailEndpoints
     /// </summary>
     private static async Task<IResult> GetEmailDocumentStatusAsync(
         Guid emailId,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -638,7 +638,7 @@ public static class EmailEndpoints
     /// </summary>
     private static async Task<Guid?> CheckExistingDocumentAsync(
         Guid emailId,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         CancellationToken cancellationToken)
     {
         // Query for existing document with sprk_Email = emailId
@@ -659,7 +659,7 @@ public static class EmailEndpoints
         Guid emailId,
         string driveId,
         SpeFileStore speFileStore,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         ILogger logger,
         CancellationToken cancellationToken)
     {

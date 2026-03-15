@@ -31,7 +31,16 @@ public static class OfficeModule
     public static IServiceCollection AddOfficeModule(this IServiceCollection services)
     {
         // ============================================================================
-        // Office Add-in Service
+        // Office Add-in Focused Services (extracted from OfficeService)
+        // ============================================================================
+        // ADR-010: Concrete registration — no interfaces unless a seam is required.
+        services.AddScoped<OfficeEmailEnricher>();
+        services.AddScoped<OfficeDocumentPersistence>();
+        services.AddScoped<OfficeJobQueue>();
+        services.AddScoped<OfficeStorageUploader>();
+
+        // ============================================================================
+        // Office Add-in Orchestrator Service
         // ============================================================================
         // Scoped lifetime - new instance per request for proper auth context
         services.AddScoped<IOfficeService, OfficeService>();

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -19,16 +20,30 @@ namespace Sprk.Bff.Api.Services.Ai.Testing;
 ///
 /// Expected execution time: ~30-60 seconds for typical documents.
 /// </remarks>
-public class ProductionTestExecutor : IProductionTestExecutor
+public class ProductionTestExecutor : IProductionTestExecutor, IDisposable
 {
     private readonly ISpeFileOperations _speFileOperations;
     private readonly ITextExtractor _textExtractor;
     private readonly IOpenAiClient _openAiClient;
     private readonly ILogger<ProductionTestExecutor> _logger;
 
-    // In-memory store for test results (aligns with Phase 1 AnalysisOrchestrationService pattern)
-    // TRACKED: GitHub #229 - Replace with Dataverse persistence
-    private static readonly Dictionary<Guid, ProductionTestResult> _testResultStore = new();
+    /// <summary>
+    /// Bounded in-memory store for test results with TTL eviction.
+    /// Uses ConcurrentDictionary for thread safety and a background timer
+    /// that evicts entries older than 30 minutes every 5 minutes.
+    /// TRACKED: GitHub #229 - Replace with Dataverse persistence.
+    /// </summary>
+    private static readonly ConcurrentDictionary<Guid, (ProductionTestResult Result, DateTimeOffset StoredAt)> _testResultStore = new();
+
+    /// <summary>
+    /// Maximum age for cached test results before eviction.
+    /// </summary>
+    private static readonly TimeSpan TestResultTtl = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Background timer that periodically evicts expired test results.
+    /// </summary>
+    private readonly Timer _evictionTimer;
 
     public ProductionTestExecutor(
         ISpeFileOperations speFileOperations,
@@ -40,6 +55,38 @@ public class ProductionTestExecutor : IProductionTestExecutor
         _textExtractor = textExtractor;
         _openAiClient = openAiClient;
         _logger = logger;
+
+        // Fire every 5 minutes to evict entries older than 30 minutes
+        _evictionTimer = new Timer(EvictExpiredEntries, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+    }
+
+    /// <summary>
+    /// Remove test result entries that have exceeded the TTL.
+    /// </summary>
+    private void EvictExpiredEntries(object? state)
+    {
+        var cutoff = DateTimeOffset.UtcNow - TestResultTtl;
+        var expiredKeys = _testResultStore
+            .Where(kvp => kvp.Value.StoredAt < cutoff)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (var key in expiredKeys)
+        {
+            _testResultStore.TryRemove(key, out _);
+        }
+
+        if (expiredKeys.Count > 0)
+        {
+            _logger.LogDebug("Evicted {Count} expired test results from in-memory store", expiredKeys.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _evictionTimer.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <inheritdoc />
@@ -425,8 +472,8 @@ public class ProductionTestExecutor : IProductionTestExecutor
                 NodeResults = nodeResults
             };
 
-            // Store in-memory (Phase 1 pattern - will be replaced with Dataverse)
-            _testResultStore[analysisId] = testResult;
+            // Store in bounded ConcurrentDictionary with TTL (eviction timer removes entries >30min)
+            _testResultStore[analysisId] = (testResult, DateTimeOffset.UtcNow);
 
             _logger.LogInformation(
                 "Production test result saved: AnalysisId={AnalysisId}, IsTest=true, Status={Status}",
@@ -501,8 +548,11 @@ public class ProductionTestExecutor : IProductionTestExecutor
     /// <inheritdoc />
     public Task<ProductionTestResult?> GetTestResultAsync(Guid analysisId, CancellationToken cancellationToken)
     {
-        _testResultStore.TryGetValue(analysisId, out var result);
-        return Task.FromResult(result);
+        if (_testResultStore.TryGetValue(analysisId, out var entry))
+        {
+            return Task.FromResult<ProductionTestResult?>(entry.Result);
+        }
+        return Task.FromResult<ProductionTestResult?>(null);
     }
 
     /// <summary>

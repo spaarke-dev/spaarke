@@ -38,6 +38,7 @@ public class CommunicationServiceTests
         var options = CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -54,6 +55,7 @@ public class CommunicationServiceTests
         _sut = new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
@@ -125,6 +127,7 @@ public class CommunicationServiceTests
     {
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -135,6 +138,7 @@ public class CommunicationServiceTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here

@@ -57,6 +57,7 @@ public class AttachmentValidationTests
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -68,6 +69,7 @@ public class AttachmentValidationTests
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here

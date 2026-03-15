@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Api;
 /// - ADR-001: Minimal API (no controllers)
 /// - ADR-008: Endpoint-level authorization
 /// - ADR-009: Redis-first caching (with justified L1 exception for metadata hotspot)
-/// - ADR-010: DI minimalism (use injected IDataverseService)
+/// - ADR-010: DI minimalism (use injected IGenericEntityService)
 /// </summary>
 public static class NavMapEndpoints
 {
@@ -85,7 +85,7 @@ public static class NavMapEndpoints
     /// </summary>
     private static async Task<IResult> GetEntitySetNameAsync(
         string entityLogicalName,
-        IDataverseService dataverseService,
+        IGenericEntityService dataverseService,
         IMemoryCache cache,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -174,7 +174,7 @@ public static class NavMapEndpoints
     private static async Task<IResult> GetLookupNavigationAsync(
         string childEntity,
         string relationship,
-        IDataverseService dataverseService,
+        IGenericEntityService dataverseService,
         IMemoryCache cache,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -280,7 +280,7 @@ public static class NavMapEndpoints
     private static async Task<IResult> GetCollectionNavigationAsync(
         string parentEntity,
         string relationship,
-        IDataverseService dataverseService,
+        IGenericEntityService dataverseService,
         IMemoryCache cache,
         ILogger<Program> logger,
         CancellationToken ct)

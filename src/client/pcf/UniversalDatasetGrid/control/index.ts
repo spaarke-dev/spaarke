@@ -1,10 +1,10 @@
 /**
  * Universal Dataset Grid PCF Control
- * Version 2.0.7 - Single React Root Architecture with Fluent UI v9
+ * Version 2.2.1 - Single React Root Architecture with Fluent UI v9
  */
 
 import * as React from 'react';
-import * as ReactDOM from 'react-dom/client';
+import * as ReactDOM from 'react-dom';
 import { FluentProvider } from '@fluentui/react-components';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { UniversalDatasetGridRoot } from './components/UniversalDatasetGridRoot';
@@ -16,7 +16,7 @@ import { initializeAuth } from './authInit';
 import { getAuthProvider } from '@spaarke/auth';
 
 export class UniversalDatasetGrid implements ComponentFramework.StandardControl<IInputs, IOutputs> {
-  private root: ReactDOM.Root | null = null;
+  private container: HTMLDivElement;
   private notifyOutputChanged: () => void;
   private config: GridConfiguration;
   private authInitialized = false;
@@ -60,13 +60,13 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
       // This will be async in the background; token acquisition happens in Phase 2
       this.initializeMsalAsync(container);
 
-      // Create single React root
-      this.root = ReactDOM.createRoot(container);
+      // Store container reference for React 16 render calls (ADR-022)
+      this.container = container;
 
       // Set up theme listener for dynamic theme changes
       this._cleanupThemeListener = setupThemeListener(isDark => {
         logger.info('Control', `Theme changed: isDark=${isDark}`);
-        if (this._context && this.root) {
+        if (this._context && this.container) {
           this.renderReactTree(this._context);
         }
       }, context);
@@ -132,9 +132,9 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
         this.authInitialized = false;
       }
 
-      if (this.root) {
-        this.root.unmount();
-        this.root = null;
+      // ADR-022: React 16 unmount
+      if (this.container) {
+        ReactDOM.unmountComponentAtNode(this.container);
       }
 
       this._context = null;
@@ -155,15 +155,16 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
    * Called from init() and updateView().
    */
   private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
-    if (!this.root) {
-      logger.error('Control', 'Cannot render - root not initialized');
+    if (!this.container) {
+      logger.error('Control', 'Cannot render - container not initialized');
       return;
     }
 
     try {
       const theme = resolveTheme(context);
 
-      this.root.render(
+      // ADR-022: React 16 APIs — use ReactDOM.render, not createRoot
+      ReactDOM.render(
         React.createElement(
           FluentProvider,
           { theme },
@@ -179,7 +180,8 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
               onRowClick: this.handleRowClick,
             })
           )
-        )
+        ),
+        this.container
       );
     } catch (error) {
       logger.error('Control', 'Render failed', error);

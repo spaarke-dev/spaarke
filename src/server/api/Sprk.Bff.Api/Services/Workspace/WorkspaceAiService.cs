@@ -29,7 +29,8 @@ namespace Sprk.Bff.Api.Services.Workspace;
 public class WorkspaceAiService
 {
     private readonly IPlaybookOrchestrationService _playbookService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -53,12 +54,14 @@ public class WorkspaceAiService
     /// </summary>
     public WorkspaceAiService(
         IPlaybookOrchestrationService playbookService,
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
+        IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
         IConfiguration configuration)
     {
         _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
@@ -168,7 +171,7 @@ public class WorkspaceAiService
 
     private async Task<string> FetchEventDescriptionAsync(Guid entityId, CancellationToken ct)
     {
-        var entity = await _dataverseService.RetrieveAsync(
+        var entity = await _genericEntityService.RetrieveAsync(
             "sprk_event",
             entityId,
             new[] { "sprk_eventname", "sprk_description", "sprk_priority", "sprk_duedate", "statuscode" },
@@ -217,7 +220,7 @@ public class WorkspaceAiService
 
     private async Task<string> FetchMatterDescriptionAsync(Guid entityId, CancellationToken ct)
     {
-        var entity = await _dataverseService.RetrieveAsync(
+        var entity = await _genericEntityService.RetrieveAsync(
             "sprk_matter",
             entityId,
             new[] { "sprk_name", "sprk_totalspend", "sprk_totalbudget", "sprk_utilizationpercent", "sprk_overdueeventcount", "sprk_status" },
@@ -245,7 +248,7 @@ public class WorkspaceAiService
 
     private async Task<string> FetchProjectDescriptionAsync(Guid entityId, CancellationToken ct)
     {
-        var entity = await _dataverseService.RetrieveAsync(
+        var entity = await _genericEntityService.RetrieveAsync(
             "sprk_project",
             entityId,
             new[] { "sprk_name", "sprk_description", "statecode" },
@@ -270,7 +273,7 @@ public class WorkspaceAiService
 
     private async Task<string> FetchDocumentDescriptionAsync(Guid entityId, CancellationToken ct)
     {
-        var doc = await _dataverseService.GetDocumentAsync(entityId.ToString(), ct);
+        var doc = await _documentService.GetDocumentAsync(entityId.ToString(), ct);
 
         if (doc is null)
             throw new KeyNotFoundException($"Document {entityId} not found in Dataverse.");

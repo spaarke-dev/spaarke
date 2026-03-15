@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Extract useWorkingDocumentSave + useChatState Hooks</title>
+    <phase>3: Frontend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023</blocks>
+    <tags>refactoring, typescript, pcf</tags>
+  </metadata>
+  <prompt>Extract 2 hooks from AnalysisWorkspaceApp.tsx: useWorkingDocumentSave (auto-save with 3-second debounce timer) and useChatState (chat messages, streaming response, session resume dialog state). Both run in parallel with task 021 since they target independent state clusters.</prompt>
+  <role>Senior React developer specializing in hooks and component architecture</role>
+  <goal>Two new hook files created in control/hooks/ that absorb all working document save state and chat session state from AnalysisWorkspaceApp.tsx, following the UseXxxOptions/UseXxxResult convention.</goal>
+  <context>
+    <background>This task runs in parallel with task 021 — both depend only on task 020 (auth/resolution hooks) and both target independent state clusters in AnalysisWorkspaceApp.tsx. useWorkingDocumentSave handles the auto-save debounce timer and dirty tracking. useChatState handles the large chat message state cluster including streaming response, session resume detection, and the resume confirmation dialog.</background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modify — extract save and chat state)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (create — 2 new hook files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts (read — convention reference)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-012">Hooks must be React 16/17 compatible. No React 18-only APIs.</constraint>
+    <constraint source="ADR-022">PCF uses platform-provided React 16/17. Hooks must not introduce React 18 dependencies.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisWorkspaceApp.tsx lines 391-394 to understand save state: isDirty, isSaving, lastSaved.</step>
+    <step order="2">Read AnalysisWorkspaceApp.tsx lines 714-739 to understand the auto-save timer (3s debounce) and onWorkingDocumentChange callback.</step>
+    <step order="3">Create src/client/pcf/AnalysisWorkspace/control/hooks/useWorkingDocumentSave.ts with UseWorkingDocumentSaveOptions and UseWorkingDocumentSaveResult types. Absorb: isDirty, isSaving, lastSaved state, auto-save debounce timer, and onWorkingDocumentChange callback. Return: { isDirty, isSaving, lastSaved, onWorkingDocumentChange }.</step>
+    <step order="4">Read AnalysisWorkspaceApp.tsx lines 390-403 to understand chat state: chatMessages, isChatDirty, streamingResponse, isSessionResumed, isResumingSession, showResumeDialog, pendingChatHistory and associated chat message management logic.</step>
+    <step order="5">Create src/client/pcf/AnalysisWorkspace/control/hooks/useChatState.ts with UseChatStateOptions and UseChatStateResult types. Absorb: all 7 chat-related state variables and chat message management, session resume dialog logic. Return: { chatMessages, isChatDirty, streamingResponse, isSessionResumed, isResumingSession, showResumeDialog, pendingChatHistory, ...handlers }.</step>
+    <step order="6">Update AnalysisWorkspaceApp.tsx to import and use both hooks, replacing inline state declarations.</step>
+    <step order="7">Remove all extracted useState, useEffect, and useCallback declarations from AnalysisWorkspaceApp.tsx for the save and chat state clusters.</step>
+    <step order="8">Run PCF build: cd src/client/pcf &amp;&amp; npm run build — verify zero TypeScript errors.</step>
+    <step order="9">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 022 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useWorkingDocumentSave.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useChatState.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>useWorkingDocumentSave.ts created in control/hooks/ with UseWorkingDocumentSaveOptions and UseWorkingDocumentSaveResult types exported.</criterion>
+    <criterion>useChatState.ts created in control/hooks/ with UseChatStateOptions and UseChatStateResult types exported.</criterion>
+    <criterion>AnalysisWorkspaceApp.tsx uses both hooks instead of inline state for save tracking and chat session management.</criterion>
+    <criterion>Auto-save debounce timer logic is fully encapsulated in useWorkingDocumentSave — not duplicated in component.</criterion>
+    <criterion>All 7 chat state variables (chatMessages, isChatDirty, streamingResponse, isSessionResumed, isResumingSession, showResumeDialog, pendingChatHistory) moved into useChatState.</criterion>
+    <criterion>PCF build passes with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+</task>

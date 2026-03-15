@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Segregate IDataverseService into 9 Domain-Focused Interfaces</title>
+    <phase>2: Backend Structural Decomposition</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>013</blocks>
+    <tags>refactoring, dotnet, architecture</tags>
+  </metadata>
+
+  <prompt>
+    Segregate IDataverseService (603 lines, 63 methods) into 9 domain-specific interfaces
+    following the Interface Segregation Principle. Make IDataverseService a composite interface
+    that inherits all 9. Update both concrete implementations (DataverseServiceClientImpl and
+    DataverseWebApiService) to implement the composite interface. This must be a zero-breaking-change
+    refactor — all existing code that depends on IDataverseService continues to compile and
+    behave identically.
+  </prompt>
+
+  <role>Senior .NET developer specializing in SOLID principles and service decomposition</role>
+
+  <goal>
+    Nine domain-specific interface files exist under src/server/shared/Spaarke.Dataverse/.
+    IDataverseService inherits all 9. Both DataverseServiceClientImpl and DataverseWebApiService
+    implement the composite interface. dotnet build and dotnet test both pass with zero errors
+    or failures.
+  </goal>
+
+  <context>
+    <background>
+      IDataverseService defines 63 methods across 603 lines covering documents, analysis,
+      generic entity operations, processing jobs, events, field mappings, KPIs, communications,
+      and health checks. Any service that needs only document operations must still declare a
+      dependency on the full 63-method interface, increasing coupling and making mock setup in
+      tests unnecessarily verbose. The Interface Segregation Principle (ISP) requires that clients
+      depend only on the methods they actually use. The refactoring strategy is additive: create 9
+      narrow interfaces, move method signatures into them, then make IDataverseService inherit
+      all 9. Both existing implementations continue to implement IDataverseService (the composite)
+      and therefore implement all 9 narrow interfaces automatically. No DI registrations need to
+      change in this task — that migration happens in task 013.
+    </background>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseService.cs (modify — add inheritance chain)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IDocumentDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IProcessingJobService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IEventDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IFieldMappingDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IKpiDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/ICommunicationDataverseService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseHealthService.cs (create)</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs (modify — implement composite)</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (modify — implement composite)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">
+      The refactoring must be purely additive — zero breaking changes to existing consumers.
+      IDataverseService must remain a valid type that all current code can continue to use without
+      modification. Do not remove any method signatures from IDataverseService itself; instead
+      move them into narrow interfaces and have IDataverseService inherit those interfaces so the
+      combined surface area is identical.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Read IDataverseService.cs in full. Catalog all 63 methods grouped by domain. Verify the
+      following assignment before creating any files:
+      IDocumentDataverseService (13 methods) — document CRUD and relationship queries;
+      IAnalysisDataverseService (4 methods) — analysis records and outputs;
+      IGenericEntityService (9 methods) — generic CRUD and metadata operations;
+      IProcessingJobService (8 methods) — Office processing job lifecycle;
+      IEventDataverseService (9 methods) — events, logs, and event types;
+      IFieldMappingDataverseService (7 methods) — field mapping and record operations;
+      IKpiDataverseService (2 methods) — KPI assessments;
+      ICommunicationDataverseService (9 methods) — communications and lookups;
+      IDataverseHealthService (2 methods) — health checks.
+      Adjust the assignment if the actual method groupings differ — document any deviations.
+    </step>
+    <step order="2">
+      Create IDocumentDataverseService.cs with the 13 document-related method signatures.
+      Include the correct namespace and any required using statements.
+    </step>
+    <step order="3">
+      Create IAnalysisDataverseService.cs with the 4 analysis-related method signatures.
+    </step>
+    <step order="4">
+      Create IGenericEntityService.cs with the 9 generic entity method signatures.
+    </step>
+    <step order="5">
+      Create IProcessingJobService.cs with the 8 processing job method signatures.
+    </step>
+    <step order="6">
+      Create IEventDataverseService.cs with the 9 event-related method signatures.
+    </step>
+    <step order="7">
+      Create IFieldMappingDataverseService.cs with the 7 field mapping method signatures.
+    </step>
+    <step order="8">
+      Create IKpiDataverseService.cs with the 2 KPI method signatures.
+    </step>
+    <step order="9">
+      Create ICommunicationDataverseService.cs with the 9 communication method signatures.
+    </step>
+    <step order="10">
+      Create IDataverseHealthService.cs with the 2 health check method signatures.
+    </step>
+    <step order="11">
+      Update IDataverseService.cs. Change the interface declaration to:
+        public interface IDataverseService :
+            IDocumentDataverseService,
+            IAnalysisDataverseService,
+            IGenericEntityService,
+            IProcessingJobService,
+            IEventDataverseService,
+            IFieldMappingDataverseService,
+            IKpiDataverseService,
+            ICommunicationDataverseService,
+            IDataverseHealthService
+      Remove the method signatures from IDataverseService that are now declared in the 9
+      interfaces. The body of IDataverseService should contain only the inheritance list.
+    </step>
+    <step order="12">
+      Verify DataverseServiceClientImpl.cs and DataverseWebApiService.cs — confirm they already
+      implement IDataverseService (the composite). If their class declarations say
+      ": IDataverseService" they automatically implement all 9 narrow interfaces; no changes are
+      needed unless the compiler reports missing members. Fix any missing member errors.
+    </step>
+    <step order="13">
+      Run dotnet build from the repository root. Fix all compilation errors.
+    </step>
+    <step order="14">
+      Run dotnet test. Verify all tests pass — this refactoring must not change any behavior.
+    </step>
+    <step order="15">
+      Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — mark task 012 complete.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IDocumentDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IProcessingJobService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IEventDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IFieldMappingDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IKpiDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/ICommunicationDataverseService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IDataverseHealthService.cs</output>
+    <output type="file">src/server/shared/Spaarke.Dataverse/IDataverseService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>9 focused interface files are created in src/server/shared/Spaarke.Dataverse/</criterion>
+    <criterion>IDataverseService inherits all 9 domain interfaces and contains no method signatures of its own</criterion>
+    <criterion>DataverseServiceClientImpl implements all 9 narrow interfaces (via composite)</criterion>
+    <criterion>DataverseWebApiService implements all 9 narrow interfaces (via composite)</criterion>
+    <criterion>Zero breaking changes — no existing consumer files are modified in this task</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+    <criterion>dotnet test passes with all tests green</criterion>
+  </acceptance-criteria>
+</task>

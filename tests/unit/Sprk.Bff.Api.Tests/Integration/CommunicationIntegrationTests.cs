@@ -139,6 +139,7 @@ public class CommunicationIntegrationTests
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -150,6 +151,7 @@ public class CommunicationIntegrationTests
         return new CommunicationService(
             graphFactoryMock.Object,
             senderValidator,
+            dataverseMock.Object,
             dataverseMock.Object,
             null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
@@ -485,6 +487,7 @@ public class CommunicationIntegrationTests
 
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -815,6 +818,7 @@ public class CommunicationIntegrationTests
 
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -866,6 +870,7 @@ public class CommunicationIntegrationTests
         };
 
         var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
             dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
@@ -928,6 +933,7 @@ public class CommunicationIntegrationTests
 
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -989,6 +995,7 @@ public class CommunicationIntegrationTests
             .ReturnsAsync((byte[]?)null);
 
         var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
             dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
@@ -1339,6 +1346,7 @@ public class CommunicationIntegrationTests
 
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             accountCacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 
@@ -1361,8 +1369,10 @@ public class CommunicationIntegrationTests
         return new IncomingCommunicationProcessor(
             graphFactoryMock.Object,
             dataverseMock.Object,
+            dataverseMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                dataverseMock.Object,
                 dataverseMock.Object,
                 graphFactoryMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
@@ -1677,6 +1687,7 @@ public class CommunicationIntegrationTests
         // Build CommunicationAccountService (used by GraphSubscriptionManager)
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 
@@ -1777,6 +1788,7 @@ public class CommunicationIntegrationTests
 
         var accountService = new CommunicationAccountService(
             dataverseMock.Object,
+            dataverseMock.Object,
             cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());
 
@@ -1869,6 +1881,7 @@ public class CommunicationIntegrationTests
             .ReturnsAsync((byte[]?)null);
 
         var accountService = new CommunicationAccountService(
+            dataverseMock.Object,
             dataverseMock.Object,
             cacheMock.Object,
             Mock.Of<ILogger<CommunicationAccountService>>());

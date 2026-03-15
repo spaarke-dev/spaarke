@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>PCF Build Verification — Frontend Decomposition Complete</title>
+    <phase>3: Frontend Structural Decomposition</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>032</blocks>
+    <tags>testing, typescript, verification</tags>
+  </metadata>
+  <prompt>Run full PCF build verification after all frontend decomposition is complete. Confirm all 7 hooks exist, AnalysisWorkspaceApp.tsx is under 400 lines, no react-dom/client imports remain in PCF controls (pre-check for task 030), shared logger is exported from the shared library, and the build produces zero errors.</prompt>
+  <role>Build verification engineer</role>
+  <goal>Documented proof that Phase 3 frontend decomposition is complete and correct: PCF build passes with zero errors, all structural metrics verified, and any build warnings documented for Phase 4 remediation.</goal>
+  <context>
+    <background>This verification task gates entry to Phase 4 (Architecture Compliance). It confirms that the 4 hook extraction tasks (020-023) collectively achieved their goals without introducing any regressions. It also provides an early signal on ADR-022 violations (react-dom/client imports) that will be fixed in task 030, and verifies the shared logger export that should have been fixed in Phase 2 tasks.</background>
+    <relevant-files>
+      <file>src/client/pcf/ (read — verify build passes for all controls)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (read — verify 7 hook files exist)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (read — verify line count)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (read — verify logger exported)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-022">No react-dom/client imports should remain in any PCF control index.ts after task 030 — document any found here for that task.</constraint>
+    <constraint source="ADR-012">All PCF hooks must use React 16/17 compatible APIs only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run full PCF build: cd src/client/pcf &amp;&amp; npm run build — capture all output including warnings.</step>
+    <step order="2">Verify AnalysisWorkspaceApp.tsx line count is under 400 lines.</step>
+    <step order="3">Verify all 7 hook files exist in src/client/pcf/AnalysisWorkspace/control/hooks/: useAuth.ts, useDocumentResolution.ts, useAnalysisData.ts, useAnalysisExecution.ts, useWorkingDocumentSave.ts, useChatState.ts, usePanelResize.ts.</step>
+    <step order="4">Check for remaining ADR-022 violations: grep -rn "react-dom/client" src/client/pcf/ — document any results (to be fixed in task 030).</step>
+    <step order="5">Check for remaining MsalAuthProvider.ts files: grep -rn "MsalAuthProvider" src/client/pcf/ — verify none exist (should have been removed in Phase 2).</step>
+    <step order="6">Verify shared logger export: grep -n "SpaarkeLogger\|createLogger" src/client/shared/Spaarke.UI.Components/src/index.ts — confirm it is exported.</step>
+    <step order="7">Document all build warnings (not errors) in projects/code-quality-and-assurance-r2/notes/build-warnings-phase3.md for tracking.</step>
+    <step order="8">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 024 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">projects/code-quality-and-assurance-r2/notes/build-warnings-phase3.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>PCF build completes with zero TypeScript errors.</criterion>
+    <criterion>AnalysisWorkspaceApp.tsx is under 400 lines.</criterion>
+    <criterion>All 7 hook files exist in control/hooks/.</criterion>
+    <criterion>Any react-dom/client violations documented (to be fixed in task 030 — their presence here does not block this task).</criterion>
+    <criterion>No MsalAuthProvider.ts files found in PCF controls.</criterion>
+    <criterion>Shared logger confirmed exported from @spaarke/ui-components index.</criterion>
+    <criterion>Build warnings document created in notes/ (may be empty if no warnings).</criterion>
+  </acceptance-criteria>
+</task>

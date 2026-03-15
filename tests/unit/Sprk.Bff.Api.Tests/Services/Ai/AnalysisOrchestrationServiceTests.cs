@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -22,71 +23,79 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class AnalysisOrchestrationServiceTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
-    private readonly Mock<ISpeFileOperations> _speFileOperationsMock;
-    private readonly Mock<ITextExtractor> _textExtractorMock;
     private readonly Mock<IOpenAiClient> _openAiClientMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IAnalysisContextBuilder> _contextBuilderMock;
     private readonly Mock<IWorkingDocumentService> _workingDocumentServiceMock;
-    private readonly ExportServiceRegistry _exportRegistry;
-    private readonly Mock<IRagService> _ragServiceMock;
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
     private readonly Mock<INodeService> _nodeServiceMock;
-    private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
-    private readonly Mock<IStorageRetryPolicy> _storageRetryPolicyMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
-    private readonly IOptions<AnalysisOptions> _options;
     private readonly AnalysisOrchestrationService _service;
     private readonly HttpContext _mockHttpContext;
 
     public AnalysisOrchestrationServiceTests()
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
-        _speFileOperationsMock = new Mock<ISpeFileOperations>();
-        _textExtractorMock = new Mock<ITextExtractor>();
         _openAiClientMock = new Mock<IOpenAiClient>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _contextBuilderMock = new Mock<IAnalysisContextBuilder>();
         _workingDocumentServiceMock = new Mock<IWorkingDocumentService>();
-        _ragServiceMock = new Mock<IRagService>();
         _playbookServiceMock = new Mock<IPlaybookService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _nodeServiceMock = new Mock<INodeService>();
-        _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
-        _storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
         _mockHttpContext = new DefaultHttpContext();
 
-        _options = Options.Create(new AnalysisOptions
+        var httpContextAccessorMock = new Mock<IHttpContextAccessor>();
+        var speFileOperationsMock = new Mock<ISpeFileOperations>();
+        var textExtractorMock = new Mock<ITextExtractor>();
+        var distributedCacheMock = new Mock<IDistributedCache>();
+        var ragServiceMock = new Mock<IRagService>();
+        var storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
+        var exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
+        var options = Options.Create(new AnalysisOptions
         {
             Enabled = true,
             MaxChatHistoryMessages = 10
         });
 
-        // Create export registry with empty services for basic tests
-        _exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
+        // Create the 3 extracted services
+        var documentLoader = new AnalysisDocumentLoader(
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            speFileOperationsMock.Object,
+            textExtractorMock.Object,
+            distributedCacheMock.Object,
+            httpContextAccessorMock.Object,
+            new Mock<ILogger<AnalysisDocumentLoader>>().Object);
 
-        var distributedCacheMock = new Mock<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+        var ragProcessor = new AnalysisRagProcessor(
+            ragServiceMock.Object,
+            new RagQueryBuilder(),
+            distributedCacheMock.Object,
+            httpContextAccessorMock.Object,
+            options,
+            new Mock<ILogger<AnalysisRagProcessor>>().Object);
+
+        var resultPersistence = new AnalysisResultPersistence(
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            _workingDocumentServiceMock.Object,
+            storageRetryPolicyMock.Object,
+            exportRegistry,
+            new Mock<ILogger<AnalysisResultPersistence>>().Object);
 
         _service = new AnalysisOrchestrationService(
-            _dataverseServiceMock.Object,
-            _speFileOperationsMock.Object,
-            _textExtractorMock.Object,
             _openAiClientMock.Object,
             _scopeResolverMock.Object,
             _contextBuilderMock.Object,
-            _workingDocumentServiceMock.Object,
-            _exportRegistry,
-            _ragServiceMock.Object,
-            new RagQueryBuilder(),
             _playbookServiceMock.Object,
             _toolHandlerRegistryMock.Object,
             _nodeServiceMock.Object,
-            _httpContextAccessorMock.Object,
-            _storageRetryPolicyMock.Object,
-            distributedCacheMock.Object,
-            _options,
+            documentLoader,
+            ragProcessor,
+            resultPersistence,
             _loggerMock.Object);
     }
 

@@ -12,11 +12,13 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 public class UploadSessionManager
 {
     private readonly IGraphClientFactory _factory;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<UploadSessionManager> _logger;
 
-    public UploadSessionManager(IGraphClientFactory factory, ILogger<UploadSessionManager> logger)
+    public UploadSessionManager(IGraphClientFactory factory, IHttpClientFactory httpClientFactory, ILogger<UploadSessionManager> logger)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -180,7 +182,7 @@ public class UploadSessionManager
 
         try
         {
-            using var httpClient = new HttpClient();
+            using var httpClient = _httpClientFactory.CreateClient("GraphUploadSession");
             using var request = new HttpRequestMessage(HttpMethod.Put, session.UploadUrl);
 
             // Read chunk data
@@ -408,7 +410,7 @@ public class UploadSessionManager
             }
 
             // Upload chunk to Graph API using raw HTTP (SDK doesn't expose chunked upload directly)
-            using var httpClient = new HttpClient();
+            using var httpClient = _httpClientFactory.CreateClient("GraphUploadSession");
             using var content = new ByteArrayContent(chunkData);
             content.Headers.Add("Content-Range", contentRange);
             content.Headers.ContentLength = chunkData.Length;

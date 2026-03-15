@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Final Quality Scorecard + Lessons Learned</title>
+    <phase>4: Architecture Compliance</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014, 024, 030, 031</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, quality</tags>
+  </metadata>
+  <prompt>Create the final quality scorecard by measuring all 12 success criteria from spec.md before vs. after this project. Run dotnet build, dotnet test, and npm run build to capture final state. Write lessons learned document capturing what worked, what didn't, and recommendations for a hypothetical R3 project. Update README.md status to indicate completion.</prompt>
+  <role>Technical lead conducting project retrospective and quality assessment</role>
+  <goal>A complete quality scorecard showing before/after measurements for all 12 success criteria, a lessons learned document, and README.md updated to reflect project completion.</goal>
+  <context>
+    <background>This task gates entry to Phase 5 (Project Wrap-Up). All implementation tasks across Phases 1-4 must be complete before this scorecard can be accurate. The scorecard captures the quantitative outcome of the project: line counts, test counts, interface counts, build health, ADR violation counts. The lessons learned document captures qualitative insight for the next code quality cycle.</background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r2/spec.md (read — 12 success criteria to measure)</file>
+      <file>projects/code-quality-and-assurance-r2/README.md (modify — update status to Complete)</file>
+      <file>projects/code-quality-and-assurance-r2/notes/ (create — quality-scorecard-r2.md, lessons-learned.md)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/OfficeService.cs (read — measure final line count)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (read — measure final line count)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (read — count hook files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Backend build must succeed with zero errors.</constraint>
+    <constraint source="ADR-022">Zero react-dom/client imports in PCF controls must be confirmed as part of scorecard.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r2/spec.md to identify all 12 success criteria and their target values.</step>
+    <step order="2">Run dotnet build — capture result (pass/fail, warning count).</step>
+    <step order="3">Run dotnet test — capture result (tests passing, coverage if available).</step>
+    <step order="4">Run cd src/client/pcf &amp;&amp; npm run build — capture result (pass/fail, error count).</step>
+    <step order="5">Measure each metric: (a) OfficeService.cs line count; (b) AnalysisWorkspaceApp.tsx line count; (c) hook file count in control/hooks/; (d) interface count in Sprk.Bff.Api (grep -rn "^public interface" src/server/api/); (e) DI registration count; (f) react-dom/client import count in PCF; (g) MsalAuthProvider.ts file count; (h) arch test pass/fail; (i) any remaining ADR-002 violations in active code.</step>
+    <step order="6">Create projects/code-quality-and-assurance-r2/notes/quality-scorecard-r2.md with: title, date, summary grade, and a table showing each of the 12 metrics with columns: Metric, Before, After, Target, Status (Met/Missed).</step>
+    <step order="7">Create projects/code-quality-and-assurance-r2/notes/lessons-learned.md with sections: (a) What Worked Well (approaches that were effective), (b) What Was Harder Than Expected (challenges encountered), (c) Recommendations for R3 (concrete suggestions for next code quality cycle), (d) Metrics That Moved Most (biggest wins).</step>
+    <step order="8">Update projects/code-quality-and-assurance-r2/README.md — change status from In Progress to Complete, add completion date, and add link to quality-scorecard-r2.md.</step>
+    <step order="9">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 032 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">projects/code-quality-and-assurance-r2/notes/quality-scorecard-r2.md</output>
+    <output type="file">projects/code-quality-and-assurance-r2/notes/lessons-learned.md</output>
+    <output type="file">projects/code-quality-and-assurance-r2/README.md (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>quality-scorecard-r2.md documents all 12 success criteria with before/after measurements.</criterion>
+    <criterion>Overall grade documented (target: A- or 98/100).</criterion>
+    <criterion>lessons-learned.md created with all 4 sections populated.</criterion>
+    <criterion>README.md status updated to Complete with completion date.</criterion>
+    <criterion>dotnet build passes with zero errors (warnings acceptable).</criterion>
+    <criterion>dotnet test passes — no regressions introduced during this project.</criterion>
+    <criterion>PCF build passes with zero errors.</criterion>
+    <criterion>All 12 success criteria from spec.md either met or explicitly documented as deferred with justification.</criterion>
+  </acceptance-criteria>
+</task>

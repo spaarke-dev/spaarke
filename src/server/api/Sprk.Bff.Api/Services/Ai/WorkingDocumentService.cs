@@ -10,18 +10,18 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public class WorkingDocumentService : IWorkingDocumentService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly AnalysisOptions _options;
     private readonly ILogger<WorkingDocumentService> _logger;
 
     private readonly Dictionary<Guid, int> _versionCounters = new();
 
     public WorkingDocumentService(
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         IOptions<AnalysisOptions> options,
         ILogger<WorkingDocumentService> logger)
     {
-        _dataverseService = dataverseService;
+        _genericEntityService = genericEntityService;
         _options = options.Value;
         _logger = logger;
     }
@@ -42,7 +42,7 @@ public class WorkingDocumentService : IWorkingDocumentService
                 ["sprk_workingdocument"] = content
             };
 
-            await _dataverseService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+            await _genericEntityService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -71,7 +71,7 @@ public class WorkingDocumentService : IWorkingDocumentService
                 ["statuscode"] = 2  // Completed
             };
 
-            await _dataverseService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+            await _genericEntityService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
         }
         catch (Exception ex)
         {

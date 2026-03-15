@@ -11,17 +11,17 @@ namespace Sprk.Bff.Api.Services.Ai.Tools;
 /// </summary>
 public class DataverseUpdateToolHandler : IAiToolHandler
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<DataverseUpdateToolHandler> _logger;
 
     public const string ToolNameConst = "DataverseUpdate";
     public string ToolName => ToolNameConst;
 
     public DataverseUpdateToolHandler(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService fieldMappingService,
         ILogger<DataverseUpdateToolHandler> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -63,7 +63,7 @@ public class DataverseUpdateToolHandler : IAiToolHandler
             var convertedFields = ConvertFieldValues(fields);
             var fieldsDict = new Dictionary<string, object?>(convertedFields);
 
-            await _dataverseService.UpdateRecordFieldsAsync(entityName, recordId, fieldsDict, ct);
+            await _fieldMappingService.UpdateRecordFieldsAsync(entityName, recordId, fieldsDict, ct);
 
             _logger.LogInformation(
                 "Successfully updated {EntityName} record {RecordId}",

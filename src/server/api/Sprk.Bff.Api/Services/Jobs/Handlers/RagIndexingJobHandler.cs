@@ -28,7 +28,7 @@ public class RagIndexingJobHandler : IJobHandler
 {
     private readonly IFileIndexingService _fileIndexingService;
     private readonly IIdempotencyService _idempotencyService;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly AnalysisOptions _analysisOptions;
     private readonly RagTelemetry _telemetry;
     private readonly ILogger<RagIndexingJobHandler> _logger;
@@ -41,14 +41,14 @@ public class RagIndexingJobHandler : IJobHandler
     public RagIndexingJobHandler(
         IFileIndexingService fileIndexingService,
         IIdempotencyService idempotencyService,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         IOptions<AnalysisOptions> analysisOptions,
         RagTelemetry telemetry,
         ILogger<RagIndexingJobHandler> logger)
     {
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -173,7 +173,7 @@ public class RagIndexingJobHandler : IJobHandler
                             SearchIndexedOn = DateTime.UtcNow
                         };
 
-                        await _dataverseService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
+                        await _documentService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
 
                         _logger.LogInformation(
                             "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexed=true, IndexName={IndexName}",

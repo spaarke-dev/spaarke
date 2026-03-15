@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Decompose OfficeService.cs into 4 Focused Services</title>
+    <phase>2: Backend Structural Decomposition</phase>
+    <status>completed</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>013</blocks>
+    <tags>refactoring, dotnet, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    Decompose OfficeService.cs (2,907 lines) into a thin orchestrator plus 4 focused services, each
+    with a single well-defined responsibility. Also delete the obsolete SimulateJobProgressAsync
+    method (319 lines of dead code). After extraction, OfficeService.SaveAsync becomes a thin
+    orchestrator that delegates to the 4 injected services. Register all new services in the
+    existing OfficeModule.cs following the AddXxxModule pattern.
+  </prompt>
+
+  <role>Senior .NET developer specializing in SOLID principles and service decomposition</role>
+
+  <goal>
+    OfficeService.cs is reduced to fewer than 500 lines and contains only orchestration logic.
+    Four new focused service files exist, each under 500 lines, each with a single responsibility.
+    SimulateJobProgressAsync is deleted. All new services are registered in OfficeModule.cs.
+    dotnet build passes with zero errors.
+  </goal>
+
+  <context>
+    <background>
+      OfficeService.cs has grown to 2,907 lines and violates the Single Responsibility Principle.
+      It handles email enrichment (Graph + MimeKit), Dataverse CRUD, Service Bus queuing, and SPE
+      storage upload all in one class. This makes it untestable in isolation, increases constructor
+      parameter count, and inflates cognitive complexity. The goal of Phase 2 is to decompose God
+      classes into focused services so that each class can be reasoned about, tested, and modified
+      independently. Additionally, SimulateJobProgressAsync is marked [Obsolete] and accounts for
+      319 lines that are never called in production; deleting it reduces surface area and noise.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (modify — primary target)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (modify — register new services)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeEmailEnricher.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobQueue.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">
+      Never leak Graph SDK types (GraphServiceClient, DriveItem, etc.) above the SpeFileStore
+      facade. OfficeStorageUploader must call SpeFileStore methods only — no direct Graph SDK calls.
+    </constraint>
+    <constraint source="ADR-010">
+      Register services as concrete types unless a seam is required for testing. New services must
+      be registered inside OfficeModule.cs using the existing AddOfficeModule extension method
+      pattern. Total non-framework DI registrations must remain at or below 15.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Read OfficeService.cs in full. Catalog every method, its line range, its dependencies
+      (which injected fields it uses), and which of the 4 responsibility groups it belongs to:
+      (a) email enrichment, (b) Dataverse persistence, (c) Service Bus queuing, (d) SPE upload.
+      Record the catalog in a comment block at the top of your working notes before writing any
+      new files.
+    </step>
+    <step order="2">
+      Create OfficeEmailEnricher.cs in src/server/api/Sprk.Bff.Api/Services/Office/.
+      Move into it: EnrichEmailFromGraphAsync, EnrichAttachmentFromGraphAsync,
+      BuildEmlFromMetadata, GenerateEmlFileName, SanitizeFileName (~400 lines).
+      Constructor dependencies: IGraphClientFactory, ILogger&lt;OfficeEmailEnricher&gt;.
+      Keep the same method signatures so call sites in OfficeService need no changes yet.
+    </step>
+    <step order="3">
+      Create OfficeDocumentPersistence.cs in src/server/api/Sprk.Bff.Api/Services/Office/.
+      Move into it: CreateDocumentWithSpePointersAsync, UpdateJobStatusInDataverseAsync,
+      CheckForExistingJobAsync, GenerateDataverseUrl, and all MapDataverse* helper methods
+      (~300 lines).
+      Constructor dependencies: IDataverseService, ILogger&lt;OfficeDocumentPersistence&gt;.
+    </step>
+    <step order="4">
+      Create OfficeJobQueue.cs in src/server/api/Sprk.Bff.Api/Services/Office/.
+      Move into it: QueueUploadFinalizationAsync, GetMimeType (~150 lines).
+      Constructor dependencies: ServiceBusClient, ServiceBusOptions (IOptions&lt;ServiceBusOptions&gt;),
+      ILogger&lt;OfficeJobQueue&gt;.
+    </step>
+    <step order="5">
+      Create OfficeStorageUploader.cs in src/server/api/Sprk.Bff.Api/Services/Office/.
+      Move into it: UploadToSpeAsync (~50 lines).
+      Constructor dependency: SpeFileStore, ILogger&lt;OfficeStorageUploader&gt;.
+      Confirm no raw Graph SDK types are used — only SpeFileStore methods (ADR-007).
+    </step>
+    <step order="6">
+      Update OfficeService.cs constructor. Replace raw dependencies absorbed by the 4 new services
+      with injected instances of OfficeEmailEnricher, OfficeDocumentPersistence, OfficeJobQueue,
+      and OfficeStorageUploader.
+    </step>
+    <step order="7">
+      Refactor OfficeService.SaveAsync to delegate to the injected services rather than calling
+      the moved methods directly. Ensure all call sites within OfficeService are updated.
+      GetJobStatusAsync may stay in OfficeService or be moved to a thin OfficeJobStatusService
+      if it makes the class cleaner — document the decision in a code comment.
+    </step>
+    <step order="8">
+      Delete SimulateJobProgressAsync and any private helpers called exclusively by it.
+      Confirm with a grep that no other code in the solution calls SimulateJobProgressAsync
+      before deleting.
+    </step>
+    <step order="9">
+      Register the 4 new services in OfficeModule.cs using concrete registration
+      (services.AddScoped&lt;OfficeEmailEnricher&gt;(), etc.) following ADR-010.
+    </step>
+    <step order="10">
+      Run dotnet build from the repository root. Fix any compilation errors before proceeding.
+      Do not proceed to step 11 until the build is green.
+    </step>
+    <step order="11">
+      Verify OfficeService.cs is under 500 lines (run: wc -l on the file or count manually).
+      If it still exceeds 500 lines, identify remaining candidates to extract and extract them.
+    </step>
+    <step order="12">
+      Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — mark task 010 complete.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Office/OfficeEmailEnricher.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobQueue.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (modified)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>OfficeService.cs is fewer than 500 lines after decomposition</criterion>
+    <criterion>Four new focused service files are created: OfficeEmailEnricher.cs, OfficeDocumentPersistence.cs, OfficeJobQueue.cs, OfficeStorageUploader.cs</criterion>
+    <criterion>SimulateJobProgressAsync and its exclusive helpers are deleted from the codebase</criterion>
+    <criterion>All 4 new services are registered in OfficeModule.cs</criterion>
+    <criterion>dotnet build passes with zero errors across the entire solution</criterion>
+    <criterion>OfficeStorageUploader contains no direct Graph SDK type usage (ADR-007 compliance)</criterion>
+  </acceptance-criteria>
+</task>

@@ -133,7 +133,7 @@ export class FieldMappingService {
     const filterString = filters.length > 0 ? `$filter=${filters.join(' and ')}` : '';
     const selectString =
       '$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description';
-    const query = [filterString, selectString].filter(Boolean).join('&');
+    const query =[filterString, selectString].filter(Boolean).join('&');
 
     // STUB: [API] - S010-01: Replace with actual Dataverse query when sprk_fieldmappingprofile entity exists (Task 001)
     // For now, return empty array - real implementation would be:
@@ -208,7 +208,7 @@ export class FieldMappingService {
     const selectString =
       '$select=sprk_fieldmappingruleid,sprk_name,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive';
     const orderString = '$orderby=sprk_executionorder asc';
-    const query = `?${filterString}&${selectString}&${orderString}`;
+    const query =`?${filterString}&${selectString}&${orderString}`;
 
     // STUB: [API] - S010-02: Replace with actual Dataverse query when sprk_fieldmappingrule entity exists (Task 002)
     // For now, return empty array - real implementation would be:

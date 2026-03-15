@@ -9,7 +9,7 @@ public static class DebugEndpointExtensions
 {
     public static void MapDebugEndpoints(this WebApplication app)
     {
-        app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dv, ILogger<Program> log) =>
+        app.MapGet("/debug/document/{id:guid}", async (Guid id, IDocumentDataverseService dv, ILogger<Program> log) =>
         {
             try
             {
@@ -31,7 +31,7 @@ public static class DebugEndpointExtensions
             catch (Exception ex) { log.LogError(ex, "Error {Id}", id); return Results.Ok(new { status = "ERROR", error = ex.Message }); }
         }).AllowAnonymous();
 
-        app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dv, ILogger<Program> log) =>
+        app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDocumentDataverseService dv, ILogger<Program> log) =>
         {
             try
             {

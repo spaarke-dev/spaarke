@@ -51,6 +51,8 @@ public interface ISpendSnapshotService
 /// </remarks>
 public class SpendSnapshotService : ISpendSnapshotService
 {
+    // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries.
+    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
     private readonly FinanceOptions _options;
     private readonly ILogger<SpendSnapshotService> _logger;

@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class ToolLookupService : IToolLookupService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<ToolLookupService> _logger;
 
@@ -30,11 +30,11 @@ public class ToolLookupService : IToolLookupService
     private const string CacheKeyPrefix = "tool:code:";
 
     public ToolLookupService(
-        IDataverseService dataverseService,
+        IGenericEntityService genericEntityService,
         IMemoryCache memoryCache,
         ILogger<ToolLookupService> logger)
     {
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -84,7 +84,7 @@ public class ToolLookupService : IToolLookupService
             };
 
             // Retrieve using alternate key (indexed, fast)
-            var entity = await _dataverseService.RetrieveByAlternateKeyAsync(
+            var entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
                 "sprk_analysistool",
                 alternateKeyValues,
                 columns,

@@ -41,6 +41,7 @@ public class CommunicationAccountServiceTests
 
         _sut = new CommunicationAccountService(
             _dataverseMock.Object,
+            _dataverseMock.Object,
             _cacheMock.Object,
             _loggerMock.Object);
     }

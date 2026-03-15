@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Fix 3 Unbounded Static Dictionaries (Memory Leaks)</title>
+    <phase>1: Quick Wins</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>010, 011</blocks>
+    <tags>remediation, dotnet, memory, caching</tags>
+  </metadata>
+  <prompt>Fix 3 unbounded static dictionaries that cause memory leaks under sustained load. Replace AnalysisOrchestrationService._analysisStore with Redis IDistributedCache, change ScopeManagementService to Scoped lifecycle, and add TTL eviction to ProductionTestExecutor._testResultStore.</prompt>
+  <role>Senior .NET backend engineer with expertise in distributed caching, DI lifecycle management, and memory leak remediation.</role>
+  <goal>Zero unbounded static Dictionary fields remain in the BFF API. Each of the three dictionaries is replaced with its appropriate bounded alternative, and dotnet build passes with zero errors.</goal>
+  <context>
+    <background>Code quality audit identified 3 static Dictionary fields that grow without bound under sustained load. AnalysisOrchestrationService._analysisStore accumulates analysis state indefinitely. ScopeManagementService._links is a Singleton holding per-request link scaffolding. ProductionTestExecutor._testResultStore stores test results with no expiry. These are the highest-severity memory leak sources found in Phase 1 discovery.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modify — replace _analysisStore with Redis IDistributedCache)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Scopes/ScopeManagementService.cs (modify — remove static keyword from _links; fix handled via DI lifecycle change)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Testing/ProductionTestExecutor.cs (modify — replace Dictionary with ConcurrentDictionary + TTL eviction timer)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modify — change ScopeManagementService registration to Scoped)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-009">Use IDistributedCache (Redis) for cross-request caching. Do not introduce a hybrid L1 in-process cache without profiling proof that Redis latency is a bottleneck.</constraint>
+    <constraint source="ADR-010">DI registrations must stay at or below 15 non-framework registrations. Verify count before and after changes.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs in full — identify every read and write site for _analysisStore, understand the AnalysisInternalModel shape, and note the existing _cache field and ReloadAnalysisFromDataverseAsync method.</step>
+    <step order="2">Create an AnalysisCacheEntry slim DTO class with fields: analysisId (Guid), documentId (Guid), documentText (string), status (string), createdAt (DateTimeOffset). Place it adjacent to AnalysisOrchestrationService or in a Models subfolder consistent with project conventions.</step>
+    <step order="3">Replace all _analysisStore read operations with IDistributedCache.GetAsync using JSON deserialization. Use key pattern sdap:ai:analysis:{analysisId}. If cache miss, call ReloadAnalysisFromDataverseAsync to rebuild.</step>
+    <step order="4">Replace all _analysisStore write operations with IDistributedCache.SetAsync using JSON serialization and a 2-hour absolute TTL (DistributedCacheEntryOptions with AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2)).</step>
+    <step order="5">Remove the static _analysisStore field declaration from AnalysisOrchestrationService.</step>
+    <step order="6">Read ScopeManagementService.cs — verify that _links is used only within the scope of a single incoming request (no background threads, no cross-request sharing). Confirm it is scaffolding pending Dataverse migration.</step>
+    <step order="7">Remove the static keyword from the _links field in ScopeManagementService (make it a normal instance field). Change ScopeManagementService registration in AnalysisServicesModule.cs from Singleton (or Transient) to AddScoped. The dictionary now lives and dies per request.</step>
+    <step order="8">Read ProductionTestExecutor.cs — understand the _testResultStore field, how results are stored and read, and the overall test execution lifecycle.</step>
+    <step order="9">Replace the plain Dictionary&lt;Guid, ProductionTestResult&gt; _testResultStore with ConcurrentDictionary&lt;Guid, (ProductionTestResult Result, DateTimeOffset StoredAt)&gt;. Add a System.Threading.Timer that fires every 5 minutes and removes entries where StoredAt is older than 30 minutes. Initialize the timer in the constructor and dispose it in IDisposable.Dispose (implement IDisposable if not already).</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` and resolve any compilation errors before proceeding.</step>
+    <step order="11">Verify with: grep -rn "static.*Dictionary" src/server/api/Sprk.Bff.Api/ -- confirm zero unbounded static Dictionary fields remain in DI-managed classes.</step>
+    <step order="12">Update TASK-INDEX.md: change task 001 status from pending (🔲) to completed (✅).</step>
+  </steps>
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified — uses IDistributedCache)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisCacheEntry.cs (new DTO)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/Scopes/ScopeManagementService.cs (modified — instance field, Scoped lifecycle)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/Testing/ProductionTestExecutor.cs (modified — ConcurrentDictionary + TTL timer)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified — Scoped registration)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero static Dictionary fields that grow unboundedly remain in BFF API DI-managed classes (verified by grep).</criterion>
+    <criterion>AnalysisOrchestrationService reads and writes analysis state via IDistributedCache using the key pattern sdap:ai:analysis:{analysisId} with a 2-hour TTL.</criterion>
+    <criterion>AnalysisCacheEntry DTO exists with fields: analysisId, documentId, documentText, status, createdAt.</criterion>
+    <criterion>ScopeManagementService is registered as Scoped in the DI module and _links is an instance field (not static).</criterion>
+    <criterion>ProductionTestExecutor uses ConcurrentDictionary with a timestamp wrapper and a background timer that evicts entries older than 30 minutes.</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` passes with zero errors and zero new warnings.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Delete Dead MsalAuthProvider.ts + Create Shared Logger</title>
+    <phase>1: Quick Wins</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>020, 030</blocks>
+    <tags>remediation, typescript, pcf, cleanup</tags>
+  </metadata>
+  <prompt>Delete 4 dead MsalAuthProvider.ts copies (confirmed dead — @spaarke/auth handles authentication) and create a shared createLogger utility in @spaarke/ui-components to replace raw console.log calls. Migrate the top-10 worst console.log offender files to the shared logger.</prompt>
+  <role>Senior TypeScript/React frontend engineer with expertise in PCF control development, shared component library patterns, and frontend code quality.</role>
+  <goal>Zero MsalAuthProvider.ts files remain outside node_modules. A shared createLogger utility is exported from @spaarke/ui-components. The top-10 console.log offender files are migrated to the shared logger. PCF build passes with zero errors. At least 2,321 lines of dead code are removed.</goal>
+  <context>
+    <background>Four PCF controls each carry a local copy of MsalAuthProvider.ts (~775 lines each). These are confirmed dead code — authentication is handled by @spaarke/auth imports in all four controls. The copies are either marked @deprecated or simply unused. Separately, the codebase has hundreds of raw console.log calls scattered across PCF controls with no prefix, no environment guard, and no structured format. The AnalysisWorkspace control has an existing logger.ts utility that serves as a template for a shared version.</background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts (delete — 775-line dead copy)</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/services/auth/MsalAuthProvider.ts (delete — 775-line dead copy, marked @deprecated)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/services/auth/MsalAuthProvider.ts (delete — 775-line dead copy, marked @deprecated)</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/auth/MsalAuthProvider.ts (delete — partial dead copy)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/utils/logger.ts (read — template for shared logger implementation)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/ (create — new logger.ts file here)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (modify — export createLogger from barrel)</file>
+      <file>src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts (modify — 34 console.log calls)</file>
+      <file>src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts (modify — 32 console.log calls)</file>
+      <file>src/client/pcf/EventFormController/handlers/FieldVisibilityHandler.ts (modify — 30 console.log calls)</file>
+      <file>src/client/pcf/EventAutoAssociate/index.ts (modify — 27 console.log calls)</file>
+      <file>src/client/pcf/SpeFileViewer/control/index.ts (modify — 24 console.log calls)</file>
+      <file>src/client/pcf/SpeFileViewer/control/BffClient.ts (modify — 24 console.log calls)</file>
+      <file>src/client/pcf/DueDatesWidget/control/services/navigationService.ts (modify — 22 console.log calls)</file>
+      <file>src/client/pcf/RegardingLink/index.ts (modify — 21 console.log calls)</file>
+      <file>src/client/pcf/AssociationResolver/AssociationResolverApp.tsx (modify — 21 console.log calls)</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/index.ts (modify — 19 console.log calls)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-012">Shared utilities and components must be placed in @spaarke/ui-components and reused across controls. Do not create per-control copies of shared utilities.</constraint>
+    <constraint source="ADR-022">PCF controls use platform-provided React 16/17. The shared logger must not introduce React 18 dependencies. Pure TypeScript utility with no React import required.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">For each of the 4 PCF controls, verify that @spaarke/auth is imported and used (not MsalAuthProvider) by searching for auth-related imports in each control's main entry point. Confirm MsalAuthProvider is not imported anywhere within each control.</step>
+    <step order="2">Delete src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts.</step>
+    <step order="3">Delete src/client/pcf/UniversalDatasetGrid/control/services/auth/MsalAuthProvider.ts.</step>
+    <step order="4">Delete src/client/pcf/AnalysisWorkspace/control/services/auth/MsalAuthProvider.ts.</step>
+    <step order="5">Delete src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/auth/MsalAuthProvider.ts.</step>
+    <step order="6">Run PCF build (cd src/client/pcf &amp;&amp; npm run build) to verify all 4 controls still compile after deletion. Resolve any import errors if MsalAuthProvider was unexpectedly referenced.</step>
+    <step order="7">Read src/client/pcf/AnalysisWorkspace/control/utils/logger.ts in full — understand the existing logger pattern (prefix format, conditional logging, export shape).</step>
+    <step order="8">Create src/client/shared/Spaarke.UI.Components/src/utils/logger.ts with a createLogger(prefix: string) factory function. The returned logger object must expose: logInfo(component, message, data?) — guarded by process.env.NODE_ENV === 'development'; logWarn(component, message, data?) — guarded by development mode; logError(component, message, data?) — always logs (never guarded); logDebug(component, message, data?) — guarded by development mode. Output format: [Spaarke.{prefix}] [{component}] {message} with optional data argument passed to console.</step>
+    <step order="9">Export createLogger from the @spaarke/ui-components barrel file (src/client/shared/Spaarke.UI.Components/src/index.ts). Add the named export alongside existing exports.</step>
+    <step order="10">Migrate the top-10 console.log offender files. For each file: import createLogger from @spaarke/ui-components, create a module-level logger (e.g., const logger = createLogger('AssociationResolver')), replace console.log with logger.logInfo or logger.logDebug, replace console.warn with logger.logWarn, replace console.error with logger.logError. Use the containing control or service name as the component argument.</step>
+    <step order="11">Run PCF build again (cd src/client/pcf &amp;&amp; npm run build) — verify zero compilation errors after all migrations.</step>
+    <step order="12">Verify: find src/client -name "MsalAuthProvider.ts" -not -path "*/node_modules/*" — must return zero results.</step>
+    <step order="13">Update TASK-INDEX.md: change task 004 status from pending (🔲) to completed (✅).</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts (deleted)</output>
+    <output type="file">src/client/pcf/UniversalDatasetGrid/control/services/auth/MsalAuthProvider.ts (deleted)</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/services/auth/MsalAuthProvider.ts (deleted)</output>
+    <output type="file">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/auth/MsalAuthProvider.ts (deleted)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/utils/logger.ts (new — createLogger factory)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/index.ts (modified — createLogger exported)</output>
+    <output type="file">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/EventFormController/handlers/FieldVisibilityHandler.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/EventAutoAssociate/index.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/SpeFileViewer/control/index.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/SpeFileViewer/control/BffClient.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/DueDatesWidget/control/services/navigationService.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/RegardingLink/index.ts (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx (modified — migrated to shared logger)</output>
+    <output type="file">src/client/pcf/SpeDocumentViewer/control/index.ts (modified — migrated to shared logger)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero MsalAuthProvider.ts files remain in the repository outside of node_modules (verified by find command).</criterion>
+    <criterion>A minimum of 2,321 lines of dead code are removed (4 file deletions x ~775 lines average).</criterion>
+    <criterion>createLogger(prefix) factory function exists in src/client/shared/Spaarke.UI.Components/src/utils/logger.ts and is exported from the package barrel.</criterion>
+    <criterion>createLogger returns an object with logInfo, logWarn, logError, and logDebug methods using the format [Spaarke.{prefix}] [{component}] {message}.</criterion>
+    <criterion>logInfo, logWarn, and logDebug are guarded behind process.env.NODE_ENV === 'development'. logError always logs.</criterion>
+    <criterion>All 10 listed top offender files have been migrated from raw console.log to the shared logger.</criterion>
+    <criterion>PCF build (npm run build in src/client/pcf) passes with zero errors after all changes.</criterion>
+  </acceptance-criteria>
+</task>

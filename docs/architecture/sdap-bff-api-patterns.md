@@ -289,34 +289,58 @@ public async Task<DriveItem> UploadLargeFileAsync(
 - <4MB: Direct upload via `PUT /content`
 - ≥4MB: Upload session with chunking
 
-### IDataverseService (Metadata Queries)
+### IDataverseService (Segregated Interfaces)
 
-**Purpose**: Query Dataverse for relationship metadata (Phase 7).
+**Purpose**: Query Dataverse for entity and metadata operations. As of R2, the interface is segregated into 9 focused interfaces with a composite for backward compatibility.
+
+**Interface Segregation** (R2):
+
+| Interface | Domain | Methods |
+|-----------|--------|---------|
+| `IDocumentDataverseService` | Document CRUD + profiles | ~12 |
+| `IAnalysisDataverseService` | Analysis records + scope resolution | ~8 |
+| `IGenericEntityService` | Generic entity CRUD + search | ~10 |
+| `IProcessingJobService` | Job lifecycle management | ~6 |
+| `IEventDataverseService` | Event + todo operations | ~5 |
+| `IFieldMappingDataverseService` | Field mapping configuration | ~4 |
+| `IKpiDataverseService` | KPI metrics + scoring | ~6 |
+| `ICommunicationDataverseService` | Email + communication records | ~7 |
+| `IDataverseHealthService` | Health check operations | ~2 |
+
+`IDataverseService` is now a composite interface inheriting all 9. Existing consumers using `IDataverseService` continue to work unchanged. New consumers should inject the narrowest applicable interface.
 
 ```csharp
-// IDataverseService.cs
-public interface IDataverseService
-{
-    Task<NavigationPropertyMetadata> GetLookupNavigationPropertyAsync(
-        string childEntity,
-        string relationshipSchemaName);
-        
-    Task<NavigationPropertyMetadata> GetCollectionNavigationPropertyAsync(
-        string parentEntity,
-        string relationshipSchemaName);
-        
-    Task<DocumentInfo> GetDocumentAsync(string documentId);
-}
+// Composite interface — backward compatible
+public interface IDataverseService :
+    IDocumentDataverseService,
+    IAnalysisDataverseService,
+    IGenericEntityService,
+    IProcessingJobService,
+    IEventDataverseService,
+    IFieldMappingDataverseService,
+    IKpiDataverseService,
+    ICommunicationDataverseService,
+    IDataverseHealthService
+{ }
 
+// Consumers should inject the narrowest interface
+public class DocumentUploadService(IDocumentDataverseService dataverse) { }
+public class AnalysisOrchestrationService(IAnalysisDataverseService dataverse) { }
+```
+
+Both implementations (`DataverseServiceClientImpl`, `DataverseWebApiService`) implement the composite interface.
+
+See [Interface Segregation Guide](../guides/INTERFACE-SEGREGATION-GUIDE.md) for the full decomposition strategy.
+
+```csharp
 // DataverseServiceClientImpl.cs
 public class DataverseServiceClientImpl : IDataverseService
 {
     private readonly ServiceClient _serviceClient;
-    
+
     public DataverseServiceClientImpl(IConfiguration config)
     {
-        // Connection string authentication (Microsoft recommended)
-        var connectionString = 
+        var connectionString =
             $"AuthType=ClientSecret;" +
             $"Url={config["Dataverse:ServiceUrl"]};" +
             $"ClientId={config["API_APP_ID"]};" +
@@ -324,28 +348,31 @@ public class DataverseServiceClientImpl : IDataverseService
 
         _serviceClient = new ServiceClient(connectionString);
     }
-    
-    public async Task<NavigationPropertyMetadata> GetLookupNavigationPropertyAsync(
-        string childEntity, string relationshipSchemaName)
-    {
-        var query = new QueryExpression("relationship")
-        {
-            ColumnSet = new ColumnSet("referencingentitynavigationpropertyname"),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    new ConditionExpression("schemaname", ConditionOperator.Equal,
-                                           relationshipSchemaName)
-                }
-            }
-        };
-
-        var results = await Task.Run(() => _serviceClient.RetrieveMultiple(query));
-        // Extract and return navigation property name
-    }
 }
 ```
+
+### Decomposed Backend Services (R2)
+
+The following focused services were extracted from God classes during R2:
+
+**From OfficeService.cs** (2,907 → 1,951 lines):
+
+| Service | Responsibility |
+|---------|---------------|
+| `OfficeEmailEnricher` | Graph email fetch + MimeKit EML construction |
+| `OfficeDocumentPersistence` | Dataverse CRUD for documents + jobs |
+| `OfficeJobQueue` | Service Bus job queuing |
+| `OfficeStorageUploader` | SPE upload operations |
+
+**From AnalysisOrchestrationService.cs** (21 → 10 constructor deps):
+
+| Service | Responsibility |
+|---------|---------------|
+| `AnalysisDocumentLoader` | Text extraction, document reload, caching |
+| `AnalysisRagProcessor` | RAG search, cache key computation, tenant resolution |
+| `AnalysisResultPersistence` | Output storage, RAG indexing, working doc finalization |
+
+See [Service Decomposition Guide](../guides/SERVICE-DECOMPOSITION-GUIDE.md) for the full decomposition strategy.
 
 ---
 

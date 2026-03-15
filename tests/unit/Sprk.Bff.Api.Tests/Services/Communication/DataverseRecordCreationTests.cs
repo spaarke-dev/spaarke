@@ -52,6 +52,7 @@ public class DataverseRecordCreationTests
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -67,12 +68,13 @@ public class DataverseRecordCreationTests
         var speFileStore = new SpeFileStore(
             new ContainerOperations(fakeGraphFactory, Mock.Of<ILogger<ContainerOperations>>()),
             new DriveItemOperations(fakeGraphFactory, Mock.Of<ILogger<DriveItemOperations>>()),
-            new UploadSessionManager(fakeGraphFactory, Mock.Of<ILogger<UploadSessionManager>>()),
+            new UploadSessionManager(fakeGraphFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(fakeGraphFactory, Mock.Of<ILogger<UserOperations>>()));
 
         return new CommunicationService(
             _graphClientFactoryMock.Object,
             senderValidator,
+            _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             emlGenerationService,
             speFileStore,

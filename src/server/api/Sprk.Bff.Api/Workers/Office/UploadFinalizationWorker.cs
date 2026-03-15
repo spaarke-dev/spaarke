@@ -47,7 +47,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
     private readonly GraphOptions _graphOptions;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly IProcessingJobService _processingJobService;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
     private readonly JobSubmissionService _jobSubmissionService;
@@ -79,7 +80,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions,
         IOptions<GraphOptions> graphOptions,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
+        IProcessingJobService processingJobService,
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilterService,
         JobSubmissionService jobSubmissionService,
@@ -92,7 +94,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
         _graphOptions = graphOptions?.Value ?? throw new ArgumentNullException(nameof(graphOptions));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
@@ -682,7 +685,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 : payload.AttachmentMetadata?.OriginalFileName
         };
 
-        var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+        var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);
 
         _logger.LogInformation(
@@ -739,7 +742,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             updateRequest.IsEmailArchive = true;
         }
 
-        await _dataverseService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
+        await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
         _logger.LogInformation(
             "Document record updated with SPE pointers and metadata: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
@@ -800,7 +803,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             DocumentId = documentId
         };
 
-        var emailArtifactId = await _dataverseService.CreateEmailArtifactAsync(request, cancellationToken);
+        var emailArtifactId = await _processingJobService.CreateEmailArtifactAsync(request, cancellationToken);
 
         _logger.LogInformation(
             "EmailArtifact created: EmailArtifactId={EmailArtifactId}, DocumentId={DocumentId}",
@@ -829,7 +832,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             DocumentId = documentId
         };
 
-        var attachmentArtifactId = await _dataverseService.CreateAttachmentArtifactAsync(request, cancellationToken);
+        var attachmentArtifactId = await _processingJobService.CreateAttachmentArtifactAsync(request, cancellationToken);
 
         _logger.LogInformation(
             "AttachmentArtifact created: AttachmentArtifactId={AttachmentArtifactId}, DocumentId={DocumentId}",
@@ -880,7 +883,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     : (DateTime?)null
             };
 
-            await _dataverseService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
+            await _processingJobService.UpdateProcessingJobAsync(jobId, updateRequest, cancellationToken);
 
             _logger.LogInformation(
                 "ProcessingJob {JobId} updated in Dataverse: Status={Status}, Progress={Progress}%",
@@ -1173,7 +1176,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Description = $"Email attachment from {parentFileName}"
         };
 
-        var childDocumentIdStr = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+        var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
 
         if (!Guid.TryParse(childDocumentIdStr, out var childDocumentId))
         {
@@ -1209,7 +1212,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             EmailParentId = internetMessageId
         };
 
-        await _dataverseService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
+        await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 
         _logger.LogInformation(
             "Created child document {ChildDocumentId} for attachment '{AttachmentName}' (parent: {ParentDocumentId})",

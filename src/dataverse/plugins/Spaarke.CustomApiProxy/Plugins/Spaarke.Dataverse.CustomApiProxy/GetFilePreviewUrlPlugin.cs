@@ -40,6 +40,7 @@ namespace Spaarke.Dataverse.CustomApiProxy
     /// - AuthType: ClientCredentials (1)
     /// - ClientId, ClientSecret, TenantId, Scope
     /// </summary>
+    [Obsolete("Violates ADR-002 via BaseProxyPlugin. Use BFF API + Service Bus worker pattern instead.")]
     public class GetFilePreviewUrlPlugin : BaseProxyPlugin
     {
         private const string SERVICE_NAME = "SDAP_BFF_API";

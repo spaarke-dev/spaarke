@@ -26,7 +26,8 @@ public sealed class CommunicationService
 {
     private readonly IGraphClientFactory _graphClientFactory;
     private readonly ApprovedSenderValidator _senderValidator;
-    private readonly IDataverseService _dataverseService;
+    private readonly ICommunicationDataverseService _communicationService;
+    private readonly IGenericEntityService _genericEntityService;
     private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
     private readonly CommunicationAccountService _accountService;
@@ -37,7 +38,8 @@ public sealed class CommunicationService
     public CommunicationService(
         IGraphClientFactory graphClientFactory,
         ApprovedSenderValidator senderValidator,
-        IDataverseService dataverseService,
+        ICommunicationDataverseService communicationService,
+        IGenericEntityService genericEntityService,
         EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
         CommunicationAccountService accountService,
@@ -47,7 +49,8 @@ public sealed class CommunicationService
     {
         _graphClientFactory = graphClientFactory;
         _senderValidator = senderValidator;
-        _dataverseService = dataverseService;
+        _communicationService = communicationService;
+        _genericEntityService = genericEntityService;
         _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
         _accountService = accountService;
@@ -734,7 +737,7 @@ public sealed class CommunicationService
         {
             try
             {
-                var systemUserId = await _dataverseService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+                var systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
                 if (systemUserId.HasValue)
                 {
                     communication["sprk_sentby"] = new EntityReference("systemuser", systemUserId.Value);
@@ -770,7 +773,7 @@ public sealed class CommunicationService
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
-        var recordId = await _dataverseService.CreateAsync(communication, ct);
+        var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
         _logger.LogInformation(
             "Dataverse communication record created (user mode) | Id: {RecordId}, UserEmail: {UserEmail}, CorrelationId: {CorrelationId}",
@@ -898,7 +901,7 @@ public sealed class CommunicationService
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
-        var recordId = await _dataverseService.CreateAsync(communication, ct);
+        var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
         _logger.LogInformation(
             "Dataverse communication record created | Id: {RecordId}, CorrelationId: {CorrelationId}",
@@ -1008,7 +1011,7 @@ public sealed class CommunicationService
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
 
-        var documentId = await _dataverseService.CreateAsync(document, ct);
+        var documentId = await _genericEntityService.CreateAsync(document, ct);
 
         _logger.LogInformation(
             "Created sprk_document record for archived .eml | DocumentId: {DocumentId}, CommunicationId: {CommunicationId}",
@@ -1049,7 +1052,7 @@ public sealed class CommunicationService
                 ["sprk_attachmenttype"] = new OptionSetValue(100000000) // File
             };
 
-            var attachmentId = await _dataverseService.CreateAsync(attachment, ct);
+            var attachmentId = await _genericEntityService.CreateAsync(attachment, ct);
             createdCount++;
 
             _logger.LogDebug(
@@ -1094,7 +1097,7 @@ public sealed class CommunicationService
                     ["sprk_graphdriveid"] = driveId,
                 };
 
-                var documentId = await _dataverseService.CreateAsync(attachmentDoc, ct);
+                var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
                 _logger.LogInformation(
                     "Created sprk_document for outbound attachment | DocumentId: {DocumentId}, FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",

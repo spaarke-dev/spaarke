@@ -11,14 +11,14 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// </summary>
 public sealed class DocumentStorageResolver : IDocumentStorageResolver
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<DocumentStorageResolver> _logger;
 
     public DocumentStorageResolver(
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         ILogger<DocumentStorageResolver> logger)
     {
-        _dataverseService = dataverseService;
+        _documentService = documentService;
         _logger = logger;
     }
 
@@ -29,7 +29,7 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
         _logger.LogDebug("Resolving SPE pointers for document {DocumentId}", documentId);
 
         // Query Dataverse for document record
-        var document = await _dataverseService.GetDocumentAsync(
+        var document = await _documentService.GetDocumentAsync(
             documentId.ToString(),
             cancellationToken);
 

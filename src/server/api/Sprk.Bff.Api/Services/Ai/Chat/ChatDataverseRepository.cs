@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   - <c>sprk_aichatmessage</c> — individual messages (SessionId, Role, Content, TokenCount, SequenceNumber)
 ///
 /// Constraint (ADR-002): No AI processing here — pure data persistence.
-/// Constraint (ADR-010): Registered as scoped (one per request); IDataverseService is a singleton.
+/// Constraint (ADR-010): Registered as scoped (one per request); narrow interfaces are singletons.
 /// </summary>
 public sealed class ChatDataverseRepository : IChatDataverseRepository
 {
@@ -20,14 +20,17 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     private const string SummaryEntityName = "sprk_aichatsummary";
     private const string MessageEntityName = "sprk_aichatmessage";
 
-    private readonly IDataverseService _dataverse;
+    private readonly IGenericEntityService _genericEntityService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<ChatDataverseRepository> _logger;
 
     public ChatDataverseRepository(
-        IDataverseService dataverse,
+        IGenericEntityService genericEntityService,
+        IFieldMappingDataverseService fieldMappingService,
         ILogger<ChatDataverseRepository> logger)
     {
-        _dataverse = dataverse;
+        _genericEntityService = genericEntityService;
+        _fieldMappingService = fieldMappingService;
         _logger = logger;
     }
 
@@ -44,7 +47,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             ["sprk_isarchived"] = false
         };
 
-        var id = await _dataverse.CreateAsync(entity, ct);
+        var id = await _genericEntityService.CreateAsync(entity, ct);
 
         _logger.LogInformation(
             "Created sprk_aichatsummary {RecordId} for session {SessionId} (tenant={TenantId})",
@@ -134,7 +137,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             ["sprk_sequencenumber"] = message.SequenceNumber
         };
 
-        var id = await _dataverse.CreateAsync(entity, ct);
+        var id = await _genericEntityService.CreateAsync(entity, ct);
 
         _logger.LogDebug(
             "Persisted message {MessageId} to Dataverse (session={SessionId}, role={Role}, seqNum={SeqNum})",
@@ -155,7 +158,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
         // then retrieve each. This is less efficient than FetchXML but works with the
         // existing IDataverseService API surface.
         // Phase D will add a proper GetMessagesAsync to IDataverseService for efficiency.
-        var messageIds = await _dataverse.QueryChildRecordIdsAsync(
+        var messageIds = await _fieldMappingService.QueryChildRecordIdsAsync(
             MessageEntityName,
             "sprk_sessionid",
             Guid.Empty, // sprk_sessionid is a text field, not a lookup GUID — workaround pending

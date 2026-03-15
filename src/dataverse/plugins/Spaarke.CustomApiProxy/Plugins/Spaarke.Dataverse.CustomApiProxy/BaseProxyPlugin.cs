@@ -12,6 +12,7 @@ namespace Spaarke.Dataverse.CustomApiProxy
     /// Base plugin class providing common functionality for all Custom API Proxy operations.
     /// Handles authentication, configuration retrieval, audit logging, and error handling.
     /// </summary>
+    [Obsolete("Violates ADR-002: makes HTTP calls, uses Thread.Sleep, and constructs HttpClient per execution. Use BFF API + Service Bus worker pattern instead. See projects/code-quality-and-assurance-r2/notes/baseplugin-adr002-assessment.md")]
     public abstract class BaseProxyPlugin : IPlugin
     {
         protected ITracingService TracingService { get; private set; }

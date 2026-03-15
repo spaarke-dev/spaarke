@@ -46,6 +46,7 @@ public class SendCommunicationToolHandlerRegistrationTests
 
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -57,6 +58,7 @@ public class SendCommunicationToolHandlerRegistrationTests
         var communicationService = new CommunicationService(
             Mock.Of<IGraphClientFactory>(),
             senderValidator,
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
@@ -153,6 +155,7 @@ public class SendCommunicationToolHandlerRegistrationTests
 
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
@@ -163,6 +166,7 @@ public class SendCommunicationToolHandlerRegistrationTests
         var communicationService = new CommunicationService(
             Mock.Of<IGraphClientFactory>(),
             senderValidator,
+            Mock.Of<IDataverseService>(),
             Mock.Of<IDataverseService>(),
             null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here

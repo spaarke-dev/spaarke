@@ -35,7 +35,7 @@ public interface ISignalEvaluationService
 /// </summary>
 public class SignalEvaluationService : ISignalEvaluationService
 {
-    private readonly IDataverseService _dataverseService;
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly FinanceOptions _options;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<SignalEvaluationService> _logger;
@@ -101,12 +101,12 @@ public class SignalEvaluationService : ISignalEvaluationService
     ];
 
     public SignalEvaluationService(
-        IDataverseService dataverseService,
+        IFieldMappingDataverseService fieldMappingService,
         IOptions<FinanceOptions> options,
         FinanceTelemetry telemetry,
         ILogger<SignalEvaluationService> logger)
     {
-        _dataverseService = dataverseService;
+        _fieldMappingService = fieldMappingService;
         _options = options.Value;
         _telemetry = telemetry;
         _logger = logger;
@@ -128,7 +128,7 @@ public class SignalEvaluationService : ISignalEvaluationService
             matterId, _rules.Count);
 
         // 1. Query snapshot record IDs for this matter
-        var snapshotIds = await _dataverseService.QueryChildRecordIdsAsync(
+        var snapshotIds = await _fieldMappingService.QueryChildRecordIdsAsync(
             SnapshotEntity,
             SnapshotMatterLookup,
             matterId,
@@ -148,7 +148,7 @@ public class SignalEvaluationService : ISignalEvaluationService
 
         foreach (var snapshotId in snapshotIds)
         {
-            var fields = await _dataverseService.RetrieveRecordFieldsAsync(
+            var fields = await _fieldMappingService.RetrieveRecordFieldsAsync(
                 SnapshotEntity,
                 snapshotId,
                 SnapshotSelectFields,
@@ -223,7 +223,7 @@ public class SignalEvaluationService : ISignalEvaluationService
             [SignalGeneratedAt] = DateTime.UtcNow
         };
 
-        await _dataverseService.UpdateRecordFieldsAsync(
+        await _fieldMappingService.UpdateRecordFieldsAsync(
             SignalEntity,
             signalRecordId,
             fields,

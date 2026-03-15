@@ -149,7 +149,7 @@ public static class EventEndpoints
         [FromQuery] DateTime? dueDateTo,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 50,
-        IDataverseService dataverseService = null!,
+        IEventDataverseService dataverseService = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
     {
@@ -244,7 +244,7 @@ public static class EventEndpoints
     /// <returns>The event if found, or 404 ProblemDetails if not found.</returns>
     private static async Task<IResult> GetEventByIdAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -296,7 +296,7 @@ public static class EventEndpoints
     /// <returns>201 Created with event details on success, or 400 ProblemDetails if validation fails.</returns>
     private static async Task<IResult> CreateEventAsync(
         [FromBody] ApiCreateEventRequest request,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -380,7 +380,7 @@ public static class EventEndpoints
     private static async Task<IResult> UpdateEventAsync(
         Guid id,
         [FromBody] ApiUpdateEventRequest request,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -488,7 +488,7 @@ public static class EventEndpoints
     /// <returns>204 No Content on success, or 404 ProblemDetails if not found.</returns>
     private static async Task<IResult> DeleteEventAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -532,7 +532,7 @@ public static class EventEndpoints
     /// Queries events from Dataverse with filtering and pagination.
     /// </summary>
     private static async Task<(EventDto[] Items, int TotalCount)> QueryEventsAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         int? regardingRecordType,
         string? regardingRecordId,
         Guid? eventTypeId,
@@ -569,7 +569,7 @@ public static class EventEndpoints
     /// Gets a single event by ID from Dataverse.
     /// </summary>
     private static async Task<EventDto?> GetEventByIdFromDataverseAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid id,
         CancellationToken ct)
     {
@@ -622,7 +622,7 @@ public static class EventEndpoints
     /// An Event Log entry is created to track the state transition.
     /// </remarks>
     private static async Task SoftDeleteEventAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid id,
         CancellationToken ct)
     {
@@ -644,7 +644,7 @@ public static class EventEndpoints
     /// Creates the event record and an Event Log entry for the creation.
     /// </remarks>
     private static async Task<(Guid Id, DateTime CreatedOn)> CreateEventInDataverseAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ApiCreateEventRequest request,
         CancellationToken ct)
     {
@@ -682,7 +682,7 @@ public static class EventEndpoints
     /// Only updates fields that are non-null in the request.
     /// </remarks>
     private static async Task UpdateEventInDataverseAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid id,
         ApiUpdateEventRequest request,
         CancellationToken ct)
@@ -761,7 +761,7 @@ public static class EventEndpoints
     /// <returns>200 OK with action response on success, 400 if invalid transition, or 404 if not found.</returns>
     private static async Task<IResult> CompleteEventAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -846,7 +846,7 @@ public static class EventEndpoints
     /// <returns>200 OK with action response on success, 400 if invalid transition, or 404 if not found.</returns>
     private static async Task<IResult> CancelEventAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -988,7 +988,7 @@ public static class EventEndpoints
     /// Updates the statuscode field and, for completion, sets the completeddate.
     /// </remarks>
     private static async Task UpdateEventStatusAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid id,
         int newStatusCode,
         CancellationToken ct)
@@ -1011,7 +1011,7 @@ public static class EventEndpoints
     /// <returns>List of event log entries, or 404 if event not found.</returns>
     private static async Task<IResult> GetEventLogsAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1062,7 +1062,7 @@ public static class EventEndpoints
     /// Queries event log entries from Dataverse.
     /// </summary>
     private static async Task<EventLogDto[]> QueryEventLogsAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid eventId,
         CancellationToken ct)
     {
@@ -1099,7 +1099,7 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     private static async Task CreateEventLogAsync(
-        IDataverseService dataverseService,
+        IEventDataverseService dataverseService,
         Guid eventId,
         int action,
         string? description,

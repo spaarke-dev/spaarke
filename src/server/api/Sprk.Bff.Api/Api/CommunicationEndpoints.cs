@@ -251,7 +251,7 @@ public static class CommunicationEndpoints
 
     private static async Task<IResult> GetCommunicationStatusAsync(
         Guid id,
-        IDataverseService dataverseService,
+        IGenericEntityService dataverseService,
         ILogger<CommunicationService> logger,
         CancellationToken ct)
     {

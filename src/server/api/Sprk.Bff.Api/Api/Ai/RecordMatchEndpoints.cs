@@ -89,7 +89,7 @@ public static class RecordMatchEndpoints
     /// </summary>
     private static async Task<IResult> AssociateRecord(
         AssociateRecordRequest request,
-        IDataverseService dataverseService,
+        IDocumentDataverseService dataverseService,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {

@@ -45,6 +45,7 @@ public class IncomingAssociationResolverTests
 
         _resolver = new IncomingAssociationResolver(
             _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
             _graphClientFactoryMock.Object,
             Mock.Of<ILogger<IncomingAssociationResolver>>());
     }

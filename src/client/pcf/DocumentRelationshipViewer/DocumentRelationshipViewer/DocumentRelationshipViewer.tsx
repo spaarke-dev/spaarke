@@ -24,7 +24,7 @@ import type { DocumentNode } from './types/graph';
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.31';
+const CONTROL_VERSION = '1.0.32';
 
 /**
  * Props for the DocumentRelationshipViewer component

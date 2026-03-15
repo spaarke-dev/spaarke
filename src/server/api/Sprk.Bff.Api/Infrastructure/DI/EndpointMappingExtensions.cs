@@ -33,7 +33,7 @@ public static class EndpointMappingExtensions
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
-        app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
+        app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDocumentDataverseService dataverseService, ILogger<Program> logger) =>
         {
             logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
             try
@@ -182,7 +182,7 @@ public static class EndpointMappingExtensions
         });
     }
 
-    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseService dataverseService)
+    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService)
     {
         try
         {
@@ -198,7 +198,7 @@ public static class EndpointMappingExtensions
         }
     }
 
-    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseService dataverseService)
+    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseHealthService dataverseService)
     {
         try
         {

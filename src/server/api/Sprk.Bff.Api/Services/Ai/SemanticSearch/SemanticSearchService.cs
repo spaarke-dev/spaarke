@@ -35,7 +35,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private readonly IEmbeddingCache _embeddingCache;
     private readonly IQueryPreprocessor _queryPreprocessor;
     private readonly IResultPostprocessor _resultPostprocessor;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<SemanticSearchService> _logger;
 
     // Semantic configuration name from the index definition
@@ -57,7 +57,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         IEmbeddingCache embeddingCache,
         IQueryPreprocessor queryPreprocessor,
         IResultPostprocessor resultPostprocessor,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         ILogger<SemanticSearchService> logger)
     {
         _deploymentService = deploymentService;
@@ -65,7 +65,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _embeddingCache = embeddingCache;
         _queryPreprocessor = queryPreprocessor;
         _resultPostprocessor = resultPostprocessor;
-        _dataverseService = dataverseService;
+        _documentService = documentService;
         _logger = logger;
     }
 
@@ -500,7 +500,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
             try
             {
-                var doc = await _dataverseService.GetDocumentAsync(result.DocumentId, cancellationToken);
+                var doc = await _documentService.GetDocumentAsync(result.DocumentId, cancellationToken);
                 if (doc != null)
                 {
                     enriched.Add(result with

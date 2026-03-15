@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class ScopeManagementService : IScopeManagementService
 {
+    // INTENTIONAL: Keeps IDataverseService — scaffolding service with no method calls yet.
+    // Will be narrowed to specific interface(s) when Dataverse entity operations are implemented.
     private readonly IDataverseService _dataverseService;
     private readonly IScopeResolverService _scopeResolver;
     private readonly ILogger<ScopeManagementService> _logger;
@@ -397,8 +399,9 @@ public class ScopeManagementService : IScopeManagementService
 
     // In-memory link storage for scaffolding (will be replaced with Dataverse calls)
     // Key: (playbookId, scopeType) -> Set of scopeIds
-    private static readonly Dictionary<(Guid PlaybookId, ScopeType ScopeType), HashSet<Guid>> _links = new();
-    private static readonly object _lockObject = new();
+    // Scoped lifetime: dictionary lives and dies per HTTP request (ADR-009 compliance).
+    private readonly Dictionary<(Guid PlaybookId, ScopeType ScopeType), HashSet<Guid>> _links = new();
+    private readonly object _lockObject = new();
 
     /// <inheritdoc />
     public async Task LinkScopeToPlaybookAsync(Guid playbookId, ScopeType scopeType, Guid scopeId, CancellationToken cancellationToken)

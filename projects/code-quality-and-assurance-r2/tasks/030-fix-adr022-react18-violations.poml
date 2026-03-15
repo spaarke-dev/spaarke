@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Fix ADR-022 Violations — React 18 createRoot in 3 PCF Controls</title>
+    <phase>4: Architecture Compliance</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>032</blocks>
+    <tags>remediation, typescript, pcf, adr</tags>
+  </metadata>
+  <prompt>Fix 3 PCF controls that violate ADR-022 by importing from react-dom/client and using React 18 createRoot API. Replace with the correct React 16 ReactDOM.render() pattern. Reference SemanticSearchControl as the correct implementation pattern. The 3 controls are: SpeFileViewer, SpeDocumentViewer, and UniversalDatasetGrid.</prompt>
+  <role>Senior PCF developer familiar with Power Platform component lifecycle and ADR compliance</role>
+  <goal>Zero imports from react-dom/client across all PCF controls. All 3 affected controls use ReactDOM.render() and ReactDOM.unmountComponentAtNode() following the React 16 pattern. PCF build passes with zero errors.</goal>
+  <context>
+    <background>ADR-022 establishes that PCF field-bound controls must use platform-provided React 16/17 APIs — not React 18. The Power Platform runtime provides React 16/17; controls that import react-dom/client are importing a React 18 API that is bundled separately and can cause version conflicts at runtime. SemanticSearchControl correctly uses the React 16 pattern and serves as the reference implementation for this fix.</background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/control/index.ts (modify — replace createRoot with ReactDOM.render)</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/index.ts (modify — replace createRoot with ReactDOM.render)</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/index.ts (modify — replace createRoot with ReactDOM.render)</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts (read — correct React 16 reference pattern)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-022">PCF controls MUST use platform-provided React 16/17 APIs. import from 'react-dom/client' is PROHIBITED. Use ReactDOM.render(element, container) and ReactDOM.unmountComponentAtNode(container).</constraint>
+    <constraint source="ADR-012">No React 18 APIs in PCF — createRoot, useId, useSyncExternalStore (unless polyfilled), startTransition are all prohibited.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts to understand the correct React 16 pattern: import, render, and unmount calls.</step>
+    <step order="2">Read src/client/pcf/SpeFileViewer/control/index.ts — find: line 13 createRoot import, line 442 this.root = createRoot(this.container), and the unmount call. Note the private root field.</step>
+    <step order="3">Fix SpeFileViewer/control/index.ts: (a) replace import from 'react-dom/client' with import * as ReactDOM from 'react-dom'; (b) remove private root field; (c) replace this.root = createRoot(this.container) with direct ReactDOM.render(element, this.container) call; (d) replace this.root.render(...) with ReactDOM.render(..., this.container); (e) replace this.root.unmount() with ReactDOM.unmountComponentAtNode(this.container).</step>
+    <step order="4">Read src/client/pcf/SpeDocumentViewer/control/index.ts — find: line 13 createRoot import, line 423 createRoot call, and root field usage.</step>
+    <step order="5">Fix SpeDocumentViewer/control/index.ts using the same pattern as step 3.</step>
+    <step order="6">Read src/client/pcf/UniversalDatasetGrid/control/index.ts — find: line 7 import * as ReactDOM from 'react-dom/client', line 64 ReactDOM.createRoot(container), and subsequent root.render/root.unmount calls.</step>
+    <step order="7">Fix UniversalDatasetGrid/control/index.ts: (a) change import to import * as ReactDOM from 'react-dom'; (b) remove root field if present; (c) replace ReactDOM.createRoot(container) pattern with ReactDOM.render(element, container); (d) replace root.unmount() with ReactDOM.unmountComponentAtNode(container).</step>
+    <step order="8">Run PCF build: cd src/client/pcf &amp;&amp; npm run build — verify zero TypeScript errors.</step>
+    <step order="9">Verify zero violations remain: confirm no files import from react-dom/client in src/client/pcf/.</step>
+    <step order="10">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 030 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/SpeFileViewer/control/index.ts (modified)</output>
+    <output type="file">src/client/pcf/SpeDocumentViewer/control/index.ts (modified)</output>
+    <output type="file">src/client/pcf/UniversalDatasetGrid/control/index.ts (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero files in src/client/pcf/ import from 'react-dom/client'.</criterion>
+    <criterion>SpeFileViewer/control/index.ts uses ReactDOM.render() and ReactDOM.unmountComponentAtNode() — no createRoot, no Root type, no private root field.</criterion>
+    <criterion>SpeDocumentViewer/control/index.ts uses ReactDOM.render() and ReactDOM.unmountComponentAtNode() — no createRoot.</criterion>
+    <criterion>UniversalDatasetGrid/control/index.ts uses ReactDOM.render() and ReactDOM.unmountComponentAtNode() — no createRoot.</criterion>
+    <criterion>All 3 fixed controls follow the same import pattern as SemanticSearchControl.</criterion>
+    <criterion>PCF build passes with zero TypeScript errors.</criterion>
+  </acceptance-criteria>
+</task>

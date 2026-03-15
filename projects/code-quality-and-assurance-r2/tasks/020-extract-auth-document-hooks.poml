@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Extract useAuth + useDocumentResolution Hooks</title>
+    <phase>3: Frontend Structural Decomposition</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>021, 022</blocks>
+    <tags>refactoring, typescript, pcf</tags>
+  </metadata>
+  <prompt>Extract 2 foundational hooks from AnalysisWorkspaceApp.tsx (1,564 lines, 29 useState calls) to begin structural decomposition of the oversized component. Create useAuth and useDocumentResolution hooks following shared library hook conventions.</prompt>
+  <role>Senior React developer specializing in hooks and component architecture</role>
+  <goal>Two new hook files created in control/hooks/ that absorb auth and document resolution state from AnalysisWorkspaceApp.tsx, reducing component complexity and enabling further decomposition in tasks 021 and 022.</goal>
+  <context>
+    <background>AnalysisWorkspaceApp.tsx has grown to 1,564 lines with 29 useState calls — well beyond maintainable size. The frontend structural decomposition phase extracts cohesive state clusters into custom hooks, following the shared library hook conventions (UseXxxOptions/UseXxxResult types, useCallback wrapping). This task handles the two foundational hooks: authentication state and document ID resolution from PCF context.</background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modify — extract auth and resolution state)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (create — 2 new hook files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts (read — convention reference for hook pattern)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-012">Hooks must be React 16/17 compatible — no React 18 APIs (no useId, no useSyncExternalStore unless polyfilled).</constraint>
+    <constraint source="ADR-021">Any UI-touching changes must maintain Fluent v9 compliance; hooks themselves are logic-only and not UI-constrained.</constraint>
+    <constraint source="ADR-022">PCF controls use platform-provided React 16/17. Custom hooks must not import or require React 18 APIs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisWorkspaceApp.tsx lines 386-487 to understand auth state (isAuthInitialized, sprkChatAccessToken, sprkChatSessionId) and document resolution state (resolvedDocumentId, resolvedContainerId, resolvedFileId, resolvedDocumentName, playbookId).</step>
+    <step order="2">Read src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts to understand the UseXxxOptions/UseXxxResult type convention and useCallback wrapping pattern.</step>
+    <step order="3">Create src/client/pcf/AnalysisWorkspace/control/hooks/useAuth.ts with UseAuthOptions and UseAuthResult types. Absorb: isAuthInitialized state, sprkChatAccessToken state, sprkChatSessionId state, auth check effect, getAccessToken callback, SprkChat token refresh interval. Return: { isAuthInitialized, accessToken, sessionId, getAccessToken }.</step>
+    <step order="4">Create src/client/pcf/AnalysisWorkspace/control/hooks/useDocumentResolution.ts with UseDocumentResolutionOptions and UseDocumentResolutionResult types. Absorb: resolvedDocumentId, resolvedContainerId, resolvedFileId, resolvedDocumentName, playbookId state and the mount-time ID resolution logic from PCF context/Dataverse. Return: { documentId, containerId, fileId, documentName, playbookId }.</step>
+    <step order="5">Update AnalysisWorkspaceApp.tsx to import and use both hooks, replacing the inline state declarations and effects with hook calls.</step>
+    <step order="6">Remove all extracted useState, useEffect, and useCallback declarations from AnalysisWorkspaceApp.tsx — ensure no duplication between component and hooks.</step>
+    <step order="7">Run PCF build: cd src/client/pcf && npm run build — verify zero TypeScript errors.</step>
+    <step order="8">Verify component renders correctly with same behavior (auth flow, document ID resolution at mount).</step>
+    <step order="9">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 020 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useAuth.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/useDocumentResolution.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>useAuth.ts created in control/hooks/ with UseAuthOptions and UseAuthResult types exported.</criterion>
+    <criterion>useDocumentResolution.ts created in control/hooks/ with UseDocumentResolutionOptions and UseDocumentResolutionResult types exported.</criterion>
+    <criterion>AnalysisWorkspaceApp.tsx uses both hooks instead of inline state for auth and document resolution.</criterion>
+    <criterion>No useState/useEffect for auth or document resolution remains inline in AnalysisWorkspaceApp.tsx.</criterion>
+    <criterion>PCF build passes with zero TypeScript errors.</criterion>
+    <criterion>No behavior change — auth check, token refresh, and document ID resolution work identically.</criterion>
+  </acceptance-criteria>
+</task>

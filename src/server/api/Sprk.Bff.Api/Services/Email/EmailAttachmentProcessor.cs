@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Email;
 public class EmailAttachmentProcessor : IEmailAttachmentProcessor
 {
     private readonly SpeFileStore _speFileStore;
-    private readonly IDataverseService _dataverseService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly EmailProcessingOptions _options;
     private readonly ILogger<EmailAttachmentProcessor> _logger;
 
@@ -40,12 +40,12 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
 
     public EmailAttachmentProcessor(
         SpeFileStore speFileStore,
-        IDataverseService dataverseService,
+        IDocumentDataverseService documentService,
         IOptions<EmailProcessingOptions> options,
         ILogger<EmailAttachmentProcessor> logger)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
-        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -266,7 +266,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 Description = $"Email attachment from email {request.EmailId}"
             };
 
-            documentIdStr = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+            documentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
 
             if (!Guid.TryParse(documentIdStr, out documentId))
             {
@@ -313,7 +313,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 }
             }
 
-            await _dataverseService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);
+            await _documentService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);
 
             _logger.LogInformation(
                 "Created document record {DocumentId} for attachment '{FileName}'",

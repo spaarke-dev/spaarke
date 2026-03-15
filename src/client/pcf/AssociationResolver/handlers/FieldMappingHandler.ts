@@ -19,6 +19,10 @@
  * @see spec.md - Field Mapping Framework section
  */
 
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('AssociationResolver');
+
 // Local type definitions (inlined from @spaarke/ui-components to avoid build dependency issues)
 export enum SyncMode {
   OneTime = 0,
@@ -92,16 +96,16 @@ class FieldMappingService {
       const result = await this.webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
       if (!result.entities || result.entities.length === 0) {
-        console.log(`[FieldMappingService] No Record Type found for entity: ${entityLogicalName}`);
+        logger.logInfo('FieldMappingService', `No Record Type found for entity: ${entityLogicalName}`);
         return null;
       }
 
       const recordTypeId = result.entities[0].sprk_recordtype_refid as string;
       this.recordTypeCache.set(entityLogicalName, recordTypeId);
-      console.log(`[FieldMappingService] Found Record Type ${recordTypeId} for ${entityLogicalName}`);
+      logger.logDebug('FieldMappingService', `Found Record Type ${recordTypeId} for ${entityLogicalName}`);
       return recordTypeId;
     } catch (error) {
-      console.error(`[FieldMappingService] Error querying Record Type:`, error);
+      logger.logError('FieldMappingService', 'Error querying Record Type', error);
       return null;
     }
   }
@@ -112,13 +116,13 @@ class FieldMappingService {
    */
   async getProfileForEntityPair(sourceEntity: string, targetEntity: string): Promise<IFieldMappingProfile | null> {
     const cacheKey = `${sourceEntity}:${targetEntity}`;
-    console.log(`[FieldMappingService] Querying profile for ${sourceEntity} -> ${targetEntity}`);
+    logger.logInfo('FieldMappingService', `Querying profile for ${sourceEntity} -> ${targetEntity}`);
 
     // Check cache if enabled
     if (this.enableCache) {
       const cached = this.profileCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-        console.log(`[FieldMappingService] Returning cached profile`);
+        logger.logDebug('FieldMappingService', 'Returning cached profile');
         return cached.profile;
       }
     }
@@ -129,12 +133,12 @@ class FieldMappingService {
       const targetRecordTypeId = await this.getRecordTypeId(targetEntity);
 
       if (!sourceRecordTypeId) {
-        console.log(`[FieldMappingService] No Record Type for source entity: ${sourceEntity}`);
+        logger.logInfo('FieldMappingService', `No Record Type for source entity: ${sourceEntity}`);
         return null;
       }
 
       if (!targetRecordTypeId) {
-        console.log(`[FieldMappingService] No Record Type for target entity: ${targetEntity}`);
+        logger.logInfo('FieldMappingService', `No Record Type for target entity: ${targetEntity}`);
         return null;
       }
 
@@ -144,7 +148,7 @@ class FieldMappingService {
       const result = await this.webApi.retrieveMultipleRecords('sprk_fieldmappingprofile', query);
 
       if (!result.entities || result.entities.length === 0) {
-        console.log(`[FieldMappingService] No profile found for ${sourceEntity} -> ${targetEntity}`);
+        logger.logInfo('FieldMappingService', `No profile found for ${sourceEntity} -> ${targetEntity}`);
         if (this.enableCache) {
           this.profileCache.set(cacheKey, {
             profile: null,
@@ -183,7 +187,7 @@ class FieldMappingService {
         rules,
       };
 
-      console.log(`[FieldMappingService] Found profile: ${profile.name} with ${rules.length} rules`);
+      logger.logInfo('FieldMappingService', `Found profile: ${profile.name} with ${rules.length} rules`);
 
       if (this.enableCache) {
         this.profileCache.set(cacheKey, { profile, timestamp: Date.now() });
@@ -191,7 +195,7 @@ class FieldMappingService {
 
       return profile;
     } catch (error) {
-      console.error(`[FieldMappingService] Error querying profile:`, error);
+      logger.logError('FieldMappingService', 'Error querying profile', error);
       return null;
     }
   }
@@ -205,7 +209,7 @@ class FieldMappingService {
     targetRecord: Record<string, unknown>,
     profile: IFieldMappingProfile
   ): Promise<IMappingResult> {
-    console.log(`[FieldMappingService] Applying mappings from profile ${profile.name}`);
+    logger.logInfo('FieldMappingService', `Applying mappings from profile ${profile.name}`);
 
     const result: IMappingResult = {
       success: true,
@@ -216,7 +220,7 @@ class FieldMappingService {
     };
 
     if (!profile.rules || profile.rules.length === 0) {
-      console.log(`[FieldMappingService] No rules in profile`);
+      logger.logDebug('FieldMappingService', 'No rules in profile');
       return result;
     }
 
@@ -253,7 +257,7 @@ class FieldMappingService {
             valueToSet = sourceRecord[rule.sourceField];
 
             if (valueToSet === undefined) {
-              console.log(`[FieldMappingService] Source field ${rule.sourceField} not found, skipping`);
+              logger.logDebug('FieldMappingService', `Source field ${rule.sourceField} not found, skipping`);
               result.skippedRules++;
               continue;
             }
@@ -264,14 +268,9 @@ class FieldMappingService {
           result.mappedValues[rule.targetField] = valueToSet;
           result.appliedRules++;
 
-          console.log(
-            `[FieldMappingService] Mapped ${rule.sourceField || '(constant)'} -> ${rule.targetField}: ${valueToSet}`
-          );
+          logger.logDebug('FieldMappingService', `Mapped ${rule.sourceField || '(constant)'} -> ${rule.targetField}: ${valueToSet}`);
         } catch (ruleError) {
-          console.error(
-            `[FieldMappingService] Error applying rule ${rule.sourceField} -> ${rule.targetField}:`,
-            ruleError
-          );
+          logger.logError('FieldMappingService', `Error applying rule ${rule.sourceField} -> ${rule.targetField}`, ruleError);
           result.errors.push({
             message: `Failed to apply mapping: ${rule.sourceField} -> ${rule.targetField}`,
           });
@@ -279,10 +278,10 @@ class FieldMappingService {
         }
       }
 
-      console.log(`[FieldMappingService] Applied ${result.appliedRules} rules, skipped ${result.skippedRules}`);
+      logger.logInfo('FieldMappingService', `Applied ${result.appliedRules} rules, skipped ${result.skippedRules}`);
       return result;
     } catch (error) {
-      console.error(`[FieldMappingService] Error fetching source record:`, error);
+      logger.logError('FieldMappingService', 'Error fetching source record', error);
       result.success = false;
       result.errors.push({
         message: error instanceof Error ? error.message : 'Failed to fetch source record',
@@ -382,25 +381,25 @@ export class FieldMappingHandler {
       errors: [],
     };
 
-    console.log(`[FieldMappingHandler] Checking for profile: ${sourceEntity} -> ${this.targetEntity}`);
+    logger.logInfo('FieldMappingHandler', `Checking for profile: ${sourceEntity} -> ${this.targetEntity}`);
 
     try {
       // Step 1: Get profile for entity pair
       const profile = await this.mappingService.getProfileForEntityPair(sourceEntity, this.targetEntity);
 
       if (!profile) {
-        console.log(`[FieldMappingHandler] No active profile found for ${sourceEntity} -> ${this.targetEntity}`);
+        logger.logInfo('FieldMappingHandler', `No active profile found for ${sourceEntity} -> ${this.targetEntity}`);
         return result;
       }
 
       result.profileFound = true;
       result.profile = profile;
 
-      console.log(`[FieldMappingHandler] Found profile: ${profile.name} (${profile.id})`);
+      logger.logInfo('FieldMappingHandler', `Found profile: ${profile.name} (${profile.id})`);
 
       // Step 2: Check sync mode - only apply for one-time or manual refresh
       if (profile.syncMode !== SyncMode.OneTime && profile.syncMode !== SyncMode.ManualRefresh) {
-        console.log(`[FieldMappingHandler] Profile sync mode (${profile.syncMode}) does not support auto-apply`);
+        logger.logInfo('FieldMappingHandler', `Profile sync mode (${profile.syncMode}) does not support auto-apply`);
         return result;
       }
 
@@ -417,14 +416,11 @@ export class FieldMappingHandler {
         result.errors = mappingResult.errors.map((e: { message: string }) => e.message);
       }
 
-      console.log(
-        `[FieldMappingHandler] Applied mappings: ${result.fieldsMapped} applied, ` +
-          `${result.rulesSkipped} skipped, ${result.errors.length} errors`
-      );
+      logger.logInfo('FieldMappingHandler', `Applied mappings: ${result.fieldsMapped} applied, ${result.rulesSkipped} skipped, ${result.errors.length} errors`);
 
       return result;
     } catch (error) {
-      console.error('[FieldMappingHandler] Error applying mappings:', error);
+      logger.logError('FieldMappingHandler', 'Error applying mappings', error);
       result.success = false;
       result.errors.push(error instanceof Error ? error.message : 'Unknown error applying field mappings');
       return result;
@@ -444,7 +440,7 @@ export class FieldMappingHandler {
   applyToForm(mappedValues: Record<string, unknown>, skipDirtyFields = true): number {
     const xrmPage = this.getXrmPage();
     if (!xrmPage) {
-      console.warn('[FieldMappingHandler] Xrm.Page not available - cannot apply to form');
+      logger.logWarn('FieldMappingHandler', 'Xrm.Page not available - cannot apply to form');
       return 0;
     }
 
@@ -455,13 +451,13 @@ export class FieldMappingHandler {
       try {
         const attr = xrmPage.getAttribute(fieldName);
         if (!attr) {
-          console.warn(`[FieldMappingHandler] Field ${fieldName} not found on form`);
+          logger.logWarn('FieldMappingHandler', `Field ${fieldName} not found on form`);
           continue;
         }
 
         // Skip user-modified fields if requested
         if (skipDirtyFields && attr.getIsDirty()) {
-          console.log(`[FieldMappingHandler] Skipping dirty field: ${fieldName}`);
+          logger.logDebug('FieldMappingHandler', `Skipping dirty field: ${fieldName}`);
           continue;
         }
 
@@ -469,9 +465,9 @@ export class FieldMappingHandler {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         attr.setValue(value as any);
         appliedCount++;
-        console.log(`[FieldMappingHandler] Set ${fieldName} to:`, value);
+        logger.logDebug('FieldMappingHandler', `Set ${fieldName} to:`, value);
       } catch (error) {
-        console.error(`[FieldMappingHandler] Error setting field ${fieldName}:`, error);
+        logger.logError('FieldMappingHandler', `Error setting field ${fieldName}`, error);
       }
     }
 
@@ -490,7 +486,7 @@ export class FieldMappingHandler {
       const profile = await this.mappingService.getProfileForEntityPair(sourceEntity, this.targetEntity);
       return profile !== null && profile.isActive;
     } catch (error) {
-      console.error('[FieldMappingHandler] Error checking profile:', error);
+      logger.logError('FieldMappingHandler', 'Error checking profile', error);
       return false;
     }
   }
@@ -506,7 +502,7 @@ export class FieldMappingHandler {
       const profile = await this.mappingService.getProfileForEntityPair(sourceEntity, this.targetEntity);
       return profile !== null && profile.isActive && profile.syncMode === SyncMode.ManualRefresh;
     } catch (error) {
-      console.error('[FieldMappingHandler] Error checking refresh support:', error);
+      logger.logError('FieldMappingHandler', 'Error checking refresh support', error);
       return false;
     }
   }
@@ -520,7 +516,7 @@ export class FieldMappingHandler {
       const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
       return xrm?.Page || null;
     } catch (error) {
-      console.warn('[FieldMappingHandler] Unable to access Xrm.Page:', error);
+      logger.logWarn('FieldMappingHandler', 'Unable to access Xrm.Page', error);
       return null;
     }
   }
