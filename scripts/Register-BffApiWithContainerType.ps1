@@ -2,13 +2,19 @@
 # The owning app (BFF API) gets full delegated + full appOnly permissions
 
 param(
-    [Parameter(Mandatory)][string]$ContainerTypeId,
-    [Parameter(Mandatory)][string]$OwningAppId,
+    [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,
+    [string]$OwningAppId = $env:API_APP_ID,
     # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
-    [Parameter(Mandatory)][string]$OwningAppSecret,
-    [Parameter(Mandatory)][string]$TenantId,
-    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
+    [string]$OwningAppSecret = $env:API_CLIENT_SECRET,
+    [string]$TenantId = $env:TENANT_ID,
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN  # e.g., "spaarke.sharepoint.com"
 )
+
+if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
+if (-not $OwningAppSecret) { throw "OwningAppSecret required. Pass -OwningAppSecret or set API_CLIENT_SECRET env var." }
+if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "REGISTER OWNING APP WITH CONTAINER TYPE" -ForegroundColor Cyan

@@ -4,11 +4,14 @@
 
 param(
     [string]$ContainerTypeName = "Spaarke Document Storage",
-    [Parameter(Mandatory)][string]$OwningAppId,
+    [string]$OwningAppId = $env:API_APP_ID,
     [string]$ApplicationRedirectUrl = "https://localhost",
-    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,  # e.g., "spaarke.sharepoint.com"
     [switch]$Trial = $false  # Use trial container type (no billing)
 )
+
+if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 # Derive admin URL from SharePoint domain
 $AdminCenterUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"

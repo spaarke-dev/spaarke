@@ -1,7 +1,7 @@
 /**
  * speApiClient - Typed API client for all /api/spe/* BFF endpoints.
  *
- * Uses authenticatedFetch() from @spaarke/auth for every request.
+ * Uses authenticatedFetch() from ./authInit (wraps @spaarke/auth with lazy init).
  * authenticatedFetch handles:
  *   - Bearer token acquisition (MSAL or token bridge)
  *   - 401 retry with exponential backoff
@@ -13,7 +13,8 @@
  * ApiError / AuthError which they can display to the user.
  */
 
-import { authenticatedFetch, ApiError, AuthError } from "@spaarke/auth";
+import { ApiError, AuthError } from "@spaarke/auth";
+import { authenticatedFetch } from "./authInit";
 import type {
   BusinessUnit,
   SpeEnvironment,
