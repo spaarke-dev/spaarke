@@ -42,7 +42,7 @@
 |---|------|--------|------|--------------|-----|
 | 030 | Fix ADR-022 violations — React 18→16 in 3 PCF controls | ✅ | remediation, typescript, pcf, adr | 004 | 3h |
 | 031 | Document BaseProxyPlugin ADR-002 violations | ✅ | documentation, dotnet, architecture | 003 | 2h |
-| 032 | Final quality scorecard + lessons learned | 🔲 | documentation, quality | 014, 024, 030, 031 | 2h |
+| 032 | Final quality scorecard + lessons learned | ✅ | documentation, quality | 014, 024, 030, 031 | 2h |
 
 ### Phase 5: Project Wrap-Up
 
