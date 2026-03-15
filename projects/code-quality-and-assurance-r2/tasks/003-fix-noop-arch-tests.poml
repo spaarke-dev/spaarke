@@ -3,7 +3,7 @@
   <metadata>
     <title>Fix No-Op Arch Tests + Add Plugin Assembly Coverage</title>
     <phase>1: Quick Wins</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies></dependencies>
     <blocks>031</blocks>

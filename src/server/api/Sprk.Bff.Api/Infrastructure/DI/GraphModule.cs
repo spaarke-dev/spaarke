@@ -36,6 +36,9 @@ public static class GraphModule
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             });
 
+        // Named HttpClient for Graph upload sessions (pre-authorized URLs, no auth headers needed)
+        services.AddHttpClient("GraphUploadSession");
+
         // Singleton GraphServiceClient factory (uses IHttpClientFactory with resilience handler)
         services.AddSingleton<IGraphClientFactory, GraphClientFactory>();
 

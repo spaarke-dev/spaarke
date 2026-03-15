@@ -19,6 +19,9 @@
  */
 
 import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('EventAutoAssociate');
 
 // Control version for debugging
 const CONTROL_VERSION = '1.0.0';
@@ -101,7 +104,7 @@ function getXrmPage(): Xrm.Page | null {
       (window.parent as unknown as { Xrm?: { Page?: Xrm.Page } })?.Xrm;
     return xrm?.Page || null;
   } catch (error) {
-    console.warn('[EventAutoAssociate] Unable to access Xrm.Page:', error);
+    logger.logWarn('EventAutoAssociate', 'Unable to access Xrm.Page:', error);
     return null;
   }
 }
@@ -171,7 +174,7 @@ function buildRecordUrl(entityLogicalName: string, recordId: string): string {
       }
     }
   } catch (error) {
-    console.warn('[EventAutoAssociate] Error building record URL, using fallback:', error);
+    logger.logWarn('EventAutoAssociate', 'Error building record URL, using fallback:', error);
   }
 
   return `/main.aspx?pagetype=entityrecord&etn=${entityLogicalName}&id=${cleanId}`;
@@ -213,7 +216,7 @@ async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Promise<Ent
   }
 
   try {
-    console.log('[EventAutoAssociate] Loading entity configs from sprk_recordtype_ref...');
+    logger.logInfo('EventAutoAssociate', 'Loading entity configs from sprk_recordtype_ref...');
     const query = `?$filter=statecode eq 0&$select=sprk_recordtype_refid,sprk_recordlogicalname,sprk_recorddisplayname,sprk_regardingfield&$orderby=sprk_recorddisplayname`;
     const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
@@ -226,11 +229,11 @@ async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Promise<Ent
           regardingField: e.sprk_regardingfield as string,
         }));
 
-      console.log(`[EventAutoAssociate] Loaded ${entityConfigs.length} entity configs`);
+      logger.logInfo('EventAutoAssociate', ` Loaded ${entityConfigs.length} entity configs`);
       return entityConfigs;
     }
   } catch (error) {
-    console.warn('[EventAutoAssociate] Error loading entity configs, using fallback:', error);
+    logger.logWarn('EventAutoAssociate', 'Error loading entity configs, using fallback:', error);
   }
 
   entityConfigs = [...FALLBACK_ENTITY_CONFIGS];
@@ -266,11 +269,11 @@ async function getRecordTypeByEntityLogicalName(
       const name = recordType.sprk_recorddisplayname as string;
 
       recordTypeCache.set(entityLogicalName, { id, name });
-      console.log(`[EventAutoAssociate] Found Record Type for ${entityLogicalName}: ${name}`);
+      logger.logInfo('EventAutoAssociate', ` Found Record Type for ${entityLogicalName}: ${name}`);
       return { id, name };
     }
   } catch (error) {
-    console.error(`[EventAutoAssociate] Error querying Record Type for ${entityLogicalName}:`, error);
+    logger.logError('EventAutoAssociate', ` Error querying Record Type for ${entityLogicalName}:`, error);
   }
 
   return null;
@@ -296,11 +299,11 @@ function setLookupValue(fieldName: string, entityType: string, id: string, name:
           entityType: entityType,
         },
       ]);
-      console.log(`[EventAutoAssociate] Set ${fieldName} to ${name}`);
+      logger.logInfo('EventAutoAssociate', ` Set ${fieldName} to ${name}`);
       return true;
     }
   } catch (error) {
-    console.error(`[EventAutoAssociate] Error setting ${fieldName}:`, error);
+    logger.logError('EventAutoAssociate', ` Error setting ${fieldName}:`, error);
   }
   return false;
 }
@@ -318,11 +321,11 @@ function setTextValue(fieldName: string, value: string | null): boolean {
     const attr = xrmPage.getAttribute(fieldName);
     if (attr) {
       attr.setValue(value);
-      console.log(`[EventAutoAssociate] Set ${fieldName} to "${value}"`);
+      logger.logInfo('EventAutoAssociate', ` Set ${fieldName} to "${value}"`);
       return true;
     }
   } catch (error) {
-    console.error(`[EventAutoAssociate] Error setting ${fieldName}:`, error);
+    logger.logError('EventAutoAssociate', ` Error setting ${fieldName}:`, error);
   }
   return false;
 }
@@ -344,11 +347,11 @@ interface DetectedParentContext {
 function detectPrePopulatedParent(): DetectedParentContext | null {
   const xrmPage = getXrmPage();
   if (!xrmPage) {
-    console.log('[EventAutoAssociate] Xrm.Page not available for parent detection');
+    logger.logInfo('EventAutoAssociate', 'Xrm.Page not available for parent detection');
     return null;
   }
 
-  console.log('[EventAutoAssociate] Checking for pre-populated regarding fields...');
+  logger.logInfo('EventAutoAssociate', 'Checking for pre-populated regarding fields...');
 
   for (const config of getEntityConfigs()) {
     try {
@@ -365,17 +368,17 @@ function detectPrePopulatedParent(): DetectedParentContext | null {
               recordName: lookupValue.name || '',
               regardingField: config.regardingField,
             };
-            console.log(`[EventAutoAssociate] Detected parent: ${config.displayName} - ${detected.recordName}`);
+            logger.logInfo('EventAutoAssociate', ` Detected parent: ${config.displayName} - ${detected.recordName}`);
             return detected;
           }
         }
       }
     } catch (error) {
-      console.warn(`[EventAutoAssociate] Error checking ${config.regardingField}:`, error);
+      logger.logWarn('EventAutoAssociate', ` Error checking ${config.regardingField}:`, error);
     }
   }
 
-  console.log('[EventAutoAssociate] No pre-populated regarding field detected');
+  logger.logInfo('EventAutoAssociate', 'No pre-populated regarding field detected');
   return null;
 }
 
@@ -396,7 +399,7 @@ function areDenormalizedFieldsPopulated(): boolean {
     if (recordNameAttr) {
       const value = recordNameAttr.getValue();
       if (value && typeof value === 'string' && value.trim().length > 0) {
-        console.log('[EventAutoAssociate] Denormalized fields already populated');
+        logger.logInfo('EventAutoAssociate', 'Denormalized fields already populated');
         return true;
       }
     }
@@ -404,12 +407,12 @@ function areDenormalizedFieldsPopulated(): boolean {
     if (recordTypeAttr) {
       const value = recordTypeAttr.getValue() as Xrm.LookupValue[] | null;
       if (value && Array.isArray(value) && value.length > 0) {
-        console.log('[EventAutoAssociate] Denormalized fields already populated (type lookup set)');
+        logger.logInfo('EventAutoAssociate', 'Denormalized fields already populated (type lookup set)');
         return true;
       }
     }
   } catch (error) {
-    console.warn('[EventAutoAssociate] Error checking denormalized fields:', error);
+    logger.logWarn('EventAutoAssociate', 'Error checking denormalized fields:', error);
   }
 
   return false;
@@ -451,11 +454,11 @@ async function completeAutoDetectedAssociation(
       success = false;
     }
   } else {
-    console.warn(`[EventAutoAssociate] Record Type not found for entity: ${detectedParent.entityType}`);
+    logger.logWarn('EventAutoAssociate', ` Record Type not found for entity: ${detectedParent.entityType}`);
     success = false;
   }
 
-  console.log(`[EventAutoAssociate] Association completed: success=${success}`);
+  logger.logInfo('EventAutoAssociate', ` Association completed: success=${success}`);
   return success;
 }
 
@@ -488,7 +491,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<II
     // Render hidden container
     container.innerHTML = `<div style="display:none" data-control="EventAutoAssociate" data-version="${CONTROL_VERSION}"></div>`;
 
-    console.log(`[EventAutoAssociate] v${CONTROL_VERSION} initialized`);
+    logger.logInfo('EventAutoAssociate', ` v${CONTROL_VERSION} initialized`);
 
     // Run auto-detection asynchronously
     this.runAutoDetection();
@@ -500,13 +503,13 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<II
   private async runAutoDetection(): Promise<void> {
     // Only run once per form load
     if (this.hasRun) {
-      console.log('[EventAutoAssociate] Already ran, skipping');
+      logger.logInfo('EventAutoAssociate', 'Already ran, skipping');
       return;
     }
     this.hasRun = true;
 
     if (!this.context) {
-      console.warn('[EventAutoAssociate] Context not available');
+      logger.logWarn('EventAutoAssociate', 'Context not available');
       return;
     }
 
@@ -517,7 +520,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<II
 
     // Check if denormalized fields are already populated
     if (areDenormalizedFieldsPopulated()) {
-      console.log('[EventAutoAssociate] Denormalized fields already set, no action needed');
+      logger.logInfo('EventAutoAssociate', 'Denormalized fields already set, no action needed');
       return;
     }
 
@@ -530,7 +533,7 @@ export class EventAutoAssociate implements ComponentFramework.StandardControl<II
       // Complete the association by setting denormalized fields
       await completeAutoDetectedAssociation(detectedParent, webApi);
     } else {
-      console.log('[EventAutoAssociate] No parent detected, no action needed');
+      logger.logInfo('EventAutoAssociate', 'No parent detected, no action needed');
     }
   }
 

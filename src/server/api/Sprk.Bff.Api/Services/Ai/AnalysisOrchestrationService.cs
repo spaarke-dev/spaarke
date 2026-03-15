@@ -69,8 +69,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     /// </summary>
     private static readonly SemaphoreSlim _ragSearchSemaphore = new(5);
 
-    // In-memory store for Phase 1 (will be replaced with Dataverse in Task 032)
-    private static readonly Dictionary<Guid, AnalysisInternalModel> _analysisStore = new();
+    /// <summary>
+    /// Cache key pattern for analysis state in Redis.
+    /// </summary>
+    private const string AnalysisCacheKeyPrefix = "sdap:ai:analysis:";
+
+    /// <summary>
+    /// TTL for cached analysis entries. Entries expire after 2 hours of inactivity.
+    /// </summary>
+    private static readonly DistributedCacheEntryOptions AnalysisCacheTtl = new()
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2)
+    };
 
     public AnalysisOrchestrationService(
         IDataverseService dataverseService,
@@ -116,6 +126,36 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _telemetry = telemetry;
         _cacheMetrics = cacheMetrics;
         _jobSubmissionService = jobSubmissionService;
+    }
+
+    /// <summary>
+    /// Store an analysis model in Redis via IDistributedCache with 2-hour TTL.
+    /// </summary>
+    private async Task CacheAnalysisAsync(Guid analysisId, AnalysisInternalModel analysis)
+    {
+        var entry = new AnalysisCacheEntry
+        {
+            AnalysisId = analysisId,
+            DocumentId = analysis.DocumentId,
+            DocumentText = analysis.DocumentText,
+            Status = analysis.Status,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(entry);
+        await _cache.SetAsync($"{AnalysisCacheKeyPrefix}{analysisId}", json, AnalysisCacheTtl);
+    }
+
+    /// <summary>
+    /// Try to retrieve a cached analysis entry from Redis.
+    /// Returns null on cache miss.
+    /// </summary>
+    private async Task<AnalysisCacheEntry?> GetCachedAnalysisAsync(Guid analysisId)
+    {
+        var bytes = await _cache.GetAsync($"{AnalysisCacheKeyPrefix}{analysisId}");
+        if (bytes == null) return null;
+
+        return JsonSerializer.Deserialize<AnalysisCacheEntry>(bytes);
     }
 
     /// <inheritdoc />
@@ -185,7 +225,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             StartedOn = DateTime.UtcNow,
             ChatHistory = []
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         _logger.LogDebug("Created analysis record {AnalysisId} with session {SessionId}", analysisId, sessionId);
 
@@ -264,7 +304,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             DocumentText = documentText,
             SystemPrompt = systemPrompt
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         // 7. Stream AI completion
         var outputBuilder = new StringBuilder();
@@ -302,7 +342,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             OutputTokens = outputTokens
             // DocumentText and SystemPrompt already set above
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         // Persist final content to Dataverse (sprk_workingdocument)
         await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
@@ -336,12 +376,19 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
 
-        // Get analysis from in-memory store, or reload from Dataverse if not found
-        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
+        // Get analysis from Redis cache, or reload from Dataverse if cache miss
+        var cachedEntry = await GetCachedAnalysisAsync(analysisId);
+        AnalysisInternalModel analysis;
+        if (cachedEntry == null)
         {
-            _logger.LogInformation("Analysis {AnalysisId} not in memory, reloading from Dataverse", analysisId);
+            _logger.LogInformation("Analysis {AnalysisId} not in cache, reloading from Dataverse", analysisId);
             analysis = await ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
-            _analysisStore[analysisId] = analysis;
+            await CacheAnalysisAsync(analysisId, analysis);
+        }
+        else
+        {
+            // Rebuild full model from Dataverse using cache hint for document text
+            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
         }
 
         // Build full prompt with document context via context builder service
@@ -381,7 +428,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             InputTokens = analysis.InputTokens + inputTokens,
             OutputTokens = analysis.OutputTokens + outputTokens
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
 
@@ -705,7 +752,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 StartedOn = DateTime.UtcNow
             };
 
-            _analysisStore[analysisId] = analysis;
+            await CacheAnalysisAsync(analysisId, analysis);
 
             _logger.LogInformation(
                 "Analysis {AnalysisId} resumed successfully: {ChatMessages} messages, WorkingDoc={HasWorkingDoc}, HasDocText={HasDocText}",
@@ -1155,7 +1202,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     /// <summary>
-    /// Get an analysis from the in-memory store, or reload it from Dataverse if not found.
+    /// Get an analysis from the Redis cache, or reload it from Dataverse if cache miss.
     /// This is the "lite" version that does NOT extract document text (no HttpContext needed).
     /// Suitable for GET, save, and export operations that only need the persisted analysis data.
     /// For chat continuation (which needs document text), use ReloadAnalysisFromDataverseAsync instead.
@@ -1164,12 +1211,20 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         Guid analysisId,
         CancellationToken cancellationToken)
     {
-        if (_analysisStore.TryGetValue(analysisId, out var existing))
+        var cached = await GetCachedAnalysisAsync(analysisId);
+        if (cached != null)
         {
-            return existing;
+            // Return a lite model from the cache entry — sufficient for GET/save/export
+            return new AnalysisInternalModel
+            {
+                Id = cached.AnalysisId,
+                DocumentId = cached.DocumentId,
+                DocumentText = cached.DocumentText,
+                Status = cached.Status,
+            };
         }
 
-        _logger.LogInformation("Analysis {AnalysisId} not in memory, loading from Dataverse (lite)", analysisId);
+        _logger.LogInformation("Analysis {AnalysisId} not in cache, loading from Dataverse (lite)", analysisId);
 
         // 1. Get analysis record from Dataverse
         var record = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
@@ -1210,7 +1265,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             CompletedOn = record.ModifiedOn,
         };
 
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         _logger.LogInformation(
             "Loaded analysis {AnalysisId} from Dataverse (lite): {DocChars} chars, {ChatCount} messages",
@@ -1486,7 +1541,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             StartedOn = DateTime.UtcNow,
             ChatHistory = []
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
@@ -1620,7 +1675,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                     }
 
                     analysis = analysis with { Status = "Failed", CompletedOn = DateTime.UtcNow };
-                    _analysisStore[analysisId] = analysis;
+                    await CacheAnalysisAsync(analysisId, analysis);
 
                     yield return AnalysisStreamChunk.FromError(
                         evt.Error ?? "Playbook execution failed");
@@ -1676,7 +1731,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 InputTokens = totalTokensIn,
                 OutputTokens = totalTokensOut
             };
-            _analysisStore[analysisId] = analysis;
+            await CacheAnalysisAsync(analysisId, analysis);
 
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Node-based execution {Status}: Analysis {AnalysisId}, {NodeCount} nodes, output {OutputLength} chars",
@@ -1780,7 +1835,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             DocumentText = documentText,
             SystemPrompt = action.SystemPrompt
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         // 9. Execute tools from playbook
         var toolResults = new StringBuilder();
@@ -2145,7 +2200,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             InputTokens = totalInputTokens,
             OutputTokens = totalOutputTokens
         };
-        _analysisStore[analysisId] = analysis;
+        await CacheAnalysisAsync(analysisId, analysis);
 
         // Persist final content to Dataverse (sprk_workingdocument) — matches action-based path
         await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);

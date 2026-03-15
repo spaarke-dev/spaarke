@@ -14,6 +14,7 @@
     "refreshTypes": "pcf-scripts refreshTypes"
   },
   "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@azure/msal-browser": "^4.26.2",
     "uuid": "^13.0.0"
   },

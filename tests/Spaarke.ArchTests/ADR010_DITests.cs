@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using NetArchTest.Rules;
 using Xunit;
 
@@ -10,35 +11,91 @@ namespace Spaarke.ArchTests;
 /// </summary>
 public class ADR010_DITests
 {
+    /// <summary>
+    /// Root path to the source code, resolved from the test output directory.
+    /// </summary>
+    private static readonly string SourceRoot = ResolveSourceRoot();
+
     [Fact(DisplayName = "ADR-010: Expensive resources should be registered as Singleton")]
     public void ExpensiveResourcesShouldBeSingleton()
     {
-        // Arrange
-        var assembly = typeof(Program).Assembly;
+        // Arrange — scan DI module source files to verify lifetime registrations.
+        // ADR-010 requires ServiceClient, GraphServiceClient, and HttpClient factory
+        // to be registered as Singleton (these are expensive to create: ~500ms init).
+        var diModulePath = Path.Combine(SourceRoot,
+            "src", "server", "api", "Sprk.Bff.Api", "Infrastructure", "DI");
+        var programPath = Path.Combine(SourceRoot,
+            "src", "server", "api", "Sprk.Bff.Api", "Program.cs");
 
-        // Act - Find types that represent expensive resources
+        Assert.True(Directory.Exists(diModulePath),
+            $"DI module directory not found: {diModulePath}");
+
+        // Collect all DI registration source code
+        var diSourceFiles = Directory.GetFiles(diModulePath, "*.cs", SearchOption.AllDirectories).ToList();
+        if (File.Exists(programPath))
+            diSourceFiles.Add(programPath);
+
+        var allDiSource = string.Join("\n", diSourceFiles.Select(File.ReadAllText));
+
+        var violations = new List<string>();
+
+        // Expensive types that MUST be Singleton
         var expensiveTypes = new[]
         {
             "ServiceClient",       // Dataverse ServiceClient (~500ms init)
             "GraphServiceClient",  // Microsoft Graph client
-            "HttpClient"           // HTTP clients should use IHttpClientFactory
         };
 
-        // This is a documentation test - verify that Program.cs registers these correctly
-        // Actual validation would require DI container inspection at runtime
-        var programType = assembly.GetType("Program");
-        Assert.NotNull(programType);
+        foreach (var typeName in expensiveTypes)
+        {
+            // Check for Scoped or Transient registrations of expensive types
+            // Pattern: AddScoped<...TypeName...> or AddTransient<...TypeName...>
+            var scopedPattern = $@"Add(?:Scoped|Transient)\s*<[^>]*{Regex.Escape(typeName)}";
+            if (Regex.IsMatch(allDiSource, scopedPattern))
+            {
+                violations.Add($"{typeName} is registered as Scoped or Transient. " +
+                    "ADR-010 requires expensive resources to be Singleton.");
+            }
+        }
 
-        // For ServiceClient specifically, we can check it's not registered as Scoped
-        // by verifying no Scoped registration pattern exists in endpoint constructors
-        var endpointTypes = Types.InAssembly(assembly)
-            .That()
-            .HaveNameEndingWith("Endpoints")
-            .GetTypes();
+        // Verify IHttpClientFactory is used (not new HttpClient()) in service registrations
+        // Check across all server source for direct HttpClient construction
+        var serverSourcePath = Path.Combine(SourceRoot, "src", "server", "api", "Sprk.Bff.Api");
+        var serverCsFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
 
-        // If endpoints inject IDataverseService, verify it's not reconstructed per request
-        // This is a heuristic - proper validation requires runtime DI inspection
-        Assert.True(true, "Manual verification: Check Program.cs for Singleton registration of expensive resources");
+        // Exclude the plugin project from this check
+        var bffFiles = serverCsFiles.Where(f => !f.Contains("CustomApiProxy")).ToList();
+
+        // Check that IHttpClientFactory is registered somewhere
+        var hasHttpClientFactory = allDiSource.Contains("AddHttpClient") ||
+                                   allDiSource.Contains("IHttpClientFactory");
+        if (!hasHttpClientFactory)
+        {
+            violations.Add("IHttpClientFactory is not registered in DI modules. " +
+                "HttpClient instances should be managed via IHttpClientFactory per ADR-010.");
+        }
+
+        // Check BFF service files for direct HttpClient construction (new HttpClient())
+        // that bypasses IHttpClientFactory
+        foreach (var file in bffFiles)
+        {
+            var content = File.ReadAllText(file);
+            var fileName = Path.GetFileName(file);
+
+            // Skip test files and DI module files (which register the factory)
+            if (fileName.Contains("Test") || fileName.Contains("Module"))
+                continue;
+
+            // Detect: new HttpClient( — direct instantiation bypassing factory
+            if (Regex.IsMatch(content, @"new\s+HttpClient\s*\("))
+            {
+                violations.Add($"{fileName}: directly instantiates HttpClient. " +
+                    "Use IHttpClientFactory for proper connection pooling per ADR-010.");
+            }
+        }
+
+        // Assert — test fails when expensive resources are not properly registered
+        Assert.Empty(violations);
     }
 
     [Fact(DisplayName = "ADR-010: Services should be concrete unless seam required")]
@@ -47,57 +104,60 @@ public class ADR010_DITests
         // Arrange
         var assembly = typeof(Program).Assembly;
 
-        // Act - Find interface/implementation pairs
+        // Act - Find interface/implementation pairs in our application namespace
         var allTypes = Types.InAssembly(assembly).GetTypes();
         var interfaces = allTypes.Where(t => t.IsInterface).ToList();
         var concretes = allTypes.Where(t => !t.IsInterface && !t.IsAbstract).ToList();
 
-        // Known seams (exceptions per ADR-010):
-        var allowedSeams = new[]
-        {
-            "IAccessDataSource",     // UAC data seam
-            "IFileStore",            // Storage seam (if introduced)
-            "IDistributedCache",     // Framework interface
-            "ILogger",               // Framework interface
-            "IConfiguration",        // Framework interface
-            "IDataverseService",     // Optional seam for testing
-            "IAuthorizationService"  // Optional seam for testing
-        };
+        // Framework interfaces are always allowed (not subject to ADR-010)
+        var frameworkPrefixes = new[] { "System", "Microsoft", "Azure", "StackExchange" };
 
-        // Check for unnecessary interfaces (1:1 interface:implementation without clear seam)
-        var unnecessaryInterfaces = new List<string>();
+        // Count 1:1 interface-to-implementation mappings in our application namespace
+        var oneToOneInterfaces = new List<string>();
 
         foreach (var iface in interfaces)
         {
-            // Skip framework and allowed seam interfaces
-            if (allowedSeams.Contains(iface.Name))
+            // Skip framework interfaces
+            if (frameworkPrefixes.Any(p => iface.Namespace?.StartsWith(p) == true))
                 continue;
 
-            if (iface.Namespace?.StartsWith("System") == true ||
-                iface.Namespace?.StartsWith("Microsoft") == true)
+            // Only check our application namespace
+            if (iface.Namespace?.StartsWith("Sprk") != true &&
+                iface.Namespace?.StartsWith("Spaarke") != true)
                 continue;
 
             // Find implementations
             var implementations = concretes.Where(c => iface.IsAssignableFrom(c)).ToList();
 
-            // If exactly 1 implementation and not an allowed seam, flag for review
+            // If exactly 1 implementation, it's a 1:1 mapping that ADR-010 discourages
             if (implementations.Count == 1)
             {
-                unnecessaryInterfaces.Add($"{iface.Name} -> {implementations[0].Name} (consider using concrete)");
+                oneToOneInterfaces.Add($"{iface.Name} -> {implementations[0].Name}");
             }
         }
 
-        // Assert - This is a warning test; some interfaces may be justified
-        // Review flagged interfaces to determine if they're necessary
-        if (unnecessaryInterfaces.Any())
-        {
-            var message = $"ADR-010 review: Found 1:1 interface mappings. " +
-                         $"Consider registering concrete classes unless a seam is needed for testing or swappability:\n" +
-                         string.Join("\n", unnecessaryInterfaces);
+        // Ceiling-based assertion: the current count of 1:1 interface mappings must not increase.
+        // ADR-010 says "register concretes unless a genuine seam is required."
+        // Many existing 1:1 interfaces exist for testing (mock injection). These are grandfathered.
+        // NEW 1:1 interfaces must be reviewed — either justify the seam or use concrete registration.
+        //
+        // To update the ceiling: review the new interface, determine if the seam is justified,
+        // then increase the ceiling with a comment explaining the addition.
+        //
+        // Current inventory (as of 2026-03-14):
+        //   - Testing seams (mock injection): ~40 interfaces
+        //   - Architecture seams (ADR-013 AI, ADR-007 facade): ~15 interfaces
+        //   - Worker/Job handler seams (multiple implementations): ~5 interfaces
+        //   - Infrastructure seams (resilience, auth): ~8 interfaces
+        const int knownOneToOneCeiling = 76;
 
-            // This is informational; we don't fail the test but log for review
-            Assert.True(true, message);
-        }
+        Assert.True(
+            oneToOneInterfaces.Count <= knownOneToOneCeiling,
+            $"ADR-010: 1:1 interface mapping count increased from {knownOneToOneCeiling} to {oneToOneInterfaces.Count}. " +
+            $"New interfaces added without seam justification. " +
+            $"Either register concrete per ADR-010 or update the ceiling with documentation.\n\n" +
+            $"Current 1:1 interfaces ({oneToOneInterfaces.Count}):\n" +
+            string.Join("\n", oneToOneInterfaces.Select(i => $"  - {i}")));
     }
 
     [Fact(DisplayName = "ADR-010: Feature modules should use extension methods")]
@@ -156,5 +216,26 @@ public class ADR010_DITests
 
         // Assert
         Assert.Empty(violatingTypes);
+    }
+
+    /// <summary>
+    /// Resolve the repository source root by walking up from the test output directory.
+    /// </summary>
+    private static string ResolveSourceRoot()
+    {
+        var currentDir = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(currentDir);
+
+        while (dir != null)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "src")) &&
+                Directory.Exists(Path.Combine(dir.FullName, "tests")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+
+        return currentDir;
     }
 }

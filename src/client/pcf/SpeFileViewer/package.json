@@ -13,6 +13,7 @@
     "refreshTypes": "pcf-scripts refreshTypes"
   },
   "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@azure/msal-browser": "^4.26.2",
     "@fluentui/react-components": "^9.56.0",
     "@fluentui/react-icons": "^2.0.266",

@@ -19,6 +19,9 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare const Xrm: any;
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('DueDatesWidget');
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +191,7 @@ function buildPageInput(eventId: string, eventType?: string): SidePanePageInput 
 function navigateToEventsTab(): boolean {
   const ui = getFormContextUi();
   if (!ui || !ui.tabs) {
-    console.log('[NavigationService] Form context not available for tab navigation');
+    logger.logInfo('NavigationService', 'Form context not available for tab navigation');
     return false;
   }
 
@@ -204,7 +207,7 @@ function navigateToEventsTab(): boolean {
           }
         }
         tab.setFocus();
-        console.log(`[NavigationService] Navigated to Events tab: ${tabName}`);
+        logger.logInfo('NavigationService', ` Navigated to Events tab: ${tabName}`);
         return true;
       }
     } catch (e) {
@@ -232,14 +235,14 @@ function navigateToEventsTab(): boolean {
         }
       }
       tabToFocus.setFocus();
-      console.log(`[NavigationService] Navigated to Events tab (found by iteration)`);
+      logger.logInfo('NavigationService', ` Navigated to Events tab (found by iteration)`);
       return true;
     }
   } catch (e) {
-    console.log('[NavigationService] Error iterating tabs:', e);
+    logger.logInfo('NavigationService', 'Error iterating tabs:', e);
   }
 
-  console.log('[NavigationService] Events tab not found on current form');
+  logger.logInfo('NavigationService', 'Events tab not found on current form');
   return false;
 }
 
@@ -276,7 +279,7 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
     openedSidePane: false,
   };
 
-  console.log('[NavigationService] Navigating to event', {
+  logger.logInfo('NavigationService', 'Navigating to event', {
     eventId,
     eventType,
     navigateToTab,
@@ -285,7 +288,7 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
   // Validate eventId
   if (!eventId || eventId.trim() === '') {
     const error = 'eventId is required for navigation';
-    console.error('[NavigationService]', error);
+    logger.logError('NavigationService', 'Event navigation error:', error);
     result.error = error;
     onNavigationError?.(error);
     return result;
@@ -302,7 +305,7 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
     // If sidePanes API not available, we may be in test harness or custom page
     // Fall back to just the tab navigation result
     const warning = 'Xrm.App.sidePanes API is not available. Side pane cannot be opened.';
-    console.warn('[NavigationService]', warning);
+    logger.logWarn('NavigationService', warning);
 
     // If we at least navigated to the tab, consider partial success
     if (result.navigatedToTab) {
@@ -321,7 +324,7 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
 
     if (existingPane) {
       // Pane exists - navigate to new event (reuses pane)
-      console.log('[NavigationService] Reusing existing side pane');
+      logger.logInfo('NavigationService', 'Reusing existing side pane');
 
       const pageInput = buildPageInput(eventId, eventType);
       await existingPane.navigate(pageInput);
@@ -331,7 +334,7 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
       result.success = true;
     } else {
       // Create new pane
-      console.log('[NavigationService] Creating new side pane');
+      logger.logInfo('NavigationService', 'Creating new side pane');
 
       const newPane = await sidePanes.createPane({
         title: 'Event Details',
@@ -348,11 +351,11 @@ export async function navigateToEvent(params: NavigateToEventParams): Promise<Na
       result.success = true;
     }
 
-    console.log('[NavigationService] Navigation complete', result);
+    logger.logInfo('NavigationService', 'Navigation complete', result);
     onNavigationComplete?.();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[NavigationService] Failed to open side pane:', errorMessage);
+    logger.logError('NavigationService', 'Failed to open side pane:', errorMessage);
 
     result.error = `Failed to open side pane: ${errorMessage}`;
 
@@ -394,7 +397,7 @@ export function closeEventDetailPane(): boolean {
 
   const existingPane = sidePanes.getPane(EVENT_DETAIL_PANE_ID);
   if (existingPane) {
-    console.log('[NavigationService] Closing Event Detail pane');
+    logger.logInfo('NavigationService', 'Closing Event Detail pane');
     existingPane.close();
     return true;
   }
@@ -442,11 +445,11 @@ export interface NavigateToEventsPageParams {
 export async function navigateToEventsPage(params?: NavigateToEventsPageParams): Promise<boolean> {
   const { onNavigationComplete, onNavigationError } = params || {};
 
-  console.log('[NavigationService] Navigating to Events page/tab');
+  logger.logInfo('NavigationService', 'Navigating to Events page/tab');
 
   // First try to navigate to the Events tab on the current form
   if (navigateToEventsTab()) {
-    console.log('[NavigationService] Navigated to Events tab on current form');
+    logger.logInfo('NavigationService', 'Navigated to Events tab on current form');
     onNavigationComplete?.();
     return true;
   }
@@ -454,7 +457,7 @@ export async function navigateToEventsPage(params?: NavigateToEventsPageParams):
   // If no Events tab found, try navigating to the Events Custom Page
   try {
     if (typeof Xrm !== 'undefined' && Xrm.Navigation && Xrm.Navigation.navigateTo) {
-      console.log('[NavigationService] Navigating to Events Custom Page');
+      logger.logInfo('NavigationService', 'Navigating to Events Custom Page');
       await Xrm.Navigation.navigateTo({
         pageType: 'custom',
         name: 'sprk_eventspage',
@@ -463,13 +466,13 @@ export async function navigateToEventsPage(params?: NavigateToEventsPageParams):
       return true;
     }
   } catch (error) {
-    console.error('[NavigationService] Failed to navigate to Events page:', error);
+    logger.logError('NavigationService', 'Failed to navigate to Events page:', error);
   }
 
   // Fallback: try to navigate to the Events entity list
   try {
     if (typeof Xrm !== 'undefined' && Xrm.Navigation && Xrm.Navigation.navigateTo) {
-      console.log('[NavigationService] Navigating to Events entity list (fallback)');
+      logger.logInfo('NavigationService', 'Navigating to Events entity list (fallback)');
       await Xrm.Navigation.navigateTo({
         pageType: 'entitylist',
         entityName: 'sprk_event',
@@ -478,11 +481,11 @@ export async function navigateToEventsPage(params?: NavigateToEventsPageParams):
       return true;
     }
   } catch (error) {
-    console.error('[NavigationService] Failed to navigate to Events entity list:', error);
+    logger.logError('NavigationService', 'Failed to navigate to Events entity list:', error);
   }
 
   const errorMsg = 'Unable to navigate to Events page - Xrm.Navigation API not available';
-  console.warn('[NavigationService]', errorMsg);
+  logger.logWarn('NavigationService', errorMsg);
   onNavigationError?.(errorMsg);
   return false;
 }

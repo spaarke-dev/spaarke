@@ -18,6 +18,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-icons": "^2.0.200"
   },

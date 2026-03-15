@@ -11,9 +11,9 @@
 
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
-| 001 | Fix 3 unbounded static dictionaries (memory leaks) | 🔲 | remediation, dotnet, memory, caching | — | 3h |
-| 002 | Replace `new HttpClient()` with IHttpClientFactory | 🔲 | remediation, dotnet, graph | — | 1h |
-| 003 | Fix no-op arch tests + add plugin assembly coverage | 🔲 | testing, dotnet, architecture | — | 3h |
+| 001 | Fix 3 unbounded static dictionaries (memory leaks) | ✅ | remediation, dotnet, memory, caching | — | 3h |
+| 002 | Replace `new HttpClient()` with IHttpClientFactory | ✅ | remediation, dotnet, graph | — | 1h |
+| 003 | Fix no-op arch tests + add plugin assembly coverage | ✅ | testing, dotnet, architecture | — | 3h |
 | 004 | Delete dead MsalAuthProvider.ts + create shared logger | 🔲 | remediation, typescript, pcf, cleanup | — | 5h |
 
 ### Phase 2: Backend Structural Decomposition

@@ -49,6 +49,9 @@ import {
   IFieldMappingApplicationResult,
 } from './handlers/FieldMappingHandler';
 import { useMappingToast } from './hooks/useMappingToast';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('AssociationResolver');
 
 // Entity configuration type - now loaded dynamically from sprk_recordtype_ref
 // Using EntityLookupConfig from RecordSelectionHandler for consistency
@@ -65,7 +68,7 @@ function navigateToRecord(entityLogicalName: string, recordId: string): void {
       entityId: recordId.replace(/[{}]/g, ''),
     });
   } else {
-    console.error('[AssociationResolver] Xrm.Navigation.openForm not available');
+    logger.logError('AssociationResolver', 'Xrm.Navigation.openForm not available');
   }
 }
 
@@ -176,13 +179,13 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       if (!context?.webAPI || configsLoaded) return;
 
       try {
-        console.log('[AssociationResolver] Loading dynamic entity configs...');
+        logger.logInfo('AssociationResolver', 'Loading dynamic entity configs...');
         const configs = await loadEntityConfigs(context.webAPI);
         setEntityConfigs(configs);
         setConfigsLoaded(true);
-        console.log(`[AssociationResolver] Loaded ${configs.length} entity configs`);
+        logger.logInfo('AssociationResolver', ` Loaded ${configs.length} entity configs`);
       } catch (error) {
-        console.error('[AssociationResolver] Error loading entity configs:', error);
+        logger.logError('AssociationResolver', 'Error loading entity configs:', error);
         // Keep using fallback configs
         setConfigsLoaded(true);
       }
@@ -200,7 +203,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         return;
       }
 
-      console.log('[AssociationResolver] Running auto-detection...');
+      logger.logInfo('AssociationResolver', 'Running auto-detection...');
       setIsLoading(true);
 
       try {
@@ -208,9 +211,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         const detected = detectPrePopulatedParent();
 
         if (detected) {
-          console.log(
-            `[AssociationResolver] Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`
-          );
+          logger.logInfo('AssociationResolver', `Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`);
           setIsAutoDetected(true);
           setDetectedParent(detected);
           setSelectedEntityType(detected.entityType);
@@ -247,7 +248,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                   setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
                 }
               } catch (mappingErr) {
-                console.error('[AssociationResolver] Auto field mapping error:', mappingErr);
+                logger.logError('AssociationResolver', 'Auto field mapping error:', mappingErr);
               } finally {
                 setIsApplyingMappings(false);
               }
@@ -255,7 +256,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
               setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
             }
           } else {
-            console.warn('[AssociationResolver] Auto-detection completion had errors:', result.errors);
+            logger.logWarn('AssociationResolver', 'Auto-detection completion had errors:', result.errors);
             setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
           }
         } else {
@@ -273,12 +274,12 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
               if (entityLogicalName) {
                 const config = entityConfigs.find(c => c.logicalName === entityLogicalName);
                 if (config) {
-                  console.log(`[AssociationResolver] Initialized entity type from Record Type: ${entityLogicalName}`);
+                  logger.logInfo('AssociationResolver', ` Initialized entity type from Record Type: ${entityLogicalName}`);
                   setSelectedEntityType(config.logicalName);
                 }
               }
             } catch (err) {
-              console.error('[AssociationResolver] Error initializing from Record Type:', err);
+              logger.logError('AssociationResolver', 'Error initializing from Record Type:', err);
             }
           }
         }
@@ -310,9 +311,9 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       try {
         const hasProfile = await fieldMappingHandler.hasProfileForEntity(selectedEntityType);
         setHasProfileForEntity(hasProfile);
-        console.log(`[AssociationResolver] Profile check for ${selectedEntityType}: ${hasProfile}`);
+        logger.logInfo('AssociationResolver', ` Profile check for ${selectedEntityType}: ${hasProfile}`);
       } catch (err) {
-        console.error('[AssociationResolver] Error checking profile:', err);
+        logger.logError('AssociationResolver', 'Error checking profile:', err);
         setHasProfileForEntity(false);
       }
     };
@@ -342,7 +343,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     sourceRecordId: string
   ): Promise<IFieldMappingApplicationResult | null> => {
     if (!fieldMappingHandler) {
-      console.warn('[AssociationResolver] FieldMappingHandler not initialized - webAPI not available');
+      logger.logWarn('AssociationResolver', 'FieldMappingHandler not initialized - webAPI not available');
       return null;
     }
 
@@ -359,10 +360,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         // Apply mapped values to the form (skipping user-modified fields)
         const fieldsSetOnForm = fieldMappingHandler.applyToForm(targetRecord, true);
 
-        console.log(
-          `[AssociationResolver] Field mappings applied: ` +
-            `${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`
-        );
+        logger.logInfo('AssociationResolver', `Field mappings applied: ${result.fieldsMapped} mapped, ${fieldsSetOnForm} set on form`);
 
         // Get entity display name for toast message
         const entityConfig = entityConfigs.find(c => c.logicalName === sourceEntity);
@@ -378,15 +376,15 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
         // Log any warnings/errors
         if (result.errors.length > 0) {
-          console.warn('[AssociationResolver] Mapping warnings:', result.errors);
+          logger.logWarn('AssociationResolver', 'Mapping warnings:', result.errors);
         }
       } else {
-        console.log(`[AssociationResolver] No field mapping profile found for ${sourceEntity} -> sprk_event`);
+        logger.logInfo('AssociationResolver', ` No field mapping profile found for ${sourceEntity} -> sprk_event`);
       }
 
       return result;
     } catch (error) {
-      console.error('[AssociationResolver] Failed to apply field mappings:', error);
+      logger.logError('AssociationResolver', 'Failed to apply field mappings:', error);
       // Task 024: Show error toast for mapping failures
       showErrorToast('Failed to apply field mappings. Please try again.');
       // Don't set error state - field mapping failure shouldn't block record selection
@@ -476,7 +474,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         }
       }
     } catch (err) {
-      console.error('[AssociationResolver] Lookup error:', err);
+      logger.logError('AssociationResolver', 'Lookup error:', err);
       setError(err instanceof Error ? err.message : 'Failed to open lookup');
     } finally {
       setIsLoading(false);
@@ -501,7 +499,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
       setMappingStatus('Selection cleared');
     } catch (err) {
-      console.error('[AssociationResolver] Clear error:', err);
+      logger.logError('AssociationResolver', 'Clear error:', err);
       setError(err instanceof Error ? err.message : 'Failed to clear selection');
     } finally {
       setIsLoading(false);
@@ -584,7 +582,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
           // Show any warnings
           if (mappingResult.errors.length > 0) {
-            console.warn('[AssociationResolver] Refresh warnings:', mappingResult.errors);
+            logger.logWarn('AssociationResolver', 'Refresh warnings:', mappingResult.errors);
           }
         } else {
           setMappingStatus('No field mapping profile configured for this entity type');
@@ -595,7 +593,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         showErrorToast('Failed to refresh fields from parent. Please try again.');
       }
     } catch (err) {
-      console.error('[AssociationResolver] Refresh error:', err);
+      logger.logError('AssociationResolver', 'Refresh error:', err);
       setError(err instanceof Error ? err.message : 'Failed to refresh from parent');
     } finally {
       setIsLoading(false);

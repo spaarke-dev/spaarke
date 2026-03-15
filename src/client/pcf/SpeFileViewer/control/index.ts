@@ -15,6 +15,9 @@ import { initializeAuth } from './authInit';
 import { FilePreview } from './FilePreview';
 import { FileViewerState } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('SpeFileViewer');
 
 // ============================================================================
 // Theme Storage Utilities (from Spaarke.UI.Components)
@@ -136,7 +139,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
   constructor() {
     // Generate correlation ID for this control instance
     this.correlationId = uuidv4();
-    console.log(`[SpeFileViewer] Control instance created. Correlation ID: ${this.correlationId}`);
+    logger.logInfo('SpeFileViewer', ` Control instance created. Correlation ID: ${this.correlationId}`);
   }
 
   /**
@@ -167,8 +170,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     this.container.style.display = 'flex';
     this.container.style.flexDirection = 'column';
 
-    console.log('[SpeFileViewer] Initializing control...');
-    console.log(`[SpeFileViewer] Configured height: ${controlHeight}px (min) with 100% responsive expansion`);
+    logger.logInfo('SpeFileViewer', 'Initializing control...');
+    logger.logInfo('SpeFileViewer', ` Configured height: ${controlHeight}px (min) with 100% responsive expansion`);
 
     try {
       // Extract configuration from manifest properties
@@ -182,7 +185,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
         throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
       }
 
-      console.log(`[SpeFileViewer] Configuration:`, {
+      logger.logInfo('SpeFileViewer', ` Configuration:`, {
         tenantId: this.tenantId,
         clientAppId: this.clientAppId,
         bffAppId: this.bffAppId,
@@ -192,7 +195,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
       // Initialize @spaarke/auth (replaces local AuthService)
       await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
       this.authInitialized = true;
-      console.log('[SpeFileViewer] @spaarke/auth initialized');
+      logger.logInfo('SpeFileViewer', '@spaarke/auth initialized');
 
       // Create AbortController for this session (Task 022)
       this._abortController = new AbortController();
@@ -200,7 +203,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
       // Track initial document ID for change detection
       try {
         this._previousDocumentId = this.extractDocumentId(context);
-        console.log(`[SpeFileViewer] Initial document ID: ${this._previousDocumentId || '(none)'}`);
+        logger.logInfo('SpeFileViewer', ` Initial document ID: ${this._previousDocumentId || '(none)'}`);
       } catch {
         // extractDocumentId may throw for invalid GUIDs - handle gracefully in init
         this._previousDocumentId = null;
@@ -208,18 +211,18 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
 
       // Set up theme listener for global theme changes
       this._cleanupThemeListener = setupThemeListener(isDark => {
-        console.log(`[SpeFileViewer] Theme changed: isDark=${isDark}`);
+        logger.logInfo('SpeFileViewer', ` Theme changed: isDark=${isDark}`);
         if (this._context && this._state === FileViewerState.Ready) {
           this.renderControl(this._context);
         }
       }, context);
-      console.log('[SpeFileViewer] Theme listener initialized');
+      logger.logInfo('SpeFileViewer', 'Theme listener initialized');
 
       // Transition to Ready and render React component
       this.transitionTo(FileViewerState.Ready);
       this.renderBasedOnState();
     } catch (error) {
-      console.error('[SpeFileViewer] Initialization failed:', error);
+      logger.logError('SpeFileViewer', 'Initialization failed:', error);
       this._errorMessage = error instanceof Error ? error.message : String(error);
       this.transitionTo(FileViewerState.Error);
       this.renderBasedOnState();
@@ -250,12 +253,12 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
 
     // Check if document ID changed (Task 022 - cancel previous, start new)
     if (currentDocumentId !== this._previousDocumentId) {
-      console.log(`[SpeFileViewer] Document ID changed: ${this._previousDocumentId} → ${currentDocumentId}`);
+      logger.logInfo('SpeFileViewer', ` Document ID changed: ${this._previousDocumentId} → ${currentDocumentId}`);
 
       // Abort any in-flight requests from previous document
       if (this._abortController) {
         this._abortController.abort();
-        console.log('[SpeFileViewer] Aborted previous request due to document change');
+        logger.logInfo('SpeFileViewer', 'Aborted previous request due to document change');
       }
 
       // Create new AbortController for new document
@@ -276,7 +279,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     const previousState = this._state;
     this._state = newState;
 
-    console.log(`[SpeFileViewer] State: ${previousState} → ${newState}`);
+    logger.logInfo('SpeFileViewer', ` State: ${previousState} → ${newState}`);
 
     // Notify PCF framework of state change (triggers updateView)
     this._notifyOutputChanged?.();
@@ -379,11 +382,11 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
       // Validate GUID format (prevent sending driveItemId by accident)
       if (!this.isValidGuid(trimmed)) {
         const errorMsg = 'Document ID must be a GUID format (Dataverse primary key). Do not use SharePoint Item IDs.';
-        console.error('[SpeFileViewer] Configured documentId is not a valid GUID:', trimmed);
+        logger.logError('SpeFileViewer', 'Configured documentId is not a valid GUID:', trimmed);
         throw new Error(errorMsg);
       }
 
-      console.log('[SpeFileViewer] Using configured document ID:', trimmed);
+      logger.logInfo('SpeFileViewer', 'Using configured document ID:', trimmed);
       return trimmed;
     }
 
@@ -393,15 +396,15 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     if (recordId && typeof recordId === 'string') {
       if (!this.isValidGuid(recordId)) {
         const errorMsg = 'Form context did not provide a valid GUID.';
-        console.error('[SpeFileViewer] Form record ID is not a valid GUID:', recordId);
+        logger.logError('SpeFileViewer', 'Form record ID is not a valid GUID:', recordId);
         throw new Error(errorMsg);
       }
 
-      console.log('[SpeFileViewer] Using form record ID:', recordId);
+      logger.logInfo('SpeFileViewer', 'Using form record ID:', recordId);
       return recordId;
     }
 
-    console.warn('[SpeFileViewer] No document ID available from input or form context');
+    logger.logWarn('SpeFileViewer', 'No document ID available from input or form context');
     return '';
   }
 
@@ -427,7 +430,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
 
     // Check if auth is initialized
     if (!this.authInitialized) {
-      console.warn('[SpeFileViewer] Auth not initialized yet, skipping render');
+      logger.logWarn('SpeFileViewer', 'Auth not initialized yet, skipping render');
       return;
     }
 
@@ -435,8 +438,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     // Priority: localStorage → Platform context → DOM navbar → system preference
     const isDarkTheme = getEffectiveDarkMode(context);
 
-    console.log(`[SpeFileViewer] Rendering preview for document: ${documentId || '(none)'}`);
-    console.log(`[SpeFileViewer] Dark mode: ${isDarkTheme} (preference: ${getUserThemePreference()})`);
+    logger.logInfo('SpeFileViewer', ` Rendering preview for document: ${documentId || '(none)'}`);
+    logger.logInfo('SpeFileViewer', ` Dark mode: ${isDarkTheme} (preference: ${getUserThemePreference()})`);
 
     // Create root on first render (React 19+)
     if (!this.root) {
@@ -451,7 +454,7 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
         correlationId: this.correlationId,
         isDarkTheme: isDarkTheme,
         onRefresh: () => {
-          console.log('[SpeFileViewer] Refresh requested from component');
+          logger.logInfo('SpeFileViewer', 'Refresh requested from component');
         },
       })
     );
@@ -490,20 +493,20 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
    * Cleanup when control is removed
    */
   public destroy(): void {
-    console.log('[SpeFileViewer] Destroying control...');
+    logger.logInfo('SpeFileViewer', 'Destroying control...');
 
     // Clean up theme listener (Dark Mode Theme Toggle feature)
     if (this._cleanupThemeListener) {
       this._cleanupThemeListener();
       this._cleanupThemeListener = null;
-      console.log('[SpeFileViewer] Theme listener cleaned up');
+      logger.logInfo('SpeFileViewer', 'Theme listener cleaned up');
     }
 
     // Abort any in-flight requests (Task 022)
     if (this._abortController) {
       this._abortController.abort();
       this._abortController = null;
-      console.log('[SpeFileViewer] Aborted in-flight requests on destroy');
+      logger.logInfo('SpeFileViewer', 'Aborted in-flight requests on destroy');
     }
 
     // Unmount React component (React 19+)

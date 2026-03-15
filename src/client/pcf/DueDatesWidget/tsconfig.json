@@ -5,7 +5,14 @@
     "jsx": "react",
     "esModuleInterop": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@spaarke/ui-components": [
+        "../../shared/Spaarke.UI.Components/dist/index"
+      ],
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
+    },
+    "baseUrl": "."
   },
   "exclude": [
     "node_modules",

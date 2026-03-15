@@ -15,6 +15,9 @@ import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
 import { DocumentViewerState } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('SpeDocumentViewer');
 
 // Theme storage utilities
 const THEME_STORAGE_KEY = 'spaarke-theme';
@@ -113,7 +116,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
 
   constructor() {
     this.correlationId = uuidv4();
-    console.log(`[SpeDocumentViewer] Control instance created. Correlation ID: ${this.correlationId}`);
+    logger.logInfo('SpeDocumentViewer', ` Control instance created. Correlation ID: ${this.correlationId}`);
   }
 
   /**
@@ -146,7 +149,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
           parentUrl.includes('/formeditor/') ||
           parentUrl.includes('appdesigner')
         ) {
-          console.log('[SpeDocumentViewer] Design mode detected via parent URL');
+          logger.logInfo('SpeDocumentViewer', 'Design mode detected via parent URL');
           return true;
         }
       }
@@ -159,7 +162,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isAuthoringMode = (context as any).mode?.isAuthoringMode;
     if (isAuthoringMode === true) {
-      console.log('[SpeDocumentViewer] Design mode detected via isAuthoringMode');
+      logger.logInfo('SpeDocumentViewer', 'Design mode detected via isAuthoringMode');
       return true;
     }
 
@@ -167,7 +170,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     const allocatedHeight = context.mode.allocatedHeight;
     const allocatedWidth = context.mode.allocatedWidth;
     if ((allocatedHeight === 0 || allocatedHeight === -1) && (allocatedWidth === 0 || allocatedWidth === -1)) {
-      console.log('[SpeDocumentViewer] Design mode suspected via zero dimensions');
+      logger.logInfo('SpeDocumentViewer', 'Design mode suspected via zero dimensions');
       // Don't return true yet - could be legitimate zero dimensions
     }
 
@@ -240,13 +243,13 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     this.container.style.display = 'flex';
     this.container.style.flexDirection = 'column';
     this.container.style.overflow = 'hidden';
-    console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px`);
+    logger.logInfo('SpeDocumentViewer', ` Control height: ${controlHeight}px`);
 
-    console.log('[SpeDocumentViewer] Initializing control...');
+    logger.logInfo('SpeDocumentViewer', 'Initializing control...');
 
     // Check for design mode FIRST - before any authentication
     if (this.isDesignMode(context)) {
-      console.log('[SpeDocumentViewer] Running in design mode - showing placeholder');
+      logger.logInfo('SpeDocumentViewer', 'Running in design mode - showing placeholder');
       this.renderDesignModePlaceholder();
       return;
     }
@@ -269,7 +272,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
       }
 
-      console.log('[SpeDocumentViewer] Configuration:', {
+      logger.logInfo('SpeDocumentViewer', 'Configuration:', {
         tenantId: this.tenantId,
         clientAppId: this.clientAppId,
         bffAppId: this.bffAppId,
@@ -283,7 +286,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
       // Initialize @spaarke/auth (replaces local AuthService)
       await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
       this.authInitialized = true;
-      console.log('[SpeDocumentViewer] @spaarke/auth initialized');
+      logger.logInfo('SpeDocumentViewer', '@spaarke/auth initialized');
 
       // Track initial document ID
       try {
@@ -294,7 +297,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
 
       // Set up theme listener
       this._cleanupThemeListener = setupThemeListener(isDark => {
-        console.log(`[SpeDocumentViewer] Theme changed: isDark=${isDark}`);
+        logger.logInfo('SpeDocumentViewer', ` Theme changed: isDark=${isDark}`);
         if (this._context && this._state === DocumentViewerState.Ready) {
           this.renderControl(this._context);
         }
@@ -304,7 +307,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
       this.transitionTo(DocumentViewerState.Ready);
       this.renderControl(context);
     } catch (error) {
-      console.error('[SpeDocumentViewer] Initialization failed:', error);
+      logger.logError('SpeDocumentViewer', 'Initialization failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Check if this is a popup-blocked error (likely in form designer)
@@ -313,7 +316,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         errorMessage.toLowerCase().includes('blocked') ||
         errorMessage.toLowerCase().includes('interaction_required')
       ) {
-        console.log('[SpeDocumentViewer] Popup blocked - likely in design mode, showing placeholder');
+        logger.logInfo('SpeDocumentViewer', 'Popup blocked - likely in design mode, showing placeholder');
         this.renderDesignModePlaceholder();
         return;
       }
@@ -346,7 +349,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     }
 
     if (currentDocumentId !== this._previousDocumentId) {
-      console.log(`[SpeDocumentViewer] Document ID changed: ${this._previousDocumentId} -> ${currentDocumentId}`);
+      logger.logInfo('SpeDocumentViewer', ` Document ID changed: ${this._previousDocumentId} -> ${currentDocumentId}`);
       this._previousDocumentId = currentDocumentId;
     }
 
@@ -356,7 +359,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
   private transitionTo(newState: DocumentViewerState): void {
     const previousState = this._state;
     this._state = newState;
-    console.log(`[SpeDocumentViewer] State: ${previousState} -> ${newState}`);
+    logger.logInfo('SpeDocumentViewer', ` State: ${previousState} -> ${newState}`);
     this._notifyOutputChanged?.();
   }
 
@@ -412,13 +415,13 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     const documentId = this.extractDocumentId(context);
 
     if (!this.authInitialized) {
-      console.warn('[SpeDocumentViewer] Auth not initialized yet');
+      logger.logWarn('SpeDocumentViewer', 'Auth not initialized yet');
       return;
     }
 
     const isDarkTheme = getEffectiveDarkMode(context);
 
-    console.log(`[SpeDocumentViewer] Rendering for document: ${documentId || '(none)'}`);
+    logger.logInfo('SpeDocumentViewer', ` Rendering for document: ${documentId || '(none)'}`);
 
     if (!this.root) {
       this.root = createRoot(this.container);
@@ -435,10 +438,10 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         enableDownload: this.enableDownload,
         showToolbar: this.showToolbar,
         onRefresh: () => {
-          console.log('[SpeDocumentViewer] Refresh requested');
+          logger.logInfo('SpeDocumentViewer', 'Refresh requested');
         },
         onDeleted: () => {
-          console.log('[SpeDocumentViewer] Document deleted');
+          logger.logInfo('SpeDocumentViewer', 'Document deleted');
         },
       })
     );
@@ -465,7 +468,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
   }
 
   public destroy(): void {
-    console.log('[SpeDocumentViewer] Destroying control...');
+    logger.logInfo('SpeDocumentViewer', 'Destroying control...');
 
     if (this._cleanupThemeListener) {
       this._cleanupThemeListener();

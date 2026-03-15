@@ -19,6 +19,9 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
 import { FluentProvider, webLightTheme, webDarkTheme, Link, Theme } from '@fluentui/react-components';
 import { Open16Regular } from '@fluentui/react-icons';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('RegardingLink');
 
 const CONTROL_VERSION = '1.1.6';
 
@@ -28,12 +31,12 @@ const CONTROL_VERSION = '1.1.6';
 // Power Apps Grid looks for customizers on window BEFORE the control's init()
 // This IIFE runs immediately when the bundle loads
 (function registerGridCustomizerEarly() {
-  console.log('[RegardingLink] EARLY REGISTRATION: Setting up global customizer...');
+  logger.logInfo('RegardingLink', 'EARLY REGISTRATION: Setting up global customizer...');
 
   // Will be populated when gridCustomizer is defined below
   const earlyCustomizer = {
     getGridCustomizer: () => {
-      console.log('[RegardingLink] EARLY getGridCustomizer() called!');
+      logger.logInfo('RegardingLink', 'EARLY getGridCustomizer() called!');
       return (window as any).__RegardingLinkGridCustomizer || null;
     },
   };
@@ -44,7 +47,7 @@ const CONTROL_VERSION = '1.1.6';
   (window as any)['Spaarke.Controls.RegardingLink'] = earlyCustomizer;
   (window as any)['sprk_Spaarke.Controls.RegardingLink'] = earlyCustomizer;
 
-  console.log('[RegardingLink] EARLY REGISTRATION complete. Waiting for full module load...');
+  logger.logInfo('RegardingLink', 'EARLY REGISTRATION complete. Waiting for full module load...');
 })();
 
 // Entity type mapping - values correspond to sprk_recordtype.sprk_entitylogicalname
@@ -84,7 +87,7 @@ function navigateToRecord(entityLogicalName: string, entityId: string): void {
       entityId: entityId.replace(/[{}]/g, ''),
     });
   } else {
-    console.error('[RegardingLink] Xrm.Navigation.openForm not available');
+    logger.logError('RegardingLink', 'Xrm.Navigation.openForm not available');
   }
 }
 
@@ -131,7 +134,7 @@ const LinkCell: React.FC<LinkCellProps> = ({ recordName, recordId, entityLogical
  * are not yet exported in @types/powerapps-component-framework but exist at runtime
  */
 // Log when gridCustomizer is created
-console.log(`[RegardingLink] Creating gridCustomizer with Text column override`);
+logger.logInfo('RegardingLink', ` Creating gridCustomizer with Text column override`);
 
 const gridCustomizer: any = {
   /**
@@ -149,7 +152,7 @@ const gridCustomizer: any = {
       const columnName = props?.columnInfo?.name || props?.colDefs?.[props?.columnIndex]?.name;
 
       // DEBUG: Log every Text cell render call
-      console.log(`[RegardingLink] Text cellRenderer called`, {
+      logger.logInfo('RegardingLink', ` Text cellRenderer called`, {
         columnName: columnName,
         targetColumn: REGARDING_RECORD_NAME_COLUMN,
         isMatch: columnName === REGARDING_RECORD_NAME_COLUMN,
@@ -161,12 +164,12 @@ const gridCustomizer: any = {
         return renderedValue; // Return default for other text columns
       }
 
-      console.log(`[RegardingLink] Processing ${REGARDING_RECORD_NAME_COLUMN} column`);
+      logger.logInfo('RegardingLink', ` Processing ${REGARDING_RECORD_NAME_COLUMN} column`);
 
       // Get the row data
       const rowData = props?.rowData;
       if (!rowData) {
-        console.log('[RegardingLink] No rowData in props');
+        logger.logInfo('RegardingLink', 'No rowData in props');
         return renderedValue;
       }
 
@@ -225,13 +228,13 @@ const gridCustomizer: any = {
 
 // Store gridCustomizer globally for early registration to find
 (window as any).__RegardingLinkGridCustomizer = gridCustomizer;
-console.log('[RegardingLink] gridCustomizer stored globally as __RegardingLinkGridCustomizer');
+logger.logInfo('RegardingLink', 'gridCustomizer stored globally as __RegardingLinkGridCustomizer');
 
 // Update early registrations with the real customizer
 (function updateEarlyRegistrations() {
   const fullCustomizer = {
     getGridCustomizer: () => {
-      console.log('[RegardingLink] getGridCustomizer() called via global!');
+      logger.logInfo('RegardingLink', 'getGridCustomizer() called via global!');
       return gridCustomizer;
     },
     // Also expose cellRendererOverrides directly (some grid versions look for this)
@@ -243,7 +246,7 @@ console.log('[RegardingLink] gridCustomizer stored globally as __RegardingLinkGr
   (window as any)['Spaarke.Controls.RegardingLink'] = fullCustomizer;
   (window as any)['sprk_Spaarke.Controls.RegardingLink'] = fullCustomizer;
 
-  console.log('[RegardingLink] Global registrations updated with full customizer');
+  logger.logInfo('RegardingLink', 'Global registrations updated with full customizer');
 })();
 
 /**
@@ -259,7 +262,7 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
    * Called by Power Apps Grid to get cell renderer overrides
    */
   public static getGridCustomizer(): any {
-    console.log('[RegardingLink] getGridCustomizer() called by Power Apps Grid');
+    logger.logInfo('RegardingLink', 'getGridCustomizer() called by Power Apps Grid');
     console.log(
       '[RegardingLink] Returning customizer with cellRendererOverrides for:',
       Object.keys(gridCustomizer.cellRendererOverrides)
@@ -283,12 +286,12 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
     this.context = context;
     this.notifyOutputChanged = notifyOutputChanged;
 
-    console.log(`[RegardingLink] Grid Customizer initialized v${CONTROL_VERSION}`);
+    logger.logInfo('RegardingLink', ` Grid Customizer initialized v${CONTROL_VERSION}`);
 
     // DEBUG: Expose class globally to verify getGridCustomizer is accessible
     (window as any).RegardingLinkClass = RegardingLink;
-    console.log('[RegardingLink] Class exposed globally. Test with: window.RegardingLinkClass.getGridCustomizer()');
-    console.log('[RegardingLink] getGridCustomizer exists:', typeof RegardingLink.getGridCustomizer);
+    logger.logInfo('RegardingLink', 'Class exposed globally. Test with: window.RegardingLinkClass.getGridCustomizer()');
+    logger.logInfo('RegardingLink', 'getGridCustomizer exists:', typeof RegardingLink.getGridCustomizer);
   }
 
   /**
@@ -313,7 +316,7 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
    * Cleanup
    */
   public destroy(): void {
-    console.log('[RegardingLink] Grid Customizer destroyed');
+    logger.logInfo('RegardingLink', 'Grid Customizer destroyed');
   }
 }
 
@@ -328,12 +331,12 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
 (window as any)['sprk_Spaarke.Controls.RegardingLink'] = RegardingLink;
 
 // Log to verify module-level exposure
-console.log('[RegardingLink] Module fully loaded v' + CONTROL_VERSION);
-console.log('[RegardingLink] Global names registered:', [
+logger.logInfo('RegardingLink', 'Module fully loaded v' + CONTROL_VERSION);
+logger.logInfo('RegardingLink', 'Global names registered:', [
   'RegardingLink',
   'RegardingLinkClass',
   'Spaarke.Controls.RegardingLink',
   'sprk_Spaarke.Controls.RegardingLink',
 ]);
-console.log('[RegardingLink] getGridCustomizer exists:', typeof RegardingLink.getGridCustomizer);
-console.log('[RegardingLink] cellRendererOverrides keys:', Object.keys(gridCustomizer.cellRendererOverrides));
+logger.logInfo('RegardingLink', 'getGridCustomizer exists:', typeof RegardingLink.getGridCustomizer);
+logger.logInfo('RegardingLink', 'cellRendererOverrides keys:', Object.keys(gridCustomizer.cellRendererOverrides));

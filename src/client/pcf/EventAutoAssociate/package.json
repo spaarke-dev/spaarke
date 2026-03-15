@@ -13,6 +13,9 @@
     "start:watch": "pcf-scripts start watch",
     "refreshTypes": "pcf-scripts refreshTypes"
   },
+  "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
+  },
   "devDependencies": {
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
     "@types/node": "^18.19.0",

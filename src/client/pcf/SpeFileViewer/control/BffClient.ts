@@ -12,6 +12,9 @@
  */
 
 import { authenticatedFetch, ApiError } from '@spaarke/auth';
+import { createLogger } from '@spaarke/ui-components';
+
+const logger = createLogger('SpeFileViewer');
 import { FilePreviewResponse, BffErrorResponse, OfficeUrlResponse, OpenLinksResponse } from './types';
 
 /**
@@ -44,8 +47,8 @@ export class BffClient {
   public async getPreviewUrl(documentId: string, correlationId: string): Promise<FilePreviewResponse> {
     const url = `${this.baseUrl}/api/documents/${documentId}/preview-url`;
 
-    console.log(`[BffClient] GET ${url}`);
-    console.log(`[BffClient] Correlation ID: ${correlationId}`);
+    logger.logInfo('BffClient', ` GET ${url}`);
+    logger.logInfo('BffClient', ` Correlation ID: ${correlationId}`);
 
     try {
       const response = await authenticatedFetch(url, {
@@ -60,11 +63,11 @@ export class BffClient {
 
       const data = (await response.json()) as FilePreviewResponse;
 
-      console.log(`[BffClient] Preview URL acquired for document: ${data.documentInfo.name}`);
+      logger.logInfo('BffClient', ` Preview URL acquired for document: ${data.documentInfo.name}`);
 
       // Verify correlation ID round-trip
       if (data.correlationId !== correlationId) {
-        console.warn(`[BffClient] Correlation ID mismatch! Sent: ${correlationId}, Received: ${data.correlationId}`);
+        logger.logWarn('BffClient', ` Correlation ID mismatch! Sent: ${correlationId}, Received: ${data.correlationId}`);
       }
 
       return data;
@@ -72,7 +75,7 @@ export class BffClient {
       if (error instanceof ApiError) {
         this.handleApiError(error, correlationId);
       }
-      console.error('[BffClient] Request failed:', error);
+      logger.logError('BffClient', 'Request failed:', error);
       throw new Error(`Failed to get preview URL: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -90,8 +93,8 @@ export class BffClient {
   public async getOfficeUrl(documentId: string, correlationId: string): Promise<OfficeUrlResponse> {
     const url = `${this.baseUrl}/api/documents/${documentId}/office`;
 
-    console.log(`[BffClient] GET ${url} (Office Editor)`);
-    console.log(`[BffClient] Correlation ID: ${correlationId}`);
+    logger.logInfo('BffClient', ` GET ${url} (Office Editor)`);
+    logger.logInfo('BffClient', ` Correlation ID: ${correlationId}`);
 
     try {
       const response = await authenticatedFetch(url, {
@@ -106,13 +109,13 @@ export class BffClient {
 
       const data = (await response.json()) as OfficeUrlResponse;
 
-      console.log(`[BffClient] Office URL acquired for document`);
-      console.log(`[BffClient] Can Edit: ${data.permissions.canEdit}`);
-      console.log(`[BffClient] User Role: ${data.permissions.role}`);
+      logger.logInfo('BffClient', ` Office URL acquired for document`);
+      logger.logInfo('BffClient', ` Can Edit: ${data.permissions.canEdit}`);
+      logger.logInfo('BffClient', ` User Role: ${data.permissions.role}`);
 
       // Verify correlation ID round-trip
       if (data.correlationId !== correlationId) {
-        console.warn(`[BffClient] Correlation ID mismatch! Sent: ${correlationId}, Received: ${data.correlationId}`);
+        logger.logWarn('BffClient', ` Correlation ID mismatch! Sent: ${correlationId}, Received: ${data.correlationId}`);
       }
 
       return data;
@@ -120,7 +123,7 @@ export class BffClient {
       if (error instanceof ApiError) {
         this.handleApiError(error, correlationId);
       }
-      console.error('[BffClient] Request failed:', error);
+      logger.logError('BffClient', 'Request failed:', error);
       throw new Error(`Failed to get Office URL: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -138,8 +141,8 @@ export class BffClient {
   public async getOpenLinks(documentId: string, correlationId: string): Promise<OpenLinksResponse> {
     const url = `${this.baseUrl}/api/documents/${documentId}/open-links`;
 
-    console.log(`[BffClient] GET ${url} (Open Links)`);
-    console.log(`[BffClient] Correlation ID: ${correlationId}`);
+    logger.logInfo('BffClient', ` GET ${url} (Open Links)`);
+    logger.logInfo('BffClient', ` Correlation ID: ${correlationId}`);
 
     try {
       const response = await authenticatedFetch(url, {
@@ -154,15 +157,15 @@ export class BffClient {
 
       const data = (await response.json()) as OpenLinksResponse;
 
-      console.log(`[BffClient] Open links acquired for: ${data.fileName}`);
-      console.log(`[BffClient] Desktop URL available: ${data.desktopUrl ? 'Yes' : 'No'}`);
+      logger.logInfo('BffClient', ` Open links acquired for: ${data.fileName}`);
+      logger.logInfo('BffClient', ` Desktop URL available: ${data.desktopUrl ? 'Yes' : 'No'}`);
 
       return data;
     } catch (error) {
       if (error instanceof ApiError) {
         this.handleApiError(error, correlationId);
       }
-      console.error('[BffClient] Request failed:', error);
+      logger.logError('BffClient', 'Request failed:', error);
       throw new Error(`Failed to get open links: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -180,8 +183,8 @@ export class BffClient {
   public async getViewUrl(documentId: string, correlationId: string): Promise<FilePreviewResponse> {
     const url = `${this.baseUrl}/api/documents/${documentId}/view-url`;
 
-    console.log(`[BffClient] GET ${url} (View URL - real-time)`);
-    console.log(`[BffClient] Correlation ID: ${correlationId}`);
+    logger.logInfo('BffClient', ` GET ${url} (View URL - real-time)`);
+    logger.logInfo('BffClient', ` Correlation ID: ${correlationId}`);
 
     try {
       const response = await authenticatedFetch(url, {
@@ -196,9 +199,9 @@ export class BffClient {
 
       const data = (await response.json()) as FilePreviewResponse;
 
-      console.log(`[BffClient] View URL acquired for document: ${data.documentInfo.name}`);
+      logger.logInfo('BffClient', ` View URL acquired for document: ${data.documentInfo.name}`);
       if (data.checkoutStatus?.isCheckedOut) {
-        console.log(`[BffClient] Document is checked out by: ${data.checkoutStatus.checkedOutBy?.name}`);
+        logger.logInfo('BffClient', ` Document is checked out by: ${data.checkoutStatus.checkedOutBy?.name}`);
       }
 
       return data;
@@ -206,7 +209,7 @@ export class BffClient {
       if (error instanceof ApiError) {
         this.handleApiError(error, correlationId);
       }
-      console.error('[BffClient] Request failed:', error);
+      logger.logError('BffClient', 'Request failed:', error);
       throw new Error(`Failed to get view URL: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -223,7 +226,7 @@ export class BffClient {
   public async getDownloadUrl(documentId: string, correlationId: string): Promise<string> {
     const url = `${this.baseUrl}/api/documents/${documentId}/content`;
 
-    console.log(`[BffClient] GET ${url}`);
+    logger.logInfo('BffClient', ` GET ${url}`);
 
     const response = await authenticatedFetch(url, {
       method: 'GET',
@@ -266,7 +269,7 @@ export class BffClient {
     const problemDetails = error.problemDetails;
     const errorCode = (problemDetails as Record<string, unknown>)?.extensions?.code as string | undefined;
 
-    console.error('[BffClient] BFF API Error:', {
+    logger.logError('BffClient', 'BFF API Error:', {
       status: error.status,
       code: errorCode,
       message: error.message,

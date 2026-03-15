@@ -3,7 +3,7 @@
   <metadata>
     <title>Fix 3 Unbounded Static Dictionaries (Memory Leaks)</title>
     <phase>1: Quick Wins</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies></dependencies>
     <blocks>010, 011</blocks>
