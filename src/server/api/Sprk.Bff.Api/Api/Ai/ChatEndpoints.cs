@@ -136,6 +136,16 @@ public static class ChatEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401);
 
+        // DELETE /api/ai/chat/context-mappings/cache — evict all cached context mappings
+        group.MapDelete("/context-mappings/cache", EvictContextMappingsCacheAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("EvictContextMappingsCache")
+            .WithSummary("Evict all cached context mappings from Redis")
+            .WithDescription("Removes all chat:ctx-mapping:* keys from Redis. Use after updating sprk_aichatcontextmapping records in Dataverse to force fresh resolution on next request.")
+            .Produces(204)
+            .ProducesProblem(400)
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -651,6 +661,42 @@ public static class ChatEndpoints
         var result = await mappingService.ResolveAsync(entityType, pageType, tenantId, cancellationToken);
 
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Evict all cached context mappings from Redis.
+    /// DELETE /api/ai/chat/context-mappings/cache
+    ///
+    /// Administrative endpoint — removes all <c>chat:ctx-mapping:*</c> keys from Redis
+    /// so that subsequent <see cref="GetContextMappingsAsync"/> calls re-query Dataverse.
+    /// Use after bulk-updating <c>sprk_aichatcontextmapping</c> records.
+    /// </summary>
+    private static async Task<IResult> EvictContextMappingsCacheAsync(
+        HttpContext httpContext,
+        ChatContextMappingService mappingService,
+        ILogger<ChatContextMappingService> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        logger.LogInformation(
+            "EvictContextMappingsCache: evicting all context mapping cache entries (tenant={TenantId})",
+            tenantId);
+
+        var evictedCount = await mappingService.EvictAllCachedMappingsAsync(cancellationToken);
+
+        logger.LogInformation(
+            "EvictContextMappingsCache: evicted {Count} cache entries (tenant={TenantId})",
+            evictedCount, tenantId);
+
+        return Results.NoContent();
     }
 
     // =========================================================================

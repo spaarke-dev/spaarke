@@ -161,6 +161,12 @@ export interface ISprkChatProps {
   accessToken: string;
   /** Callback fired when a new session is created */
   onSessionCreated?: (session: IChatSession) => void;
+  /**
+   * Callback fired when the user switches playbooks via the context selector
+   * or playbook chips. Allows the host to update its own state and persist
+   * the choice (e.g., to sessionStorage).
+   */
+  onPlaybookChange?: (playbookId: string) => void;
   /** Optional CSS class name applied to the root element */
   className?: string;
   /** Available documents for context switching */

@@ -44,7 +44,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { makeStyles, shorthands, tokens, Spinner, Text, Button } from '@fluentui/react-components';
 import { ErrorCircle20Regular, LockClosed20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
 import { SprkChat, SprkChatBridge } from '@spaarke/ui-components';
-import type { IHostContext } from '@spaarke/ui-components';
+import type { IHostContext, IPlaybookOption } from '@spaarke/ui-components';
 import { getAccessToken, initializeAuth, clearTokenCache, isXrmAvailable, AuthError } from './services/authInit';
 import {
   detectContext,
@@ -222,6 +222,9 @@ export const App: React.FC<AppProps> = ({
     return propSessionId;
   });
 
+  // ── Available playbooks from context mapping API ───────────────────
+  const [availablePlaybooks, setAvailablePlaybooks] = useState<IPlaybookOption[]>([]);
+
   // ── Context-switch dialog state ─────────────────────────────────────
   const [contextSwitch, setContextSwitch] = useState<ContextSwitchState>({
     open: false,
@@ -283,6 +286,20 @@ export const App: React.FC<AppProps> = ({
       authState.token
     ).then((mapping) => {
       if (cancelled) return;
+
+      // Store available playbooks for the context selector
+      if (mapping.availablePlaybooks.length > 0) {
+        const playbookOptions: IPlaybookOption[] = mapping.availablePlaybooks.map((pb) => ({
+          id: pb.id,
+          name: pb.name,
+          description: pb.description,
+        }));
+        setAvailablePlaybooks(playbookOptions);
+        console.info('[SprkChatPane] Available playbooks from API:', playbookOptions.length);
+      } else {
+        setAvailablePlaybooks([]);
+      }
+
       if (mapping.defaultPlaybook?.id) {
         setActiveContext((prev) => ({ ...prev, playbookId: mapping.defaultPlaybook!.id }));
         console.info('[SprkChatPane] Playbook resolved from API:', mapping.defaultPlaybook.id, mapping.defaultPlaybook.name);
@@ -431,6 +448,10 @@ export const App: React.FC<AppProps> = ({
     clearSession(DEFAULT_PANE_ID);
     setActiveSessionId('');
 
+    // Clear stale playbooks — the useEffect for async playbook resolution
+    // will re-populate from the API for the new entity type.
+    setAvailablePlaybooks([]);
+
     // Update active context with empty playbookId -- the useEffect for async
     // playbook resolution will pick up the new entityType/pageType and resolve it.
     setActiveContext({ ...newContext, playbookId: '' });
@@ -447,6 +468,17 @@ export const App: React.FC<AppProps> = ({
       newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
     });
     console.debug('[SprkChatPane] User chose to keep current context');
+  }, []);
+
+  /**
+   * Callback from SprkChat when the user switches playbooks via the context
+   * selector dropdown or playbook chips. Updates activeContext so that the
+   * sessionStorage persistence effect picks up the new playbookId, ensuring
+   * it is remembered on next pane open.
+   */
+  const handlePlaybookChange = useCallback((playbookId: string) => {
+    setActiveContext((prev) => ({ ...prev, playbookId }));
+    console.info('[SprkChatPane] Playbook changed by user:', playbookId);
   }, []);
 
   /**
@@ -526,7 +558,9 @@ export const App: React.FC<AppProps> = ({
           apiBaseUrl={apiBaseUrl}
           accessToken={authState.token}
           hostContext={hostContext}
+          playbooks={availablePlaybooks}
           onSessionCreated={handleSessionCreated}
+          onPlaybookChange={handlePlaybookChange}
         />
       </div>
 

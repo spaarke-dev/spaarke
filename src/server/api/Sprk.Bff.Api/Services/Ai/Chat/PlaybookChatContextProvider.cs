@@ -19,6 +19,29 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 public class PlaybookChatContextProvider : IChatContextProvider
 {
+    /// <summary>
+    /// Maximum token budget for the system prompt. Enrichment is skipped if appending
+    /// would push the total past this limit. Rough estimate: 1 token ≈ 4 characters.
+    /// </summary>
+    internal const int MaxSystemPromptTokenBudget = 8_000;
+
+    /// <summary>
+    /// Maximum token count for the entity enrichment block itself.
+    /// </summary>
+    internal const int MaxEnrichmentTokens = 100;
+
+    /// <summary>
+    /// Maps raw page type values to human-readable labels for the enrichment block.
+    /// Unknown or unmapped page types result in enrichment being skipped.
+    /// </summary>
+    private static readonly Dictionary<string, string> PageTypeLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["form"] = "main form view",
+        ["list"] = "list view",
+        ["dashboard"] = "dashboard view",
+        ["workspace"] = "workspace view"
+    };
+
     private readonly IScopeResolverService _scopeResolver;
     private readonly IPlaybookService _playbookService;
     private readonly IDocumentDataverseService _documentService;
@@ -58,6 +81,9 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 documentId);
 
             var defaultPrompt = BuildDefaultSystemPrompt(null);
+
+            // 6. Append entity metadata enrichment (generic mode)
+            defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);
 
             // Still load document summary for inline context
             string? defaultDocSummary = null;
@@ -132,7 +158,10 @@ public class PlaybookChatContextProvider : IChatContextProvider
         // 4. Enrich system prompt with inline knowledge and skill instructions
         systemPrompt = EnrichSystemPrompt(systemPrompt, knowledgeScope);
 
-        // 5. Load document summary for inline context injection
+        // 5. Append entity metadata enrichment (after all other sections)
+        systemPrompt = AppendEntityEnrichment(systemPrompt, hostContext);
+
+        // 6. Load document summary for inline context injection
         string? documentSummary = null;
         IReadOnlyDictionary<string, string>? analysisMetadata = null;
 
@@ -288,6 +317,83 @@ public class PlaybookChatContextProvider : IChatContextProvider
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends an entity metadata enrichment block to the system prompt when
+    /// the host context provides a valid EntityName and PageType.
+    /// </summary>
+    /// <remarks>
+    /// Guards:
+    /// - EntityName must be non-null/non-empty
+    /// - PageType must be non-null/non-empty and not "unknown"
+    /// - PageType must map to a known human-readable label
+    /// - Enrichment block must be ≤ <see cref="MaxEnrichmentTokens"/> tokens
+    /// - Total system prompt must not exceed <see cref="MaxSystemPromptTokenBudget"/> tokens
+    /// </remarks>
+    private string AppendEntityEnrichment(string systemPrompt, ChatHostContext? hostContext)
+    {
+        // Guard: no host context at all
+        if (hostContext is null)
+            return systemPrompt;
+
+        // Guard: EntityName must be present
+        if (string.IsNullOrWhiteSpace(hostContext.EntityName))
+            return systemPrompt;
+
+        // Guard: PageType must be present and not "unknown"
+        if (string.IsNullOrWhiteSpace(hostContext.PageType) ||
+            string.Equals(hostContext.PageType, "unknown", StringComparison.OrdinalIgnoreCase))
+            return systemPrompt;
+
+        // Guard: PageType must map to a known label
+        if (!PageTypeLabels.TryGetValue(hostContext.PageType, out var humanReadablePageType))
+        {
+            _logger.LogDebug(
+                "Unmapped page type '{PageType}'; skipping entity enrichment",
+                hostContext.PageType);
+            return systemPrompt;
+        }
+
+        // Build the enrichment block
+        var enrichmentBlock =
+            $"Context: You are assisting with {hostContext.EntityType} record '{hostContext.EntityName}'. " +
+            $"The user is viewing the {humanReadablePageType}.";
+
+        // Guard: enrichment block itself must be ≤ MaxEnrichmentTokens
+        var enrichmentTokenEstimate = EstimateTokenCount(enrichmentBlock);
+        if (enrichmentTokenEstimate > MaxEnrichmentTokens)
+        {
+            _logger.LogWarning(
+                "Entity enrichment block exceeds token cap ({EstimatedTokens} > {MaxTokens}); skipping enrichment",
+                enrichmentTokenEstimate, MaxEnrichmentTokens);
+            return systemPrompt;
+        }
+
+        // Guard: total system prompt budget
+        var currentTokenEstimate = EstimateTokenCount(systemPrompt);
+        if (currentTokenEstimate + enrichmentTokenEstimate > MaxSystemPromptTokenBudget)
+        {
+            _logger.LogWarning(
+                "System prompt token budget would be exceeded ({CurrentTokens} + {EnrichmentTokens} > {Budget}); skipping entity enrichment",
+                currentTokenEstimate, enrichmentTokenEstimate, MaxSystemPromptTokenBudget);
+            return systemPrompt;
+        }
+
+        return systemPrompt + "\n\n" + enrichmentBlock;
+    }
+
+    /// <summary>
+    /// Rough token estimate for English text: word_count * 1.3.
+    /// Uses whitespace splitting for word count.
+    /// </summary>
+    private static int EstimateTokenCount(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+
+        var wordCount = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        return (int)Math.Ceiling(wordCount * 1.3);
     }
 
     /// <summary>

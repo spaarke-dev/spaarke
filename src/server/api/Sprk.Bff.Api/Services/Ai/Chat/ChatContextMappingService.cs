@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using StackExchange.Redis;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -30,7 +31,14 @@ public class ChatContextMappingService
 
     private const string MappingEntityName = "sprk_aichatcontextmapping";
 
+    /// <summary>
+    /// Cache key prefix used by <see cref="BuildCacheKey"/>. Must match the pattern
+    /// used in <see cref="EvictAllCachedMappingsAsync"/> for SCAN-based eviction.
+    /// </summary>
+    private const string CacheKeyPrefix = "chat:ctx-mapping:";
+
     private readonly IDistributedCache _cache;
+    private readonly IConnectionMultiplexer? _redis;
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<ChatContextMappingService> _logger;
 
@@ -38,14 +46,16 @@ public class ChatContextMappingService
     /// Builds the Redis cache key for a context mapping lookup.
     /// </summary>
     internal static string BuildCacheKey(string entityType, string? pageType)
-        => $"chat:ctx-mapping:{entityType}:{pageType ?? "any"}";
+        => $"{CacheKeyPrefix}{entityType}:{pageType ?? "any"}";
 
     public ChatContextMappingService(
         IDistributedCache cache,
         IGenericEntityService genericEntityService,
-        ILogger<ChatContextMappingService> logger)
+        ILogger<ChatContextMappingService> logger,
+        IConnectionMultiplexer? redis = null)
     {
         _cache = cache;
+        _redis = redis;
         _genericEntityService = genericEntityService;
         _logger = logger;
     }
@@ -96,6 +106,60 @@ public class ChatContextMappingService
         await CacheMappingAsync(cacheKey, response, ct);
 
         return response;
+    }
+
+    /// <summary>
+    /// Evicts all cached context mapping entries from Redis by scanning for keys
+    /// matching the <c>chat:ctx-mapping:*</c> pattern and removing them.
+    ///
+    /// Uses <see cref="IConnectionMultiplexer"/> (Option A) for pattern-based key
+    /// deletion via Redis SCAN. Falls back gracefully when Redis is not configured
+    /// (in-memory cache) — returns 0 since in-memory cache has no pattern-delete API
+    /// and entries will expire naturally via TTL.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of cache keys evicted.</returns>
+    public async Task<int> EvictAllCachedMappingsAsync(CancellationToken ct = default)
+    {
+        if (_redis is null)
+        {
+            _logger.LogWarning(
+                "EvictAllCachedMappings: Redis not available (in-memory cache). " +
+                "Entries will expire naturally via TTL ({Ttl} min).",
+                MappingCacheTtl.TotalMinutes);
+            return 0;
+        }
+
+        // The StackExchangeRedisCache prepends the instance name (e.g. "sdap:") to all keys.
+        // We need to scan for the full Redis key pattern including that prefix.
+        // IDistributedCache.RemoveAsync expects the key WITHOUT the instance prefix.
+        var endpoints = _redis.GetEndPoints();
+        var evicted = 0;
+
+        foreach (var endpoint in endpoints)
+        {
+            var server = _redis.GetServer(endpoint);
+            if (server.IsReplica)
+                continue;
+
+            // SCAN for keys matching the pattern (non-blocking, cursor-based)
+            // The instance name prefix "sdap:" is prepended by StackExchangeRedisCache
+            var pattern = $"sdap:{CacheKeyPrefix}*";
+
+            await foreach (var key in server.KeysAsync(pattern: pattern).WithCancellation(ct))
+            {
+                // IDistributedCache expects the key without the instance prefix
+                var cacheKey = ((string)key!).Replace("sdap:", "", StringComparison.Ordinal);
+                await _cache.RemoveAsync(cacheKey, ct);
+                evicted++;
+            }
+        }
+
+        _logger.LogInformation(
+            "EvictAllCachedMappings: evicted {Count} cache entries matching pattern '{Pattern}'",
+            evicted, $"{CacheKeyPrefix}*");
+
+        return evicted;
     }
 
     /// <summary>

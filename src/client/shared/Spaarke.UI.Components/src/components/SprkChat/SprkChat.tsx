@@ -105,6 +105,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   apiBaseUrl,
   accessToken,
   onSessionCreated,
+  onPlaybookChange,
   className,
   documents = [],
   playbooks = [],
@@ -300,8 +301,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handlePlaybookChange = React.useCallback(
     (newPlaybookId: string) => {
       switchContext(documentId, newPlaybookId);
+      if (onPlaybookChange) {
+        onPlaybookChange(newPlaybookId);
+      }
     },
-    [switchContext, documentId]
+    [switchContext, documentId, onPlaybookChange]
   );
 
   // Handle additional documents change with debounce (300ms)
@@ -614,8 +618,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handlePlaybookChipClick = React.useCallback(
     (pb: IPlaybookOption) => {
       switchContext(documentId, pb.id, hostContext);
+      if (onPlaybookChange) {
+        onPlaybookChange(pb.id);
+      }
     },
-    [switchContext, documentId, hostContext]
+    [switchContext, documentId, hostContext, onPlaybookChange]
   );
 
   const displayError = sessionError || streamError || editorRefineError;
