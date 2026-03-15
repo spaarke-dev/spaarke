@@ -40,10 +40,10 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
     // These default to the dev environment values from the original msalConfig.ts
     const tenantId = context.parameters.tenantId?.raw ?? 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
     const clientAppId =
-      (context.parameters as Record<string, { raw?: string }>).clientAppId?.raw ??
+      (context.parameters as unknown as Record<string, { raw?: string }>).clientAppId?.raw ??
       '170c98e1-d486-4355-bcbe-170454e0207c';
     const bffAppId =
-      (context.parameters as Record<string, { raw?: string }>).bffAppId?.raw ?? '1e40baad-e065-4aea-a8d4-4b7ab273458c';
+      (context.parameters as unknown as Record<string, { raw?: string }>).bffAppId?.raw ?? '1e40baad-e065-4aea-a8d4-4b7ab273458c';
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
     // Initialize @spaarke/auth asynchronously (don't block init)
@@ -51,6 +51,7 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
       .then(() => {
         this.authInitialized = true;
         console.info('[DocumentRelationshipViewer] @spaarke/auth initialized');
+        return undefined;
       })
       .catch(error => {
         console.error('[DocumentRelationshipViewer] @spaarke/auth initialization failed:', error);

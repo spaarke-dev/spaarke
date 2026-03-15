@@ -3,7 +3,10 @@
   "compilerOptions": {
     "typeRoots": ["node_modules/@types"],
     "module": "es2015",
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "noImplicitAny": false,
+    "strict": false
   },
   "exclude": [
     "node_modules",

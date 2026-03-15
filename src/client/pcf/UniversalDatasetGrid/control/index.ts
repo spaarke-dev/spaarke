@@ -1,6 +1,6 @@
 /**
  * Universal Dataset Grid PCF Control
- * Version 2.0.7 - Single React Root Architecture with Fluent UI v9
+ * Version 2.2.1 - Single React Root Architecture with Fluent UI v9
  */
 
 import * as React from 'react';

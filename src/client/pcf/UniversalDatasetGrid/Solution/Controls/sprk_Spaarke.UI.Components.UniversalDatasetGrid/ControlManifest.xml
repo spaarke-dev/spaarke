@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.UI.Components" constructor="UniversalDatasetGrid" version="2.2.0" display-name-key="Universal Dataset Grid" description-key="Document management grid with MSAL authentication, SDAP integration and Fluent UI v9" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.UI.Components" constructor="UniversalDatasetGrid" version="2.2.1" display-name-key="Universal Dataset Grid" description-key="Document management grid with MSAL authentication, SDAP integration and Fluent UI v9 (v2.2.1)" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <data-set name="dataset" display-name-key="Dataset"/>
     <property name="configJson" display-name-key="Configuration JSON" description-key="JSON configuration for grid behavior, commands, and SDAP integration" of-type="Multiple" usage="input" required="false"/>
