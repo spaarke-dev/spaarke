@@ -20,17 +20,29 @@ public sealed record EnvironmentSummaryDto
     [JsonPropertyName("name")]
     public string Name { get; init; } = string.Empty;
 
+    /// <summary>Azure AD tenant ID — sprk_tenantid</summary>
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; init; }
+
+    /// <summary>Tenant display name — sprk_tenantname</summary>
+    [JsonPropertyName("tenantName")]
+    public string? TenantName { get; init; }
+
     /// <summary>SharePoint root site URL for this tenant environment — sprk_rootsiteurl</summary>
     [JsonPropertyName("rootSiteUrl")]
     public string RootSiteUrl { get; init; } = string.Empty;
 
-    /// <summary>Microsoft Graph API base URL override — sprk_graphapibaseurl</summary>
-    [JsonPropertyName("graphApiBaseUrl")]
-    public string? GraphApiBaseUrl { get; init; }
+    /// <summary>Microsoft Graph API endpoint override — sprk_graphapibaseurl</summary>
+    [JsonPropertyName("graphEndpoint")]
+    public string? GraphEndpoint { get; init; }
 
     /// <summary>Whether this is the default environment — sprk_isdefault</summary>
     [JsonPropertyName("isDefault")]
     public bool IsDefault { get; init; }
+
+    /// <summary>Active or inactive status — derived from statecode (0=active, 1=inactive)</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "active";
 
     /// <summary>Record creation timestamp.</summary>
     [JsonPropertyName("createdOn")]
@@ -56,16 +68,24 @@ public sealed record EnvironmentDetailDto
     [JsonPropertyName("name")]
     public string Name { get; init; } = string.Empty;
 
+    /// <summary>Azure AD tenant ID — sprk_tenantid</summary>
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; init; }
+
+    /// <summary>Tenant display name — sprk_tenantname</summary>
+    [JsonPropertyName("tenantName")]
+    public string? TenantName { get; init; }
+
     /// <summary>SharePoint root site URL for this tenant environment — sprk_rootsiteurl</summary>
     [JsonPropertyName("rootSiteUrl")]
     public string RootSiteUrl { get; init; } = string.Empty;
 
     /// <summary>
-    /// Microsoft Graph API base URL override (if non-standard).
+    /// Microsoft Graph API endpoint override (if non-standard).
     /// Defaults to https://graph.microsoft.com/v1.0 when null — sprk_graphapibaseurl
     /// </summary>
-    [JsonPropertyName("graphApiBaseUrl")]
-    public string? GraphApiBaseUrl { get; init; }
+    [JsonPropertyName("graphEndpoint")]
+    public string? GraphEndpoint { get; init; }
 
     /// <summary>Optional description for administrators — sprk_description</summary>
     [JsonPropertyName("description")]
@@ -74,6 +94,10 @@ public sealed record EnvironmentDetailDto
     /// <summary>Whether this is the default environment — sprk_isdefault</summary>
     [JsonPropertyName("isDefault")]
     public bool IsDefault { get; init; }
+
+    /// <summary>Active or inactive status — derived from statecode (0=active, 1=inactive)</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "active";
 
     /// <summary>Record creation timestamp.</summary>
     [JsonPropertyName("createdOn")]
@@ -97,6 +121,14 @@ public sealed record CreateEnvironmentRequest
     [JsonPropertyName("name")]
     public string Name { get; init; } = string.Empty;
 
+    /// <summary>Azure AD tenant ID (e.g. "72f988bf-86f1-41af-91ab-2d7cd011db47"). Required.</summary>
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; init; }
+
+    /// <summary>Tenant display name (e.g. "Contoso Ltd"). Optional.</summary>
+    [JsonPropertyName("tenantName")]
+    public string? TenantName { get; init; }
+
     /// <summary>
     /// SharePoint root site URL. Required.
     /// Must be a valid HTTPS URL.
@@ -105,11 +137,11 @@ public sealed record CreateEnvironmentRequest
     public string RootSiteUrl { get; init; } = string.Empty;
 
     /// <summary>
-    /// Microsoft Graph API base URL override. Optional.
+    /// Microsoft Graph API endpoint override. Optional.
     /// Must be a valid HTTPS URL when provided.
     /// </summary>
-    [JsonPropertyName("graphApiBaseUrl")]
-    public string? GraphApiBaseUrl { get; init; }
+    [JsonPropertyName("graphEndpoint")]
+    public string? GraphEndpoint { get; init; }
 
     /// <summary>Optional description for administrators.</summary>
     [JsonPropertyName("description")]
@@ -121,6 +153,12 @@ public sealed record CreateEnvironmentRequest
     /// </summary>
     [JsonPropertyName("isDefault")]
     public bool IsDefault { get; init; }
+
+    /// <summary>
+    /// Active or inactive status ("active" | "inactive"). Defaults to "active".
+    /// </summary>
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = "active";
 }
 
 /// <summary>
@@ -133,6 +171,14 @@ public sealed record UpdateEnvironmentRequest
     [JsonPropertyName("name")]
     public string? Name { get; init; }
 
+    /// <summary>Azure AD tenant ID. Optional.</summary>
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; init; }
+
+    /// <summary>Tenant display name. Optional.</summary>
+    [JsonPropertyName("tenantName")]
+    public string? TenantName { get; init; }
+
     /// <summary>
     /// SharePoint root site URL. Optional.
     /// Must be a valid HTTPS URL when provided.
@@ -141,11 +187,11 @@ public sealed record UpdateEnvironmentRequest
     public string? RootSiteUrl { get; init; }
 
     /// <summary>
-    /// Microsoft Graph API base URL override. Optional.
+    /// Microsoft Graph API endpoint override. Optional.
     /// Must be a valid HTTPS URL when provided.
     /// </summary>
-    [JsonPropertyName("graphApiBaseUrl")]
-    public string? GraphApiBaseUrl { get; init; }
+    [JsonPropertyName("graphEndpoint")]
+    public string? GraphEndpoint { get; init; }
 
     /// <summary>Optional description for administrators.</summary>
     [JsonPropertyName("description")]
@@ -157,6 +203,10 @@ public sealed record UpdateEnvironmentRequest
     /// </summary>
     [JsonPropertyName("isDefault")]
     public bool? IsDefault { get; init; }
+
+    /// <summary>Active or inactive status ("active" | "inactive"). Optional.</summary>
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +242,12 @@ internal sealed class EnvironmentDataverseRow
     [JsonPropertyName("sprk_name")]
     public string? Name { get; set; }
 
+    [JsonPropertyName("sprk_tenantid")]
+    public string? TenantId { get; set; }
+
+    [JsonPropertyName("sprk_tenantname")]
+    public string? TenantName { get; set; }
+
     [JsonPropertyName("sprk_rootsiteurl")]
     public string? RootSiteUrl { get; set; }
 
@@ -204,6 +260,10 @@ internal sealed class EnvironmentDataverseRow
     [JsonPropertyName("sprk_isdefault")]
     public bool IsDefault { get; set; }
 
+    /// <summary>Dataverse statecode: 0 = Active, 1 = Inactive.</summary>
+    [JsonPropertyName("statecode")]
+    public int StateCode { get; set; }
+
     [JsonPropertyName("createdon")]
     public DateTimeOffset? CreatedOn { get; set; }
 
@@ -212,13 +272,18 @@ internal sealed class EnvironmentDataverseRow
 
     // ── Mapping helpers ───────────────────────────────────────────────────────
 
+    private string MappedStatus => StateCode == 0 ? "active" : "inactive";
+
     public EnvironmentSummaryDto ToSummary() => new()
     {
         Id = Id,
         Name = Name ?? string.Empty,
+        TenantId = TenantId,
+        TenantName = TenantName,
         RootSiteUrl = RootSiteUrl ?? string.Empty,
-        GraphApiBaseUrl = GraphApiBaseUrl,
+        GraphEndpoint = GraphApiBaseUrl,
         IsDefault = IsDefault,
+        Status = MappedStatus,
         CreatedOn = CreatedOn,
         ModifiedOn = ModifiedOn
     };
@@ -227,10 +292,13 @@ internal sealed class EnvironmentDataverseRow
     {
         Id = Id,
         Name = Name ?? string.Empty,
+        TenantId = TenantId,
+        TenantName = TenantName,
         RootSiteUrl = RootSiteUrl ?? string.Empty,
-        GraphApiBaseUrl = GraphApiBaseUrl,
+        GraphEndpoint = GraphApiBaseUrl,
         Description = Description,
         IsDefault = IsDefault,
+        Status = MappedStatus,
         CreatedOn = CreatedOn,
         ModifiedOn = ModifiedOn
     };
