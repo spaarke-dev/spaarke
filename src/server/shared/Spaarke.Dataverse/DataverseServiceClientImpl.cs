@@ -55,8 +55,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         try
         {
             // Use connection string method (Microsoft's recommended approach for server-to-server auth)
-            // Format: AuthType=ClientSecret;Url=https://org.crm.dynamics.com;ClientId=xxx;ClientSecret=xxx
-            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};ClientId={clientId};ClientSecret={clientSecret}";
+            // Format: AuthType=ClientSecret;url=...;tenantId=...;clientId=...;clientSecret=...
+            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};TenantId={tenantId};ClientId={clientId};ClientSecret={clientSecret}";
 
             _logger.LogInformation("Using ClientSecret authentication (connection string method)");
 
