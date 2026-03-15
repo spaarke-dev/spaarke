@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Build Verification and Integration Test Pass After Phase 2</title>
+    <phase>2: Backend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>032</blocks>
+    <tags>testing, dotnet, verification</tags>
+  </metadata>
+
+  <prompt>
+    Run a full build and test pass to verify that all Phase 2 backend decomposition work is
+    complete and correct. Verify each measurable metric from the Phase 2 acceptance criteria.
+    Document any failures, fix them, and confirm the final green state before closing the phase.
+  </prompt>
+
+  <role>Senior .NET developer specializing in SOLID principles and service decomposition</role>
+
+  <goal>
+    dotnet build produces zero errors. dotnet test produces zero failures. All Phase 2 structural
+    metrics are verified and confirmed: OfficeService.cs under 500 lines,
+    AnalysisOrchestrationService constructor at or under 10 parameters, IDataverseService
+    inheriting 9 narrow interfaces, no unbounded static dictionaries, no direct HttpClient
+    instantiation in DI classes.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 010, 011, 012, and 013 collectively decompose OfficeService.cs and
+      AnalysisOrchestrationService.cs, segregate IDataverseService into 9 focused interfaces,
+      and migrate all consumers to narrow interface injection. Each task ran incremental build
+      checks, but this task is the final gate for Phase 2. It re-runs the full suite from a clean
+      state, verifies each metric explicitly, and documents the outcome. If any regressions are
+      found they must be fixed here before Phase 3 (test coverage and static analysis) begins.
+      This task is also the checkpoint that unblocks the Phase 3 tasks (task group 03x).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ (read — verify metrics)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseService.cs (read — verify 9 interfaces)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (read — verify line count)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (read — verify constructor)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">
+      DI registrations must not exceed 15 non-framework registrations. If the build or test run
+      reveals a registration that was added outside this constraint, flag it and reduce the count
+      before marking this task complete.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Run dotnet build from the repository root. Record the full output. If there are errors,
+      diagnose and fix each one. Do not proceed until the build is green.
+    </step>
+    <step order="2">
+      Run dotnet test from the repository root. Record the pass/fail counts. If any tests fail,
+      diagnose and fix each failure. Do not weaken test assertions or skip tests to achieve a
+      green run. Do not proceed until all tests pass.
+    </step>
+    <step order="3">
+      Run dotnet test --filter ArchTests (or the project-specific arch test filter) to verify
+      that architecture fitness functions pass. If arch tests did not exist before this project,
+      note that they will be added in Phase 3.
+    </step>
+    <step order="4">
+      Verify OfficeService.cs line count. Run: wc -l on the file (or count using Read tool).
+      Confirm the line count is below 500. If it exceeds 500, identify what remains and complete
+      the extraction before marking this step done.
+    </step>
+    <step order="5">
+      Verify AnalysisOrchestrationService.cs constructor parameter count. Read the constructor
+      signature and count parameters. Confirm the count is 10 or fewer.
+    </step>
+    <step order="6">
+      Verify IDataverseService.cs. Read the interface declaration and confirm it inherits exactly
+      9 domain interfaces and contains no method signatures of its own.
+    </step>
+    <step order="7">
+      Grep for static unbounded dictionary patterns in DI and service classes:
+        pattern: new Dictionary&lt; (without a capacity argument or ConcurrentDictionary) assigned
+        to a static field.
+      Verify zero instances remain from the Phase 1 fix (task 001). If any are found, fix them.
+    </step>
+    <step order="8">
+      Grep for direct HttpClient instantiation outside the HttpClientFactory pattern:
+        pattern: new HttpClient() in any file under src/server/.
+      Verify zero instances. If any are found, replace with IHttpClientFactory.CreateClient().
+    </step>
+    <step order="9">
+      Document the final state of all Phase 2 metrics in a brief summary comment at the top of
+      projects/code-quality-and-assurance-r2/current-task.md under a "Phase 2 Verification"
+      section. Include: build status, test pass/fail counts, line counts, constructor parameter
+      counts, and grep results.
+    </step>
+    <step order="10">
+      Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — mark task 014 complete
+      and update the phase 2 status to indicate all tasks are done.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="file">projects/code-quality-and-assurance-r2/current-task.md (modified — Phase 2 Verification section)</output>
+    <output type="file">projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>dotnet build produces zero errors across the entire solution</criterion>
+    <criterion>dotnet test produces zero failures — all existing tests remain green</criterion>
+    <criterion>OfficeService.cs is confirmed at fewer than 500 lines</criterion>
+    <criterion>AnalysisOrchestrationService constructor is confirmed at 10 or fewer parameters</criterion>
+    <criterion>IDataverseService is confirmed to inherit exactly 9 domain interfaces with no inline method signatures</criterion>
+    <criterion>Zero static unbounded dictionary patterns found in service or DI files</criterion>
+    <criterion>Zero direct new HttpClient() instantiations found in src/server/</criterion>
+    <criterion>Phase 2 Verification summary written to current-task.md</criterion>
+  </acceptance-criteria>
+</task>

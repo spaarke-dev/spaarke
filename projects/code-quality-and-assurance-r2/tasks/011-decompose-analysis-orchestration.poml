@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Decompose AnalysisOrchestrationService into 3 Focused Services</title>
+    <phase>2: Backend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>013</blocks>
+    <tags>refactoring, dotnet, bff-api, ai</tags>
+  </metadata>
+
+  <prompt>
+    Decompose AnalysisOrchestrationService.cs to reduce its constructor from 20 injected
+    dependencies down to 10 or fewer by extracting 3 focused services: AnalysisDocumentLoader,
+    AnalysisRagProcessor, and AnalysisResultPersistence. ExecutePlaybookAsync remains in the
+    orchestrator but delegates its phases to the extracted services. Register all 3 new services
+    in AnalysisServicesModule.cs.
+  </prompt>
+
+  <role>Senior .NET developer specializing in SOLID principles and service decomposition</role>
+
+  <goal>
+    AnalysisOrchestrationService.cs has a constructor with 10 or fewer parameters. Three new
+    focused service files exist, each absorbing a cohesive set of dependencies. All existing
+    functionality is preserved. dotnet build passes with zero errors.
+  </goal>
+
+  <context>
+    <background>
+      AnalysisOrchestrationService.cs orchestrates AI-powered document analysis. Its constructor
+      currently accepts 20 dependencies, which is a strong signal that the class violates the
+      Single Responsibility Principle and that constructor injection is being abused as a service
+      locator. The 20-parameter constructor makes unit testing impractical, increases the
+      likelihood of merge conflicts, and obscures the true responsibilities of the class.
+      Phase 2 requires reducing the constructor to 10 or fewer parameters by extracting 3
+      cohesive services: one for document loading and text extraction, one for RAG retrieval and
+      caching, and one for persisting analysis outputs. ExecutePlaybookAsync is the core
+      orchestration method and stays in the orchestrator; it simply calls the extracted services
+      rather than calling dependencies directly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modify — primary target)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modify — register new services)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisDocumentLoader.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisRagProcessor.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">
+      Redis is the only caching layer. IDistributedCache must remain the abstraction used for
+      RAG result caching inside AnalysisRagProcessor. Do not introduce an in-memory fallback or
+      hybrid cache unless profiling proves a need.
+    </constraint>
+    <constraint source="ADR-010">
+      Register new services as concrete types in AnalysisServicesModule.cs. Constructor parameter
+      count for AnalysisOrchestrationService must be 10 or fewer after refactoring. Total
+      non-framework DI registrations across the solution must remain at or below 15.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Read AnalysisOrchestrationService.cs in full. For each constructor parameter, list which
+      methods use it. Group methods by the dependency cluster they belong to:
+      (a) document loading / text extraction, (b) RAG search and caching, (c) output persistence
+      and indexing. Record this mapping before writing any new files.
+    </step>
+    <step order="2">
+      Create AnalysisDocumentLoader.cs in src/server/api/Sprk.Bff.Api/Services/Ai/.
+      Move into it: ExtractDocumentTextAsync, ReloadAnalysisFromDataverseAsync,
+      GetOrReloadFromDataverseAsync.
+      Constructor dependencies to absorb: IDataverseService, ISpeFileOperations, ITextExtractor,
+      IDistributedCache (document cache only), IHttpContextAccessor,
+      ILogger&lt;AnalysisDocumentLoader&gt;.
+    </step>
+    <step order="3">
+      Create AnalysisRagProcessor.cs in src/server/api/Sprk.Bff.Api/Services/Ai/.
+      Move into it: ProcessRagKnowledgeAsync, GetOrSearchRagCacheAsync, ComputeRagCacheKey,
+      GetTenantIdFromClaims.
+      Constructor dependencies to absorb: IRagService, RagQueryBuilder, IDistributedCache (RAG
+      cache), CacheMetrics, ILogger&lt;AnalysisRagProcessor&gt;.
+    </step>
+    <step order="4">
+      Create AnalysisResultPersistence.cs in src/server/api/Sprk.Bff.Api/Services/Ai/.
+      Move into it: StoreDocumentProfileOutputsAsync, EnqueueRagIndexingJobAsync, and any
+      working-document finalization logic.
+      Constructor dependencies to absorb: IDataverseService (output writes), IWorkingDocumentService,
+      IStorageRetryPolicy, JobSubmissionService, ILogger&lt;AnalysisResultPersistence&gt;.
+    </step>
+    <step order="5">
+      Update AnalysisOrchestrationService constructor. Replace all absorbed raw dependencies with
+      the 3 injected service instances plus only the dependencies that genuinely belong in the
+      orchestrator (e.g., the AI tool runner, playbook loader, metrics). Verify the count is 10
+      or fewer.
+    </step>
+    <step order="6">
+      Refactor ExecutePlaybookAsync to delegate document loading, RAG processing, and result
+      persistence phases to the 3 injected services. The orchestrator method should read as a
+      clear sequence of high-level steps with no implementation details inline.
+    </step>
+    <step order="7">
+      Refactor ExecuteAnalysisAsync in the same manner — delegate phases rather than calling
+      low-level dependencies directly.
+    </step>
+    <step order="8">
+      Register AnalysisDocumentLoader, AnalysisRagProcessor, and AnalysisResultPersistence in
+      AnalysisServicesModule.cs as concrete scoped registrations following ADR-010.
+    </step>
+    <step order="9">
+      Run dotnet build from the repository root. Fix all compilation errors before proceeding.
+      Do not proceed to step 10 until the build is green.
+    </step>
+    <step order="10">
+      Count the parameters in the AnalysisOrchestrationService constructor. If the count exceeds
+      10, identify which remaining dependencies can be absorbed into one of the 3 extracted
+      services or a new one, and extract accordingly.
+    </step>
+    <step order="11">
+      Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — mark task 011 complete.
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisDocumentLoader.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisRagProcessor.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified)</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisOrchestrationService constructor has 10 or fewer parameters</criterion>
+    <criterion>Three new focused service files created: AnalysisDocumentLoader.cs, AnalysisRagProcessor.cs, AnalysisResultPersistence.cs</criterion>
+    <criterion>All existing functionality of ExecutePlaybookAsync and ExecuteAnalysisAsync is preserved — no behavior changes</criterion>
+    <criterion>All 3 new services are registered in AnalysisServicesModule.cs</criterion>
+    <criterion>dotnet build passes with zero errors across the entire solution</criterion>
+    <criterion>IDistributedCache usage for RAG caching remains inside AnalysisRagProcessor only (ADR-009 compliance)</criterion>
+  </acceptance-criteria>
+</task>

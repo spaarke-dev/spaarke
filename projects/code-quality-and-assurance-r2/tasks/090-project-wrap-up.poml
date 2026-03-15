@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>5: Project Wrap-Up</phase>
+    <status>pending</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, cleanup</tags>
+  </metadata>
+  <prompt>Standard project wrap-up: reconcile TASK-INDEX.md to ensure all tasks are marked complete, update README.md status to Complete, review notes/ files for completeness, verify a clean working tree, and create the final commit.</prompt>
+  <role>Project lead performing final project closure</role>
+  <goal>All tasks marked complete in TASK-INDEX.md, README.md reflects Complete status, working tree is clean, and a final wrap-up commit is pushed. The project is fully closed and ready for the push-to-github / merge-to-master workflow.</goal>
+  <context>
+    <background>This is the final task in the code-quality-and-assurance-r2 project. All implementation (Phases 1-2), frontend decomposition (Phase 3), architecture compliance (Phase 4), and the quality scorecard (task 032) must be complete before this task begins. The wrap-up ensures the project folder is clean, all status markers are accurate, and the branch is ready for merge.</background>
+    <relevant-files>
+      <file>projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md (modify — reconcile all task statuses)</file>
+      <file>projects/code-quality-and-assurance-r2/README.md (verify — should already be Complete from task 032)</file>
+      <file>projects/code-quality-and-assurance-r2/notes/ (review — all notes should be complete)</file>
+      <file>projects/code-quality-and-assurance-r2/current-task.md (modify — reset to none after completion)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Final commit must be on the feature branch — do not merge to master in this task. Use push-to-github skill for the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md — identify any tasks not marked complete (status 🔲 or In Progress).</step>
+    <step order="2">Reconcile TASK-INDEX.md — mark all completed tasks with ✅ status. If any tasks are genuinely incomplete, document why in README.md under a "Deferred Items" section rather than falsely marking them complete.</step>
+    <step order="3">Verify projects/code-quality-and-assurance-r2/README.md status is Complete (should have been set in task 032).</step>
+    <step order="4">Review all files in projects/code-quality-and-assurance-r2/notes/ — verify quality-scorecard-r2.md and lessons-learned.md are present and not empty. Note any missing documents.</step>
+    <step order="5">Update projects/code-quality-and-assurance-r2/current-task.md — set active task to "none" and add a completion summary indicating the project is complete.</step>
+    <step order="6">Run git status — verify working tree state. Stage and commit any uncommitted changes with message: "chore(quality): project wrap-up — code-quality-and-assurance-r2 complete".</step>
+    <step order="7">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 090 complete (this is the last update).</step>
+  </steps>
+  <outputs>
+    <output type="file">projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md (modified — all tasks marked complete)</output>
+    <output type="file">projects/code-quality-and-assurance-r2/current-task.md (modified — reset to none)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All tasks in TASK-INDEX.md marked ✅ complete (or explicitly deferred with justification in README.md).</criterion>
+    <criterion>README.md status is Complete.</criterion>
+    <criterion>notes/quality-scorecard-r2.md exists and is populated.</criterion>
+    <criterion>notes/lessons-learned.md exists and is populated.</criterion>
+    <criterion>current-task.md set to active task: none.</criterion>
+    <criterion>Git working tree is clean after final commit (git status shows nothing to commit).</criterion>
+  </acceptance-criteria>
+</task>

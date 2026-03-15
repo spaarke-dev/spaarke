@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Fix No-Op Arch Tests + Add Plugin Assembly Coverage</title>
+    <phase>1: Quick Wins</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>031</blocks>
+    <tags>testing, dotnet, architecture</tags>
+  </metadata>
+  <prompt>Fix 2 no-op architecture tests in ADR010_DITests.cs that always pass (Assert.True(true)) and add the plugin assembly to ADR002_PluginTests.cs test scope so plugin violations are actually caught.</prompt>
+  <role>Senior .NET test engineer with expertise in architecture tests, WebApplicationFactory, and NetArchTest or reflection-based assembly scanning.</role>
+  <goal>Zero Assert.True(true) no-ops remain in arch test files. Both fixed tests use real inspection that will fail when violations exist. Plugin assembly is included in ADR-002 test scope. dotnet test --filter ArchTests passes.</goal>
+  <context>
+    <background>The architecture test suite contains tests that permanently pass regardless of actual code state. ADR010_DITests.cs has two such tests: ExpensiveResourcesShouldBeSingleton (asserts true unconditionally) and ServicesShouldBeConcreteUnlessSeamRequired (logs but never fails). ADR002_PluginTests.cs only scans the BFF assembly and misses the Spaarke.Dataverse.CustomApiProxy plugin assembly where ADR-002 violations (HTTP calls, Thread.Sleep) would most likely occur. These no-ops give false confidence that architectural constraints are being enforced.</background>
+    <relevant-files>
+      <file>tests/Spaarke.ArchTests/ADR010_DITests.cs (modify — fix 2 no-op tests)</file>
+      <file>tests/Spaarke.ArchTests/ADR002_PluginTests.cs (modify — add plugin assembly to test scope)</file>
+      <file>src/dataverse/plugins/Spaarke.CustomApiProxy/ (read — understand assembly name and structure for reference)</file>
+      <file>tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj (modify if needed — add project reference to plugin assembly)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">Dataverse plugins must not make HTTP/Graph calls, must not use Thread.Sleep, and must execute in under 50ms p95. Architecture tests must actually fail when these constraints are violated.</constraint>
+    <constraint source="ADR-010">Expensive resources (ServiceClient, GraphServiceClient, HttpClient) must be registered as Singleton. Tests verifying this must use real DI inspection, not placeholder assertions.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002.md</file>
+      <file>.claude/adr/ADR-010.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read ADR010_DITests.cs in full — understand all 4 tests, their current assertion logic, and the test class setup (WebApplicationFactory usage if any).</step>
+    <step order="2">Fix ExpensiveResourcesShouldBeSingleton: replace Assert.True(true) with a test that uses WebApplicationFactory&lt;Program&gt; to build the service provider, then retrieves ServiceDescriptors for ServiceClient, GraphServiceClient, and IHttpClientFactory. Assert that each has ServiceLifetime.Singleton. The test should fail if any of these are registered as Scoped or Transient.</step>
+    <step order="3">Fix ServicesShouldBeConcreteUnlessSeamRequired: define a documented allow-list of interfaces that have genuine architectural seams (e.g., IDataverseService, ISpeFileOperations — identify the real allow-list by reading the existing test logic). Replace Assert.True(true, message) with Assert.Empty(unnecessaryInterfaces) so the test fails when interfaces outside the allow-list are registered unnecessarily.</step>
+    <step order="4">Read ADR002_PluginTests.cs in full — understand what assemblies are currently scanned, what patterns are detected, and how violations are reported.</step>
+    <step order="5">Determine how to reference the plugin assembly in the test project. Read the test project's .csproj to check for existing references. If Spaarke.CustomApiProxy is not referenced, add a ProjectReference to it (or load the assembly by path if a project reference creates circular dependencies).</step>
+    <step order="6">Add the plugin assembly (Spaarke.Dataverse.CustomApiProxy) to the assembly list scanned in ADR002_PluginTests.cs.</step>
+    <step order="7">Add a dedicated test that scans the plugin assembly for: (a) instantiation of HttpClient or WebRequest, (b) calls to Thread.Sleep, (c) usage of System.Net.Http types. The test should fail if any such usage is found in plugin code.</step>
+    <step order="8">Run `dotnet test --filter ArchTests` — verify all tests pass (with any newly discovered real violations reported as failures that must then be addressed or added to a justified exceptions list).</step>
+    <step order="9">Verify with: grep -rn "Assert.True(true" tests/ -- confirm zero results remain.</step>
+    <step order="10">Update TASK-INDEX.md: change task 003 status from pending (🔲) to completed (✅).</step>
+  </steps>
+  <outputs>
+    <output type="file">tests/Spaarke.ArchTests/ADR010_DITests.cs (modified — two no-op tests replaced with real inspections)</output>
+    <output type="file">tests/Spaarke.ArchTests/ADR002_PluginTests.cs (modified — plugin assembly added to test scope)</output>
+    <output type="file">tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj (modified if project reference was needed)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Zero `Assert.True(true)` calls remain in any arch test file (verified by grep).</criterion>
+    <criterion>ExpensiveResourcesShouldBeSingleton uses WebApplicationFactory&lt;Program&gt; to inspect real ServiceDescriptor.Lifetime values and fails when Singleton requirement is violated.</criterion>
+    <criterion>ServicesShouldBeConcreteUnlessSeamRequired uses Assert.Empty with a documented allow-list and fails when interfaces outside the allow-list are registered unnecessarily.</criterion>
+    <criterion>ADR002_PluginTests.cs scans the Spaarke.Dataverse.CustomApiProxy plugin assembly in addition to the BFF assembly.</criterion>
+    <criterion>A test exists that detects HttpClient instantiation, Thread.Sleep, and HTTP calls in the plugin assembly and fails when found.</criterion>
+    <criterion>`dotnet test --filter ArchTests` passes with no unexpected failures.</criterion>
+  </acceptance-criteria>
+</task>

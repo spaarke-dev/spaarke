@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="code-quality-and-assurance-r2">
+  <metadata>
+    <title>Extract usePanelResize + Finalize Component Decomposition</title>
+    <phase>3: Frontend Structural Decomposition</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021, 022</dependencies>
+    <blocks>024</blocks>
+    <tags>refactoring, typescript, pcf</tags>
+  </metadata>
+  <prompt>Extract the final hook (usePanelResize) from AnalysisWorkspaceApp.tsx and verify the component is fully decomposed. After this task, AnalysisWorkspaceApp.tsx should be approximately 300 lines — down from 1,564 — containing only hook composition and layout JSX. Verify all 7 hooks are properly integrated.</prompt>
+  <role>Senior React developer specializing in hooks and component architecture</role>
+  <goal>usePanelResize hook created in control/hooks/ absorbing all panel resize state, refs, and mouse event handlers. AnalysisWorkspaceApp.tsx reduced to under 400 lines containing only hook composition and layout JSX, with all 7 hooks properly integrated.</goal>
+  <context>
+    <background>This is the final hook extraction in Phase 3. After tasks 020, 021, and 022 extract 6 hooks, this task extracts the last one (usePanelResize) and verifies the overall decomposition result. The panel resize logic is particularly ref-heavy: it uses containerRef, leftPanelRef, centerPanelRef, isDraggingRef, dragStartXRef, and dragStartWidthRef — plus 3 mouse event handlers and a cleanup effect. All of this should move into the hook. After this task, AnalysisWorkspaceApp.tsx must be under 400 lines.</background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modify — extract panel resize state and verify final size)</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/hooks/ (create — usePanelResize.ts; verify all 7 hooks present)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-012">Hook must be React 16/17 compatible. useRef and mouse event handlers are compatible.</constraint>
+    <constraint source="ADR-022">PCF uses platform-provided React 16/17. No React 18 APIs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-022.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read AnalysisWorkspaceApp.tsx lines 396-412 to understand panel visibility and width state: isConversationPanelVisible, isDocumentPanelVisible, leftPanelWidth, centerPanelWidth.</step>
+    <step order="2">Read AnalysisWorkspaceApp.tsx lines 745-802 to understand refs (containerRef, leftPanelRef, centerPanelRef, isDraggingRef, dragStartXRef, dragStartWidthRef) and mouse event handlers (handleResizeMouseDown, handleResizeMouseMove, handleResizeMouseUp) and cleanup effect.</step>
+    <step order="3">Create src/client/pcf/AnalysisWorkspace/control/hooks/usePanelResize.ts with UsePanelResizeOptions and UsePanelResizeResult types. Absorb: all 4 state variables, all 6 refs, all 3 mouse event handlers, and the cleanup effect. Return: { isConversationPanelVisible, isDocumentPanelVisible, leftPanelWidth, centerPanelWidth, containerRef, leftPanelRef, centerPanelRef, handleResizeMouseDown, ...setters }.</step>
+    <step order="4">Update AnalysisWorkspaceApp.tsx to import and use usePanelResize, replacing inline state, refs, and handlers.</step>
+    <step order="5">Remove all extracted useState, useRef, useEffect, and useCallback declarations for panel resize from AnalysisWorkspaceApp.tsx.</step>
+    <step order="6">Verify AnalysisWorkspaceApp.tsx line count is under 400 — the component should now be pure hook composition + layout JSX.</step>
+    <step order="7">Verify control/hooks/ directory contains all 7 expected hooks: useAuth.ts, useDocumentResolution.ts, useAnalysisData.ts, useAnalysisExecution.ts, useWorkingDocumentSave.ts, useChatState.ts, usePanelResize.ts.</step>
+    <step order="8">Run PCF build: cd src/client/pcf &amp;&amp; npm run build — verify zero TypeScript errors.</step>
+    <step order="9">Update projects/code-quality-and-assurance-r2/tasks/TASK-INDEX.md to mark task 023 complete.</step>
+  </steps>
+  <outputs>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/hooks/usePanelResize.ts</output>
+    <output type="file">src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx (modified — final state)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>usePanelResize.ts created in control/hooks/ with UsePanelResizeOptions and UsePanelResizeResult types exported.</criterion>
+    <criterion>All 6 refs (containerRef, leftPanelRef, centerPanelRef, isDraggingRef, dragStartXRef, dragStartWidthRef) encapsulated in usePanelResize.</criterion>
+    <criterion>All 3 mouse event handlers encapsulated in usePanelResize.</criterion>
+    <criterion>AnalysisWorkspaceApp.tsx is under 400 lines after extraction.</criterion>
+    <criterion>All 7 hooks present in control/hooks/: useAuth, useDocumentResolution, useAnalysisData, useAnalysisExecution, useWorkingDocumentSave, useChatState, usePanelResize.</criterion>
+    <criterion>PCF build passes with zero TypeScript errors.</criterion>
+    <criterion>Panel resize behavior (drag to resize, panel show/hide) works identically.</criterion>
+  </acceptance-criteria>
+</task>
