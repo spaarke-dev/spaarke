@@ -53,6 +53,7 @@ public static class BusinessUnitEndpoints
                 .Select(r => new BusinessUnitDto(
                     Id: r.BusinessUnitId,
                     Name: r.Name ?? string.Empty,
+                    IsRootUnit: r.ParentBusinessUnitId == null,
                     ParentBusinessUnitId: r.ParentBusinessUnitId))
                 .OrderBy(d => d.Name)
                 .ToArray();

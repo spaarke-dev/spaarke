@@ -33,7 +33,7 @@ public static class EnvironmentEndpoints
     private const string EntitySet = "sprk_speenvironments";
     private const string ConfigEntitySet = "sprk_specontainertypeconfigs";
     private const string SelectFields =
-        "sprk_speenvironmentid,sprk_name,sprk_rootsiteurl,sprk_graphapibaseurl,sprk_description,sprk_isdefault,createdon,modifiedon";
+        "sprk_speenvironmentid,sprk_name,sprk_tenantid,sprk_tenantname,sprk_rootsiteurl,sprk_graphapibaseurl,sprk_description,sprk_isdefault,statecode,createdon,modifiedon";
 
     /// <summary>
     /// Registers the environment CRUD endpoints on the /api/spe route group.
@@ -252,10 +252,13 @@ public static class EnvironmentEndpoints
                     {
                         Id = newId,
                         Name = request.Name,
+                        TenantId = request.TenantId,
+                        TenantName = request.TenantName,
                         RootSiteUrl = request.RootSiteUrl,
-                        GraphApiBaseUrl = request.GraphApiBaseUrl,
+                        GraphEndpoint = request.GraphEndpoint,
                         Description = request.Description,
-                        IsDefault = request.IsDefault
+                        IsDefault = request.IsDefault,
+                        Status = request.Status
                     });
             }
 
@@ -452,9 +455,9 @@ public static class EnvironmentEndpoints
             errors["rootSiteUrl"] = ["rootSiteUrl must be a valid HTTPS URL."];
         }
 
-        if (request.GraphApiBaseUrl is not null && !IsValidHttpsUrl(request.GraphApiBaseUrl))
+        if (request.GraphEndpoint is not null && !IsValidHttpsUrl(request.GraphEndpoint))
         {
-            errors["graphApiBaseUrl"] = ["graphApiBaseUrl must be a valid HTTPS URL when provided."];
+            errors["graphEndpoint"] = ["graphEndpoint must be a valid HTTPS URL when provided."];
         }
 
         return errors;
@@ -469,9 +472,9 @@ public static class EnvironmentEndpoints
             errors["rootSiteUrl"] = ["rootSiteUrl must be a valid HTTPS URL."];
         }
 
-        if (request.GraphApiBaseUrl is not null && !IsValidHttpsUrl(request.GraphApiBaseUrl))
+        if (request.GraphEndpoint is not null && !IsValidHttpsUrl(request.GraphEndpoint))
         {
-            errors["graphApiBaseUrl"] = ["graphApiBaseUrl must be a valid HTTPS URL when provided."];
+            errors["graphEndpoint"] = ["graphEndpoint must be a valid HTTPS URL when provided."];
         }
 
         return errors;
@@ -531,8 +534,10 @@ public static class EnvironmentEndpoints
         new
         {
             sprk_name = request.Name,
+            sprk_tenantid = request.TenantId,
+            sprk_tenantname = request.TenantName,
             sprk_rootsiteurl = request.RootSiteUrl,
-            sprk_graphapibaseurl = request.GraphApiBaseUrl,
+            sprk_graphapibaseurl = request.GraphEndpoint,
             sprk_description = request.Description,
             sprk_isdefault = request.IsDefault
         };
@@ -546,13 +551,17 @@ public static class EnvironmentEndpoints
         if (request.Name is not null)
             dict["sprk_name"] = request.Name;
 
+        if (request.TenantId is not null)
+            dict["sprk_tenantid"] = request.TenantId;
+
+        if (request.TenantName is not null)
+            dict["sprk_tenantname"] = request.TenantName;
+
         if (request.RootSiteUrl is not null)
             dict["sprk_rootsiteurl"] = request.RootSiteUrl;
 
-        // GraphApiBaseUrl can be explicitly set to null to clear it (optional field)
-        // Always include if key is present in request — partial update semantics
-        if (request.GraphApiBaseUrl is not null)
-            dict["sprk_graphapibaseurl"] = request.GraphApiBaseUrl;
+        if (request.GraphEndpoint is not null)
+            dict["sprk_graphapibaseurl"] = request.GraphEndpoint;
 
         if (request.Description is not null)
             dict["sprk_description"] = request.Description;
