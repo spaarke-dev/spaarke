@@ -14,6 +14,7 @@ import { AuditLogPage } from "./components/audit/AuditLogPage";
 import { SearchPage } from "./components/search/SearchPage";
 import { SecurityPage } from "./components/security/SecurityPage";
 import { RecycleBinPage } from "./components/recycle-bin/RecycleBinPage";
+import { ContainersPage } from "./components/containers/ContainersPage";
 import { ContainerTypesPage } from "./components/container-types/ContainerTypesPage";
 import { ContainerTypeDetail } from "./components/container-types/ContainerTypeDetail";
 
@@ -163,6 +164,8 @@ const AppContent: React.FC<AppContentProps> = ({
         <SecurityPage />
       ) : activePage === "recycle-bin" ? (
         <RecycleBinPage />
+      ) : activePage === "containers" ? (
+        <ContainersPage />
       ) : activePage === "container-types" ? (
         <>
           <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
@@ -172,9 +175,7 @@ const AppContent: React.FC<AppContentProps> = ({
           />
         </>
       ) : (
-        // Placeholder for pages not yet implemented (e.g. containers)
-        // The onOpenContainerInBrowser callback is available for ContainersPage (task SPE-033)
-        // to hook into once implemented.
+        // Placeholder for any remaining pages not yet implemented
         <div
           style={{
             padding: tokens.spacingVerticalXL,
