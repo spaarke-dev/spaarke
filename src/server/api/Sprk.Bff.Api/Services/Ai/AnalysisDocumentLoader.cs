@@ -75,7 +75,7 @@ public class AnalysisDocumentLoader
     public async Task<AnalysisCacheEntry?> GetCachedAnalysisAsync(Guid analysisId)
     {
         var bytes = await _cache.GetAsync($"{AnalysisCacheKeyPrefix}{analysisId}");
-        if (bytes == null) return null;
+        if (bytes == null || bytes.Length == 0) return null;
 
         return JsonSerializer.Deserialize<AnalysisCacheEntry>(bytes);
     }

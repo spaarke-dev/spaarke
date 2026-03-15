@@ -1,14 +1,14 @@
 # Current Task — code-quality-and-assurance-r2
 
 ## Active Task
-- **Task ID**: 013
-- **Task File**: tasks/013-migrate-dataverse-consumers.poml
-- **Title**: Migrate IDataverseService Consumers to Narrow Interfaces
+- **Task ID**: 014
+- **Task File**: tasks/014-backend-build-verification.poml
+- **Title**: Build Verification and Integration Test Pass After Phase 2
 - **Phase**: 2: Backend Structural Decomposition
 - **Status**: completed
 - **Started**: 2026-03-15
 - **Completed**: 2026-03-15
-- **Rigor Level**: FULL (bff-api tag, .cs modification, 9 steps, 3 dependencies)
+- **Rigor Level**: STANDARD (testing tag, verification task)
 
 ## Quick Recovery
 If resuming after compaction or new session:
@@ -18,10 +18,45 @@ If resuming after compaction or new session:
 
 | Field | Value |
 |-------|-------|
-| **Task** | 013 - Migrate IDataverseService Consumers to Narrow Interfaces (COMPLETED) |
-| **Step** | 9 of 9: All steps complete |
+| **Task** | 014 - Build Verification and Integration Test Pass (COMPLETED) |
+| **Step** | 10 of 10: All steps complete |
 | **Status** | completed |
-| **Next Action** | Task 014 (Build verification + integration test pass) is now unblocked |
+| **Next Action** | Task 032 (Final quality scorecard + lessons learned) is now unblocked |
+
+## Phase 2 Verification Summary
+
+### Build Status
+- **dotnet build**: PASS — 0 errors, 0 warnings
+- **Fixed during verification**: 3 UploadSessionManager constructor errors in test files (missing `IHttpClientFactory` parameter added in task 002)
+- **Fixed during verification**: 4 AnalysisOrchestrationServiceTests failures (empty byte[] cache mock causing JsonException instead of KeyNotFoundException — added `bytes.Length == 0` guard in `AnalysisDocumentLoader.GetCachedAnalysisAsync`)
+
+### Test Results
+- **Unit tests (Sprk.Bff.Api.Tests)**: 4,176 passed, 0 failed, 105 skipped
+- **Integration tests (Spe.Integration.Tests)**: 53 passed, 138 failed (pre-existing — require `SpeAdmin:KeyVaultUri` live Azure config), 108 skipped
+- **Architecture fitness tests**: Not yet created — will be added in Phase 3
+
+### Structural Metrics
+
+| Metric | Target | Actual | Status |
+|--------|--------|--------|--------|
+| OfficeService.cs line count | < 500 | 1,951 | INCOMPLETE — 4 services extracted but coordinating class still large |
+| AnalysisOrchestrationService constructor params | <= 10 | 10 | PASS |
+| IDataverseService interface count | 9 | 9 | PASS |
+| IDataverseService inline methods | 0 | 0 | PASS |
+| Static unbounded dictionaries | 0 | 0 | PASS |
+| new HttpClient() in src/server/ | 0 | 0 (1 in docs/ markdown only) | PASS |
+
+### OfficeService.cs Gap Analysis
+Task 010 extracted 4 focused services (`OfficeDocumentPersistence`, `OfficeEmailEnricher`, `OfficeJobQueue`, `OfficeStorageUploader`) but OfficeService.cs retained substantial business logic:
+- Entity search methods (SearchEntitiesAsync, SearchDocumentsAsync)
+- Share link creation (CreateShareLinksAsync, ProcessShareInvitationsAsync)
+- Quick-create operations (QuickCreateAsync)
+- Recent documents (GetRecentDocumentsAsync)
+- Attachment packaging (GetAttachmentsAsync, PackageAttachmentAsync)
+- SSE job status streaming (StreamJobStatusAsync, ProduceJobStatusEventsAsync)
+- Stub data generators for development
+
+This is a known incomplete extraction from task 010. The remaining methods represent distinct responsibility groups that could be further decomposed in a follow-up project.
 
 ## Progress
 - Task 001: Fix 3 Unbounded Static Dictionaries — COMPLETED 2026-03-14
@@ -32,66 +67,22 @@ If resuming after compaction or new session:
 - Task 011: Decompose AnalysisOrchestrationService → 3 Services — COMPLETED 2026-03-15
 - Task 012: Segregate IDataverseService into 9 Focused Interfaces — COMPLETED 2026-03-15
 - Task 013: Migrate IDataverseService Consumers to Narrow Interfaces — COMPLETED 2026-03-15
+- Task 014: Build Verification + Integration Test Pass — COMPLETED 2026-03-15
 - Task 020: Extract useAuth + useDocumentResolution Hooks — COMPLETED 2026-03-15
 - Task 021: Extract useAnalysisData + useAnalysisExecution Hooks — COMPLETED 2026-03-15
 - Task 022: Extract useWorkingDocumentSave + useChatState Hooks — COMPLETED 2026-03-15 (parallel session)
 - Task 023: Extract usePanelResize + Finalize Component Decomposition — COMPLETED 2026-03-15
+- Task 024: PCF Build Verification — COMPLETED 2026-03-15
 - Task 030: Fix ADR-022 violations — React 18→16 in 3 PCF controls — COMPLETED (prior session)
 - Task 031: Document BaseProxyPlugin ADR-002 Violations — COMPLETED 2026-03-15
 
-## Files Modified (Task 013)
+## Files Modified (Task 014)
+- `tests/unit/Sprk.Bff.Api.Tests/SpeFileStoreTests.cs` — added IHttpClientFactory parameter to UploadSessionManager constructor
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationMappingTests.cs` — added IHttpClientFactory parameter
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseRecordCreationTests.cs` — added IHttpClientFactory parameter
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisDocumentLoader.cs` — added empty byte[] guard in GetCachedAnalysisAsync
 
-### Services Migrated to Narrow Interfaces
-- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` — IDataverseService → IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs` — IDataverseService → IDocumentDataverseService + IFieldMappingDataverseService
-- `src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs` — IDataverseService → IFieldMappingDataverseService
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` — IDataverseService → IDocumentDataverseService + IAnalysisDataverseService
-- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs` — verified already narrow
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisDocumentLoader.cs` — verified already narrow
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs` — verified already narrow
-- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs` — migrated
-- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs` — migrated
-- `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs` — migrated
-- `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs` — migrated
-- `src/server/api/Sprk.Bff.Api/Services/Communication/MailboxVerificationService.cs` — migrated
-- `src/server/api/Sprk.Bff.Api/Services/ScorecardCalculatorService.cs` — migrated
-
-### Endpoints Migrated
-- `src/server/api/Sprk.Bff.Api/DataverseDocumentsEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/FileAccessEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/EmailEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/CommunicationEndpoints.cs` — IGenericEntityService
-- `src/server/api/Sprk.Bff.Api/Events/EventEndpoints.cs` — IEventDataverseService
-- `src/server/api/Sprk.Bff.Api/FieldMappings/FieldMappingEndpoints.cs` — IFieldMappingDataverseService
-- `src/server/api/Sprk.Bff.Api/NavMapEndpoints.cs` — IGenericEntityService
-- `src/server/api/Sprk.Bff.Api/Ai/RagEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/Ai/RecordMatchEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/Ai/VisualizationEndpoints.cs` — IDocumentDataverseService
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — IDocumentDataverseService + IDataverseHealthService
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/DebugEndpointExtensions.cs` — IDocumentDataverseService
-
-### DI Registration
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs` — 9 forwarding registrations added
-
-### Services Keeping IDataverseService (with justifying comments)
-- `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs` — casts to ServiceClient for FetchXML
-- `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs` — casts to DataverseServiceClientImpl for FetchXML
-- `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs` — casts to DataverseServiceClientImpl for FetchXML
-- `src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs` — casts to ServiceClient for FetchXML
-- `src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` — casts to DataverseServiceClientImpl + multiple domains
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeManagementService.cs` — scaffolding, no method calls yet
-
-### Test Files Fixed (21 files)
-- 4 ScorecardCalculator test files — added second mock param
-- EmailAnalysisIntegrationTests.cs — added IAnalysisDataverseService param
-- AnalysisOrchestrationServiceTests.cs — updated AnalysisDocumentLoader + AnalysisResultPersistence constructors
-- 14 Communication test files — updated constructor mock params
-- MailboxVerificationTests.cs — added second mock param
-
-## Notes (Task 013)
-- All consumers migrated to narrowest applicable interface(s)
-- 6 services justified to keep IDataverseService (FetchXML casts, scaffolding)
-- 9 DI forwarding registrations in GraphModule.cs (ADR-010 compliant — forwarding delegates don't count)
-- dotnet build: 0 errors, 0 warnings
-- dotnet test build: 3 pre-existing UploadSessionManager errors only (verified in baseline)
-- Mock pattern: Mock<IDataverseService>.Object satisfies narrow interface params via inheritance
+## Notes (Task 014)
+- Integration tests (138 failures) are all infrastructure-dependent (require Azure Key Vault URI) — pre-existing, not caused by Phase 2 changes
+- OfficeService.cs line count (1,951) does not meet the < 500 target from task 010. This is a known gap carried forward. The 4 extracted services are correct and functional, but the original coordinating class retained too much business logic.
+- All other Phase 2 metrics pass their acceptance criteria

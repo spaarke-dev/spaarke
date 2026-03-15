@@ -24,7 +24,7 @@
 | 011 | Decompose AnalysisOrchestrationService → 3 services | ✅ | refactoring, dotnet, bff-api, ai | 001 | 8h |
 | 012 | Segregate IDataverseService → 9 focused interfaces | ✅ | refactoring, dotnet, architecture | — | 5h |
 | 013 | Migrate IDataverseService consumers to narrow interfaces | ✅ | refactoring, dotnet, bff-api | 010, 011, 012 | 4h |
-| 014 | Build verification + integration test pass | 🔲 | testing, dotnet, verification | 013 | 2h |
+| 014 | Build verification + integration test pass | ✅ | testing, dotnet, verification | 013 | 2h |
 
 ### Phase 3: Frontend Structural Decomposition
 

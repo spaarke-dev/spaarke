@@ -68,7 +68,7 @@ public class DataverseRecordCreationTests
         var speFileStore = new SpeFileStore(
             new ContainerOperations(fakeGraphFactory, Mock.Of<ILogger<ContainerOperations>>()),
             new DriveItemOperations(fakeGraphFactory, Mock.Of<ILogger<DriveItemOperations>>()),
-            new UploadSessionManager(fakeGraphFactory, Mock.Of<ILogger<UploadSessionManager>>()),
+            new UploadSessionManager(fakeGraphFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(fakeGraphFactory, Mock.Of<ILogger<UserOperations>>()));
 
         return new CommunicationService(
