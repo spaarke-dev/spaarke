@@ -1,9 +1,11 @@
 # Get SPE container metadata and owning application details
 
 param(
-    [Parameter(Mandatory)][string]$ContainerId,
-    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
+    [Parameter(Mandatory)][string]$ContainerId,  # No env var — always specific to the container being inspected
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN  # e.g., "spaarke.sharepoint.com"
 )
+
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 $SharePointAdminUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"
 

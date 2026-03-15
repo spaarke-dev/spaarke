@@ -3,15 +3,20 @@
 # Creates container type, registers owning app, and optionally creates a test container
 
 param(
-    [Parameter(Mandatory)][string]$OwningAppId,
+    [string]$OwningAppId = $env:API_APP_ID,
     # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
-    [Parameter(Mandatory)][string]$OwningAppSecret,
-    [Parameter(Mandatory)][string]$TenantId,
-    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
+    [string]$OwningAppSecret = $env:API_CLIENT_SECRET,
+    [string]$TenantId = $env:TENANT_ID,
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,  # e.g., "spaarke.sharepoint.com"
     [string]$DisplayName = "Spaarke Document Storage",
     [string]$Description = "Container type for document storage - owned by BFF API app",
     [switch]$CreateTestContainer = $false
 )
+
+if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
+if (-not $OwningAppSecret) { throw "OwningAppSecret required. Pass -OwningAppSecret or set API_CLIENT_SECRET env var." }
+if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE NEW CONTAINER TYPE" -ForegroundColor Cyan

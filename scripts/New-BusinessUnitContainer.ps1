@@ -13,12 +13,15 @@
 #   - Manual execution of this script during customer onboarding
 
 param(
-    [Parameter(Mandatory)][string]$BusinessUnitId,       # Dataverse BU GUID
+    [Parameter(Mandatory)][string]$BusinessUnitId,       # Dataverse BU GUID — always specific
     [Parameter(Mandatory)][string]$BusinessUnitName,     # Display name for the container
-    [Parameter(Mandatory)][string]$ContainerTypeId,      # SPE container type GUID
-    [Parameter(Mandatory)][string]$DataverseUrl,         # e.g., "https://spaarke-prod.crm.dynamics.com"
+    [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,
+    [string]$DataverseUrl = $env:DATAVERSE_URL,          # e.g., "https://spaarke-prod.crm.dynamics.com"
     [switch]$Force = $false                              # Overwrite existing sprk_containerid
 )
+
+if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+if (-not $DataverseUrl) { throw "DataverseUrl required. Pass -DataverseUrl or set DATAVERSE_URL env var." }
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE SPE CONTAINER FOR BUSINESS UNIT" -ForegroundColor Cyan

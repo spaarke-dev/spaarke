@@ -2,10 +2,14 @@
 # Purpose: Identify which Azure AD app owns the container type
 
 param(
-    [Parameter(Mandatory)][string]$ContainerTypeId,
-    [Parameter(Mandatory)][string]$TenantId,
-    [Parameter(Mandatory)][string]$SharePointDomain  # e.g., "spaarke.sharepoint.com"
+    [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,
+    [string]$TenantId = $env:TENANT_ID,
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN  # e.g., "spaarke.sharepoint.com"
 )
+
+if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 $SharePointAdminUrl = "https://$($SharePointDomain -replace '\.sharepoint\.com$', '-admin.sharepoint.com')"
 

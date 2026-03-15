@@ -1,10 +1,13 @@
 # Check what apps are registered with a SharePoint Embedded Container Type
 
 param(
-    [Parameter(Mandatory)][string]$ContainerTypeId,
-    [Parameter(Mandatory)][string]$SharePointDomain,  # e.g., "spaarke.sharepoint.com"
-    [string]$OwningAppId  # Optional: verify this app is registered as owner
+    [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,  # e.g., "spaarke.sharepoint.com"
+    [string]$OwningAppId = $env:API_APP_ID  # Optional: verify this app is registered as owner
 )
+
+if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
 Write-Host "Checking ContainerType registration..." -ForegroundColor Yellow
 Write-Host "Container Type ID:  $ContainerTypeId" -ForegroundColor Gray
