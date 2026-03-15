@@ -3,7 +3,7 @@
   <metadata>
     <title>Fix ADR-022 Violations — React 18 createRoot in 3 PCF Controls</title>
     <phase>4: Architecture Compliance</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>032</blocks>

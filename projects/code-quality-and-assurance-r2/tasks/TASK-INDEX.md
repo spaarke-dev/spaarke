@@ -14,15 +14,15 @@
 | 001 | Fix 3 unbounded static dictionaries (memory leaks) | ✅ | remediation, dotnet, memory, caching | — | 3h |
 | 002 | Replace `new HttpClient()` with IHttpClientFactory | ✅ | remediation, dotnet, graph | — | 1h |
 | 003 | Fix no-op arch tests + add plugin assembly coverage | ✅ | testing, dotnet, architecture | — | 3h |
-| 004 | Delete dead MsalAuthProvider.ts + create shared logger | 🔲 | remediation, typescript, pcf, cleanup | — | 5h |
+| 004 | Delete dead MsalAuthProvider.ts + create shared logger | ✅ | remediation, typescript, pcf, cleanup | — | 5h |
 
 ### Phase 2: Backend Structural Decomposition
 
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
-| 010 | Decompose OfficeService.cs → 4 focused services | 🔲 | refactoring, dotnet, bff-api | 001 | 8h |
+| 010 | Decompose OfficeService.cs → 4 focused services | ✅ | refactoring, dotnet, bff-api | 001 | 8h |
 | 011 | Decompose AnalysisOrchestrationService → 3 services | 🔲 | refactoring, dotnet, bff-api, ai | 001 | 8h |
-| 012 | Segregate IDataverseService → 9 focused interfaces | 🔲 | refactoring, dotnet, architecture | — | 5h |
+| 012 | Segregate IDataverseService → 9 focused interfaces | ✅ | refactoring, dotnet, architecture | — | 5h |
 | 013 | Migrate IDataverseService consumers to narrow interfaces | 🔲 | refactoring, dotnet, bff-api | 010, 011, 012 | 4h |
 | 014 | Build verification + integration test pass | 🔲 | testing, dotnet, verification | 013 | 2h |
 
@@ -30,7 +30,7 @@
 
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
-| 020 | Extract useAuth + useDocumentResolution hooks | 🔲 | refactoring, typescript, pcf | 004 | 3h |
+| 020 | Extract useAuth + useDocumentResolution hooks | ✅ | refactoring, typescript, pcf | 004 | 3h |
 | 021 | Extract useAnalysisData + useAnalysisExecution hooks | 🔲 | refactoring, typescript, pcf | 020 | 3h |
 | 022 | Extract useWorkingDocumentSave + useChatState hooks | 🔲 | refactoring, typescript, pcf | 020 | 3h |
 | 023 | Extract usePanelResize + finalize component | 🔲 | refactoring, typescript, pcf | 021, 022 | 2h |
@@ -40,8 +40,8 @@
 
 | # | Task | Status | Tags | Dependencies | Est |
 |---|------|--------|------|--------------|-----|
-| 030 | Fix ADR-022 violations — React 18→16 in 3 PCF controls | 🔲 | remediation, typescript, pcf, adr | 004 | 3h |
-| 031 | Document BaseProxyPlugin ADR-002 violations | 🔲 | documentation, dotnet, architecture | 003 | 2h |
+| 030 | Fix ADR-022 violations — React 18→16 in 3 PCF controls | ✅ | remediation, typescript, pcf, adr | 004 | 3h |
+| 031 | Document BaseProxyPlugin ADR-002 violations | ✅ | documentation, dotnet, architecture | 003 | 2h |
 | 032 | Final quality scorecard + lessons learned | 🔲 | documentation, quality | 014, 024, 030, 031 | 2h |
 
 ### Phase 5: Project Wrap-Up

@@ -10,7 +10,7 @@
 
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
-import { createRoot, Root } from 'react-dom/client';
+import * as ReactDOM from 'react-dom';
 import { initializeAuth } from './authInit';
 import { FilePreview } from './FilePreview';
 import { FileViewerState } from './types';
@@ -99,9 +99,6 @@ function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => 
 export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   // PCF container element
   private container: HTMLDivElement;
-
-  // React root for rendering (React 19+)
-  private root: Root | null = null;
 
   // Whether @spaarke/auth has been initialized
   private authInitialized = false;
@@ -441,13 +438,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     logger.logInfo('SpeFileViewer', ` Rendering preview for document: ${documentId || '(none)'}`);
     logger.logInfo('SpeFileViewer', ` Dark mode: ${isDarkTheme} (preference: ${getUserThemePreference()})`);
 
-    // Create root on first render (React 19+)
-    if (!this.root) {
-      this.root = createRoot(this.container);
-    }
-
-    // Render React component
-    this.root.render(
+    // Render React component (ADR-022: React 16 APIs)
+    ReactDOM.render(
       React.createElement(FilePreview, {
         documentId: documentId,
         bffApiUrl: this.bffApiUrl,
@@ -456,7 +448,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
         onRefresh: () => {
           logger.logInfo('SpeFileViewer', 'Refresh requested from component');
         },
-      })
+      }),
+      this.container
     );
   }
 
@@ -509,11 +502,8 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
       logger.logInfo('SpeFileViewer', 'Aborted in-flight requests on destroy');
     }
 
-    // Unmount React component (React 19+)
-    if (this.root) {
-      this.root.unmount();
-      this.root = null;
-    }
+    // Unmount React component (ADR-022: React 16 APIs)
+    ReactDOM.unmountComponentAtNode(this.container);
 
     // Reset auth state
     this.authInitialized = false;

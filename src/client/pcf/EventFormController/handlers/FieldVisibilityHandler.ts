@@ -473,9 +473,7 @@ export function resetToDefaults(): ApplyRulesResult {
     result.success = false;
   }
 
-  console.log(
-    `[FieldVisibilityHandler] Reset complete: ${result.rulesApplied} fields, ${sectionsReset} sections, ${result.skippedFields.length} skipped`
-  );
+  logger.logInfo('FieldVisibilityHandler', `Reset complete: ${result.rulesApplied} fields, ${sectionsReset} sections, ${result.skippedFields.length} skipped`);
   return result;
 }
 
@@ -548,9 +546,7 @@ export function applyComputedFieldStates(computed: IComputedFieldStates): ApplyR
     result.success = false;
   }
 
-  console.log(
-    `[FieldVisibilityHandler] Applied computed states: ${result.rulesApplied} fields, ${sectionsApplied} sections, ${result.skippedFields.length} fields skipped, ${skippedSections.length} sections skipped`
-  );
+  logger.logInfo('FieldVisibilityHandler', `Applied computed states: ${result.rulesApplied} fields, ${sectionsApplied} sections, ${result.skippedFields.length} fields skipped, ${skippedSections.length} sections skipped`);
   return result;
 }
 

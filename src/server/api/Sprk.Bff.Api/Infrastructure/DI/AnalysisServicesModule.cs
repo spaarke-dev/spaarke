@@ -81,6 +81,10 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.ExportServiceRegistry>();
+        // Extracted focused services from AnalysisOrchestrationService (ADR-010: constructor ≤10 params)
+        services.AddScoped<AnalysisDocumentLoader>();
+        services.AddScoped<AnalysisRagProcessor>();
+        services.AddScoped<AnalysisResultPersistence>();
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
     }

@@ -263,10 +263,7 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
    */
   public static getGridCustomizer(): any {
     logger.logInfo('RegardingLink', 'getGridCustomizer() called by Power Apps Grid');
-    console.log(
-      '[RegardingLink] Returning customizer with cellRendererOverrides for:',
-      Object.keys(gridCustomizer.cellRendererOverrides)
-    );
+    logger.logDebug('RegardingLink', 'Returning customizer with cellRendererOverrides for:', Object.keys(gridCustomizer.cellRendererOverrides));
     return gridCustomizer;
   }
 

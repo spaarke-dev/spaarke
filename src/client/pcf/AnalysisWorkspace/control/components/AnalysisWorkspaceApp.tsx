@@ -41,6 +41,8 @@ import { RichTextEditor } from './RichTextEditor';
 import { SourceDocumentViewer } from './SourceDocumentViewer';
 import { ResumeSessionDialog } from './ResumeSessionDialog';
 import { useSseStream } from '../hooks/useSseStream';
+import { useAuth } from '../hooks/useAuth';
+import { useDocumentResolution } from '../hooks/useDocumentResolution';
 import { getAuthProvider } from '@spaarke/auth';
 import { SprkChat } from '@spaarke/ui-components/dist/components/SprkChat';
 import type { IChatSession } from '@spaarke/ui-components/dist/components/SprkChat';
@@ -412,25 +414,29 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
   const dragStartXRef = React.useRef<number>(0);
   const dragStartWidthRef = React.useRef<number>(0);
 
-  // Resolved document fields from expanded relationship
-  // Note: documentId prop may be empty - we resolve the actual document ID from the Analysis record
-  const [resolvedDocumentId, setResolvedDocumentId] = React.useState(documentId);
-  const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId);
-  const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
-  const [resolvedDocumentName, setResolvedDocumentName] = React.useState('');
+  // Auth hook — manages auth initialization, token acquisition, and SprkChat token refresh
+  const {
+    isAuthInitialized,
+    accessToken: sprkChatAccessToken,
+    sessionId: sprkChatSessionId,
+    getAccessToken,
+    setSessionId: setSprkChatSessionId,
+  } = useAuth({ isAuthReady, useLegacyChat });
 
-  // Playbook info (loaded from analysis record)
-  const [playbookId, setPlaybookId] = React.useState<string | null>(null);
-
-  // Auth state (uses @spaarke/auth shared library)
-  const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
+  // Document resolution hook — resolves document/container/file IDs from Dataverse
+  const {
+    documentId: resolvedDocumentId,
+    containerId: resolvedContainerId,
+    fileId: resolvedFileId,
+    documentName: resolvedDocumentName,
+    playbookId,
+    resolveFromDocumentId,
+    setPlaybookId,
+    setDocumentId: setResolvedDocumentId,
+  } = useDocumentResolution({ documentId, containerId, fileId, webApi });
 
   // Ref to track current chatMessages for save operations (avoids stale closure)
   const chatMessagesRef = React.useRef<IChatMessage[]>([]);
-
-  // SprkChat state (new chat system - used when useLegacyChat=false)
-  const [sprkChatAccessToken, setSprkChatAccessToken] = React.useState<string>('');
-  const [sprkChatSessionId, setSprkChatSessionId] = React.useState<string | undefined>(undefined);
 
   // Initial execution state - tracks if we're running the first AI analysis
   const [isExecuting, setIsExecuting] = React.useState(false);
@@ -442,55 +448,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     docId: string;
   } | null>(null);
 
-  // Check if @spaarke/auth is already initialized (by index.ts initializeAuth)
-  React.useEffect(() => {
-    try {
-      getAuthProvider(); // Will throw if not initialized
-      setIsAuthInitialized(true);
-      logInfo('AnalysisWorkspaceApp', '@spaarke/auth provider available');
-    } catch {
-      logError('AnalysisWorkspaceApp', '@spaarke/auth not yet initialized, waiting...');
-      // Auth may not be ready yet (async init in index.ts).
-      // The parent will re-render with isAuthReady=true once initializeAuth completes.
-      // Check props.isAuthReady on re-render.
-    }
-  }, [isAuthReady]);
-
-  // Function to get access token for API calls (via @spaarke/auth)
-  const getAccessToken = React.useCallback(async (): Promise<string> => {
-    const provider = getAuthProvider();
-    return provider.getAccessToken();
-  }, []);
-
-  // Acquire and refresh access token for SprkChat component (new chat system)
-  React.useEffect(() => {
-    if (!isAuthInitialized || useLegacyChat) return;
-    let isMounted = true;
-    const acquireToken = async () => {
-      try {
-        const token = await getAccessToken();
-        if (isMounted) {
-          setSprkChatAccessToken(token);
-          logInfo('AnalysisWorkspaceApp', 'SprkChat access token acquired');
-        }
-      } catch (err) {
-        logError('AnalysisWorkspaceApp', 'Failed to acquire SprkChat access token', err);
-      }
-    };
-    acquireToken();
-    // Refresh token every 45 minutes (tokens typically expire in 60min)
-    const refreshInterval = setInterval(acquireToken, 45 * 60 * 1000);
-    return () => {
-      isMounted = false;
-      clearInterval(refreshInterval);
-    };
-  }, [isAuthInitialized, useLegacyChat, getAccessToken]);
-
   // SprkChat session created handler
   const handleSprkChatSessionCreated = React.useCallback((session: IChatSession) => {
     logInfo('AnalysisWorkspaceApp', `SprkChat session created: ${session.sessionId}`);
     setSprkChatSessionId(session.sessionId);
-  }, []);
+  }, [setSprkChatSessionId]);
 
   // SSE Stream Hook for AI Chat (legacy)
   const [sseState, sseActions] = useSseStream({
@@ -880,31 +842,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         // Store the document ID from analysis record
         setResolvedDocumentId(docId);
 
-        try {
-          // Query document for SPE integration fields
-          // Document entity field names: sprk_containerid, sprk_graphitemid/sprk_driveitemid
-          // sprk_filename is used for display name (not sprk_name)
-          const docResult = await webApi.retrieveRecord(
-            'sprk_document',
-            docId,
-            '?$select=sprk_documentname,sprk_graphdriveid,sprk_graphitemid'
-          );
-          if (docResult.sprk_graphdriveid) {
-            setResolvedContainerId(docResult.sprk_graphdriveid);
-          }
-          if (docResult.sprk_graphitemid) {
-            setResolvedFileId(docResult.sprk_graphitemid);
-          }
-          if (docResult.sprk_documentname) {
-            setResolvedDocumentName(docResult.sprk_documentname);
-          }
-          logInfo(
-            'AnalysisWorkspaceApp',
-            `Document fields resolved: docId=${docId}, container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`
-          );
-        } catch (docErr) {
-          logError('AnalysisWorkspaceApp', 'Failed to load document details', docErr);
-        }
+        // Resolve document details (container/file IDs, name) via hook
+        await resolveFromDocumentId(docId);
 
         // Parse chat history FIRST - if exists, show choice dialog (ADR-023)
         // This must happen before draft execution check to ensure dialog is shown

@@ -425,9 +425,7 @@ async function completeAutoDetectedAssociation(
   detectedParent: DetectedParentContext,
   webApi: ComponentFramework.WebApi
 ): Promise<boolean> {
-  console.log(
-    `[EventAutoAssociate] Completing association for: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`
-  );
+  logger.logInfo('EventAutoAssociate', `Completing association for: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`);
 
   let success = true;
 

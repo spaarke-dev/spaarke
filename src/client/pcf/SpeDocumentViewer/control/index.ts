@@ -10,7 +10,7 @@
 
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
-import { createRoot, Root } from 'react-dom/client';
+import * as ReactDOM from 'react-dom';
 import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
 import { DocumentViewerState } from './types';
@@ -88,7 +88,6 @@ function setupThemeListener(onChange: ThemeChangeHandler, context?: ComponentFra
 
 export class SpeDocumentViewer implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement;
-  private root: Root | null = null;
   private authInitialized = false;
 
   // Configuration
@@ -423,11 +422,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
 
     logger.logInfo('SpeDocumentViewer', ` Rendering for document: ${documentId || '(none)'}`);
 
-    if (!this.root) {
-      this.root = createRoot(this.container);
-    }
-
-    this.root.render(
+    // ADR-022: React 16 APIs — use ReactDOM.render, not createRoot
+    ReactDOM.render(
       React.createElement(DocumentViewerApp, {
         documentId: documentId,
         bffApiUrl: this.bffApiUrl,
@@ -443,7 +439,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         onDeleted: () => {
           logger.logInfo('SpeDocumentViewer', 'Document deleted');
         },
-      })
+      }),
+      this.container
     );
   }
 
@@ -475,10 +472,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
       this._cleanupThemeListener = null;
     }
 
-    if (this.root) {
-      this.root.unmount();
-      this.root = null;
-    }
+    // ADR-022: React 16 APIs
+    ReactDOM.unmountComponentAtNode(this.container);
 
     this.authInitialized = false;
   }

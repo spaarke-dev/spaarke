@@ -3,7 +3,7 @@
   <metadata>
     <title>Extract useAuth + useDocumentResolution Hooks</title>
     <phase>3: Frontend Structural Decomposition</phase>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>021, 022</blocks>

@@ -1,28 +1,24 @@
 using System.Text.Json;
-using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using MimeKit;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
-using Sprk.Bff.Api.Workers.Office;
-using Sprk.Bff.Api.Workers.Office.Messages;
 
 namespace Sprk.Bff.Api.Services.Office;
 
 /// <summary>
-/// Implementation of <see cref="IOfficeService"/> for Office add-in operations.
+/// Thin orchestrator for Office add-in operations.
+/// Delegates to focused services: OfficeEmailEnricher, OfficeDocumentPersistence,
+/// OfficeJobQueue, and OfficeStorageUploader.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This service implements the Office add-in backend workflows:
-/// - Task 021: Save endpoint (implemented) - creates ProcessingJob and returns tracking URLs
-/// - Task 022: Job status endpoint (stub) - query Dataverse for job progress
-/// - Task 023: SSE streaming (pending) - real-time job status updates
+/// This service orchestrates the Office add-in backend workflows:
+/// - Save: enriches content, uploads to SPE, persists to Dataverse, queues finalization
+/// - Job status: queries Dataverse/in-memory store for job progress
+/// - SSE streaming: real-time job status updates via Redis pub/sub
+/// - Search, share, quick-create: entity and document operations
 /// </para>
 /// <para>
 /// Per ADR-001, heavy processing (SPE upload, AI processing) is delegated to background workers.
@@ -33,35 +29,32 @@ public class OfficeService : IOfficeService
 {
     private readonly IJobStatusService _jobStatusService;
     private readonly IDataverseService _dataverseService;
-    private readonly SpeFileStore _speFileStore;
-    private readonly IGraphClientFactory _graphClientFactory;
-    private readonly ServiceBusClient _serviceBusClient;
-    private readonly ServiceBusOptions _serviceBusOptions;
+    private readonly OfficeEmailEnricher _emailEnricher;
+    private readonly OfficeDocumentPersistence _documentPersistence;
+    private readonly OfficeJobQueue _jobQueue;
+    private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, JobStatusResponse> _jobStore = new();
 
-    // Queue names for Office workers
-    private const string UploadFinalizationQueueName = "office-upload-finalization";
-
     public OfficeService(
         IJobStatusService jobStatusService,
         IDataverseService dataverseService,
-        SpeFileStore speFileStore,
-        IGraphClientFactory graphClientFactory,
-        ServiceBusClient serviceBusClient,
-        IOptions<ServiceBusOptions> serviceBusOptions,
+        OfficeEmailEnricher emailEnricher,
+        OfficeDocumentPersistence documentPersistence,
+        OfficeJobQueue jobQueue,
+        OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         ILogger<OfficeService> logger)
     {
         _jobStatusService = jobStatusService;
         _dataverseService = dataverseService;
-        _speFileStore = speFileStore;
-        _graphClientFactory = graphClientFactory;
-        _serviceBusClient = serviceBusClient;
-        _serviceBusOptions = serviceBusOptions.Value;
+        _emailEnricher = emailEnricher;
+        _documentPersistence = documentPersistence;
+        _jobQueue = jobQueue;
+        _storageUploader = storageUploader;
         _emailProcessingOptions = emailProcessingOptions.Value;
         _logger = logger;
     }
@@ -91,13 +84,13 @@ public class OfficeService : IOfficeService
         // Fetch email body and attachments from Graph API if missing
         if (request.ContentType == SaveContentType.Email && request.Email != null)
         {
-            request = await EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
+            request = await _emailEnricher.EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
         }
 
         // Fetch attachment content from Graph API if missing (single attachment save)
         if (request.ContentType == SaveContentType.Attachment && request.Attachment != null)
         {
-            request = await EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+            request = await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
         }
 
         try
@@ -107,7 +100,7 @@ public class OfficeService : IOfficeService
 
             // Step 2: Check for existing job with this idempotency key
             // TRACKED: GitHub #229 - Replace with Dataverse ProcessingJob query
-            var existingJob = await CheckForExistingJobAsync(idempotencyKey, cancellationToken);
+            var existingJob = await _documentPersistence.CheckForExistingJobAsync(idempotencyKey, cancellationToken);
 
             if (existingJob is not null)
             {
@@ -214,8 +207,8 @@ public class OfficeService : IOfficeService
                 {
                     case SaveContentType.Email when request.Email != null:
                         // Build .eml file from email metadata using MimeKit
-                        contentStream = BuildEmlFromMetadata(request.Email);
-                        fileName = GenerateEmlFileName(request.Email);
+                        contentStream = OfficeEmailEnricher.BuildEmlFromMetadata(request.Email);
+                        fileName = OfficeEmailEnricher.GenerateEmlFileName(request.Email);
                         fileSize = contentStream.Length;
                         break;
 
@@ -267,7 +260,7 @@ public class OfficeService : IOfficeService
                 }
 
                 // Upload to SPE
-                var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await UploadToSpeAsync(
+                var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
                     containerId,
                     request.FolderPath,
                     fileName,
@@ -277,7 +270,7 @@ public class OfficeService : IOfficeService
                 if (!uploadSuccess || string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
                 {
                     // Update job status to failed
-                    await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
+                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
 
                     return new SaveResponse
                     {
@@ -293,7 +286,7 @@ public class OfficeService : IOfficeService
                 }
 
                 // Update job status to uploading complete
-                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
+                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
                 _jobStore[jobId] = jobRecord with
                 {
                     Status = JobStatus.Running,
@@ -302,7 +295,7 @@ public class OfficeService : IOfficeService
                 };
 
                 // Create Document record with SPE pointers
-                var documentId = await CreateDocumentWithSpePointersAsync(
+                var documentId = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
                     driveId,
                     itemId,
@@ -313,7 +306,7 @@ public class OfficeService : IOfficeService
                     cancellationToken);
 
                 // Update job status to records created
-                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);
+                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);
                 _jobStore[jobId] = _jobStore[jobId] with
                 {
                     Progress = 50,
@@ -322,7 +315,7 @@ public class OfficeService : IOfficeService
 
                 // ALWAYS queue finalization job - it creates EmailArtifact/AttachmentArtifact records
                 // and optionally triggers AI processing based on TriggerAiProcessing flag in payload
-                await QueueUploadFinalizationAsync(
+                await _jobQueue.QueueUploadFinalizationAsync(
                     jobId,
                     idempotencyKey,
                     correlationId,
@@ -337,7 +330,7 @@ public class OfficeService : IOfficeService
 
                 // Mark job as complete - background workers will process asynchronously
                 // User sees immediate success while AI processing continues in background
-                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
+                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
                 _jobStore[jobId] = _jobStore[jobId] with
                 {
                     Status = JobStatus.Completed,
@@ -392,151 +385,6 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
-    /// DEPRECATED: Simulates job progress for testing/development when Service Bus is unavailable.
-    /// Production flow now uses actual SPE upload and Service Bus queueing via SaveAsync.
-    /// Only use this for local development without Service Bus configured.
-    /// </summary>
-    [Obsolete("Use SaveAsync with Service Bus flow instead. This is only for local development without Service Bus.")]
-    private async Task SimulateJobProgressAsync(Guid jobId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Wait briefly then start "Running"
-            await Task.Delay(500, cancellationToken);
-            if (!_jobStore.TryGetValue(jobId, out var job)) return;
-
-            job = job with
-            {
-                Status = JobStatus.Running,
-                Progress = 10,
-                CurrentPhase = "RecordsCreated",
-                StartedAt = DateTimeOffset.UtcNow
-            };
-            _jobStore[jobId] = job;
-
-            // Simulate RecordsCreated phase
-            await Task.Delay(1000, cancellationToken);
-            if (!_jobStore.TryGetValue(jobId, out job)) return;
-
-            var completedPhases = new List<CompletedPhase>(job.CompletedPhases ?? new List<CompletedPhase>())
-            {
-                new CompletedPhase
-                {
-                    Name = "RecordsCreated",
-                    CompletedAt = DateTimeOffset.UtcNow,
-                    DurationMs = 1000
-                }
-            };
-
-            job = job with
-            {
-                Progress = 30,
-                CurrentPhase = "FileUploaded",
-                CompletedPhases = completedPhases
-            };
-            _jobStore[jobId] = job;
-
-            // Simulate FileUploaded phase
-            await Task.Delay(1500, cancellationToken);
-            if (!_jobStore.TryGetValue(jobId, out job)) return;
-
-            completedPhases = new List<CompletedPhase>(job.CompletedPhases ?? new List<CompletedPhase>())
-            {
-                new CompletedPhase
-                {
-                    Name = "FileUploaded",
-                    CompletedAt = DateTimeOffset.UtcNow,
-                    DurationMs = 1500
-                }
-            };
-
-            // Create actual Document record in Dataverse
-            // In production, this would be done by the background worker after SPE upload
-            Guid documentId;
-            string documentUrl;
-
-            try
-            {
-                var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
-                {
-                    Name = $"Simulated Document - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-                    ContainerId = "simulation", // Placeholder - no actual container
-                    Description = "Document created by simulation (no actual file uploaded)"
-                };
-
-                var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
-                documentId = Guid.Parse(documentIdString);
-
-                _logger.LogInformation(
-                    "Simulation created actual Document in Dataverse: {DocumentId}",
-                    documentId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Simulation failed to create Document in Dataverse, using fake ID");
-                documentId = Guid.NewGuid();
-            }
-
-            // Use correct Dataverse URL format for the document
-            // AppId for Spaarke app in dev environment
-            const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
-            const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
-            documentUrl = $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
-
-            job = job with
-            {
-                Status = JobStatus.Completed,
-                Progress = 100,
-                CurrentPhase = "Complete",
-                CompletedPhases = completedPhases,
-                CompletedAt = DateTimeOffset.UtcNow,
-                Result = new JobResult
-                {
-                    Artifact = new CreatedArtifact
-                    {
-                        Type = ArtifactType.Document,
-                        Id = documentId,
-                        WebUrl = documentUrl
-                    }
-                }
-            };
-            _jobStore[jobId] = job;
-
-            _logger.LogInformation(
-                "Simulated job {JobId} completed with document {DocumentId}",
-                jobId,
-                documentId);
-        }
-        catch (OperationCanceledException)
-        {
-            // Job was cancelled
-            _logger.LogDebug("Simulated job {JobId} was cancelled", jobId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error simulating job progress for {JobId}", jobId);
-
-            // Mark job as failed
-            if (_jobStore.TryGetValue(jobId, out var job))
-            {
-                job = job with
-                {
-                    Status = JobStatus.Failed,
-                    Error = new JobError
-                    {
-                        Code = "OFFICE_INTERNAL",
-                        Message = "Internal error during processing",
-                        Retryable = true
-                    }
-                };
-                _jobStore[jobId] = job;
-            }
-        }
-    }
-
-    /// <summary>
     /// Generates an idempotency key based on the request content.
     /// Uses SHA256 hash of the canonical payload.
     /// </summary>
@@ -554,810 +402,6 @@ public class OfficeService : IOfficeService
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToBase64String(hashBytes);
-    }
-
-    /// <summary>
-    /// Builds an RFC 5322 compliant .eml file from Office add-in email metadata.
-    /// Uses MimeKit for proper MIME message construction.
-    /// </summary>
-    private static Stream BuildEmlFromMetadata(EmailMetadata metadata)
-    {
-        var message = new MimeMessage();
-
-        // Set sender
-        message.From.Add(new MailboxAddress(metadata.SenderName ?? "", metadata.SenderEmail));
-
-        // Set recipients
-        if (metadata.Recipients != null)
-        {
-            foreach (var recipient in metadata.Recipients)
-            {
-                var mailbox = new MailboxAddress(recipient.Name ?? "", recipient.Email);
-                switch (recipient.Type)
-                {
-                    case RecipientType.To:
-                        message.To.Add(mailbox);
-                        break;
-                    case RecipientType.Cc:
-                        message.Cc.Add(mailbox);
-                        break;
-                    case RecipientType.Bcc:
-                        message.Bcc.Add(mailbox);
-                        break;
-                }
-            }
-        }
-
-        // Set subject
-        message.Subject = metadata.Subject;
-
-        // Set dates
-        if (metadata.SentDate.HasValue)
-        {
-            message.Date = metadata.SentDate.Value;
-        }
-
-        // Set message ID if it's a valid RFC 2822 Message-ID format
-        // Note: Exchange item IDs (AAMkA...) are NOT valid Message-IDs
-        // Valid format: <something@something> or just something@something
-        if (!string.IsNullOrEmpty(metadata.InternetMessageId))
-        {
-            // Check if it looks like an RFC 2822 Message-ID (contains @ and doesn't look like base64)
-            var msgId = metadata.InternetMessageId;
-            if (msgId.Contains('@') && !msgId.StartsWith("AAMk", StringComparison.OrdinalIgnoreCase))
-            {
-                // Strip angle brackets if present, MimeKit will add them
-                if (msgId.StartsWith("<") && msgId.EndsWith(">"))
-                {
-                    msgId = msgId[1..^1];
-                }
-                message.MessageId = msgId;
-            }
-            // If it's an Exchange item ID, store it in a custom header for reference
-            else
-            {
-                message.Headers.Add("X-Exchange-Item-Id", metadata.InternetMessageId);
-            }
-        }
-
-        // Build body with attachments
-        var bodyBuilder = new BodyBuilder();
-        if (metadata.IsBodyHtml && !string.IsNullOrEmpty(metadata.Body))
-        {
-            bodyBuilder.HtmlBody = metadata.Body;
-        }
-        else if (!string.IsNullOrEmpty(metadata.Body))
-        {
-            bodyBuilder.TextBody = metadata.Body;
-        }
-
-        // Add attachments from client-side content
-        if (metadata.Attachments != null)
-        {
-            foreach (var attachment in metadata.Attachments)
-            {
-                if (string.IsNullOrEmpty(attachment.ContentBase64))
-                {
-                    continue; // Skip attachments without content
-                }
-
-                try
-                {
-                    var contentBytes = Convert.FromBase64String(attachment.ContentBase64);
-                    var contentType = MimeKit.ContentType.Parse(attachment.ContentType ?? "application/octet-stream");
-
-                    if (attachment.IsInline && !string.IsNullOrEmpty(attachment.ContentId))
-                    {
-                        // Inline attachment (embedded image in HTML body)
-                        var linkedResource = bodyBuilder.LinkedResources.Add(
-                            attachment.FileName,
-                            contentBytes,
-                            contentType);
-                        linkedResource.ContentId = attachment.ContentId;
-                    }
-                    else
-                    {
-                        // Regular attachment
-                        bodyBuilder.Attachments.Add(
-                            attachment.FileName,
-                            contentBytes,
-                            contentType);
-                    }
-                }
-                catch (FormatException)
-                {
-                    // Skip invalid base64 content
-                }
-            }
-        }
-
-        message.Body = bodyBuilder.ToMessageBody();
-
-        // Write to stream
-        var stream = new MemoryStream();
-        message.WriteTo(stream);
-        stream.Position = 0;
-        return stream;
-    }
-
-    /// <summary>
-    /// Generates a sanitized filename for the .eml file.
-    /// Format: YYYY-MM-DD_Subject.eml (max 100 chars, special chars removed)
-    /// </summary>
-    private static string GenerateEmlFileName(EmailMetadata metadata)
-    {
-        var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var sanitizedSubject = SanitizeFileName(metadata.Subject);
-
-        // Limit subject to 80 chars to leave room for date and extension
-        if (sanitizedSubject.Length > 80)
-        {
-            sanitizedSubject = sanitizedSubject[..80];
-        }
-
-        return $"{datePrefix}_{sanitizedSubject}.eml";
-    }
-
-    /// <summary>
-    /// Sanitizes a string for use as a filename.
-    /// </summary>
-    private static string SanitizeFileName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "untitled";
-        }
-
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
-        return string.IsNullOrWhiteSpace(sanitized) ? "untitled" : sanitized.Trim();
-    }
-
-    /// <summary>
-    /// Uploads content to SPE and returns the DriveId and ItemId.
-    /// </summary>
-    private async Task<(bool Success, string? DriveId, string? ItemId, string? WebUrl, string? Error)> UploadToSpeAsync(
-        string containerId,
-        string? folderPath,
-        string fileName,
-        Stream content,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug(
-            "Uploading to SPE container {ContainerId}, path {FolderPath}/{FileName}",
-            containerId,
-            folderPath ?? "root",
-            fileName);
-
-        try
-        {
-            // Resolve container to drive ID
-            var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
-
-            // Build the full path
-            var path = string.IsNullOrEmpty(folderPath)
-                ? fileName
-                : $"{folderPath.TrimEnd('/')}/{fileName}";
-
-            // Upload using SpeFileStore (ADR-007)
-            var result = await _speFileStore.UploadSmallAsync(driveId, path, content, cancellationToken);
-
-            if (result != null)
-            {
-                _logger.LogInformation(
-                    "File uploaded to SPE: DriveId={DriveId}, ItemId={ItemId}",
-                    driveId,
-                    result.Id);
-
-                return (true, driveId, result.Id, result.WebUrl, null);
-            }
-
-            return (false, null, null, null, "Upload returned null result");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "SPE upload failed for {FileName}", fileName);
-            return (false, null, null, null, ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Enriches email metadata by fetching body and attachments from Graph API when missing.
-    /// Uses OBO authentication to access user's mailbox via Microsoft Graph.
-    /// </summary>
-    /// <param name="request">Save request to enrich with email content.</param>
-    /// <param name="httpContext">HTTP context for OBO authentication.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Updated save request with email body and attachments from Graph API.</returns>
-    private async Task<SaveRequest> EnrichEmailFromGraphAsync(
-        SaveRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        // Only fetch if body is missing and we have an internet message ID
-        if (!string.IsNullOrEmpty(request.Email?.Body) || string.IsNullOrEmpty(request.Email?.InternetMessageId))
-        {
-            return request; // Body already present or no message ID
-        }
-
-        try
-        {
-            _logger.LogInformation(
-                "Fetching email content from Graph API for message {MessageId}",
-                request.Email.InternetMessageId);
-
-            // Get Graph client with OBO auth
-            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
-
-            // Fetch message with body and attachments
-            var message = await graphClient.Me.Messages[request.Email.InternetMessageId]
-                .GetAsync(requestConfig =>
-                {
-                    requestConfig.QueryParameters.Select = new[]
-                    {
-                        "body",
-                        "subject",
-                        "from",
-                        "toRecipients",
-                        "ccRecipients",
-                        "bccRecipients",
-                        "hasAttachments",
-                        "internetMessageId",
-                        "sentDateTime"
-                    };
-                    requestConfig.QueryParameters.Expand = new[] { "attachments" };
-                }, cancellationToken);
-
-            if (message == null)
-            {
-                _logger.LogWarning(
-                    "Graph API returned null message for {MessageId}",
-                    request.Email.InternetMessageId);
-                return request; // Graph API returned null, return original request
-            }
-
-            // Extract body content
-            string? bodyContent = null;
-            bool isBodyHtml = false;
-            if (message.Body != null && !string.IsNullOrEmpty(message.Body.Content))
-            {
-                bodyContent = message.Body.Content;
-                isBodyHtml = message.Body.ContentType == Microsoft.Graph.Models.BodyType.Html;
-
-                _logger.LogInformation(
-                    "Retrieved email body from Graph API: Length={BodyLength}, IsHtml={IsHtml}",
-                    bodyContent.Length,
-                    isBodyHtml);
-            }
-
-            // Extract ALL attachments (for embedding in .eml file)
-            // Note: Attachment selection only affects which ones become separate Documents, not what's in the .eml
-            List<Models.Office.AttachmentReference>? attachmentReferences = null;
-            if (message.HasAttachments == true && message.Attachments?.Any() == true)
-            {
-                attachmentReferences = new List<Models.Office.AttachmentReference>();
-
-                foreach (var attachment in message.Attachments)
-                {
-                    if (attachment is FileAttachment fileAttachment && fileAttachment.ContentBytes != null)
-                    {
-                        var contentBase64 = Convert.ToBase64String(fileAttachment.ContentBytes);
-
-                        attachmentReferences.Add(new Models.Office.AttachmentReference
-                        {
-                            AttachmentId = attachment.Id ?? Guid.NewGuid().ToString(),
-                            FileName = fileAttachment.Name ?? "attachment",
-                            Size = fileAttachment.Size,
-                            ContentType = fileAttachment.ContentType ?? "application/octet-stream",
-                            ContentBase64 = contentBase64,
-                            IsInline = fileAttachment.IsInline ?? false,
-                            ContentId = fileAttachment.ContentId
-                        });
-                    }
-                }
-
-                _logger.LogInformation(
-                    "Retrieved {AttachmentCount} attachments from Graph API for message {MessageId} - all will be embedded in .eml",
-                    attachmentReferences.Count,
-                    request.Email.InternetMessageId);
-            }
-
-            // Create updated email metadata with Graph API content
-            // EmailMetadata is a record with init-only properties, so we need to create a new instance
-            if (bodyContent != null || attachmentReferences != null)
-            {
-                return request with
-                {
-                    Email = request.Email with
-                    {
-                        Body = bodyContent ?? request.Email.Body,
-                        IsBodyHtml = bodyContent != null ? isBodyHtml : request.Email.IsBodyHtml,
-                        Attachments = attachmentReferences ?? request.Email.Attachments
-                    }
-                };
-            }
-
-            return request; // No updates needed
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to fetch email content from Graph API for message {MessageId}",
-                request.Email?.InternetMessageId);
-
-            // Don't throw - continue with whatever content we have from the client
-            // This allows fallback to client-provided data if Graph API fails
-            return request;
-        }
-    }
-
-    /// <summary>
-    /// Enriches attachment metadata by fetching content from Graph API.
-    /// Uses OBO authentication to access user's mailbox and extract the specific attachment.
-    /// </summary>
-    /// <param name="request">Save request to enrich with attachment content.</param>
-    /// <param name="httpContext">HTTP context for OBO authentication.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Updated save request with attachment content from Graph API.</returns>
-    private async Task<SaveRequest> EnrichAttachmentFromGraphAsync(
-        SaveRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        // Only fetch if content is missing and we have parent email ID
-        if (!string.IsNullOrEmpty(request.Attachment?.ContentBase64) || string.IsNullOrEmpty(request.Attachment?.ParentEmailId))
-        {
-            return request; // Content already present or no parent email ID
-        }
-
-        try
-        {
-            _logger.LogInformation(
-                "Fetching attachment content from Graph API for attachment {FileName} from message {MessageId}",
-                request.Attachment.FileName,
-                request.Attachment.ParentEmailId);
-
-            // Get Graph client with OBO auth
-            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
-
-            // Fetch message with attachments
-            var message = await graphClient.Me.Messages[request.Attachment.ParentEmailId]
-                .GetAsync(requestConfig =>
-                {
-                    requestConfig.QueryParameters.Expand = new[] { "attachments" };
-                }, cancellationToken);
-
-            if (message == null || message.Attachments == null)
-            {
-                _logger.LogWarning(
-                    "Graph API returned null message or no attachments for {MessageId}",
-                    request.Attachment.ParentEmailId);
-                return request;
-            }
-
-            // Find the matching attachment by filename (case-insensitive)
-            FileAttachment? matchingAttachment = null;
-            foreach (var attachment in message.Attachments)
-            {
-                if (attachment is FileAttachment fileAttachment &&
-                    string.Equals(fileAttachment.Name, request.Attachment.FileName, StringComparison.OrdinalIgnoreCase))
-                {
-                    matchingAttachment = fileAttachment;
-                    break;
-                }
-            }
-
-            if (matchingAttachment?.ContentBytes == null)
-            {
-                _logger.LogWarning(
-                    "Attachment {FileName} not found in message {MessageId} or has no content",
-                    request.Attachment.FileName,
-                    request.Attachment.ParentEmailId);
-                return request;
-            }
-
-            // Convert to base64
-            var contentBase64 = Convert.ToBase64String(matchingAttachment.ContentBytes);
-
-            _logger.LogInformation(
-                "Retrieved attachment content from Graph API: {FileName}, Size={Size} bytes",
-                request.Attachment.FileName,
-                matchingAttachment.ContentBytes.Length);
-
-            // Return updated request with attachment content
-            return request with
-            {
-                Attachment = request.Attachment with
-                {
-                    ContentBase64 = contentBase64,
-                    Size = request.Attachment.Size ?? matchingAttachment.ContentBytes.Length
-                }
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to fetch attachment content from Graph API for {FileName} from message {MessageId}",
-                request.Attachment?.FileName,
-                request.Attachment?.ParentEmailId);
-
-            // Don't throw - return error to user
-            throw new InvalidOperationException(
-                $"Failed to retrieve attachment content: {ex.Message}. Please try again.",
-                ex);
-        }
-    }
-
-    /// <summary>
-    /// Queues a job to the Service Bus for background processing.
-    /// </summary>
-    private async Task QueueUploadFinalizationAsync(
-        Guid jobId,
-        string idempotencyKey,
-        string correlationId,
-        string userId,
-        SaveRequest request,
-        string driveId,
-        string itemId,
-        string fileName,
-        long fileSize,
-        Guid documentId,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug(
-            "Queueing upload finalization job {JobId} for {ContentType}",
-            jobId,
-            request.ContentType);
-
-        // Build the payload for the worker
-        var payload = new UploadFinalizationPayload
-        {
-            ContentType = request.ContentType,
-            AssociationType = request.TargetEntity?.EntityType,
-            AssociationId = request.TargetEntity?.EntityId,
-            ContainerId = driveId, // Use resolved drive ID
-            FolderPath = request.FolderPath,
-            TempFileLocation = $"spe://{driveId}/{itemId}", // Reference the already-uploaded SPE file
-            FileName = fileName,
-            FileSize = fileSize,
-            MimeType = GetMimeType(request),
-            TriggerAiProcessing = request.TriggerAiProcessing,
-            EmailMetadata = request.ContentType == SaveContentType.Email && request.Email != null
-                ? new EmailArtifactPayload
-                {
-                    InternetMessageId = request.Email.InternetMessageId,
-                    ConversationId = request.Email.ConversationId,
-                    Subject = request.Email.Subject,
-                    SenderEmail = request.Email.SenderEmail,
-                    SenderName = request.Email.SenderName,
-                    RecipientsJson = request.Email.Recipients != null
-                        ? JsonSerializer.Serialize(request.Email.Recipients)
-                        : null,
-                    SentDate = request.Email.SentDate,
-                    ReceivedDate = request.Email.ReceivedDate,
-                    BodyPreview = request.Email.Body?[..Math.Min(request.Email.Body.Length, 500)],
-                    HasAttachments = request.Email.Attachments?.Count > 0,
-                    Importance = 1, // Normal
-                    SelectedAttachmentFileNames = request.Email.SelectedAttachmentFileNames
-                }
-                : null,
-            AttachmentMetadata = request.ContentType == SaveContentType.Attachment && request.Attachment != null
-                ? new AttachmentArtifactPayload
-                {
-                    OutlookAttachmentId = request.Attachment.AttachmentId,
-                    OriginalFileName = request.Attachment.FileName,
-                    ContentType = request.Attachment.ContentType,
-                    Size = request.Attachment.Size ?? 0,
-                    IsInline = false
-                }
-                : null,
-            AiOptions = request.AiOptions != null
-                ? new AiProcessingOptions
-                {
-                    ProfileSummary = request.AiOptions.ProfileSummary,
-                    RagIndex = request.AiOptions.RagIndex,
-                    DeepAnalysis = request.AiOptions.DeepAnalysis
-                }
-                : new AiProcessingOptions
-                {
-                    ProfileSummary = request.TriggerAiProcessing,
-                    RagIndex = request.TriggerAiProcessing,
-                    DeepAnalysis = false
-                },
-            DocumentId = documentId
-        };
-
-        // Create the job message
-        var message = new OfficeJobMessage
-        {
-            JobId = jobId,
-            JobType = OfficeJobType.UploadFinalization,
-            SubjectId = itemId,
-            CorrelationId = correlationId,
-            IdempotencyKey = idempotencyKey,
-            Attempt = 1,
-            MaxAttempts = 3,
-            UserId = userId,
-            Payload = JsonSerializer.SerializeToElement(payload)
-        };
-
-        // Send to Service Bus
-        var sender = _serviceBusClient.CreateSender(UploadFinalizationQueueName);
-
-        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(message))
-        {
-            MessageId = jobId.ToString(),
-            CorrelationId = correlationId,
-            ContentType = "application/json",
-            Subject = OfficeJobType.UploadFinalization.ToString(),
-            ApplicationProperties =
-            {
-                ["JobType"] = OfficeJobType.UploadFinalization.ToString(),
-                ["Attempt"] = 1,
-                ["UserId"] = userId,
-                ["ContentType"] = request.ContentType.ToString()
-            }
-        };
-
-        await sender.SendMessageAsync(sbMessage, cancellationToken);
-        await sender.DisposeAsync();
-
-        _logger.LogInformation(
-            "Upload finalization job {JobId} queued to Service Bus for {ContentType}",
-            jobId,
-            request.ContentType);
-    }
-
-    /// <summary>
-    /// Gets the MIME type for the save request content.
-    /// </summary>
-    private static string GetMimeType(SaveRequest request) => request.ContentType switch
-    {
-        SaveContentType.Email => "message/rfc822",
-        SaveContentType.Attachment => request.Attachment?.ContentType ?? "application/octet-stream",
-        SaveContentType.Document => request.Document?.ContentType ?? "application/octet-stream",
-        _ => "application/octet-stream"
-    };
-
-    /// <summary>
-    /// Updates ProcessingJob status in Dataverse.
-    /// </summary>
-    private async Task UpdateJobStatusInDataverseAsync(
-        Guid jobId,
-        JobStatus status,
-        string phase,
-        int progress,
-        string? errorMessage,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var dataverseStatus = status switch
-            {
-                JobStatus.Queued => 0,
-                JobStatus.Running => 1,
-                JobStatus.Completed => 2,
-                JobStatus.Failed => 3,
-                JobStatus.Cancelled => 4,
-                _ => 1
-            };
-
-            await _dataverseService.UpdateProcessingJobAsync(jobId, new
-            {
-                Status = dataverseStatus,
-                Progress = progress,
-                CurrentStage = phase,
-                ErrorMessage = errorMessage,
-                CompletedDate = status is JobStatus.Completed or JobStatus.Failed
-                    ? DateTime.UtcNow
-                    : (DateTime?)null
-            }, cancellationToken);
-
-            _logger.LogDebug(
-                "ProcessingJob {JobId} status updated: {Status}, {Phase}, {Progress}%",
-                jobId, status, phase, progress);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to update ProcessingJob {JobId} status in Dataverse", jobId);
-        }
-    }
-
-    /// <summary>
-    /// Creates a Document record in Dataverse with SPE pointers.
-    /// </summary>
-    private async Task<Guid> CreateDocumentWithSpePointersAsync(
-        SaveRequest request,
-        string driveId,
-        string itemId,
-        string? webUrl,
-        string fileName,
-        long fileSize,
-        string userId,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug(
-            "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
-            driveId, itemId);
-
-        // Create base document record
-        var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
-        {
-            Name = fileName,
-            ContainerId = driveId,
-            Description = request.ContentType switch
-            {
-                SaveContentType.Email => request.Email?.Subject,
-                SaveContentType.Attachment => $"Attachment: {request.Attachment?.FileName}",
-                SaveContentType.Document => request.Document?.Title ?? request.Document?.FileName,
-                _ => null
-            }
-        };
-
-        var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
-        var documentId = Guid.Parse(documentIdString);
-
-        // Update with SPE pointers and additional metadata
-        var updateRequest = new Spaarke.Dataverse.UpdateDocumentRequest
-        {
-            GraphDriveId = driveId,
-            GraphItemId = itemId,
-            FileName = fileName,
-            FileSize = fileSize,
-            MimeType = GetMimeType(request),
-            HasFile = true,
-            FilePath = webUrl  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
-        };
-
-        // Set entity association lookup based on target entity
-        if (request.TargetEntity != null)
-        {
-            switch (request.TargetEntity.EntityType?.ToLowerInvariant())
-            {
-                case "matter":
-                case "sprk_matter":
-                    updateRequest.MatterLookup = request.TargetEntity.EntityId;
-                    break;
-                case "project":
-                case "sprk_project":
-                    updateRequest.ProjectLookup = request.TargetEntity.EntityId;
-                    break;
-                case "invoice":
-                case "sprk_invoice":
-                    updateRequest.InvoiceLookup = request.TargetEntity.EntityId;
-                    break;
-                default:
-                    _logger.LogWarning(
-                        "Unknown target entity type {EntityType}, skipping association",
-                        request.TargetEntity.EntityType);
-                    break;
-            }
-        }
-
-        // Set email-specific fields
-        if (request.ContentType == SaveContentType.Email && request.Email != null)
-        {
-            updateRequest.EmailSubject = request.Email.Subject;
-            updateRequest.EmailFrom = request.Email.SenderEmail;
-            updateRequest.EmailTo = request.Email.Recipients != null
-                ? JsonSerializer.Serialize(request.Email.Recipients)
-                : null;
-            updateRequest.EmailDate = request.Email.SentDate?.DateTime;
-            updateRequest.EmailBody = request.Email.Body?[..Math.Min(request.Email.Body?.Length ?? 0, 2000)];
-            updateRequest.EmailMessageId = request.Email.InternetMessageId;
-            updateRequest.EmailConversationIndex = request.Email.ConversationId;
-            updateRequest.IsEmailArchive = true;
-        }
-
-        await _dataverseService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
-
-        _logger.LogInformation(
-            "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
-            documentId, driveId, itemId);
-
-        return documentId;
-    }
-
-    /// <summary>
-    /// Generates a Dataverse URL for a document record.
-    /// </summary>
-    private static string GenerateDataverseUrl(Guid documentId)
-    {
-        const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
-        const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
-        return $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
-    }
-
-    /// <summary>
-    /// Checks for an existing ProcessingJob with the given idempotency key.
-    /// Uses IDataverseService to query for existing jobs.
-    /// </summary>
-    private async Task<JobStatusResponse?> CheckForExistingJobAsync(
-        string idempotencyKey,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug("Checking for existing job with idempotency key");
-
-        try
-        {
-            var existingJob = await _dataverseService.GetProcessingJobByIdempotencyKeyAsync(
-                idempotencyKey,
-                cancellationToken);
-
-            if (existingJob == null)
-            {
-                return null;
-            }
-
-            // Map the dynamic result to JobStatusResponse
-            // The Dataverse service returns an anonymous type with: Id, Name, JobType, Status, Progress, IdempotencyKey, CorrelationId
-            dynamic job = existingJob;
-
-            var status = MapDataverseStatusToJobStatus((int?)job.Status);
-            var jobType = MapDataverseJobTypeToJobType((int?)job.JobType);
-
-            _logger.LogInformation(
-                "Found existing job {JobId} with idempotency key, status: {Status}",
-                (Guid)job.Id,
-                status);
-
-            return new JobStatusResponse
-            {
-                JobId = (Guid)job.Id,
-                Status = status,
-                JobType = jobType,
-                Progress = (int?)job.Progress ?? 0,
-                CurrentPhase = null, // Not stored in ProcessingJob
-                CompletedPhases = new List<CompletedPhase>(),
-                CreatedAt = DateTimeOffset.UtcNow, // Not returned by query
-                CreatedBy = null
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Error checking for existing job by idempotency key, treating as no duplicate");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Maps Dataverse ProcessingJob status option set value to JobStatus enum.
-    /// </summary>
-    private static JobStatus MapDataverseStatusToJobStatus(int? statusValue)
-    {
-        // ProcessingJob status option set values:
-        // 0 = Pending/Queued, 1 = InProgress/Running, 2 = Completed, 3 = Failed
-        return statusValue switch
-        {
-            0 => JobStatus.Queued,
-            1 => JobStatus.Running,
-            2 => JobStatus.Completed,
-            3 => JobStatus.Failed,
-            4 => JobStatus.Cancelled,
-            _ => JobStatus.Queued
-        };
-    }
-
-    /// <summary>
-    /// Maps Dataverse ProcessingJob job type option set value to JobType enum.
-    /// </summary>
-    private static JobType MapDataverseJobTypeToJobType(int? jobTypeValue)
-    {
-        // ProcessingJob job type option set values:
-        // 0 = DocumentSave, 1 = EmailSave, 2 = AttachmentSave, 3 = AiProcessing, 4 = Indexing
-        return jobTypeValue switch
-        {
-            0 => JobType.DocumentSave,
-            1 => JobType.EmailSave,
-            2 => JobType.AttachmentSave,
-            3 => JobType.AiProcessing,
-            4 => JobType.Indexing,
-            _ => JobType.DocumentSave
-        };
     }
 
     /// <inheritdoc />

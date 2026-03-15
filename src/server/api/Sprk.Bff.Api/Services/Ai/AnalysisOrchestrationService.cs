@@ -1,21 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
-using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
-using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Jobs.Handlers;
-using Sprk.Bff.Api.Telemetry;
 using AiExtractedEntities = Sprk.Bff.Api.Models.Ai.ExtractedEntities;
 // Explicit aliases to resolve ambiguity with types in the same namespace (Sprk.Bff.Api.Services.Ai).
 // AppOnlyAnalysisService defines DocumentAnalysisResult; AnalysisEndpoints defines ExtractedEntities.
@@ -33,129 +23,52 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// 2. Download file from SPE via ISpeFileOperations
 /// 3. Extract text via ITextExtractor (supports PDF, DOCX, TXT, etc.)
 /// 4. Pass extracted text to Azure OpenAI for analysis
+///
+/// Constructor dependencies reduced from 21 to 10 by extracting:
+/// - AnalysisDocumentLoader (text extraction, document reload, caching)
+/// - AnalysisRagProcessor (RAG search, cache key computation, tenant resolution)
+/// - AnalysisResultPersistence (output storage, RAG indexing enqueue, working doc finalization)
 /// </remarks>
 public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 {
-    private readonly IDataverseService _dataverseService;
-    private readonly ISpeFileOperations _speFileStore;
-    private readonly ITextExtractor _textExtractor;
     private readonly IOpenAiClient _openAiClient;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisContextBuilder _contextBuilder;
-    private readonly IWorkingDocumentService _workingDocumentService;
-    private readonly ExportServiceRegistry _exportRegistry;
-    private readonly IRagService _ragService;
     private readonly IPlaybookService _playbookService;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly INodeService _nodeService;
-    private readonly RagQueryBuilder _ragQueryBuilder;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IStorageRetryPolicy _storageRetryPolicy;
-    private readonly AnalysisOptions _options;
-    private readonly IDistributedCache _cache;
-    private readonly CacheMetrics? _cacheMetrics;
+    private readonly AnalysisDocumentLoader _documentLoader;
+    private readonly AnalysisRagProcessor _ragProcessor;
+    private readonly AnalysisResultPersistence _resultPersistence;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
-    private readonly AiTelemetry? _telemetry;
-    private readonly JobSubmissionService? _jobSubmissionService;
 
     /// <summary>
-    /// TTL for cached RAG search results. Short TTL ensures index updates are reflected quickly.
+    /// Constructor with 10 parameters (ADR-010 compliant).
+    /// Reduced from 21 by extracting AnalysisDocumentLoader, AnalysisRagProcessor,
+    /// and AnalysisResultPersistence.
     /// </summary>
-    private static readonly TimeSpan RagCacheTtl = TimeSpan.FromMinutes(15);
-
-    /// <summary>
-    /// Limits concurrent RAG searches to prevent overwhelming Azure AI Search.
-    /// Per ADR-013: no unbounded Task.WhenAll on throttled services.
-    /// </summary>
-    private static readonly SemaphoreSlim _ragSearchSemaphore = new(5);
-
-    /// <summary>
-    /// Cache key pattern for analysis state in Redis.
-    /// </summary>
-    private const string AnalysisCacheKeyPrefix = "sdap:ai:analysis:";
-
-    /// <summary>
-    /// TTL for cached analysis entries. Entries expire after 2 hours of inactivity.
-    /// </summary>
-    private static readonly DistributedCacheEntryOptions AnalysisCacheTtl = new()
-    {
-        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2)
-    };
-
     public AnalysisOrchestrationService(
-        IDataverseService dataverseService,
-        ISpeFileOperations speFileStore,
-        ITextExtractor textExtractor,
         IOpenAiClient openAiClient,
         IScopeResolverService scopeResolver,
         IAnalysisContextBuilder contextBuilder,
-        IWorkingDocumentService workingDocumentService,
-        ExportServiceRegistry exportRegistry,
-        IRagService ragService,
-        RagQueryBuilder ragQueryBuilder,
         IPlaybookService playbookService,
         IToolHandlerRegistry toolHandlerRegistry,
         INodeService nodeService,
-        IHttpContextAccessor httpContextAccessor,
-        IStorageRetryPolicy storageRetryPolicy,
-        IDistributedCache cache,
-        IOptions<AnalysisOptions> options,
-        ILogger<AnalysisOrchestrationService> logger,
-        AiTelemetry? telemetry = null,
-        CacheMetrics? cacheMetrics = null,
-        JobSubmissionService? jobSubmissionService = null)
+        AnalysisDocumentLoader documentLoader,
+        AnalysisRagProcessor ragProcessor,
+        AnalysisResultPersistence resultPersistence,
+        ILogger<AnalysisOrchestrationService> logger)
     {
-        _dataverseService = dataverseService;
-        _speFileStore = speFileStore;
-        _textExtractor = textExtractor;
         _openAiClient = openAiClient;
         _scopeResolver = scopeResolver;
         _contextBuilder = contextBuilder;
-        _workingDocumentService = workingDocumentService;
-        _exportRegistry = exportRegistry;
-        _ragService = ragService;
-        _ragQueryBuilder = ragQueryBuilder;
         _playbookService = playbookService;
         _toolHandlerRegistry = toolHandlerRegistry;
         _nodeService = nodeService;
-        _httpContextAccessor = httpContextAccessor;
-        _storageRetryPolicy = storageRetryPolicy;
-        _cache = cache;
-        _options = options.Value;
+        _documentLoader = documentLoader;
+        _ragProcessor = ragProcessor;
+        _resultPersistence = resultPersistence;
         _logger = logger;
-        _telemetry = telemetry;
-        _cacheMetrics = cacheMetrics;
-        _jobSubmissionService = jobSubmissionService;
-    }
-
-    /// <summary>
-    /// Store an analysis model in Redis via IDistributedCache with 2-hour TTL.
-    /// </summary>
-    private async Task CacheAnalysisAsync(Guid analysisId, AnalysisInternalModel analysis)
-    {
-        var entry = new AnalysisCacheEntry
-        {
-            AnalysisId = analysisId,
-            DocumentId = analysis.DocumentId,
-            DocumentText = analysis.DocumentText,
-            Status = analysis.Status,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        var json = JsonSerializer.SerializeToUtf8Bytes(entry);
-        await _cache.SetAsync($"{AnalysisCacheKeyPrefix}{analysisId}", json, AnalysisCacheTtl);
-    }
-
-    /// <summary>
-    /// Try to retrieve a cached analysis entry from Redis.
-    /// Returns null on cache miss.
-    /// </summary>
-    private async Task<AnalysisCacheEntry?> GetCachedAnalysisAsync(Guid analysisId)
-    {
-        var bytes = await _cache.GetAsync($"{AnalysisCacheKeyPrefix}{analysisId}");
-        if (bytes == null) return null;
-
-        return JsonSerializer.Deserialize<AnalysisCacheEntry>(bytes);
     }
 
     /// <inheritdoc />
@@ -199,7 +112,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             documentId, request.ActionId);
 
         // 1. Get document details from Dataverse
-        var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
+        var document = await _documentLoader.GetDocumentAsync(documentId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Document {documentId} not found");
 
         // Log document details for debugging extraction issues
@@ -210,8 +123,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             document.FileName, document.GraphDriveId ?? "(null)", document.GraphItemId ?? "(null)");
 
         // 2. Use existing analysis record ID from Dataverse (if provided) or generate a new one.
-        // When the Code Page passes AnalysisId, we reuse it so WorkingDocumentService
-        // persists content to the correct Dataverse record (sprk_workingdocument).
         var analysisId = request.AnalysisId ?? Guid.NewGuid();
         var sessionId = Guid.NewGuid().ToString("N")[..12];
 
@@ -225,7 +136,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             StartedOn = DateTime.UtcNow,
             ChatHistory = []
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         _logger.LogDebug("Created analysis record {AnalysisId} with session {SessionId}", analysisId, sessionId);
 
@@ -234,8 +145,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         yield return AnalysisStreamChunk.Progress("document_loaded", "Opening document...");
 
         // 3. Resolve scopes (Skills, Knowledge, Tools) and action
-        // Note: Playbook-based analysis is handled via early delegation to ExecutePlaybookAsync above.
-        // This code path is for action-based analysis only (no playbook).
         if (!request.ActionId.HasValue)
         {
             throw new ArgumentException("ActionId is required when not using a playbook");
@@ -260,7 +169,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // 5. Extract document text from SPE via TextExtractor (uses OBO auth)
         yield return AnalysisStreamChunk.Progress("extracting_text", "Reading content...");
-        var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
         yield return AnalysisStreamChunk.Progress("text_extracted", "Preparing analysis...");
 
         // Log extraction result for debugging
@@ -279,17 +188,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         // 6. Process RAG knowledge sources (query Azure AI Search)
-        // Wrap the raw document text in a minimal AnalysisDocumentResult for RagQueryBuilder.
-        // The Summary field is used as the semantic anchor for vector search.
-        // Entity/keyword enrichment occurs later in the pipeline (tool handlers); for
-        // action-based analysis without a playbook, use document text as the summary.
         var ragAnalysisContext = new AnalysisDocumentResult
         {
             Summary = documentText.Length > 500 ? documentText[..500] : documentText,
             Keywords = string.Empty,
             Entities = new AiExtractedEntities()
         };
-        var processedKnowledge = await ProcessRagKnowledgeAsync(
+        var processedKnowledge = await _ragProcessor.ProcessRagKnowledgeAsync(
             scopes.Knowledge, ragAnalysisContext, cancellationToken);
         yield return AnalysisStreamChunk.Progress("context_ready", "Running analysis...");
 
@@ -304,7 +209,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             DocumentText = documentText,
             SystemPrompt = systemPrompt
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         // 7. Stream AI completion
         var outputBuilder = new StringBuilder();
@@ -325,7 +230,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             // Update working document periodically (every 500 chars)
             if (outputBuilder.Length % 500 == 0)
             {
-                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                await _resultPersistence.UpdateWorkingDocumentAsync(
                     analysisId, outputBuilder.ToString(), cancellationToken);
             }
         }
@@ -342,20 +247,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             OutputTokens = outputTokens
             // DocumentText and SystemPrompt already set above
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         // Persist final content to Dataverse (sprk_workingdocument)
-        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
-        await _workingDocumentService.FinalizeAnalysisAsync(analysisId, inputTokens, outputTokens, cancellationToken);
+        await _resultPersistence.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
+        await _resultPersistence.FinalizeAnalysisAsync(analysisId, inputTokens, outputTokens, cancellationToken);
 
         _logger.LogInformation("Analysis {AnalysisId} completed: {InputTokens} input, {OutputTokens} output tokens",
             analysisId, inputTokens, outputTokens);
 
         // Enqueue RAG indexing job after analysis completes (ADR-001 / ADR-004).
-        // The job runs as a background Service Bus task so it does not block the streaming response.
-        // Idempotency key: "{tenantId}:{documentId}" — prevents duplicate indexing (ADR-004).
-        var analysisTenantId = GetTenantIdFromClaims() ?? "unknown";
-        await EnqueueRagIndexingJobAsync(
+        var analysisTenantId = _ragProcessor.GetTenantIdFromClaims() ?? "unknown";
+        await _resultPersistence.EnqueueRagIndexingJobAsync(
             analysisId.ToString(),
             documentId.ToString(),
             analysisTenantId,
@@ -377,18 +280,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
 
         // Get analysis from Redis cache, or reload from Dataverse if cache miss
-        var cachedEntry = await GetCachedAnalysisAsync(analysisId);
+        var cachedEntry = await _documentLoader.GetCachedAnalysisAsync(analysisId);
         AnalysisInternalModel analysis;
         if (cachedEntry == null)
         {
             _logger.LogInformation("Analysis {AnalysisId} not in cache, reloading from Dataverse", analysisId);
-            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
-            await CacheAnalysisAsync(analysisId, analysis);
+            analysis = await _documentLoader.ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
+            await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
         }
         else
         {
             // Rebuild full model from Dataverse using cache hint for document text
-            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
+            analysis = await _documentLoader.ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
         }
 
         // Build full prompt with document context via context builder service
@@ -428,9 +331,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             InputTokens = analysis.InputTokens + inputTokens,
             OutputTokens = analysis.OutputTokens + outputTokens
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
-        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
+        await _resultPersistence.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
 
         _logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
 
@@ -445,7 +348,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         _logger.LogInformation("Saving working document for analysis {AnalysisId}", analysisId);
 
-        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
+        var analysis = await _documentLoader.GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(analysis.WorkingDocument))
         {
@@ -455,8 +358,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // Convert working document to requested format
         var (content, contentType) = ConvertToFormat(analysis.WorkingDocument, request.Format);
 
-        // Save to SPE via working document service
-        return await _workingDocumentService.SaveToSpeAsync(
+        // Save to SPE via result persistence
+        return await _resultPersistence.SaveToSpeAsync(
             analysisId,
             request.FileName,
             content,
@@ -475,15 +378,15 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         _logger.LogInformation("Exporting analysis {AnalysisId} to {Format}", analysisId, request.Format);
 
-        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
+        var analysis = await _documentLoader.GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
         // Get the export service for the requested format
-        var exportService = _exportRegistry.GetService(request.Format);
+        var exportService = _resultPersistence.GetExportService(request.Format);
         if (exportService == null)
         {
             _logger.LogWarning("Export format {Format} not supported", request.Format);
             stopwatch.Stop();
-            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "format_not_supported");
+            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "format_not_supported");
             return new ExportResult
             {
                 ExportType = request.Format,
@@ -515,7 +418,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             _logger.LogWarning("Export validation failed for {AnalysisId}: {Errors}",
                 analysisId, string.Join(", ", validation.Errors));
             stopwatch.Stop();
-            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "validation_failed");
+            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "validation_failed");
             return new ExportResult
             {
                 ExportType = request.Format,
@@ -530,7 +433,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         if (!result.Success)
         {
             stopwatch.Stop();
-            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "export_failed");
+            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "export_failed");
             return new ExportResult
             {
                 ExportType = request.Format,
@@ -542,7 +445,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // For file exports (DOCX, PDF), save to SPE and return result
         if (result.FileBytes != null && request.Format is ExportFormat.Docx or ExportFormat.Pdf)
         {
-            var savedDoc = await _workingDocumentService.SaveToSpeAsync(
+            var savedDoc = await _resultPersistence.SaveToSpeAsync(
                 analysisId,
                 result.FileName ?? $"export_{analysisId:N}.{request.Format.ToString().ToLowerInvariant()}",
                 result.FileBytes,
@@ -550,7 +453,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 cancellationToken);
 
             stopwatch.Stop();
-            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true, fileSizeBytes: result.FileBytes.Length);
+            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true, fileSizeBytes: result.FileBytes.Length);
 
             return new ExportResult
             {
@@ -573,7 +476,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             var sentAt = result.Metadata.TryGetValue("SentAt", out var t) ? t : null;
 
             stopwatch.Stop();
-            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
+            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
 
             return new ExportResult
             {
@@ -589,7 +492,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // For other formats (Teams), return the result directly
         stopwatch.Stop();
-        _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
+        _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
 
         return new ExportResult
         {
@@ -641,7 +544,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         _logger.LogDebug("Retrieving analysis {AnalysisId}", analysisId);
 
-        var analysis = await GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
+        var analysis = await _documentLoader.GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
 
         return new AnalysisDetailResult
         {
@@ -682,25 +585,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             if (request.IncludeChatHistory && !string.IsNullOrWhiteSpace(request.ChatHistory))
             {
-                try
-                {
-                    var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
-                        request.ChatHistory,
-                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                    if (messages != null)
-                    {
-                        chatHistory = messages;
-                        chatMessagesRestored = messages.Length;
-                        _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
-                            chatMessagesRestored, analysisId);
-                    }
-                }
-                catch (System.Text.Json.JsonException ex)
-                {
-                    _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
-                    // Continue with empty chat history rather than failing
-                }
+                chatHistory = _documentLoader.DeserializeChatHistory(request.ChatHistory, analysisId);
+                chatMessagesRestored = chatHistory.Length;
             }
 
             // Extract document text for context in chat continuations
@@ -709,16 +595,16 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             try
             {
-                var document = await _dataverseService.GetDocumentAsync(
+                var document = await _documentLoader.GetDocumentAsync(
                     request.DocumentId.ToString(), cancellationToken);
 
                 if (document != null)
                 {
                     _logger.LogDebug("Extracting document text for resumed analysis {AnalysisId}", analysisId);
-                    documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+                    documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
 
                     // Build a default system prompt for continuations
-                    systemPrompt = BuildDefaultSystemPrompt();
+                    systemPrompt = AnalysisDocumentLoader.BuildDefaultSystemPrompt();
 
                     _logger.LogInformation(
                         "Extracted {CharCount} characters of document text for analysis {AnalysisId}",
@@ -752,7 +638,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 StartedOn = DateTime.UtcNow
             };
 
-            await CacheAnalysisAsync(analysisId, analysis);
+            await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
             _logger.LogInformation(
                 "Analysis {AnalysisId} resumed successfully: {ChatMessages} messages, WorkingDoc={HasWorkingDoc}, HasDocText={HasDocText}",
@@ -782,379 +668,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
     // === Private Helper Methods ===
 
-    /// <summary>
-    /// Process knowledge sources, replacing RAG types with inline content from search results.
-    /// This implements RAG (Retrieval-Augmented Generation) by querying Azure AI Search.
-    /// Uses <see cref="RagQueryBuilder"/> to construct metadata-aware queries from the
-    /// DocumentAnalysisResult rather than the naive first-500-characters approach.
-    /// </summary>
-    /// <param name="knowledge">Original knowledge sources from scope resolution.</param>
-    /// <param name="analysisResult">
-    /// Document analysis result containing entities, key phrases, and document type metadata.
-    /// Used by RagQueryBuilder to build targeted search queries.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Processed knowledge array with RAG sources replaced by inline content.</returns>
-    private async Task<AnalysisKnowledge[]> ProcessRagKnowledgeAsync(
-        AnalysisKnowledge[] knowledge,
-        AnalysisDocumentResult analysisResult,
-        CancellationToken cancellationToken)
-    {
-        if (knowledge.Length == 0)
-        {
-            return knowledge;
-        }
-
-        var ragSources = knowledge.Where(k => k.Type == KnowledgeType.RagIndex).ToArray();
-        if (ragSources.Length == 0)
-        {
-            _logger.LogDebug("No RAG knowledge sources to process");
-            return knowledge;
-        }
-
-        // Get tenant ID from HttpContext claims
-        var tenantId = GetTenantIdFromClaims();
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            _logger.LogWarning("Cannot process RAG knowledge: TenantId not found in claims");
-            // Return knowledge as-is; the context builder will just skip RAG sources
-            return knowledge;
-        }
-
-        _logger.LogInformation("Processing {RagCount} RAG knowledge sources for tenant {TenantId}",
-            ragSources.Length, tenantId);
-
-        // Build metadata-aware query from analysis result using RagQueryBuilder.
-        // This replaces the naive first-500-characters approach with a structured query
-        // derived from entities, key phrases, document type, and summary.
-        var ragQuery = _ragQueryBuilder.BuildQuery(analysisResult, tenantId);
-
-        _logger.LogDebug(
-            "Built RAG query: searchText length={SearchTextLength}, filter={Filter}",
-            ragQuery.SearchText.Length, ragQuery.FilterExpression);
-
-        // Separate non-RAG sources (pass through) from RAG sources (search in parallel)
-        var nonRagSources = knowledge.Where(k => k.Type != KnowledgeType.RagIndex).ToList();
-
-        // Execute RAG searches in parallel with semaphore throttling.
-        // Previously sequential: 3 sources x 2-3s each = 6-9s. Now parallel: ~3s.
-        var parallelStopwatch = Stopwatch.StartNew();
-
-        var ragSearchTasks = ragSources.Select(async source =>
-        {
-            await _ragSearchSemaphore.WaitAsync(cancellationToken);
-            try
-            {
-                var sourceStopwatch = Stopwatch.StartNew();
-
-                var searchOptions = new RagSearchOptions
-                {
-                    TenantId = tenantId,
-                    DeploymentId = source.DeploymentId,
-                    KnowledgeSourceId = source.Id.ToString(),
-                    TopK = _options.MaxKnowledgeResults,
-                    MinScore = _options.MinRelevanceScore,
-                    UseSemanticRanking = true,
-                    UseVectorSearch = true,
-                    UseKeywordSearch = true
-                };
-
-                _logger.LogDebug("Searching RAG index for knowledge source {SourceId}: {SourceName}",
-                    source.Id, source.Name);
-
-                // Cache-aside pattern for RAG search results (ADR-009: Redis-first caching).
-                // Key: sdap:ai:rag:{knowledgeSourceId}:{queryHash}, TTL: 15 minutes.
-                var ragCacheKey = ComputeRagCacheKey(source.Id.ToString(), ragQuery.SearchText);
-                var searchResult = await GetOrSearchRagCacheAsync(
-                    ragCacheKey, ragQuery.SearchText, searchOptions, cancellationToken);
-
-                sourceStopwatch.Stop();
-
-                if (searchResult.Results.Count == 0)
-                {
-                    _logger.LogDebug("No RAG results found for knowledge source {SourceId} in {Duration}ms",
-                        source.Id, sourceStopwatch.ElapsedMilliseconds);
-                    return (AnalysisKnowledge?)null;
-                }
-
-                // Convert RAG results to inline knowledge content
-                var ragContent = new StringBuilder();
-                ragContent.AppendLine($"Retrieved from knowledge base: {source.Name}");
-                ragContent.AppendLine();
-
-                foreach (var result in searchResult.Results)
-                {
-                    ragContent.AppendLine($"### {result.DocumentName} (Relevance: {result.Score:P0})");
-                    ragContent.AppendLine(result.Content);
-                    ragContent.AppendLine();
-                }
-
-                var inlineSource = source with
-                {
-                    Type = KnowledgeType.Inline,
-                    Content = ragContent.ToString()
-                };
-
-                _logger.LogInformation(
-                    "RAG search for {SourceName} returned {ResultCount} results in {SourceDuration}ms",
-                    source.Name, searchResult.Results.Count, sourceStopwatch.ElapsedMilliseconds);
-
-                return (AnalysisKnowledge?)inlineSource;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to search RAG index for knowledge source {SourceId}: {SourceName}",
-                    source.Id, source.Name);
-                // Return null — individual source failures don't fail the entire analysis
-                return (AnalysisKnowledge?)null;
-            }
-            finally
-            {
-                _ragSearchSemaphore.Release();
-            }
-        }).ToArray();
-
-        var ragResults = await Task.WhenAll(ragSearchTasks);
-        parallelStopwatch.Stop();
-
-        // Combine non-RAG sources with successful RAG results (filter out nulls from failures/empty)
-        var processedKnowledge = nonRagSources
-            .Concat(ragResults.Where(r => r is not null).Cast<AnalysisKnowledge>())
-            .ToList();
-
-        _logger.LogInformation(
-            "Processed {RagCount} RAG sources in parallel in {TotalDuration}ms ({SuccessCount} succeeded, {FailedCount} failed/empty). Total knowledge: {ProcessedCount}",
-            ragSources.Length, parallelStopwatch.ElapsedMilliseconds,
-            ragResults.Count(r => r is not null), ragResults.Count(r => r is null),
-            processedKnowledge.Count);
-
-        return processedKnowledge.ToArray();
-    }
-
-    /// <summary>
-    /// Gets the tenant ID from the current HTTP context claims.
-    /// </summary>
-    private string? GetTenantIdFromClaims()
-    {
-        var user = _httpContextAccessor.HttpContext?.User;
-        if (user == null)
-        {
-            return null;
-        }
-
-        // Try common claim types for tenant ID
-        return user.FindFirstValue("tid") ??
-               user.FindFirstValue("http://schemas.microsoft.com/identity/claims/tenantid") ??
-               user.FindFirstValue("tenant_id");
-    }
-
-    /// <summary>
-    /// Computes a composite Redis cache key for RAG search results.
-    /// Key pattern: sdap:ai:rag:{knowledgeSourceId}:{SHA256 hash of query text}.
-    /// Per ADR-009: Redis-first caching with structured key hierarchy.
-    /// </summary>
-    /// <param name="knowledgeSourceId">The knowledge source ID for index routing.</param>
-    /// <param name="queryText">The search query text to hash.</param>
-    /// <returns>Composite cache key string.</returns>
-    private static string ComputeRagCacheKey(string knowledgeSourceId, string queryText)
-    {
-        var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(queryText))).ToLowerInvariant();
-        return $"sdap:ai:rag:{knowledgeSourceId}:{queryHash}";
-    }
-
-    /// <summary>
-    /// Cache-aside pattern for RAG search results (ADR-009).
-    /// Checks Redis cache first; on miss, executes the search and caches the result.
-    /// Cache failures are handled gracefully — search proceeds without caching.
-    /// </summary>
-    private async Task<RagSearchResponse> GetOrSearchRagCacheAsync(
-        string cacheKey,
-        string searchText,
-        RagSearchOptions searchOptions,
-        CancellationToken cancellationToken)
-    {
-        var sw = Stopwatch.StartNew();
-
-        // Step 1: Try cache
-        try
-        {
-            var cachedJson = await _cache.GetStringAsync(cacheKey, cancellationToken);
-            if (cachedJson is not null)
-            {
-                var cachedResult = JsonSerializer.Deserialize<RagSearchResponse>(cachedJson);
-                if (cachedResult is not null)
-                {
-                    sw.Stop();
-                    _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
-                    _logger.LogDebug("RAG cache HIT for key {CacheKey} in {ElapsedMs}ms",
-                        cacheKey, sw.ElapsedMilliseconds);
-                    return cachedResult;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            // Cache read failure is non-fatal — fall through to live search
-            _logger.LogWarning(ex, "RAG cache read error for key {CacheKey}, proceeding with live search", cacheKey);
-        }
-
-        sw.Stop();
-        _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, "rag");
-
-        // Step 2: Cache miss — execute live search
-        var searchResult = await _ragService.SearchAsync(searchText, searchOptions, cancellationToken);
-
-        // Step 3: Store result in cache (fire-and-forget style, don't block on cache write)
-        try
-        {
-            var json = JsonSerializer.Serialize(searchResult);
-            await _cache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = RagCacheTtl
-                },
-                cancellationToken);
-
-            _logger.LogDebug("RAG cache SET for key {CacheKey}, TTL={TtlMinutes}min, results={ResultCount}",
-                cacheKey, RagCacheTtl.TotalMinutes, searchResult.Results.Count);
-        }
-        catch (Exception ex)
-        {
-            // Cache write failure is non-fatal — result was already obtained
-            _logger.LogWarning(ex, "RAG cache write error for key {CacheKey}", cacheKey);
-        }
-
-        return searchResult;
-    }
-
-    /// <summary>
-    /// Extract text from a document stored in SharePoint Embedded.
-    /// Downloads the file using OBO authentication and uses TextExtractor to extract readable text.
-    /// </summary>
-    private async Task<string> ExtractDocumentTextAsync(
-        DocumentEntity document,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        // Check if document has SPE file reference
-        // Presence of valid Graph IDs is sufficient - HasFile flag may not always be set
-        var hasValidGraphIds = !string.IsNullOrEmpty(document.GraphDriveId) && !string.IsNullOrEmpty(document.GraphItemId);
-        if (!hasValidGraphIds)
-        {
-            _logger.LogWarning(
-                "Document {DocumentId} has no SPE file reference (HasFile={HasFile}, DriveId={DriveId}, ItemId={ItemId})",
-                document.Id, document.HasFile, document.GraphDriveId, document.GraphItemId);
-
-            return $"[Document: {document.Name}]\n\nNo file content available for this document.";
-        }
-
-        // Check if file type is supported for extraction
-        var fileName = document.FileName ?? document.Name ?? "unknown";
-        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
-
-        if (!_textExtractor.IsSupported(extension))
-        {
-            _logger.LogWarning(
-                "File type {Extension} is not supported for text extraction (Document: {DocumentId})",
-                extension, document.Id);
-
-            return $"[Document: {document.Name}]\n\nFile type '{extension}' is not supported for text extraction.";
-        }
-
-        try
-        {
-            _logger.LogInformation(
-                "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId}, FileName={FileName})",
-                document.Id, document.GraphDriveId, document.GraphItemId, fileName);
-
-            // Fetch file metadata to get ETag for cache key (ADR-009: Redis-first caching).
-            // ETag ensures cached text is auto-invalidated when the document changes.
-            string? etag = null;
-            try
-            {
-                var metadata = await _speFileStore.GetFileMetadataAsUserAsync(
-                    httpContext,
-                    document.GraphDriveId!,
-                    document.GraphItemId!,
-                    cancellationToken);
-                etag = metadata?.ETag;
-            }
-            catch (Exception ex)
-            {
-                // Metadata fetch failure is non-fatal — proceed without cache
-                _logger.LogWarning(ex,
-                    "Failed to get file metadata for ETag (Document {DocumentId}), proceeding without text extraction cache",
-                    document.Id);
-            }
-
-            // Download file from SharePoint Embedded using OBO authentication
-            // This ensures the user's token is used for file access (fixes "Access denied" errors)
-            // Graph IDs validated as non-empty above, safe to use null-forgiving operator
-            using var fileStream = await _speFileStore.DownloadFileAsUserAsync(
-                httpContext,
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                cancellationToken);
-
-            if (fileStream == null)
-            {
-                _logger.LogWarning("Failed to download document {DocumentId} from SPE - stream is null", document.Id);
-                return $"[Document: {document.Name}]\n\nFailed to download file from storage.";
-            }
-
-            // Check if stream has content
-            var streamLength = fileStream.CanSeek ? fileStream.Length : -1;
-            _logger.LogInformation(
-                "Downloaded document {DocumentId}, stream length: {StreamLength} bytes, extracting text from {FileName}",
-                document.Id, streamLength, fileName);
-
-            // Extract text using TextExtractor with Redis cache support (ADR-009).
-            // Cache key: sdap:ai:text:{driveId}:{itemId}:v{etag} with 24h TTL.
-            // Cache hit skips Document Intelligence entirely (saves 5-30s per repeat analysis).
-            var extractionResult = await _textExtractor.ExtractAsync(
-                fileStream, fileName, document.GraphDriveId, document.GraphItemId, etag, cancellationToken);
-
-            _logger.LogInformation(
-                "Extraction result for {DocumentId}: Success={Success}, Method={Method}, TextLength={TextLength}, Error={Error}",
-                document.Id, extractionResult.Success, extractionResult.Method,
-                extractionResult.Text?.Length ?? 0, extractionResult.ErrorMessage ?? "none");
-
-            if (!extractionResult.Success)
-            {
-                _logger.LogWarning(
-                    "Text extraction failed for document {DocumentId}: {Error}",
-                    document.Id, extractionResult.ErrorMessage);
-
-                return $"[Document: {document.Name}]\n\nText extraction failed: {extractionResult.ErrorMessage}";
-            }
-
-            // Check for vision-required files (images)
-            if (extractionResult.IsVisionRequired)
-            {
-                _logger.LogInformation(
-                    "Document {DocumentId} is an image file requiring vision model processing",
-                    document.Id);
-
-                // For now, return a note that image analysis would be here
-                // Full vision integration is a separate enhancement
-                return $"[Document: {document.Name}]\n\n[Image file - vision analysis not yet integrated for Analysis feature]";
-            }
-
-            _logger.LogInformation(
-                "Successfully extracted {CharCount} characters from document {DocumentId} via {Method}",
-                extractionResult.Text?.Length ?? 0, document.Id, extractionResult.Method);
-
-            return extractionResult.Text ?? string.Empty;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error extracting text from document {DocumentId}", document.Id);
-            return $"[Document: {document.Name}]\n\nError extracting text: {ex.Message}";
-        }
-    }
-
     private static (byte[] Content, string ContentType) ConvertToFormat(string markdown, SaveDocumentFormat format)
     {
         // Phase 1: Return markdown as text for all formats
@@ -1174,329 +687,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         return $"{systemPrompt}\n\n---\n\n{userPrompt}";
     }
 
-    /// <summary>
-    /// Build a default system prompt for resumed analysis sessions.
-    /// Used when the original action/skills are not available.
-    /// </summary>
-    private static string BuildDefaultSystemPrompt()
-    {
-        return """
-            You are an AI assistant helping to analyze and discuss documents.
-
-            ## Instructions
-            - Provide helpful, accurate responses to questions about the document
-            - Use the document content as your primary source of information
-            - If asked to modify or update the analysis, provide the complete updated content
-            - Format responses in clear, readable Markdown
-            - Be concise but thorough in your answers
-
-            ## Output Format
-            Provide your response in Markdown format with appropriate headings and structure.
-            """;
-    }
-
     private static int EstimateTokens(string text)
     {
         // Rough estimation: ~4 characters per token
         return (int)Math.Ceiling(text.Length / 4.0);
-    }
-
-    /// <summary>
-    /// Get an analysis from the Redis cache, or reload it from Dataverse if cache miss.
-    /// This is the "lite" version that does NOT extract document text (no HttpContext needed).
-    /// Suitable for GET, save, and export operations that only need the persisted analysis data.
-    /// For chat continuation (which needs document text), use ReloadAnalysisFromDataverseAsync instead.
-    /// </summary>
-    private async Task<AnalysisInternalModel> GetOrReloadFromDataverseAsync(
-        Guid analysisId,
-        CancellationToken cancellationToken)
-    {
-        var cached = await GetCachedAnalysisAsync(analysisId);
-        if (cached != null)
-        {
-            // Return a lite model from the cache entry — sufficient for GET/save/export
-            return new AnalysisInternalModel
-            {
-                Id = cached.AnalysisId,
-                DocumentId = cached.DocumentId,
-                DocumentText = cached.DocumentText,
-                Status = cached.Status,
-            };
-        }
-
-        _logger.LogInformation("Analysis {AnalysisId} not in cache, loading from Dataverse (lite)", analysisId);
-
-        // 1. Get analysis record from Dataverse
-        var record = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
-            ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
-
-        // 2. Parse chat history
-        var chatHistory = Array.Empty<ChatMessageModel>();
-        if (!string.IsNullOrWhiteSpace(record.ChatHistory))
-        {
-            try
-            {
-                var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
-                    record.ChatHistory,
-                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (messages != null)
-                {
-                    chatHistory = messages;
-                }
-            }
-            catch (System.Text.Json.JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
-            }
-        }
-
-        // 3. Build internal model (no document text — only needed for chat continuation)
-        var analysis = new AnalysisInternalModel
-        {
-            Id = analysisId,
-            DocumentId = record.DocumentId,
-            DocumentName = record.Name ?? "Analysis",
-            ActionId = Guid.Empty,
-            Status = "Completed",
-            WorkingDocument = record.WorkingDocument,
-            ChatHistory = chatHistory,
-            StartedOn = record.CreatedOn,
-            CompletedOn = record.ModifiedOn,
-        };
-
-        await CacheAnalysisAsync(analysisId, analysis);
-
-        _logger.LogInformation(
-            "Loaded analysis {AnalysisId} from Dataverse (lite): {DocChars} chars, {ChatCount} messages",
-            analysisId, record.WorkingDocument?.Length ?? 0, chatHistory.Length);
-
-        return analysis;
-    }
-
-    /// <summary>
-    /// Reload analysis context from Dataverse when not found in memory.
-    /// Extracts document text so chat continuations have context.
-    /// </summary>
-    private async Task<AnalysisInternalModel> ReloadAnalysisFromDataverseAsync(
-        Guid analysisId,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Reloading analysis {AnalysisId} from Dataverse", analysisId);
-
-        // 1. Get analysis record from Dataverse
-        var analysisRecord = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
-            ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
-
-        // 2. Get the associated document for text extraction
-        string? documentText = null;
-        string documentName = "Unknown";
-
-        if (analysisRecord.DocumentId != Guid.Empty)
-        {
-            try
-            {
-                var document = await _dataverseService.GetDocumentAsync(
-                    analysisRecord.DocumentId.ToString(), cancellationToken);
-
-                if (document != null)
-                {
-                    documentName = document.Name ?? document.FileName ?? "Unknown";
-                    documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
-                    _logger.LogInformation(
-                        "Extracted {CharCount} characters of document text for reloaded analysis {AnalysisId}",
-                        documentText?.Length ?? 0, analysisId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Failed to extract document text for analysis {AnalysisId}. Continuing without document context.",
-                    analysisId);
-            }
-        }
-
-        // 3. Parse chat history from the analysis record
-        var chatHistory = Array.Empty<ChatMessageModel>();
-        if (!string.IsNullOrWhiteSpace(analysisRecord.ChatHistory))
-        {
-            try
-            {
-                var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
-                    analysisRecord.ChatHistory,
-                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (messages != null)
-                {
-                    chatHistory = messages;
-                    _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
-                        messages.Length, analysisId);
-                }
-            }
-            catch (System.Text.Json.JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
-            }
-        }
-
-        // 4. Build the internal model with document context
-        var analysis = new AnalysisInternalModel
-        {
-            Id = analysisId,
-            DocumentId = analysisRecord.DocumentId,
-            DocumentName = documentName,
-            ActionId = Guid.Empty,
-            Status = "InProgress",
-            DocumentText = documentText,
-            SystemPrompt = BuildDefaultSystemPrompt(),
-            WorkingDocument = analysisRecord.WorkingDocument,
-            ChatHistory = chatHistory,
-            StartedOn = DateTime.UtcNow
-        };
-
-        _logger.LogInformation(
-            "Successfully reloaded analysis {AnalysisId} with {DocChars} chars of document text and {ChatCount} chat messages",
-            analysisId, documentText?.Length ?? 0, chatHistory.Length);
-
-        return analysis;
-    }
-
-    /// <summary>
-    /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
-    /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
-    /// </summary>
-    /// <param name="analysisId">The analysis ID.</param>
-    /// <param name="documentId">The document ID.</param>
-    /// <param name="playbookName">The playbook name.</param>
-    /// <param name="toolResults">The tool execution results.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Storage result indicating success, partial success, or failure.</returns>
-    private async Task<DocumentProfileResult> StoreDocumentProfileOutputsAsync(
-        Guid analysisId,
-        Guid documentId,
-        string playbookName,
-        Dictionary<string, string?> toolResults,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Step 1: Use existing analysis record if analysisId was provided (user-initiated via Code Page),
-            // otherwise create a new one (background worker / app-only path).
-            // This prevents duplicate records when the user triggers analysis from an existing Draft record.
-            Guid dataverseAnalysisId;
-
-            if (analysisId != Guid.Empty)
-            {
-                _logger.LogInformation(
-                    "Using existing analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
-                    analysisId, documentId);
-                dataverseAnalysisId = analysisId;
-            }
-            else
-            {
-                _logger.LogInformation(
-                    "Creating new analysis record for Document Profile: DocumentId={DocumentId}",
-                    documentId);
-                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
-                    documentId,
-                    $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-                    playbookId: null,
-                    cancellationToken);
-            }
-
-            // Step 2: Store outputs in sprk_analysisoutput (critical path)
-            _logger.LogInformation(
-                "Storing {OutputCount} outputs in sprk_analysisoutput for analysis {AnalysisId}",
-                toolResults.Count, dataverseAnalysisId);
-
-            var sortOrder = 0;
-            foreach (var (outputTypeName, value) in toolResults)
-            {
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    _logger.LogDebug("Skipping empty output for type {OutputType}", outputTypeName);
-                    continue;
-                }
-
-                var output = new AnalysisOutputEntity
-                {
-                    Name = outputTypeName,
-                    Value = value,
-                    AnalysisId = dataverseAnalysisId,
-                    OutputTypeId = null, // Output type lookup optional for Phase 1
-                    SortOrder = sortOrder++
-                };
-
-                await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
-                _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
-            }
-
-            // Step 3: Map outputs to sprk_document fields (optional path, with retry)
-            // Only for Document Profile playbook
-            if (playbookName.Equals("Document Profile", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    _logger.LogInformation(
-                        "Mapping Document Profile outputs to sprk_document fields for document {DocumentId}",
-                        documentId);
-
-                    // Create field mapping using DocumentProfileFieldMapper
-                    var fieldMapping = DocumentProfileFieldMapper.CreateFieldMapping(toolResults);
-
-                    if (fieldMapping.Count == 0)
-                    {
-                        _logger.LogWarning(
-                            "No mappable outputs found for Document Profile. Skipping document field update.");
-                        return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
-                    }
-
-                    // Update document fields with retry policy
-                    await _storageRetryPolicy.ExecuteAsync(async ct =>
-                    {
-                        await _dataverseService.UpdateDocumentFieldsAsync(
-                            documentId.ToString(),
-                            fieldMapping,
-                            ct);
-
-                        _logger.LogInformation(
-                            "Successfully mapped {FieldCount} outputs to sprk_document fields",
-                            fieldMapping.Count);
-
-                    }, cancellationToken);
-
-                    return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
-                }
-                catch (Exception ex)
-                {
-                    // Soft failure: Outputs are preserved in sprk_analysisoutput
-                    // User can still access results via Analysis Workspace
-                    _logger.LogWarning(ex,
-                        "[STORAGE-SOFT-FAIL] Failed to map outputs to sprk_document fields after retries. " +
-                        "Outputs preserved in sprk_analysisoutput for analysis {AnalysisId}",
-                        dataverseAnalysisId);
-
-                    return DocumentProfileResult.PartialSuccess(
-                        dataverseAnalysisId,
-                        "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.");
-                }
-            }
-
-            // Non-Document-Profile playbooks: full success (only sprk_analysisoutput storage required)
-            return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
-        }
-        catch (Exception ex)
-        {
-            // Complete failure: Could not store outputs at all
-            _logger.LogError(ex,
-                "Failed to store Document Profile outputs for analysis {AnalysisId}",
-                analysisId);
-
-            return DocumentProfileResult.Failure(
-                $"Failed to store analysis outputs: {ex.Message}",
-                analysisId);
-        }
     }
 
     /// <inheritdoc />
@@ -1521,7 +715,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // 2. Get document details from Dataverse
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 2: Loading document {DocumentId}", documentId);
-        var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
+        var document = await _documentLoader.GetDocumentAsync(documentId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Document {documentId} not found");
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 2 OK: Loaded document '{DocumentName}'", document.Name);
 
@@ -1541,15 +735,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             StartedOn = DateTime.UtcNow,
             ChatHistory = []
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
         // 3b. Just-in-time canvas-to-node sync.
-        // The PlaybookBuilder PCF saves canvas JSON directly to Dataverse via webAPI.updateRecord(),
-        // bypassing the BFF API endpoint where SyncCanvasToNodesAsync is wired. To ensure
-        // sprk_playbooknode records exist before execution, sync from the stored canvas layout now.
         var canvasLayout = await _playbookService.GetCanvasLayoutAsync(request.PlaybookId, cancellationToken);
         if (canvasLayout?.Layout?.Nodes is { Length: > 0 })
         {
@@ -1567,8 +758,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         // 3c. Node-based execution detection
-        // If the playbook has sprk_playbooknode records, delegate to PlaybookOrchestrationService
-        // which executes nodes in topological order with per-node scope resolution.
         var nodes = await _nodeService.GetNodesAsync(request.PlaybookId, cancellationToken);
         if (nodes.Length > 0)
         {
@@ -1578,10 +767,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             yield return AnalysisStreamChunk.TextChunk(
                 $"[Node-based execution: {nodes.Length} nodes detected]\n");
 
-            // Load document text before delegating — nodes need extracted text for AI analysis.
-            // Uses the existing SpeFileStore facade (ADR-007) and ITextExtractor pattern.
+            // Load document text before delegating
             yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-            var nodeDocText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+            var nodeDocText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Document text extracted: {CharCount} characters", nodeDocText.Length);
             yield return AnalysisStreamChunk.TextChunk(
@@ -1603,8 +791,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             };
 
             // Resolve PlaybookOrchestrationService from request services to avoid circular DI.
-            // PlaybookOrchestrationService depends on IAnalysisOrchestrationService (for legacy fallback),
-            // so we cannot inject it via constructor without creating a circular dependency.
             var playbookOrchestrator = httpContext.RequestServices
                 .GetRequiredService<IPlaybookOrchestrationService>();
 
@@ -1638,10 +824,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 }
 
                 // Capture Deliver Output node's rendered markdown from NodeCompleted events.
-                // The Deliver Output node aggregates all previous results into a final document.
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {
-                    // Identify Deliver Output by output variable name or node name convention
                     var outputVar = evt.NodeOutput.OutputVariable;
                     if (outputVar != null &&
                         (outputVar.Contains("output", StringComparison.OrdinalIgnoreCase) ||
@@ -1670,12 +854,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                     var partialContent = allContent.ToString();
                     if (!string.IsNullOrEmpty(partialContent))
                     {
-                        await _workingDocumentService.UpdateWorkingDocumentAsync(
+                        await _resultPersistence.UpdateWorkingDocumentAsync(
                             analysisId, partialContent, cancellationToken);
                     }
 
                     analysis = analysis with { Status = "Failed", CompletedOn = DateTime.UtcNow };
-                    await CacheAnalysisAsync(analysisId, analysis);
+                    await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
                     yield return AnalysisStreamChunk.FromError(
                         evt.Error ?? "Playbook execution failed");
@@ -1689,7 +873,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 ? deliverOutputContent
                 : allContent.ToString();
 
-            // Determine status: "Completed with warnings" if some nodes failed but we have output
+            // Determine status
             var finalStatus = "Completed";
             bool? partialStorage = null;
             string? storageMessage = null;
@@ -1714,11 +898,11 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             // Persist to working document (skip if no content to write)
             if (!string.IsNullOrEmpty(finalContent))
             {
-                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                await _resultPersistence.UpdateWorkingDocumentAsync(
                     analysisId, finalContent, cancellationToken);
             }
 
-            await _workingDocumentService.FinalizeAnalysisAsync(
+            await _resultPersistence.FinalizeAnalysisAsync(
                 analysisId, totalTokensIn, totalTokensOut, cancellationToken);
 
             // Update in-memory analysis store
@@ -1731,7 +915,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 InputTokens = totalTokensIn,
                 OutputTokens = totalTokensOut
             };
-            await CacheAnalysisAsync(analysisId, analysis);
+            await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Node-based execution {Status}: Analysis {AnalysisId}, {NodeCount} nodes, output {OutputLength} chars",
@@ -1779,14 +963,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 Id = actionId,
                 Name = "Playbook Analysis",
                 Description = $"Analysis using playbook: {playbook.Name}",
-                SystemPrompt = BuildDefaultSystemPrompt()
+                SystemPrompt = AnalysisDocumentLoader.BuildDefaultSystemPrompt()
             };
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 5 OK: Action '{ActionName}'", action.Name);
 
         // 6. Extract document text from SPE
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6: Extracting document text");
         yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-        var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
 
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6 OK: Extracted {CharCount} characters from document {DocumentId}",
             documentText.Length, documentId);
@@ -1794,20 +978,16 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             $"[Document text: {documentText.Length} chars extracted]\n");
 
         // 7. Process RAG knowledge sources
-        // Build a minimal AnalysisDocumentResult for RagQueryBuilder.
-        // In playbook execution, full entity extraction runs as a tool step (GenericAnalysisHandler).
-        // Since that tool hasn't run yet at this stage, we use document text as the summary.
-        // Future enhancement: run entity extraction before RAG if available in scope.
         var ragAnalysisContext = new AnalysisDocumentResult
         {
             Summary = documentText.Length > 500 ? documentText[..500] : documentText,
             Keywords = string.Empty,
             Entities = new AiExtractedEntities()
         };
-        var processedKnowledge = await ProcessRagKnowledgeAsync(scopes.Knowledge, ragAnalysisContext, cancellationToken);
+        var processedKnowledge = await _ragProcessor.ProcessRagKnowledgeAsync(scopes.Knowledge, ragAnalysisContext, cancellationToken);
 
         // Get tenant ID from claims
-        var tenantId = GetTenantIdFromClaims() ?? "default";
+        var tenantId = _ragProcessor.GetTenantIdFromClaims() ?? "default";
 
         // 8. Build execution context for tools
         var executionContext = new ToolExecutionContext
@@ -1835,7 +1015,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             DocumentText = documentText,
             SystemPrompt = action.SystemPrompt
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         // 9. Execute tools from playbook
         var toolResults = new StringBuilder();
@@ -1859,24 +1039,20 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             string? errorMessage = null;
 
             // Get handler for this tool
-            // Priority: 1) HandlerClass (if specified), 2) Type-based lookup, 3) GenericAnalysisHandler fallback
             IAnalysisToolHandler? handler = null;
 
             if (!string.IsNullOrWhiteSpace(tool.HandlerClass))
             {
-                // Try to get specific handler by class name
                 handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass);
 
                 if (handler == null)
                 {
-                    // Handler not found - log available handlers and fall back to generic
                     var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
                     _logger.LogWarning(
                         "Custom handler '{HandlerClass}' not found for tool '{ToolName}'. " +
                         "Available handlers: [{AvailableHandlers}]. Falling back to GenericAnalysisHandler.",
                         tool.HandlerClass, tool.Name, string.Join(", ", availableHandlers));
 
-                    // Fall back to GenericAnalysisHandler
                     handler = _toolHandlerRegistry.GetHandler("GenericAnalysisHandler");
 
                     yield return AnalysisStreamChunk.TextChunk(
@@ -1885,7 +1061,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             }
             else
             {
-                // No HandlerClass specified - use type-based lookup
                 var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
                 handler = handlers.FirstOrDefault();
             }
@@ -1905,25 +1080,21 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 $"[Tool {tool.Name}: Handler resolved → {handler.HandlerId}]\n");
 
             // Validate
-            var validation = handler.Validate(executionContext, tool);
-            if (!validation.IsValid)
+            var toolValidation = handler.Validate(executionContext, tool);
+            if (!toolValidation.IsValid)
             {
                 _logger.LogWarning("Tool validation failed for {ToolName}: {Errors}",
-                    tool.Name, string.Join(", ", validation.Errors));
+                    tool.Name, string.Join(", ", toolValidation.Errors));
                 yield return AnalysisStreamChunk.TextChunk(
-                    $"[Tool {tool.Name}: Validation FAILED - {string.Join("; ", validation.Errors)}]\n");
+                    $"[Tool {tool.Name}: Validation FAILED - {string.Join("; ", toolValidation.Errors)}]\n");
                 continue;
             }
 
             // Execute with error handling — streaming-aware dispatch
-            // Mirrors the per-token pattern from ExecuteAnalysisAsync (action-based path)
             var streamed = false;
 
             if (handler is IStreamingAnalysisToolHandler streamingHandler)
             {
-                // Per-token streaming path: emit heading + tokens as they arrive.
-                // No try-catch here because C# forbids yield inside try-catch.
-                // StreamExecuteAsync handles errors internally (yields Completed with error result).
                 yield return AnalysisStreamChunk.TextChunk($"### {tool.Name}\n");
                 toolResults.AppendLine($"### {tool.Name}");
 
@@ -1946,13 +1117,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 yield return AnalysisStreamChunk.TextChunk("\n\n");
                 streamed = true;
 
-                // Persist accumulated content (same pattern as action-based path)
-                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                // Persist accumulated content
+                await _resultPersistence.UpdateWorkingDocumentAsync(
                     analysisId, toolResults.ToString(), cancellationToken);
             }
             else
             {
-                // Non-streaming fallback — current blocking behavior
+                // Non-streaming fallback
                 try
                 {
                     toolResult = await handler.ExecuteAsync(executionContext, tool, cancellationToken);
@@ -1969,7 +1140,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             {
                 if (!streamed)
                 {
-                    // Non-streaming: emit full result as single chunk (existing behavior)
                     var summary = toolResult.Summary ?? "No summary available";
                     toolResults.AppendLine($"### {tool.Name}");
                     toolResults.AppendLine(summary);
@@ -1981,7 +1151,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 totalInputTokens += toolResult.Execution.InputTokens.GetValueOrDefault();
                 totalOutputTokens += toolResult.Execution.OutputTokens.GetValueOrDefault();
 
-                // Collect successful tool results for output extraction
                 executedToolResults.Add(toolResult);
             }
             else if (toolResult != null)
@@ -1997,11 +1166,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         // 10. Store outputs in Dataverse (dual storage for Document Profile)
-        // Extract structured outputs from tool results for Document Profile storage
         var structuredOutputs = new Dictionary<string, string?>();
 
-        // Map output keys from tool results to output type names expected by DocumentProfileFieldMapper
-        // These keys match the playbook outputMapping configuration
         var outputKeyToTypeName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["tldr"] = "TL;DR",
@@ -2015,7 +1181,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             "Extracting structured outputs from {ToolCount} tool results for Document Profile storage",
             executedToolResults.Count);
 
-        // Extract outputs from collected tool results
         foreach (var toolResult in executedToolResults)
         {
             if (toolResult.Data is null)
@@ -2029,15 +1194,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 toolResult.ToolName,
                 toolResult.Data.Value.GetRawText());
 
-            // Parse the Data JSON and extract outputs based on tool handler type
             try
             {
                 using var dataDoc = JsonDocument.Parse(toolResult.Data.Value.GetRawText());
                 var root = dataDoc.RootElement;
 
-                // JPS structured output: If the result contains JPS field names (tldr, summary, etc.)
-                // at the root level, extract them directly using the outputKeyToTypeName mapping.
-                // This handles GenericAnalysisHandler output when JPS structuredOutput is enabled.
+                // JPS structured output
                 if (root.TryGetProperty("tldr", out _) || root.TryGetProperty("summary", out _))
                 {
                     foreach (var (outputKey, outputTypeName) in outputKeyToTypeName)
@@ -2061,17 +1223,15 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                         }
                     }
                 }
-                // SummaryHandler → TL;DR, Summary, Keywords outputs
+                // SummaryHandler -> TL;DR, Summary, Keywords outputs
                 else if (toolResult.HandlerId.Equals("SummaryHandler", StringComparison.OrdinalIgnoreCase))
                 {
-                    // SummaryResult has "fullText" property containing the complete summary
                     if (root.TryGetProperty("fullText", out var fullTextValue) ||
                         root.TryGetProperty("FullText", out fullTextValue))
                     {
                         var summaryText = fullTextValue.GetString();
                         if (!string.IsNullOrWhiteSpace(summaryText))
                         {
-                            // Extract TL;DR (first paragraph or first 1-2 sentences)
                             var tldr = ExtractTldr(summaryText);
                             if (!string.IsNullOrWhiteSpace(tldr))
                             {
@@ -2079,11 +1239,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                                 _logger.LogDebug("Extracted TL;DR output: {Length} characters", tldr.Length);
                             }
 
-                            // Use full summary text for Summary output
                             structuredOutputs["Summary"] = summaryText;
                             _logger.LogDebug("Extracted Summary output: {Length} characters", summaryText.Length);
 
-                            // Extract keywords from sections if available
                             if (root.TryGetProperty("sections", out var sectionsValue) ||
                                 root.TryGetProperty("Sections", out sectionsValue))
                             {
@@ -2097,10 +1255,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                         }
                     }
                 }
-                // DocumentClassifierHandler → Document Type output
+                // DocumentClassifierHandler -> Document Type output
                 else if (toolResult.HandlerId.Equals("DocumentClassifierHandler", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Look for "documentType" or "classification" property
                     if (root.TryGetProperty("documentType", out var docTypeValue) ||
                         root.TryGetProperty("DocumentType", out docTypeValue) ||
                         root.TryGetProperty("classification", out docTypeValue))
@@ -2116,7 +1273,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                         }
                     }
                 }
-                // Generic fallback: Try to find output keys directly in the data
+                // Generic fallback
                 else
                 {
                     foreach (var (outputKey, outputTypeName) in outputKeyToTypeName)
@@ -2168,7 +1325,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         DocumentProfileResult? storageResult = null;
         if (structuredOutputs.Any())
         {
-            storageResult = await StoreDocumentProfileOutputsAsync(
+            storageResult = await _resultPersistence.StoreDocumentProfileOutputsAsync(
                 analysisId,
                 documentId,
                 playbook.Name ?? "Unknown",
@@ -2200,11 +1357,11 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             InputTokens = totalInputTokens,
             OutputTokens = totalOutputTokens
         };
-        await CacheAnalysisAsync(analysisId, analysis);
+        await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
 
         // Persist final content to Dataverse (sprk_workingdocument) — matches action-based path
-        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
-        await _workingDocumentService.FinalizeAnalysisAsync(analysisId, totalInputTokens, totalOutputTokens, cancellationToken);
+        await _resultPersistence.UpdateWorkingDocumentAsync(analysisId, finalOutput, cancellationToken);
+        await _resultPersistence.FinalizeAnalysisAsync(analysisId, totalInputTokens, totalOutputTokens, cancellationToken);
 
         _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed, output {OutputLength} chars",
             analysisId, scopes.Tools.Length, finalOutput.Length);
@@ -2212,8 +1369,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             $"\n[Execution complete: {executedToolResults.Count}/{scopes.Tools.Length} tools succeeded, {finalOutput.Length} chars output]\n");
 
         // Enqueue RAG indexing job after playbook execution completes (ADR-001 / ADR-004).
-        // Idempotency key: "{tenantId}:{documentId}" — prevents duplicate indexing (ADR-004).
-        await EnqueueRagIndexingJobAsync(
+        await _resultPersistence.EnqueueRagIndexingJobAsync(
             analysisId.ToString(),
             documentId.ToString(),
             tenantId,
@@ -2377,89 +1533,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         return string.Empty;
-    }
-
-    /// <summary>
-    /// Enqueues a <see cref="RagIndexingJobPayload"/> to the Service Bus queue so the document
-    /// is indexed into Azure AI Search in the background after analysis completes.
-    ///
-    /// Implements ADR-001 (BackgroundService pattern) and ADR-004 (idempotent job contract).
-    /// Idempotency key: "{tenantId}:{documentId}" — guarantees the same document is not indexed twice.
-    ///
-    /// The method is a soft-failure path: if <see cref="_jobSubmissionService"/> is not registered
-    /// (e.g. in test or minimal startup) or enqueueing throws, the analysis result is still returned
-    /// to the caller — indexing will be caught by the scheduled backfill (ScheduledRagIndexingService).
-    /// </summary>
-    private async Task EnqueueRagIndexingJobAsync(
-        string analysisId,
-        string documentId,
-        string tenantId,
-        string? driveId,
-        string? itemId,
-        CancellationToken cancellationToken)
-    {
-        if (_jobSubmissionService is null)
-        {
-            _logger.LogDebug(
-                "JobSubmissionService not available — skipping RAG indexing job enqueue for analysis {AnalysisId}",
-                analysisId);
-            return;
-        }
-
-        // Only enqueue if we have the SPE file reference needed to download the document.
-        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
-        {
-            _logger.LogWarning(
-                "Cannot enqueue RAG indexing job for analysis {AnalysisId}: missing DriveId or ItemId",
-                analysisId);
-            return;
-        }
-
-        try
-        {
-            // Idempotency key per ADR-004: "{tenantId}:{documentId}"
-            var idempotencyKey = $"{tenantId}:{documentId}";
-
-            var payload = new RagIndexingJobPayload
-            {
-                TenantId = tenantId,
-                DriveId = driveId,
-                ItemId = itemId,
-                DocumentId = documentId,
-                FileName = string.Empty, // Resolved by handler from Dataverse if needed
-                Source = "AnalysisOrchestration",
-                EnqueuedAt = DateTimeOffset.UtcNow
-            };
-
-            var job = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
-                SubjectId = documentId,
-                CorrelationId = analysisId,
-                IdempotencyKey = idempotencyKey,
-                Attempt = 1,
-                MaxAttempts = 3,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-
-            await _jobSubmissionService.SubmitJobAsync(job, cancellationToken);
-
-            _logger.LogInformation(
-                "Enqueued RAG indexing job {JobId} for document {DocumentId}, analysis {AnalysisId}, " +
-                "idempotency key {IdempotencyKey}",
-                job.JobId, documentId, analysisId, idempotencyKey);
-        }
-        catch (Exception ex)
-        {
-            // Soft failure — analysis result is already returned to the caller.
-            // Scheduled backfill (ScheduledRagIndexingService) will catch up unindexed documents.
-            _logger.LogWarning(ex,
-                "Failed to enqueue RAG indexing job for analysis {AnalysisId}, document {DocumentId}. " +
-                "Indexing will be retried by scheduled backfill.",
-                analysisId, documentId);
-        }
     }
 }
 
