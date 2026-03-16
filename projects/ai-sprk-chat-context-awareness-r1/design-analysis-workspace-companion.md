@@ -345,6 +345,263 @@ function buildInlinePrompt(action: string, text: string): string {
 }
 ```
 
+### Part B6: Quick-Action Chips in SprkChat Pane
+
+The inline AI toolbar (Parts B1-B5) handles text selection in the editor. Quick-action chips provide a complementary interaction surface — pre-loaded contextual actions visible above the SprkChat input bar, available without selecting text.
+
+#### Chip Sources (Priority Order)
+
+1. **Context-specific actions** — from analysis context mapping (highest priority)
+2. **Playbook capabilities** — top 2-3 from the active playbook's `sprk_playbookcapabilities`
+3. **Predefined prompts** — existing `SprkChatPredefinedPrompts` data (pre-first-message only)
+
+#### UX
+
+```
+┌──────────────────────────────────────────────┐
+│  SprkChat (Patent Claims Analysis)    [⚙] [—]│
+├──────────────────────────────────────────────┤
+│                                              │
+│  [Chat history...]                           │
+│                                              │
+├──────────────────────────────────────────────┤
+│  [📋 Summarize Source] [🔍 Search Prior Art]  │
+│  [📊 Extract Claims] [💬 Ask About Document]  │
+├──────────────────────────────────────────────┤
+│  Type a message...               [📎] [/] ▶  │
+└──────────────────────────────────────────────┘
+```
+
+#### Chip Configuration
+
+Chips are populated from the same context mapping endpoint that drives inline actions (Part C1):
+
+```typescript
+interface SprkChatChip {
+  id: string;                    // e.g., 'summarize-source'
+  label: string;                 // Display text (max ~20 chars)
+  icon: string;                  // Fluent UI icon name
+  prompt: string;                // Full prompt sent to SprkChat on tap
+  category: 'context' | 'playbook' | 'predefined';
+}
+
+// Example chips for Patent Claims Analysis context:
+const patentChips: SprkChatChip[] = [
+  { id: 'summarize-source', label: 'Summarize Source', icon: 'TextBulletListSquare',
+    prompt: 'Summarize the source document, highlighting key claims and specifications.',
+    category: 'context' },
+  { id: 'search-prior-art', label: 'Search Prior Art', icon: 'Search',
+    prompt: 'Search for prior art related to the claims in this patent document.',
+    category: 'playbook' },
+  { id: 'extract-claims', label: 'Extract Claims', icon: 'Gavel',
+    prompt: 'Extract and list all independent and dependent claims from the source document.',
+    category: 'playbook' },
+];
+```
+
+#### Behavior
+
+- Maximum 4 chips visible; horizontal scroll if needed
+- Chips update when context changes (playbook switch, analysis record change)
+- Tapping a chip sends the pre-configured prompt as if the user typed it
+- Hidden when SprkChat pane is narrow (<350px) — natural language and slash menu remain
+- Chips are distinct from AI-generated suggestion chips (post-response) which already exist
+
+### Part B7: Slash Command Menu
+
+A `[/]` button in the SprkChat input bar opens a keyboard-navigable command menu. This gives power users direct access to playbook capabilities and system commands without natural language.
+
+#### UX
+
+```
+User types "/" or clicks [/] button:
+
+┌─────────────────────────────────────┐
+│  / Filter commands...               │
+├─────────────────────────────────────┤
+│  Patent Claims Analysis             │  ← Active playbook name
+│    /summarize   Summarize document  │
+│    /search      Search prior art    │
+│    /analyze     Run analysis        │
+│    /reanalyze   Re-run analysis     │
+│                                     │
+│  Switch Assistant                   │  ← Alternative playbooks
+│    General Document Analysis        │
+│    Contract Review                  │
+│                                     │
+│  System                             │
+│    /clear    Clear conversation      │
+│    /new      New session             │
+│    /help     Show commands           │
+└─────────────────────────────────────┘
+  ↑↓ keyboard navigation
+  Enter = execute
+  Esc = dismiss
+  Typing filters list
+```
+
+#### Dynamic Command Registry
+
+Commands are populated from three sources:
+
+```
+Command Registry = System Commands (static)
+                 + Active Playbook Capabilities (dynamic)
+                 + Available Playbooks for Switching (dynamic)
+```
+
+**System commands** (always available): `/clear`, `/new`, `/help`, `/export`
+
+**Playbook-derived commands** (from `sprk_playbookcapabilities`):
+
+| Capability | Slash Command | Behavior |
+|------------|---------------|----------|
+| `search` | `/search [query]` | Semantic search across entity's documents |
+| `summarize` | `/summarize` | Summarize current document or context |
+| `analyze` | `/analyze` | Execute analysis on current context |
+| `write_back` | `/update [field]` | Modify a record field via chat |
+| `reanalyze` | `/reanalyze` | Re-run analysis with corrections |
+| `web_search` | `/web [query]` | Search the web for information |
+| `selection_revise` | `/revise` | Refine selected text |
+
+**Available playbooks** for switching (from context mapping):
+
+When the user selects a different playbook, the system prompt, registered tools, available commands, chips, and inline actions all update.
+
+#### Component
+
+```typescript
+// New component in @spaarke/ui-components
+// SlashCommandMenu/
+//   SlashCommandMenu.tsx     — Fluent Popover with MenuList
+//   useSlashCommands.ts      — Registry + filtering logic
+//   slashCommand.types.ts    — Types
+
+interface SlashCommand {
+  id: string;
+  command: string;              // e.g., '/summarize'
+  label: string;                // Display text
+  description: string;          // Short description
+  category: 'playbook' | 'switch' | 'system';
+  execute: (args?: string) => void;
+}
+```
+
+#### Input Interception
+
+- `/` typed as first character in empty input (or at position 0) → opens menu
+- Closes on Escape, click-away, or Backspace past the `/`
+- Type-ahead filtering: `/se` shows only `/search`
+- Width matches input width; max height ~300px with scroll
+- `[/]` button in input bar triggers the same menu
+
+### Part B8: Plan Preview for Compound Actions
+
+For compound actions (2+ steps, or any action that modifies data), SprkChat shows a plan before executing. This builds trust and gives users an approval gate.
+
+#### When Plan Preview Activates
+
+- Any action that chains 2+ tool calls (e.g., "summarize and email counsel")
+- Any write-back to Dataverse (e.g., "fix the indemnification cap to $5M")
+- Any action that sends external communication (email)
+- Single-step read-only actions execute immediately (no plan preview)
+
+#### UX
+
+```
+┌──────────────────────────────────────────────┐
+│ 📋 Here's what I'll do:                      │
+│                                              │
+│ 1. Update NDA Analysis: Indemnification Cap  │
+│    $2,000,000 → $5,000,000                  │
+│ 2. Prepare summary of analysis findings      │
+│ 3. Draft email to Jane Smith with summary    │
+│                                              │
+│ [▶ Proceed] [✏️ Edit plan] [✕ Cancel]        │
+└──────────────────────────────────────────────┘
+```
+
+#### Implementation
+
+The plan preview is a **message type** in the SprkChat response rendering:
+
+```typescript
+interface PlanPreviewMessage {
+  type: 'plan_preview';
+  steps: PlanStep[];
+  status: 'pending' | 'approved' | 'executing' | 'completed' | 'cancelled';
+}
+
+interface PlanStep {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  isDestructive: boolean;       // true for write-back, email send
+}
+```
+
+- **BFF API side**: When the AI model decides to chain multiple tools, the first response is a `plan_preview` SSE event (not tool execution)
+- **SprkChat renders**: Plan card with Proceed/Edit/Cancel buttons
+- **On Proceed**: SprkChat sends approval → BFF executes the plan → progress indicators update per step
+- **On Edit**: User types modifications conversationally ("skip step 3", "also attach the contract")
+- **On Cancel**: Plan discarded, chat continues normally
+
+#### Progress During Execution
+
+```
+┌──────────────────────────────────────────────┐
+│ ✅ Updated: Indemnification Cap              │
+│    $2,000,000 → $5,000,000                  │
+│ ✅ Summary prepared (3 findings, 2 flags)    │
+│ ⏳ Drafting email to Jane Smith...           │
+└──────────────────────────────────────────────┘
+```
+
+### Part B9: Rich Response Rendering
+
+SprkChat responses in the Analysis Workspace companion should support structured content beyond markdown text. This enables navigable results, actionable cards, and visual diffs.
+
+#### Response Types
+
+| Response Type | Rendering | When Used |
+|---------------|-----------|-----------|
+| **Markdown text** | Existing markdown renderer | Default for all responses |
+| **Source citation** | Inline link card with document name, page/section, snippet | When referencing source document sections |
+| **Before/after diff** | Side-by-side card showing old → new values | Write-back confirmations, analysis corrections |
+| **Entity card** | Clickable card with key fields + "Open" action | When referencing related matters, documents, contacts |
+| **Action confirmation** | Success/failure card with details | "Record updated", "Email sent" |
+| **Plan preview** | Numbered step list with approve/edit/cancel | Compound actions (see Part B8) |
+
+#### Implementation
+
+Rich responses are rendered by a `SprkChatMessageRenderer` component that inspects message metadata:
+
+```typescript
+interface RichResponseMetadata {
+  responseType: 'text' | 'citation' | 'diff' | 'entity' | 'confirmation' | 'plan';
+  data?: Record<string, unknown>;  // Type-specific payload
+}
+
+// Example: Source citation
+{
+  responseType: 'citation',
+  data: {
+    documentName: 'Patent Application US2024-001234',
+    section: 'Claims, Section 3.2',
+    snippet: 'The apparatus comprises a semiconductor wafer processing...',
+    pageNumber: 12,
+    sourceFileId: 'abc-123'
+  }
+}
+```
+
+- Start with markdown + existing streaming (Phase 2B)
+- Add structured cards incrementally (Phase 2E)
+- Rich responses are JSON metadata attached to SSE events — the client renders appropriate UI
+- Clicking an entity card navigates via `Xrm.Navigation.navigateTo` (same pattern as existing workspace)
+
+---
+
 ### Part C: Context-Driven Playbook Resolution
 
 #### C1: Analysis Record → Context Resolution
@@ -480,6 +737,29 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 3. Editor receives and inserts at current cursor or replaces selection
 4. Support for both plain text and formatted HTML insertion
 
+### Phase 2E: Quick-Action Chips + Slash Commands + Rich Responses
+
+**Scope**: Enhanced SprkChat pane interactions and structured output rendering.
+
+1. Create `SlashCommandMenu` component in `@spaarke/ui-components`
+2. Add `[/]` button to SprkChat input bar with input interception
+3. Populate dynamic command registry from playbook capabilities + system commands
+4. Add quick-action chip bar above SprkChat input, populated from context mapping
+5. Implement playbook switching via slash menu (using existing `useChatPlaybooks`)
+6. Add `SprkChatMessageRenderer` with support for structured response types (citations, diffs, entity cards, confirmations)
+7. Implement plan preview message type for compound/write-back actions
+8. Add progress indicators for multi-step plan execution
+
+### Phase 2F: Compound Actions + Write-Back (Future)
+
+**Scope**: Full compound action execution with plan preview and data modification.
+
+1. BFF API: Plan preview SSE event type (return plan before executing multi-tool chains)
+2. BFF API: Plan approval endpoint (user confirms → execute)
+3. Write-back capability: update Dataverse fields through chat with confirmation
+4. Email drafting and sending as a compound action
+5. Conversational plan editing ("skip step 2", "also include the deadline")
+
 ---
 
 ## Implementation Constraints
@@ -507,6 +787,10 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 7. "Ask SprkChat" inline action sends selected text to chat pane
 8. All inline actions stream results (no REST-returned AI content)
 9. SprkChat companion pane ID (`sprkchat-analysis`) prevents duplicate panes
+10. Quick-action chips appear above SprkChat input, change with context/playbook
+11. Slash command menu opens on `/` keystroke with dynamic playbook commands
+12. Compound/write-back actions show plan preview before executing
+13. Rich responses render structured cards (citations, diffs, entity cards) not just markdown
 
 ---
 
@@ -520,6 +804,11 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 | Playbook doesn't define inline actions | Fall back to default actions; always available regardless of playbook |
 | Mobile/tablet: no text selection UX | Defer mobile inline toolbar; focus on desktop (Analysis Workspace is desktop-primary) |
 | Editor performance with toolbar re-renders | Toolbar is a lightweight overlay; debounce selection events at 200ms |
+| Slash menu in narrow side pane (~300px) feels cramped | Full-width popover, compact layout; chips hidden at <350px |
+| Too many commands overwhelm users | Context filtering reduces to relevant items; max 4 chips; grouped slash menu categories |
+| Compound actions fail mid-execution | Plan preview gives user control; each step has retry; partial results shown |
+| Write-back without user confirmation | Mandatory plan preview for all data-modifying and external-facing actions |
+| Rich response rendering performance | Lazy-load structured card renderers; markdown remains default path |
 
 ---
 
@@ -534,6 +823,12 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 | `src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiToolbar.ts` | Position + visibility hook |
 | `src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiActions.ts` | Action execution hook |
 | `src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts` | Types |
+| `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx` | Fluent Popover command menu |
+| `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/useSlashCommands.ts` | Dynamic command registry + filtering |
+| `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommand.types.ts` | Types |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx` | Contextual chip bar above input |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx` | Rich response card renderer |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx` | Plan preview with approve/edit/cancel |
 | `src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts` | Wires toolbar to editor + bridge |
 
 ### Modified Files
@@ -543,7 +838,8 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 | `src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts` | Expand launch context interface |
 | `src/client/code-pages/AnalysisWorkspace/src/App.tsx` | Pass enriched context on SprkChat launch |
 | `src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx` | Mount InlineAiToolbar |
-| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` | Handle `inline_action` events |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` | Handle `inline_action` events, mount SlashCommandMenu and QuickActionChips |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx` | Add `[/]` button, input interception for `/` commands |
 | `src/solutions/EventsPage/index.html` | Remove injection snippet |
 | `src/solutions/SpeAdminApp/index.html` | Remove injection snippet |
 
@@ -555,3 +851,12 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 | `src/client/code-pages/AnalysisWorkspace/src/hooks/useDiffReview.ts` | Existing diff review — reused by diff-type inline actions |
 | `src/client/code-pages/AnalysisWorkspace/src/hooks/useSelectionBroadcast.ts` | Already broadcasts selections — complements inline toolbar |
 | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatContextMappingService.cs` | Phase 1 complete — may extend for inline action resolution |
+
+---
+
+## Cross-References
+
+- [AI Chat Strategy: M365 Copilot + SprkChat](../../docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) — Two-plane strategy and contextual component model
+- [SprkChat Extensibility Design](../ai-sprk-chat-extensibility-r1/design.md) — Quick-action chips (Phase 2), slash commands (Phase 1), plan preview (Phase 3), rich responses (Phase 4), and market research. Parts B6-B9 of this companion design integrate the Analysis Workspace-relevant portions of the extensibility design.
+- [AI Architecture](../../docs/architecture/AI-ARCHITECTURE.md) — AI Tool Framework
+- [Side Pane Platform Architecture](../../docs/architecture/SIDE-PANE-PLATFORM-ARCHITECTURE.md) — Side pane design
