@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create SlashCommandMenu Component and Hooks</title>
+    <phase>2E: Enhanced SprkChat Pane — Components</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>060, 061</blocks>
+    <tags>frontend, typescript, react, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates 3 new .tsx/.ts files in shared library; Fluent Popover + MenuList + keyboard navigation; dark mode required; 6+ steps</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the `SlashCommandMenu` Fluent UI v9 Popover component and `useSlashCommands` hook in `@spaarke/ui-components`. The menu opens when triggered, shows a keyboard-navigable list of commands with type-ahead filtering, dismisses on Esc, and fires `onCommand(command)` callback. Commands include system commands (static) plus dynamically-provided playbook capabilities.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 Popover and keyboard accessibility. Follow ADR-021 for dark mode and tokens. No Xrm imports.
+  </role>
+
+  <goal>
+    Three files in `SlashCommandMenu/` — types, hook (registry + filtering), and component (Fluent Popover + MenuList). Component is keyboard-navigable, supports type-ahead, closes on Esc, and calls onCommand callback.
+  </goal>
+
+  <context>
+    <background>
+      The slash command menu opens in SprkChat when the user types '/' as the first character in the input or clicks the '[/]' button. It shows a popover above the input bar with a filterable list of commands. System commands are always present; playbook capabilities from the context mapping endpoint are appended dynamically. The menu must not add Xrm dependency — it receives commands as props.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommand.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/useSlashCommands.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use Fluent v9 Popover + MenuList for SlashCommandMenu per spec</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 tokens only — no hard-coded colors; dark mode required</constraint>
+    <constraint source="ADR-012">MUST NOT import Xrm — commands are passed as props</constraint>
+    <constraint source="spec-FR-09">MUST support keyboard navigation (arrow keys), type-ahead filtering, Esc to dismiss</constraint>
+    <constraint source="spec-NFR-04">Chips hidden when pane &lt; 350px — not applicable to slash menu (always available)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SlashCommandMenu/ directory in Spaarke.UI.Components/src/components/</step>
+    <step order="2">Create slashCommand.types.ts: SlashCommand interface (id, label, description, icon?, category, onExecute?: callback) and SlashCommandMenuProps (commands: SlashCommand[], open: boolean, onClose: () => void, onCommand: (cmd: SlashCommand, args?: string) => void, filter: string)</step>
+    <step order="3">Create useSlashCommands.ts: accepts staticCommands (system) and dynamicCommands (from playbook capabilities); returns {allCommands, filteredCommands(filter)}; filteredCommands filters by label/description prefix match on filter string</step>
+    <step order="4">Create SlashCommandMenu.tsx: Fluent v9 Popover wrapping a MenuList</step>
+    <step order="5">In SlashCommandMenu.tsx: render each command as a MenuItem with icon + label + description; highlight filter match in label</step>
+    <step order="6">In SlashCommandMenu.tsx: handle keyboard navigation (ArrowUp/ArrowDown to move selection, Enter to execute, Esc to close)</step>
+    <step order="7">Use makeStyles with tokens for colors; ensure dark mode compatibility</step>
+    <step order="8">Add to shared library index.ts exports</step>
+    <step order="9">Add unit tests: filtering logic, keyboard navigation, Esc closes</step>
+    <step order="10">Build shared library; run tests</step>
+    <step order="11">Update TASK-INDEX.md: change task 040 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommand.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/useSlashCommands.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given filter='sum', when filteredCommands is called, then only commands with 'sum' in label/description are returned.</criterion>
+    <criterion testable="true">Given open=true, when Esc is pressed, then onClose is called.</criterion>
+    <criterion testable="true">Given open=true with 3 commands, when ArrowDown is pressed, then second command is focused.</criterion>
+    <criterion testable="true">Shared library builds without errors; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    System commands to include: /summarize (chat), /analyze (chat), /ask (chat), /help (shows command list). Playbook capabilities are passed as dynamicCommands prop — SlashCommandMenu doesn't fetch them itself. The Fluent v9 Popover should be positioned relative to the input bar (the parent component handles positioning). For type-ahead, filter on the first word after the '/' (e.g., if user typed '/sum', filter by 'sum').
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 021 (to understand the command data shape from context mapping endpoint). Check Fluent v9 Popover docs for correct API usage.</protocol>
+  </execution>
+</task>

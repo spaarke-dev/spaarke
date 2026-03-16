@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Export InlineAiToolbar from Shared Library and Add Unit Tests</title>
+    <phase>2B: Inline AI Toolbar — Library</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011, 012</dependencies>
+    <blocks>030, 031</blocks>
+    <tags>frontend, typescript, testing, shared-library</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates barrel exports and adds unit tests; creates new test files; has explicit constraints on test coverage</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update the `@spaarke/ui-components` barrel exports to include all InlineAiToolbar exports, then write unit tests for `useInlineAiToolbar` (selection detection + debounce) and `InlineAiActions` (mousedown handler, correct BroadcastChannel dispatch).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Testing Library and Jest. Test the observable behavior, not implementation details.
+  </role>
+
+  <goal>
+    InlineAiToolbar components and hooks are exported from `@spaarke/ui-components` barrel; unit tests cover selection detection, debounce, and action dispatch; all tests pass.
+  </goal>
+
+  <context>
+    <background>
+      The shared library uses a barrel export pattern (index.ts) to expose components. New InlineAiToolbar components must be added to the barrel so consumers can import from '@spaarke/ui-components'. Per ADR-012, 90%+ coverage is required on shared components.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiToolbar.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiActions.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiToolbar.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiActions.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">MUST achieve 90%+ test coverage on shared components</constraint>
+    <constraint source="ADR-012">MUST export TypeScript types alongside components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read src/client/shared/Spaarke.UI.Components/src/index.ts to understand existing barrel export pattern</step>
+    <step order="2">Add exports for InlineAiToolbar, InlineAiActions, useInlineAiToolbar, useInlineAiActions, and all types from inlineAiToolbar.types.ts to index.ts</step>
+    <step order="3">Create test file: src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/__tests__/useInlineAiToolbar.test.ts</step>
+    <step order="4">Write test: selection non-collapsed → visible=true after debounce</step>
+    <step order="5">Write test: selection collapsed → visible=false</step>
+    <step order="6">Write test: debounce fires after ≤200ms (use fake timers)</step>
+    <step order="7">Create test file: src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/__tests__/InlineAiActions.test.tsx</step>
+    <step order="8">Write test: 5 default actions render as buttons</step>
+    <step order="9">Write test: mousedown on action calls onAction with correct action and selected text</step>
+    <step order="10">Run tests: npm test (in shared library directory)</step>
+    <step order="11">Verify all tests pass and coverage meets 90%+</step>
+    <step order="12">Update TASK-INDEX.md: change task 013 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/__tests__/useInlineAiToolbar.test.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/__tests__/InlineAiActions.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given import { InlineAiToolbar } from '@spaarke/ui-components', when compiling, then no TypeScript errors.</criterion>
+    <criterion testable="true">Given all unit tests, when running npm test, then all pass with 0 failures.</criterion>
+    <criterion testable="true">Given InlineAiToolbar test coverage report, then coverage is ≥90%.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use jest fake timers (jest.useFakeTimers()) to test the 200ms debounce without waiting. Mock BroadcastChannel in tests using jest.fn() or a mock implementation. Mock window.getSelection() to return a non-collapsed selection with a bounding rect.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 011 and 012 both being complete. Run tests after each test file is written, not just at the end.</protocol>
+  </execution>
+</task>

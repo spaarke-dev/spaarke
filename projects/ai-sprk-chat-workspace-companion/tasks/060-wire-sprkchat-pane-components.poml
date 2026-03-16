@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Wire QuickActionChips and Context Fetch into SprkChat.tsx</title>
+    <phase>2E-Wiring: Enhanced Pane Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>040, 041, 031</dependencies>
+    <blocks>081</blocks>
+    <tags>frontend, typescript, react, shared-library, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChat.tsx to fetch context mapping endpoint and mount QuickActionChips; integrates SlashCommandMenu state management; 6+ steps</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update `SprkChat.tsx` to: (1) fetch the context-mappings/analysis endpoint when analysisId is available in context, (2) mount `QuickActionChips` above the input bar with actions from the endpoint response, (3) mount `SlashCommandMenu` with system + playbook commands, and (4) ensure chips update when playbook changes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 19 state management and SprkChat architecture. Read SprkChat.tsx thoroughly before modifying.
+  </role>
+
+  <goal>
+    SprkChat.tsx fetches context mapping, renders QuickActionChips above input (hidden when pane &lt; 350px via component), and provides SlashCommandMenu with dynamic commands from playbook capabilities.
+  </goal>
+
+  <context>
+    <background>
+      SprkChat.tsx is the main orchestrator component in the shared library. It already manages sessions, playbook selection, and message sending. This task adds context-driven enrichment: fetch the analysis context mapping endpoint (using the analysisId from props/URL params), populate QuickActionChips, and build the slash command registry. The fetching should use the existing BFF API client pattern in the component.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-08">Quick-action chips MUST update when playbook changes — re-fetch or re-filter on playbook change</constraint>
+    <constraint source="ADR-012">Context fetch MUST use the BFF API client (auth token) — not direct fetch without auth</constraint>
+    <constraint source="spec">Chips are populated from context mapping endpoint inlineActions (first 4)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkChat API calls" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts">
+        Read useChatPlaybooks.ts to understand how the BFF API is called from the shared library. Follow the same pattern for the context mapping fetch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChat.tsx and useChatPlaybooks.ts to understand API call patterns and props interface</step>
+    <step order="2">Add analysisId to SprkChat props (optional — only present in Analysis Workspace context)</step>
+    <step order="3">Add useEffect in SprkChat.tsx: when analysisId is present, fetch GET /api/ai/chat/context-mappings/analysis/{analysisId}</step>
+    <step order="4">Store response in state: contextMapping (AnalysisChatContextResponse | null)</step>
+    <step order="5">Re-fetch when activePlaybookId changes (add to useEffect dependency array)</step>
+    <step order="6">Mount QuickActionChips above SprkChatInput: pass contextMapping?.inlineActions.slice(0,4), onChipClick calls sendMessage with chip action</step>
+    <step order="7">Pass containerRef to QuickActionChips for width detection</step>
+    <step order="8">Pass contextMapping?.inlineActions as dynamic commands to SlashCommandMenu (via useSlashCommands hook)</step>
+    <step order="9">Build shared library; verify no type errors</step>
+    <step order="10">Update TASK-INDEX.md: change task 060 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given analysisId in props, when SprkChat mounts, then GET context-mappings/analysis endpoint is called.</criterion>
+    <criterion testable="true">Given context mapping returns 6 inline actions, when QuickActionChips renders, then only 4 chips are shown.</criterion>
+    <criterion testable="true">Given playbook changes, when new playbook is selected, then context mapping is re-fetched.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The BFF API call needs an auth token — follow the exact same pattern as useChatPlaybooks.ts (it likely uses a fetch wrapper or React context that provides auth). Don't introduce a new fetching mechanism. If analysisId is not in props, skip the context fetch entirely (SprkChat works without it for non-analysis contexts). Keep the QuickActionChips chip-to-message formatting simple: chip click → send "[Quick Action: {chipLabel}]" message.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 040, 041, and 031. Read SprkChat.tsx carefully — it's a large, complex component. Make minimal targeted changes.</protocol>
+  </execution>
+</task>

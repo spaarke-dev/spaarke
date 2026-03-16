@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Investigate ChatSessionManager and Design plan_preview Session State</title>
+    <phase>2F: BFF Plan Preview + Write-Back</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>071, 072</blocks>
+    <tags>bff-api, backend, ai, planning</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Investigation and design task — no code changes; outputs a design decision documented in notes/</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Read `ChatSessionManager.cs`, `SprkChatAgent.cs`, and `SprkChatAgentFactory.cs` to understand how session state is maintained. Design the mechanism for tracking a "pending plan" state between plan_preview SSE emission and user approval. Document the design in `notes/plan-preview-session-design.md` before starting task 071.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core session management and distributed state.
+  </role>
+
+  <goal>
+    A design document in notes/ explains how pending plan state will be stored (in Redis? in memory? in existing session record?), what the plan_preview session model looks like, and how task 072's approval endpoint will retrieve and execute the pending plan.
+  </goal>
+
+  <context>
+    <background>
+      This is the Unresolved Question from spec.md: "How does BFF maintain 'pending plan' state between plan_preview emission and user approval?" The answer depends on the existing session model. Options: (a) store pending plan in Redis keyed by sessionId, (b) add a PendingPlan field to the ChatSession POCO, (c) use an in-memory ConcurrentDictionary (single-instance OK given App Service). Understanding this before coding tasks 071-073 prevents rework.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">If using Redis for pending plan, follow existing IDistributedCache pattern (30-min TTL sufficient)</constraint>
+    <constraint source="spec-2F">Plan state must survive between the streaming endpoint call and the separate approval endpoint call</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ChatSessionManager.cs, SprkChatAgent.cs, WorkingDocumentTools.cs in full</step>
+    <step order="2">Read the ChatSession model (Models/Ai/Chat/ChatSession.cs if it exists)</step>
+    <step order="3">Document findings: how is session state currently stored? Is there an existing session store? What fields does ChatSession have?</step>
+    <step order="4">Evaluate 3 options: (a) Redis with sessionId key, (b) field on ChatSession, (c) in-memory concurrent dict</step>
+    <step order="5">Choose the simplest option that works with the existing session model</step>
+    <step order="6">Create notes/plan-preview-session-design.md with: chosen approach, PendingPlan model structure (steps array, context, status), TTL strategy, how approval endpoint retrieves and executes it</step>
+    <step order="7">Update CLAUDE.md Decisions Made section with the chosen approach</step>
+    <step order="8">Update TASK-INDEX.md: change task 070 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Read files</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/notes/plan-preview-session-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given notes/plan-preview-session-design.md, when read, then it contains: chosen storage approach, PendingPlan model, and how task 072 will implement approval.</criterion>
+    <criterion testable="true">Given CLAUDE.md, when read, then Decisions Made section includes the plan preview session state decision.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a critical investigation task. Don't rush it. The decision made here directly impacts tasks 071, 072, 073. The simplest correct approach: if ChatSession is already stored in Redis (check ChatSessionManager), adding a PendingPlan field to the session model is cleanest. If ChatSession is in-memory, Redis with sessionId key is safer for multi-instance scenarios.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 062 (client side must be ready before designing approval flow). MINIMAL rigor — investigation only, no code changes.</protocol>
+  </execution>
+</task>

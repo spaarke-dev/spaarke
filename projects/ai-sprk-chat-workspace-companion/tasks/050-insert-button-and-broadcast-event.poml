@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Add Insert Button to SprkChat Messages and document_insert Event</title>
+    <phase>2D: Insert-to-Editor</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>051</blocks>
+    <tags>frontend, typescript, react, shared-library, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx file in shared library; adds new BroadcastChannel event type; modifies SprkChatMessage component</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add an "Insert" button to `SprkChatMessage.tsx` (visible on AI response messages only) that dispatches a `document_insert` BroadcastChannel event with the message content and cursor position intent. Add the `document_insert` event type to the bridge types.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and BroadcastChannel communication.
+  </role>
+
+  <goal>
+    AI response messages in SprkChat show an "Insert" button; clicking it dispatches `document_insert` via BroadcastChannel with `{content: string, contentType: 'text' | 'html', insertAt: 'cursor' | 'selection'}`.
+  </goal>
+
+  <context>
+    <background>
+      After an AI response in SprkChat, the user should be able to insert the generated content back into the Lexical editor in AnalysisWorkspace. The "Insert" button appears on AI messages (not user messages). It dispatches a document_insert event via the same BroadcastChannel bridge used by inline_action events. The editor will receive this event in task 051.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-2D">MUST support plain text and formatted HTML content</constraint>
+    <constraint source="spec-2D">Insert button MUST only appear on AI response messages, not user messages</constraint>
+    <constraint source="ADR-012">MUST NOT add Xrm dependency</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatMessage.tsx and types.ts to understand message structure (isAiMessage boolean or role field)</step>
+    <step order="2">Add DocumentInsertEvent type to types.ts: {type: 'document_insert', content: string, contentType: 'text' | 'html', insertAt: 'cursor' | 'selection'}</step>
+    <step order="3">In SprkChatMessage.tsx: add "Insert" Fluent Button (appearance="subtle") that appears below AI message content</step>
+    <step order="4">Conditionally render "Insert" button only when message.role === 'assistant' (or equivalent isAiMessage condition)</step>
+    <step order="5">On "Insert" click: dispatch BroadcastChannel message with type='document_insert', content=message.content, contentType='text', insertAt='cursor'</step>
+    <step order="6">Use the same channel name as DocumentStreamBridge (read from task 031 / DocumentStreamBridge.tsx)</step>
+    <step order="7">Add Insert icon (ArrowExportRegular from @fluentui/react-icons) to button</step>
+    <step order="8">Build shared library; verify no type errors</step>
+    <step order="9">Update TASK-INDEX.md: change task 050 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an AI message, when rendered, then Insert button is visible.</criterion>
+    <criterion testable="true">Given a user message, when rendered, then Insert button is NOT visible.</criterion>
+    <criterion testable="true">Given Insert is clicked, when BroadcastChannel is monitored, then a document_insert event is dispatched with the message content.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The button should appear in the message footer area alongside any existing Copy or other action buttons. Use appearance="subtle" and small size to keep it unobtrusive. The content to insert is the message's text content — if the message has HTML structure (from markdown rendering), serialize it as HTML and set contentType='html'. Otherwise use 'text'.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 031 (bridge channel name is established there). Read SprkChatMessage.tsx FIRST to understand message role/type field.</protocol>
+  </execution>
+</task>

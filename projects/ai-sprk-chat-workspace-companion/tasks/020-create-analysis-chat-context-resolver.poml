@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create AnalysisChatContextResolver Service</title>
+    <phase>2C: Context-Driven Actions — BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>021, 022</blocks>
+    <tags>bff-api, backend, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .cs service file in BFF; implements AI context resolution; tags include bff-api and ai; 6+ steps</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `AnalysisChatContextResolver.cs` in `Sprk.Bff.Api/Services/Ai/Chat/` that resolves an `analysisId` to a full `AnalysisChatContextResponse` by: (1) querying Dataverse for the analysis record + related matter + source document, (2) mapping `sprk_playbookcapabilities` integer values to `InlineAiAction` definitions via a static dictionary, (3) resolving the default and available playbooks, and (4) returning knowledge source scoping based on the resolved context.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core, Dataverse integration, and the existing BFF AI chat architecture. Extend existing patterns — don't reinvent.
+  </role>
+
+  <goal>
+    `AnalysisChatContextResolver.cs` resolves an analysisId to a complete AnalysisChatContextResponse POCO containing defaultPlaybook, availablePlaybooks, inlineActions, knowledgeSources, and analysisContext fields.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 built `ChatContextMappingService.cs` which resolves entity context for chat sessions. This task extends that pattern with analysis-specific resolution. The `sprk_playbookcapabilities` field on `sprk_analysisplaybook` is a multi-select option set (integers) that maps to inline actions and slash command capabilities. The static mapping is: 100000000=search, 100000001=analyze, 100000002=write_back, 100000003=reanalyze, 100000004=selection_revise, 100000005=web_search, 100000006=summarize. `selection_revise` maps to diff-type inline action; others map to chat-type or playbook capabilities.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatContextMappingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">MUST extend Sprk.Bff.Api — no separate AI microservice</constraint>
+    <constraint source="ADR-009">MUST use IDistributedCache (Redis) with 30-min TTL for resolved context — cache key: analysis-context:{analysisId}</constraint>
+    <constraint source="ADR-010">DI registrations: register AnalysisChatContextResolver as a singleton (or scoped if Dataverse repo is scoped)</constraint>
+    <constraint source="spec">capability→InlineAction mapping is static (hardcoded dictionary in resolver) — NOT stored in Dataverse</constraint>
+    <constraint source="spec">write_back capability (100000002) maps to a plan-preview-gated write action; selection_revise (100000004) maps to diff-type inline action</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <patterns>
+      <pattern name="ChatContextMappingService pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatContextMappingService.cs">
+        Read this file to understand how context is resolved. Follow the same pattern for AnalysisChatContextResolver.
+      </pattern>
+      <pattern name="Redis caching pattern" location=".claude/adr/ADR-009-redis-caching.md">
+        Use IDistributedCache.GetOrCreateAsync with 30-min TTL. Cache key format: analysis-context:{analysisId}
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ChatContextMappingService.cs and ChatDataverseRepository.cs to understand existing resolution pattern</step>
+    <step order="2">Create AnalysisChatContextResponse POCO: defaultPlaybook (string), availablePlaybooks (List&lt;PlaybookInfo&gt;), inlineActions (List&lt;InlineActionInfo&gt;), knowledgeSources (List&lt;KnowledgeSourceInfo&gt;), analysisContext (AnalysisContextInfo with analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId)</step>
+    <step order="3">Create AnalysisChatContextResolver.cs with private static readonly Dictionary&lt;int, InlineActionInfo&gt; CapabilityToActionMap for the 7 capability values</step>
+    <step order="4">Implement ResolveAsync(string analysisId, CancellationToken ct) method: check Redis cache first (cache key: analysis-context:{analysisId})</step>
+    <step order="5">On cache miss: query Dataverse for sprk_analysisoutput record by analysisId, expand to get related sprk_analysisplaybook, related matter record (for matterType, practiceArea)</step>
+    <step order="6">Map sprk_playbookcapabilities integer collection to InlineActionInfo list using static dictionary</step>
+    <step order="7">Build AnalysisChatContextResponse and store in Redis with 30-min TTL</step>
+    <step order="8">Register AnalysisChatContextResolver in Program.cs or the existing service registration extension</step>
+    <step order="9">Build BFF project: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="10">Update TASK-INDEX.md: change task 020 status to ✅ completed</step>
+    <step order="11">Document Dataverse field names discovered during implementation in notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/AnalysisChatContextResponse.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given AnalysisChatContextResolver is registered in DI, when dotnet build runs, then project builds with 0 errors.</criterion>
+    <criterion testable="true">Given capability value 100000004 (selection_revise), when CapabilityToActionMap is accessed, then it maps to an InlineActionInfo with actionType='diff'.</criterion>
+    <criterion testable="true">Given Redis cache hit, when ResolveAsync is called, then Dataverse is NOT queried (cache-first).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Dataverse entity for analysis is likely `sprk_analysisoutput`. Check ChatDataverseRepository.cs for existing FetchXML patterns to follow. The sprk_playbookcapabilities field on sprk_analysisplaybook is a multi-select option set — when read via Dataverse SDK, it comes as a collection of OptionSetValue integers. Check existing Dataverse read patterns in the repository for how to handle multi-select option sets. If the exact entity/field names differ from the spec, document them in notes/.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies — can start immediately. Read ChatContextMappingService.cs FIRST to follow the established pattern.</protocol>
+  </execution>
+</task>

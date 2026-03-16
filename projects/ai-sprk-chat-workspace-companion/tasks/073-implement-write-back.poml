@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Implement Write-Back to sprk_analysisoutput.sprk_workingdocument</title>
+    <phase>2F: BFF Plan Preview + Write-Back</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>072</dependencies>
+    <blocks>080</blocks>
+    <tags>bff-api, backend, dataverse, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements Dataverse write-back; critical constraint (MUST NOT modify SPE source); complex session-gated execution; 6+ steps</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the write-back tool in `WorkingDocumentTools.cs` that updates `sprk_analysisoutput.sprk_workingdocument` with the AI-generated content. This tool must ONLY execute after plan approval (called from the plan execution in task 072) and must NEVER modify the SPE source file. Verify the existing `WorkingDocumentTools.cs` and extend or replace as needed.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse SDK and the BFF AI tool pipeline. CRITICAL: Never write to SPE files from this tool.
+  </role>
+
+  <goal>
+    WriteBackToAnalysisOutput tool exists in the BFF; when called post-approval, it updates `sprk_analysisoutput.sprk_workingdocument` field in Dataverse with the provided content; returns success/failure with the updated content.
+  </goal>
+
+  <context>
+    <background>
+      The write-back targets `sprk_analysisoutput.sprk_workingdocument` — a Dataverse field (likely a multi-line text or HTML field) on the analysis output record. The SPE source file (stored in SharePoint Embedded) must NEVER be modified. The existing `WorkingDocumentTools.cs` may already have a partial implementation — read it first. The tool is invoked as part of an approved plan execution (from task 072), not directly from the agent loop.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-12">MUST NOT modify SPE source files — write ONLY to sprk_analysisoutput.sprk_workingdocument</constraint>
+    <constraint source="spec">MUST be plan-preview-gated (only called from approved plan execution)</constraint>
+    <constraint source="ADR-013">Access Dataverse via existing repository pattern — no raw SDK calls</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="WorkingDocumentTools existing" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs">
+        Read this file FIRST — there may already be a write-back tool. Extend or complete it rather than creating from scratch.
+      </pattern>
+      <pattern name="Dataverse repository" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs">
+        Follow existing Dataverse update patterns.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read WorkingDocumentTools.cs and ChatDataverseRepository.cs in full</step>
+    <step order="2">Identify if WriteBackToWorkingDocument (or similar) already exists; if so, verify it targets sprk_analysisoutput and extend</step>
+    <step order="3">Implement or verify UpdateWorkingDocument method in ChatDataverseRepository.cs: update sprk_workingdocument field on the analysis output record</step>
+    <step order="4">In WriteBackToWorkingDocument tool: call the repository method with analysisOutputId and content</step>
+    <step order="5">Add validation: MUST NOT call any SPE/Graph SDK file write methods from this tool</step>
+    <step order="6">Add the write-back tool to the compound intent detection list (task 071) so it always triggers plan preview gate</step>
+    <step order="7">Build BFF: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="8">Run existing BFF tests to verify no regressions: dotnet test tests/</step>
+    <step order="9">Update TASK-INDEX.md: change task 073 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given WriteBackToWorkingDocument tool, when called with analysisOutputId and content, then sprk_workingdocument field is updated in Dataverse.</criterion>
+    <criterion testable="true">Given WriteBackToWorkingDocument tool, when inspected, then no SPE/Graph file write SDK calls are present.</criterion>
+    <criterion testable="true">BFF builds without errors; existing tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The sprk_workingdocument field type needs to be verified (likely nvarchar(max) or HTML/memo). Update accordingly. The Dataverse update call: use existing Dataverse SDK patterns in ChatDataverseRepository.cs. The analysisOutputId is available from the SprkChat session context (added when the analysis workspace launched SprkChat with analysisId). Double-check: the update targets sprk_analysisoutput entity, NOT the SharePoint document. This is the most critical safety constraint in the entire project.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 072. CRITICAL: Read WorkingDocumentTools.cs and verify SPE access patterns FIRST. Never write to SPE from this tool.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Implement document_insert Handler in AnalysisWorkspace Editor</title>
+    <phase>2D: Insert-to-Editor</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>081</blocks>
+    <tags>frontend, typescript, react, code-page, analysis-workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements Lexical editor insert with undo support; modifies EditorPanel.tsx; complex BroadcastChannel + Lexical integration</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a `document_insert` BroadcastChannel listener to `EditorPanel.tsx` (or a new `useDocumentInsert.ts` hook) that receives insert events from SprkChat and uses the Lexical editor API to insert the content at the cursor position or replace the current selection, with full undo support via the Lexical undo stack.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Lexical editor API and React 19. Read Lexical integration patterns in the existing codebase before implementing.
+  </role>
+
+  <goal>
+    When a `document_insert` BroadcastChannel event is received, the Lexical editor inserts the provided content at the cursor or replaces the current selection, with undo support.
+  </goal>
+
+  <context>
+    <background>
+      EditorPanel.tsx contains the Lexical rich text editor. Lexical exposes an API for programmatic content insertion via editor.update() commands. The insert should work for both plain text and HTML (for HTML, use $generateNodesFromDOM from Lexical's HTML utilities). Undo support means wrapping the insert in a Lexical editor transaction.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-2D">MUST support plain text and formatted HTML</constraint>
+    <constraint source="spec-2D">MUST support undo via Lexical undo stack</constraint>
+    <constraint source="spec-2D">Inserts at cursor OR replaces selection (based on current editor state)</constraint>
+    <constraint source="ADR-022">React 19 — no React 16/17 APIs</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Lexical integration" location="src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx">
+        Read EditorPanel.tsx to understand how Lexical editor instance is accessed. The editor instance is typically obtained via lexical's useEditorContext() or passed as a ref.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EditorPanel.tsx to understand how Lexical editor instance is accessed and how existing content manipulation is done</step>
+    <step order="2">Create useDocumentInsert.ts hook that accepts the Lexical editor instance</step>
+    <step order="3">In useDocumentInsert: add BroadcastChannel listener for 'document_insert' events in useEffect</step>
+    <step order="4">On document_insert event with contentType='text': call editor.update(() =&gt; { $insertNodes([$createTextNode(content)]) }) or equivalent Lexical insert command</step>
+    <step order="5">On document_insert event with contentType='html': parse HTML via $generateNodesFromDOM then insert nodes via editor.update()</step>
+    <step order="6">Wrap insert in editor.update() with discrete: true for undo support (creates a separate undo entry)</step>
+    <step order="7">If selection is non-collapsed: replace selection instead of inserting at cursor</step>
+    <step order="8">Wire useDocumentInsert into EditorPanel.tsx, passing the editor instance</step>
+    <step order="9">Build AnalysisWorkspace; verify no type errors</step>
+    <step order="10">Update TASK-INDEX.md: change task 051 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentInsert.ts</output>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a text insert event, when received, then text appears at cursor position in editor.</criterion>
+    <criterion testable="true">Given text was inserted, when Ctrl+Z is pressed, then insert is undone (text removed).</criterion>
+    <criterion testable="true">Given HTML insert event with formatted content, when received, then HTML is parsed and rendered correctly in editor.</criterion>
+    <criterion testable="true">AnalysisWorkspace builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Lexical's content insertion API: use `$insertNodes()` for node insertion, `$getSelection()` to get current selection, `$createParagraphNode()` and `$createTextNode()` for new content. For HTML: `$generateNodesFromDOM(editor, domDocument)` converts HTML DOM to Lexical nodes. If you're unsure about the exact Lexical API available in this version, read the existing Lexical usage in EditorPanel.tsx and follow the same patterns. The discrete: true option in editor.update() creates a discrete history entry, making it undoable separately from other operations.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 050. Read EditorPanel.tsx THOROUGHLY before implementing — Lexical API usage is specific to the installed version.</protocol>
+  </execution>
+</task>

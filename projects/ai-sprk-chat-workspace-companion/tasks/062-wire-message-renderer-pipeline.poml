@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Wire SprkChatMessageRenderer into Message Rendering Pipeline</title>
+    <phase>2E-Wiring: Enhanced Pane Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>042, 043, 031</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, typescript, react, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChatMessage.tsx to use new renderer; integrates PlanPreviewCard into message pipeline; wires onNavigate and onOpenDiff callbacks</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update `SprkChatMessage.tsx` to check `message.metadata?.responseType` and render `SprkChatMessageRenderer` for structured responses (and `PlanPreviewCard` for plan_preview type). Wire `onNavigate` (dispatches to AnalysisWorkspace via BroadcastChannel) and `onOpenDiff` (opens DiffReviewPanel).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React rendering patterns and BroadcastChannel communication.
+  </role>
+
+  <goal>
+    SprkChatMessage renders structured response cards via SprkChatMessageRenderer based on metadata.responseType; plan_preview type renders PlanPreviewCard with proceed/cancel callbacks wired to BFF approval endpoint.
+  </goal>
+
+  <context>
+    <background>
+      The SSE message stream now includes metadata.responseType. SprkChatMessage.tsx needs to check this field and delegate to the appropriate renderer. For entity cards, navigation must go through a BroadcastChannel event (the shared library can't call Xrm directly). For PlanPreviewCard, the onProceed callback must call the plan approval BFF endpoint.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Entity card navigation MUST NOT call Xrm directly — dispatch navigate_entity BroadcastChannel event for AnalysisWorkspace to handle</constraint>
+    <constraint source="spec-2F">PlanPreviewCard onProceed MUST call plan approval endpoint (via parent SprkChat callback — not directly from shared library)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatMessage.tsx to understand current rendering and how message data is structured</step>
+    <step order="2">Add check: if message.metadata?.responseType exists and is not 'markdown', render SprkChatMessageRenderer</step>
+    <step order="3">For responseType='plan_preview': render PlanPreviewCard with steps from message.metadata.plan; pass onProceed and onCancel as props from parent</step>
+    <step order="4">For all other structured types: render SprkChatMessageRenderer with responseType and data from message.metadata</step>
+    <step order="5">Implement onNavigate in SprkChatMessage: dispatch navigate_entity BroadcastChannel event for the AnalysisWorkspace to handle</step>
+    <step order="6">Implement onOpenDiff in SprkChatMessage: dispatch open_diff BroadcastChannel event for EditorPanel/DiffReviewPanel to handle</step>
+    <step order="7">In SprkChat.tsx: pass onProceed (calls BFF plan approval endpoint) and onCancel (dismisses plan) to SprkChatMessage for plan_preview messages</step>
+    <step order="8">Build shared library; verify no type errors</step>
+    <step order="9">Update TASK-INDEX.md: change task 062 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given message with responseType='citations', when rendered, then SprkChatMessageRenderer with citations layout is shown (not plain text).</criterion>
+    <criterion testable="true">Given message with responseType='plan_preview', when rendered, then PlanPreviewCard is shown with Proceed/Edit/Cancel buttons.</criterion>
+    <criterion testable="true">Given entity card with onNavigate, when View Record clicked, then navigate_entity BroadcastChannel event is dispatched.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Default (no metadata.responseType or responseType='markdown') must still render plain text/markdown as before — no regression. The PlanPreviewCard onProceed in SprkChat.tsx will be wired to the BFF approval endpoint in task 072. For this task, stub the onProceed with a console.log or empty callback — the actual implementation comes in task 072. Add a TODO comment marking the stub.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 042, 043, and 031. CRITICAL: Do not break existing plain-text message rendering.</protocol>
+  </execution>
+</task>

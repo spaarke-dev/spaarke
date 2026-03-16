@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Implement plan_preview SSE Event and Compound Intent Detection in BFF</title>
+    <phase>2F: BFF Plan Preview + Write-Back</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>072</blocks>
+    <tags>bff-api, backend, ai, streaming</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements new SSE event type in BFF; compound intent detection is complex; modifies SprkChatAgent; 6+ steps</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement compound intent detection in `SprkChatAgent.cs` (or a new intent detection service) that detects when a user request requires 2+ tools, any Dataverse write, or any external action. When detected, emit a `plan_preview` SSE event before execution, store the pending plan per the design from task 070, and halt execution until user approval.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core SSE streaming and the SprkChat agent pipeline.
+  </role>
+
+  <goal>
+    When compound intent is detected, a plan_preview SSE event is emitted with the plan steps; execution halts until POST /plan/approve; the pending plan is stored per task 070 design.
+  </goal>
+
+  <context>
+    <background>
+      The BFF SprkChat pipeline processes user messages and calls AI tools. Before executing a compound operation (2+ tools, any write-back, any external action), the BFF must pause and emit a plan_preview SSE event so the client can render PlanPreviewCard. The implementation must integrate with the existing SSE streaming pipeline (see AiToolEndpoints.cs or ChatEndpoints.cs for the streaming pattern).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-2F">MUST NOT stub — real plan_preview SSE event required</constraint>
+    <constraint source="spec-2F">MUST gate: any 2+ tool chain, any Dataverse field write, any external action (email)</constraint>
+    <constraint source="spec-FR-11">No write-back executes without user Proceed confirmation</constraint>
+    <constraint source="ADR-013">MUST extend BFF only — no separate AI service</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/notes/plan-preview-session-design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern name="SSE streaming pattern" location="src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs">
+        Read to understand how SSE events are emitted. The plan_preview event follows the same format but with a new event type.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatAgent.cs and AiToolEndpoints.cs to understand the SSE pipeline and tool invocation flow</step>
+    <step order="2">Create PlanPreviewEvent POCO: type="plan_preview", sessionId, planTitle, steps (PlanStep[]), requiresApproval=true</step>
+    <step order="3">Add compound intent detection: after AI model responds with tool calls, check if: tool count &gt;= 2 OR any tool is a write-back tool OR any tool is an external action</step>
+    <step order="4">If compound intent detected: build PendingPlan from tool call list; store per task 070 design (Redis/session)</step>
+    <step order="5">Emit plan_preview SSE event with the plan steps; use same SSE writer as other events</step>
+    <step order="6">HALT tool execution — do not call any tools; return from the streaming handler after emitting plan_preview</step>
+    <step order="7">Add conversational plan editing: if user sends a follow-up message after plan_preview (e.g., "skip step 2"), update PendingPlan and re-emit plan_preview</step>
+    <step order="8">Build BFF project: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="9">Update TASK-INDEX.md: change task 071 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/PlanPreviewEvent.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a request that triggers 2 tool calls, when processed, then plan_preview SSE event is emitted before any tool executes.</criterion>
+    <criterion testable="true">Given plan_preview is emitted, when BFF pipeline continues, then no tools execute until /plan/approve is called.</criterion>
+    <criterion testable="true">BFF project builds without errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The compound intent detection runs AFTER the AI model has determined what tools to call (tool call list available) but BEFORE any tools are invoked. This is the right interception point — we know the full plan before executing any part of it. For conversational editing, re-run the AI model with the user's edit message in context of the current pending plan. Write-back tools include: WorkingDocumentTools or any tool that modifies Dataverse entities.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>CRITICAL: Depends on task 070 design doc. Read it before starting. Read SprkChatAgent.cs thoroughly — this is complex agent pipeline code.</protocol>
+  </execution>
+</task>

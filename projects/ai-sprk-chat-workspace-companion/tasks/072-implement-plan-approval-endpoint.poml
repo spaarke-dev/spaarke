@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Implement POST /plan/approve Endpoint and Session Approval Flow</title>
+    <phase>2F: BFF Plan Preview + Write-Back</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>073, 080</blocks>
+    <tags>bff-api, api, minimal-api, endpoints, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF endpoint; session state retrieval; plan execution orchestration; auth required; 6+ steps</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Register `POST /api/ai/chat/sessions/{sessionId}/plan/approve` in the BFF. This endpoint retrieves the pending plan from storage (task 070 design), validates the session/user, and triggers execution of the approved plan steps, streaming results via SSE. Also wire the onProceed callback in SprkChat.tsx to call this endpoint.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal API and the SprkChat session pipeline.
+  </role>
+
+  <goal>
+    The plan approval endpoint exists; calling it with a valid sessionId retrieves the pending plan and executes the stored tool calls, streaming per-step results. SprkChat.tsx's PlanPreviewCard onProceed calls this endpoint.
+  </goal>
+
+  <context>
+    <background>
+      After plan_preview is shown to the user and they click Proceed, the client calls POST /plan/approve. The BFF retrieves the stored PendingPlan (from task 071), validates the user still owns the session, and executes the tool calls — streaming step-by-step results as plan_step_progress SSE events. On completion, emits a final plan_executed event.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for session authorization</constraint>
+    <constraint source="spec-2F">MUST stream per-step progress results via SSE</constraint>
+    <constraint source="spec-FR-11">No write-back executes without prior plan_preview + this approval endpoint being called</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/notes/plan-preview-session-design.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the plan-preview-session-design.md from task 070 and SprkChatAgent.cs for execution pattern</step>
+    <step order="2">Register POST endpoint: group.MapPost("/{sessionId}/plan/approve", ApproveSessionPlan)</step>
+    <step order="3">Implement ApproveSessionPlan: retrieve pending plan from storage by sessionId; return 404 if not found or expired</step>
+    <step order="4">Validate user has access to this session (endpoint filter or inline check)</step>
+    <step order="5">Execute tool calls from pending plan; stream plan_step_progress SSE events as each step completes (include step result)</step>
+    <step order="6">On all steps complete: emit plan_executed SSE event; clear pending plan from storage</step>
+    <step order="7">In SprkChat.tsx: replace the TODO stub from task 062 with actual fetch call to POST /api/ai/chat/sessions/{sessionId}/plan/approve</step>
+    <step order="8">Build BFF and shared library</step>
+    <step order="9">Update TASK-INDEX.md: change task 072 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="npm">Build shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatSessionPlanEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid sessionId with pending plan, when POST /plan/approve is called, then tool execution starts and SSE streams plan_step_progress events.</criterion>
+    <criterion testable="true">Given invalid sessionId, when POST /plan/approve is called, then 404 ProblemDetails is returned.</criterion>
+    <criterion testable="true">BFF and shared library both build without errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The plan execution in this endpoint reuses the tool invocation logic from SprkChatAgent.cs but in a controlled, step-by-step manner (not the normal agent loop). Each tool call from the pending plan is executed in sequence. Per-step SSE event: {type: 'plan_step_progress', stepIndex, stepDescription, status: 'running'|'completed'|'failed', result?: string}. After all steps: {type: 'plan_executed', success: true/false, summary: string}.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 071. Read plan-preview-session-design.md and SprkChatAgent.cs before starting.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create useInlineAiToolbar and useInlineAiActions Hooks</title>
+    <phase>2B: Inline AI Toolbar — Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013</blocks>
+    <tags>frontend, typescript, react, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates .ts hook files in shared library; implements selection detection + BroadcastChannel dispatch; 6+ implementation steps</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create two React hooks in the shared library: `useInlineAiToolbar.ts` (tracks text selection, computes toolbar position with 200ms debounce, returns visible/position state) and `useInlineAiActions.ts` (dispatches `inline_action` BroadcastChannel events when an action is triggered, routing diff-type actions to 'diff' and chat-type to 'chat').
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React hooks, browser Selection API, and BroadcastChannel. No Xrm imports in shared library hooks.
+  </role>
+
+  <goal>
+    Two hook files exist — useInlineAiToolbar tracks selection changes with 200ms debounce and returns {visible, position, selectedText}; useInlineAiActions dispatches to BroadcastChannel and returns an onAction callback.
+  </goal>
+
+  <context>
+    <background>
+      useInlineAiToolbar listens to the 'selectionchange' document event. When selection changes, it debounces 200ms then checks if selection is non-collapsed and within the editor container. If so, it computes position from Range.getBoundingClientRect() relative to the editor container and sets visible=true. useInlineAiActions dispatches a BroadcastChannel message to 'sprk-document-bridge' (or the relevant channel name — check DocumentStreamBridge.tsx) with event type 'inline_action', selected text, and the action.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiToolbar.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiActions.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-NFR-01">Debounce MUST be ≤ 200ms</constraint>
+    <constraint source="spec-2B">Selection detection must handle drag-select (mousedown start to mouseup end)</constraint>
+    <constraint source="ADR-012">MUST NOT import Xrm or use Dataverse-specific APIs</constraint>
+    <constraint source="spec-2B">MUST reuse existing BroadcastChannel bridge — check DocumentStreamBridge.tsx for channel name and event shape</constraint>
+    <constraint source="spec-FR-04">Inline actions MUST execute through existing SprkChat session — dispatch via BroadcastChannel, not direct API call</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing BroadcastChannel bridge" location="src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx">
+        Read DocumentStreamBridge.tsx to find the channel name and existing event type shape. The inline_action event must use the same channel and follow the same message format.
+      </pattern>
+      <pattern name="useDocumentStreaming hook" location="src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts">
+        Read useDocumentStreaming.ts to understand how events are received. This guides how useInlineAiActions should dispatch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentStreamBridge.tsx and useDocumentStreaming.ts to find the BroadcastChannel name and existing event type shapes</step>
+    <step order="2">Create useInlineAiToolbar.ts: accepts editorContainerRef (RefObject&lt;HTMLElement&gt;) parameter</step>
+    <step order="3">In useInlineAiToolbar: add document selectionchange event listener in useEffect</step>
+    <step order="4">In useInlineAiToolbar: debounce handler by 200ms using setTimeout/clearTimeout</step>
+    <step order="5">In useInlineAiToolbar: on debounced fire, check window.getSelection() — if collapsed or empty, set visible=false; otherwise compute position from selection.getRangeAt(0).getBoundingClientRect() relative to editorContainerRef</step>
+    <step order="6">In useInlineAiToolbar: return {visible, position: {top, left}, selectedText}</step>
+    <step order="7">Create useInlineAiActions.ts: returns onAction(action, selectedText) callback</step>
+    <step order="8">In useInlineAiActions: dispatch BroadcastChannel message with type='inline_action', actionId=action.id, actionType=action.actionType, selectedText, timestamp</step>
+    <step order="9">In useInlineAiActions: for actionType='diff', also dispatch 'open_diff_panel' event (or the existing diff channel event)</step>
+    <step order="10">Run tsc --noEmit on shared library to verify no type errors</step>
+    <step order="11">Update TASK-INDEX.md: change task 012 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run type checking</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiToolbar.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/useInlineAiActions.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a text selection in the editor, when selectionchange fires, then visible becomes true after ≤200ms.</criterion>
+    <criterion testable="true">Given selection is collapsed (cursor only), when selectionchange fires, then visible is false.</criterion>
+    <criterion testable="true">Given onAction is called with a diff-type action, when BroadcastChannel message is inspected, then it contains actionType='diff'.</criterion>
+    <criterion testable="true">Given onAction is called with a chat-type action, when BroadcastChannel message is inspected, then it contains actionType='chat'.</criterion>
+    <criterion testable="true">Shared library compiles without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The BroadcastChannel name must match exactly what DocumentStreamBridge.tsx uses — check that file first. If the channel name is 'sprk-doc-bridge' or similar, use that. The inline_action message shape must include enough context for SprkChat to route it: action id, type, the selected text. For diff actions, SprkChat needs to know to open DiffReviewPanel — consider dispatching two events or including a flag. Clean up the selectionchange listener in useEffect cleanup function to prevent memory leaks.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 010. Read DocumentStreamBridge.tsx FIRST before writing any BroadcastChannel code.</protocol>
+  </execution>
+</task>

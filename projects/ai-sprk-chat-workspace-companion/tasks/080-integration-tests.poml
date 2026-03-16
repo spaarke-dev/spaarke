@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Integration Tests: BFF Endpoints + Manual E2E Verification</title>
+    <phase>2G: Testing and Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>072, 073, 060, 062</dependencies>
+    <blocks>081</blocks>
+    <tags>testing, integration-test, bff-api, backend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing phase; creates new test files; has explicit ADR constraints</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write integration tests for all new BFF endpoints added in this project: GET /api/ai/chat/context-mappings/analysis/{analysisId} (task 021), POST /api/ai/chat/sessions/{sessionId}/plan/approve (task 072), and the write-back tool via WorkingDocumentTools (task 073). Verify the E2E flow manually using the BFF test script.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit + Moq integration testing for ASP.NET Core Minimal API.
+  </role>
+
+  <goal>
+    Integration tests exist and pass for all three new BFF endpoints. Manual E2E verification checklist is documented. dotnet test passes with no regressions.
+  </goal>
+
+  <context>
+    <background>
+      Three new BFF endpoints were added in Phase 2C and 2F. This task verifies them via automated integration tests. The analysis context endpoint requires mocking AnalysisChatContextResolver and PlaybookChatContextProvider. The plan approval endpoint requires a valid session with a pending plan in session storage. The write-back tool test verifies Dataverse update is called with correct field/value and SPE write is NOT called.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatContextMappingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatSessionPlanEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filter authorization must be tested — verify 401/403 responses for unauthorized sessions</constraint>
+    <constraint source="ADR-013">AI tool invocation path must be tested through the existing agent pipeline pattern</constraint>
+    <constraint source="spec-FR-12">MUST assert SPE write methods are NEVER called from the write-back path</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing test structure" location="tests/Sprk.Bff.Api.Tests/">
+        Follow existing test project patterns for test fixtures, WebApplicationFactory, and mock setup.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read tests/Sprk.Bff.Api.Tests/ to understand existing test patterns and fixtures</step>
+    <step order="2">Create AnalysisChatContextEndpointTests.cs: test GET endpoint with valid analysisId returns AnalysisChatContextResponse; test with invalid ID returns 404; test without auth returns 401</step>
+    <step order="3">Create ChatSessionPlanEndpointTests.cs: test POST /plan/approve with valid session+plan returns 200 and streams SSE; test missing session returns 404; test wrong user returns 403</step>
+    <step order="4">Create WorkingDocumentToolsTests.cs: test WriteBackToWorkingDocument calls Dataverse update with correct analysisOutputId + content; assert NO SPE/Graph file write calls are made</step>
+    <step order="5">Run dotnet test — fix any failures</step>
+    <step order="6">Create notes/e2e-verification-checklist.md with manual verification steps for the full Analysis Workspace → SprkChat → plan preview → write-back flow</step>
+    <step order="7">Update TASK-INDEX.md: change task 080 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Ai/AnalysisChatContextEndpointTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Ai/ChatSessionPlanEndpointTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/WorkingDocumentToolsTests.cs</output>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/notes/e2e-verification-checklist.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid analysisId and auth, when GET context-mappings/analysis endpoint is called, then AnalysisChatContextResponse is returned with playbook name and inline actions.</criterion>
+    <criterion testable="true">Given no pending plan, when POST /plan/approve is called, then 404 ProblemDetails is returned.</criterion>
+    <criterion testable="true">Given WriteBackToWorkingDocument test, when assertions run, then no SPE/Graph file write SDK calls are present in call graph.</criterion>
+    <criterion testable="true">dotnet test passes with no regressions.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The write-back SPE safety test is the most critical test in this project. Use Mock.Verify() to assert that ISpeFileStore.WriteAsync() (or equivalent) was NEVER called during WriteBackToWorkingDocument execution. This provides a regression guard for the spec-FR-12 safety constraint.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 072, 073, 060, 062. Read existing test patterns first. The SPE safety assertion is mandatory.</protocol>
+  </execution>
+</task>

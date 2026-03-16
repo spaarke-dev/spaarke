@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create useInlineAiToolbar Hook in AnalysisWorkspace</title>
+    <phase>2B-Wiring: EditorPanel Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013, 002</dependencies>
+    <blocks>031</blocks>
+    <tags>frontend, typescript, react, code-page, analysis-workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .ts hook in AnalysisWorkspace; wires shared library hook to app-specific BroadcastChannel bridge; modifies code files</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts` — an app-level hook that combines the shared library's `useInlineAiToolbar` (position/visibility) and `useInlineAiActions` (BroadcastChannel dispatch), wiring the inline_action event dispatch to the existing `DocumentStreamBridge` channel.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 19 hooks and the AnalysisWorkspace bridge architecture.
+  </role>
+
+  <goal>
+    `AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts` exports a hook that, given an editorContainerRef, returns {visible, position, selectedText, onAction} — everything EditorPanel needs to mount and control the toolbar.
+  </goal>
+
+  <context>
+    <background>
+      The shared library hooks (task 012/013) are generic and don't know about AnalysisWorkspace's bridge. This app-level hook composes the shared hooks and wires the BroadcastChannel dispatch to the existing DocumentStreamBridge so actions route to SprkChat. It also applies the analysis context (analysisId) to the dispatched events.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-04">Inline actions MUST execute through existing SprkChat session (BroadcastChannel bridge)</constraint>
+    <constraint source="ADR-022">AnalysisWorkspace is React 19 — do NOT use React 16/17 APIs</constraint>
+    <constraint source="spec-2B">Hook must accept editorContainerRef and return toolbar state for EditorPanel</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="DocumentStreamBridge event dispatch" location="src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx">
+        Read to understand how to dispatch events to SprkChat via the bridge. Reuse same channel/event pattern for inline_action events.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentStreamBridge.tsx, useDocumentStreaming.ts, and App.tsx to understand bridge and context</step>
+    <step order="2">Create AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts</step>
+    <step order="3">Import useInlineAiToolbar (shared) and useInlineAiActions from @spaarke/ui-components</step>
+    <step order="4">Compose the hooks: call shared useInlineAiToolbar with editorContainerRef; get onAction from shared useInlineAiActions</step>
+    <step order="5">Add analysisId context to dispatched inline_action events (get analysisId from URL params via contextService or App context)</step>
+    <step order="6">Return {visible, position, selectedText, onAction, actions} — actions is DEFAULT_INLINE_ACTIONS plus any playbook-specific actions (initially just defaults; Phase 2C endpoint will enhance)</step>
+    <step order="7">Build AnalysisWorkspace: npm run build (or tsc --noEmit)</step>
+    <step order="8">Update TASK-INDEX.md: change task 030 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and type-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the hook is imported in EditorPanel.tsx, when compiling, then TypeScript compiles without errors.</criterion>
+    <criterion testable="true">Given hook returns onAction, when called with a diff action, then a BroadcastChannel message with actionType='diff' is dispatched to the bridge channel.</criterion>
+    <criterion testable="true">AnalysisWorkspace builds without errors after this change.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This hook is the glue layer. The shared library hooks are context-agnostic; this hook adds AnalysisWorkspace-specific context (analysisId, bridge channel). Keep it thin — delegate to shared hooks for position/visibility/dispatch logic.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 013 and 002. Read DocumentStreamBridge.tsx FIRST.</protocol>
+  </execution>
+</task>
