@@ -165,7 +165,7 @@ const AppContent: React.FC<AppContentProps> = ({
       ) : activePage === "recycle-bin" ? (
         <RecycleBinPage />
       ) : activePage === "containers" ? (
-        <ContainersPage />
+        <ContainersPage onOpenContainer={handleOpenContainerInBrowser} />
       ) : activePage === "container-types" ? (
         <>
           <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />

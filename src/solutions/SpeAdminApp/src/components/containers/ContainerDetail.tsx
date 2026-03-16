@@ -42,6 +42,7 @@ import {
 import {
   Dismiss20Regular,
   ArrowClockwise20Regular,
+  FolderOpen20Regular,
   Person20Regular,
   ColumnTriple20Regular,
   Settings20Regular,
@@ -68,6 +69,8 @@ export interface ContainerDetailProps {
   containerId: string | null;
   /** Callback to close the panel. */
   onClose: () => void;
+  /** Optional callback to open the container in the file browser. */
+  onBrowseFiles?: (containerId: string, containerName?: string) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,6 +378,7 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
 export const ContainerDetail: React.FC<ContainerDetailProps> = ({
   containerId,
   onClose,
+  onBrowseFiles,
 }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
@@ -522,6 +526,15 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
           </Text>
         )}
       </div>
+      {onBrowseFiles && containerId && (
+        <Button
+          appearance="subtle"
+          icon={<FolderOpen20Regular />}
+          onClick={() => onBrowseFiles(containerId, container?.displayName)}
+          aria-label="Browse files in this container"
+          title="Browse files"
+        />
+      )}
       <Button
         appearance="subtle"
         icon={<Dismiss20Regular />}
