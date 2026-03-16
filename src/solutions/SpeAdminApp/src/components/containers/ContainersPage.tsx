@@ -389,7 +389,11 @@ const CreateContainerDialog: React.FC<CreateContainerDialogProps> = ({
  * Uses `useBuContext()` to obtain the selected container type config.
  * When no config is selected, renders a prompt to select a BU/config first.
  */
-export const ContainersPage: React.FC = () => {
+interface ContainersPageProps {
+  onOpenContainer?: (containerId: string, containerName?: string) => void;
+}
+
+export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
 
@@ -900,6 +904,7 @@ export const ContainersPage: React.FC = () => {
       <ContainerDetail
         containerId={detailContainerId}
         onClose={() => setDetailContainerId(null)}
+        onBrowseFiles={onOpenContainer}
       />
     </div>
   );
