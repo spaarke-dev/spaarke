@@ -48,8 +48,8 @@ const SESSION_STORAGE_PREFIX = 'sprkchat-session-';
 /**
  * Detected context describing the active Dataverse record.
  */
-/** Page type describing the Dataverse page where SprkChat is embedded. */
-export type PageType = 'form' | 'list' | 'dashboard' | 'workspace' | 'unknown';
+/** Page type describing the Dataverse page where SprkChat is embedded, using native Dataverse values. */
+export type PageType = 'entityrecord' | 'entitylist' | 'dashboard' | 'webresource' | 'custom' | 'unknown';
 
 export interface DetectedContext {
   /** Dataverse entity logical name (e.g., "sprk_matter"). Empty if unknown. */
@@ -58,7 +58,7 @@ export interface DetectedContext {
   entityId: string;
   /** Resolved playbook ID. Empty if no mapping and no URL param. */
   playbookId: string;
-  /** Detected page type (form, list, dashboard, workspace, or unknown). */
+  /** Detected page type using native Dataverse values (entityrecord, entitylist, dashboard, webresource, custom, or unknown). */
   pageType: PageType;
 }
 
@@ -345,18 +345,21 @@ export function detectPageType(): PageType {
     const pageContext = xrm?.Utility?.getPageContext?.();
     if (pageContext?.input?.pageType) {
       const pt = pageContext.input.pageType;
-      if (pt === 'entityrecord') return 'form';
-      if (pt === 'entitylist') return 'list';
+      // Return native Dataverse values directly
+      if (pt === 'entityrecord') return 'entityrecord';
+      if (pt === 'entitylist') return 'entitylist';
       if (pt === 'dashboard') return 'dashboard';
+      if (pt === 'webresource') return 'webresource';
+      if (pt === 'custom') return 'custom';
     }
 
     // 2. Workspace allowlist — check if current URL contains a known workspace web resource
     const url = window.location.href.toLowerCase();
-    if (WORKSPACE_ALLOWLIST.some((ws) => url.includes(ws))) return 'workspace';
+    if (WORKSPACE_ALLOWLIST.some((ws) => url.includes(ws))) return 'webresource';
 
     // 3. Fallback: URL pattern matching
-    if (url.includes('entityrecord')) return 'form';
-    if (url.includes('entitylist')) return 'list';
+    if (url.includes('entityrecord')) return 'entityrecord';
+    if (url.includes('entitylist')) return 'entitylist';
     if (url.includes('dashboard')) return 'dashboard';
 
     return 'unknown';

@@ -255,7 +255,7 @@ Phases 2,3,4 ──→ Phase 5 (Integration)
 
 - PAC CLI for seed data import
 - Dataverse dev environment access
-- Active `sprk_aiplaybook` record for seed data reference
+- Active `sprk_analysisplaybook` record for seed data reference
 
 ---
 

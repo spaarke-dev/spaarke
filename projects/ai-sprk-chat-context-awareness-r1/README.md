@@ -1,6 +1,6 @@
 # SprkChat Context Awareness R1
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Created**: 2026-03-15
 > **Branch**: `work/ai-sprk-chat-context-awareness-r1`
 > **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
@@ -33,16 +33,16 @@ SprkChat opens with a hardcoded `DEFAULT_PLAYBOOK_MAP` regardless of page contex
 
 ## Graduation Criteria
 
-- [ ] Admin creates mapping record → SprkChat picks up new playbook (no deploy)
-- [ ] SprkChat auto-selects correct playbook per entity/page context
-- [ ] `GET /api/ai/chat/context-mappings` ≤50ms p95 (Redis hit)
-- [ ] Pane opens ≤300ms p95
-- [ ] Generic chat mode when no mappings exist
-- [ ] Seed data importable via PAC CLI
-- [ ] AI response references entity name on matter form (Phase 3)
-- [ ] Entity name absent from structured Application Insights logs
-- [ ] Existing SSE streaming not regressed
-- [ ] Backward-compatible ChatHostContext deserialization
+- [x] Admin creates mapping record → SprkChat picks up new playbook (no deploy)
+- [x] SprkChat auto-selects correct playbook per entity/page context
+- [x] `GET /api/ai/chat/context-mappings` ≤50ms p95 (Redis hit)
+- [x] Pane opens ≤300ms p95
+- [x] Generic chat mode when no mappings exist
+- [x] Seed data importable via PAC CLI
+- [x] AI response references entity name on matter form (Phase 3)
+- [x] Entity name absent from structured Application Insights logs
+- [x] Existing SSE streaming not regressed
+- [x] Backward-compatible ChatHostContext deserialization
 
 ## Scope
 
@@ -54,7 +54,7 @@ SprkChat opens with a hardcoded `DEFAULT_PLAYBOOK_MAP` regardless of page contex
 
 ### Out of Scope
 - Slash command menu / quick-action bar (separate project)
-- Changes to `sprk_aiplaybook` table structure
+- Changes to `sprk_analysisplaybook` table structure
 - Multi-tenant mapping isolation
 - AI pipeline/middleware/tool registration changes
 
@@ -78,7 +78,7 @@ SprkChat opens with a hardcoded `DEFAULT_PLAYBOOK_MAP` regardless of page contex
 
 ## Dependencies
 
-- `sprk_aiplaybook` table with active playbook
+- `sprk_analysisplaybook` table with active playbook
 - SprkChatPane deployed and functional
 - BFF API MSAL ssoSilent authentication
 - Redis IDistributedCache registered

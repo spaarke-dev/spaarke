@@ -1,0 +1,44 @@
+{
+  "$schema": "seed-data",
+  "description": "Initial context mappings for SprkChat — maps entity/page combinations to playbooks",
+  "mappings": [
+    {
+      "name": "Matter Form → Document Profile",
+      "entityType": "sprk_matter",
+      "pageType": 100000000,
+      "playbookName": "Document Profile",
+      "sortOrder": 1,
+      "isDefault": true,
+      "isActive": true,
+      "description": "Auto-select Document Profile playbook when SprkChat opens on a matter form"
+    },
+    {
+      "name": "Matter List → Document Profile",
+      "entityType": "sprk_matter",
+      "pageType": 100000001,
+      "playbookName": "Document Profile",
+      "sortOrder": 1,
+      "isDefault": true,
+      "isActive": true,
+      "description": "Auto-select Document Profile playbook when SprkChat opens on matter list view"
+    },
+    {
+      "name": "Global Fallback → Document Profile",
+      "entityType": "*",
+      "pageType": 100000004,
+      "playbookName": "Document Profile",
+      "sortOrder": 100,
+      "isDefault": true,
+      "isActive": true,
+      "description": "Fallback: use Document Profile when no specific mapping exists"
+    }
+  ],
+  "pageTypeValues": {
+    "entityrecord": 100000000,
+    "entitylist": 100000001,
+    "dashboard": 100000002,
+    "webresource": 100000003,
+    "custom": 100000004,
+    "any": 100000005
+  }
+}

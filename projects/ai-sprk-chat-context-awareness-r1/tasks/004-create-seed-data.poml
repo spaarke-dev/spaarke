@@ -20,7 +20,7 @@
     <constraints>
       - MUST be compatible with PAC CLI `pac data import` command
       - MUST map: entityType="sprk_matter", pageType="form" → Document Assistant playbook
-      - MUST reference an existing sprk_aiplaybook record GUID
+      - MUST reference an existing sprk_analysisplaybook record GUID
       - File location: `data/chat-context-mappings.json`
     </constraints>
   </prompt>
@@ -32,7 +32,7 @@
   </knowledge>
 
   <steps>
-    <step>Look up existing sprk_aiplaybook GUIDs (Document Assistant playbook)</step>
+    <step>Look up existing sprk_analysisplaybook GUIDs (Document Assistant playbook)</step>
     <step>Create data/chat-context-mappings.json with PAC CLI import format</step>
     <step>Include mapping record: matter/form → Document Assistant</step>
     <step>Validate JSON structure</step>

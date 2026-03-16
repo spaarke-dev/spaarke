@@ -155,7 +155,7 @@ New Dataverse entity: `sprk_aichatcontextmap`
 | `sprk_name` | String | Display name (e.g., "Matter Form Assistant") |
 | `sprk_entitytype` | String | Dataverse entity logical name (`matter`, `project`, `invoice`, `account`, `contact`, or `*` wildcard). Must align with `ParentEntityContext.EntityTypes` values |
 | `sprk_pagetype` | Choice | Form (100000000), List (100000001), Dashboard (100000002), Workspace (100000003), Any (100000004) |
-| `sprk_playbookid` | Lookup → sprk_aiplaybook | The playbook to activate in this context |
+| `sprk_playbookid` | Lookup → sprk_analysisplaybook | The playbook to activate in this context |
 | `sprk_sortorder` | Integer | Priority (lower = higher priority, default 100) |
 | `sprk_isdefault` | Boolean | Whether this is the auto-selected playbook for the context (vs. available in picker) |
 | `sprk_description` | Multi-line Text | Admin-facing description of when this mapping applies |
@@ -392,7 +392,7 @@ The `ChatKnowledgeScope` record already carries `ParentEntityType` and `ParentEn
 
 ## Dependencies
 
-- `sprk_aiplaybook` table (playbooks must exist to be mapped)
+- `sprk_analysisplaybook` table (playbooks must exist to be mapped)
 - `ChatHostContext` record (extend with `PageType` — non-breaking, optional parameter)
 - `ChatPlaybookInfo` DTO (reuse for response — already exists in `ChatEndpoints.cs`)
 - `ChatEndpoints.cs` route group (add new endpoint to existing `/api/ai/chat` group)

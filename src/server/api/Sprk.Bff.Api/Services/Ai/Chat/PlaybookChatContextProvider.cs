@@ -36,10 +36,11 @@ public class PlaybookChatContextProvider : IChatContextProvider
     /// </summary>
     private static readonly Dictionary<string, string> PageTypeLabels = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["form"] = "main form view",
-        ["list"] = "list view",
+        ["entityrecord"] = "main form view",
+        ["entitylist"] = "list view",
         ["dashboard"] = "dashboard view",
-        ["workspace"] = "workspace view"
+        ["webresource"] = "workspace view",
+        ["custom"] = "custom page view"
     };
 
     private readonly IScopeResolverService _scopeResolver;

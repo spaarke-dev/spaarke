@@ -63,7 +63,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-123",
             EntityName: null,
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -150,7 +150,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-123",
             EntityName: "Acme v. Beta Corp",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -172,7 +172,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "project",
             EntityId: "entity-456",
             EntityName: "Project Alpha",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -197,10 +197,11 @@ public class PlaybookChatContextProviderEnrichmentTests
     // =========================================================================
 
     [Theory]
-    [InlineData("form", "main form view")]
-    [InlineData("list", "list view")]
+    [InlineData("entityrecord", "main form view")]
+    [InlineData("entitylist", "list view")]
     [InlineData("dashboard", "dashboard view")]
-    [InlineData("workspace", "workspace view")]
+    [InlineData("webresource", "workspace view")]
+    [InlineData("custom", "custom page view")]
     public async Task GetContextAsync_MapsPageTypeToHumanReadableLabel(string pageType, string expectedLabel)
     {
         // Arrange
@@ -233,7 +234,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-123",
             EntityName: "Acme Corporation v. Beta Industries LLC",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -282,7 +283,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-123",
             EntityName: "Test Budget Exceeded",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -330,7 +331,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-123",
             EntityName: "Acme v. Beta Corp",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 
@@ -377,7 +378,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             EntityType: "matter",
             EntityId: "entity-789",
             EntityName: "Smith v. Jones",
-            PageType: "form");
+            PageType: "entityrecord");
 
         var sut = CreateProvider();
 

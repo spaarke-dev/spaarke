@@ -20,7 +20,7 @@ All 4 design phases are in scope for this release.
 
 **Phase 1 — Data-Driven Mapping (MVP)**
 - Create `sprk_aichatcontextmap` Dataverse table (net-new entity, core deliverable)
-- Add to existing Dataverse solution (same solution that contains `sprk_aiplaybook`)
+- Add to existing Dataverse solution (same solution that contains `sprk_analysisplaybook`)
 - `ChatContextMappingService` — new BFF service with Redis caching (30-min TTL)
 - `GET /api/ai/chat/context-mappings` — new BFF endpoint
 - Add `PageType` to `ChatHostContext` C# record (non-breaking — optional, default null)
@@ -48,7 +48,7 @@ All 4 design phases are in scope for this release.
 ### Out of Scope
 
 - Slash command menu / quick-action bar (separate project: `ai-sprk-chat-extensibility-r1`)
-- Changes to `sprk_aiplaybook` table structure
+- Changes to `sprk_analysisplaybook` table structure
 - Multi-tenant mapping isolation (see Owner Clarifications Q2 — mappings are global config)
 - Custom command definitions (Phase 4 of extensibility project)
 - Changing the AI agent pipeline, middleware, or tool registration
@@ -74,7 +74,7 @@ All 4 design phases are in scope for this release.
 ### Functional Requirements
 
 **FR-01 — Net-New Dataverse Table**
-- Create `sprk_aichatcontextmap` with fields: `sprk_name`, `sprk_entitytype`, `sprk_pagetype` (choice), `sprk_playbookid` (lookup → `sprk_aiplaybook`), `sprk_sortorder`, `sprk_isdefault`, `sprk_description`, `sprk_isactive`
+- Create `sprk_aichatcontextmap` with fields: `sprk_name`, `sprk_entitytype`, `sprk_pagetype` (choice), `sprk_playbookid` (lookup → `sprk_analysisplaybook`), `sprk_sortorder`, `sprk_isdefault`, `sprk_description`, `sprk_isactive`
 - Acceptance: Table exists in solution, records can be created via Dataverse API
 
 **FR-02 — Context-Mapping Resolution Endpoint**
@@ -230,7 +230,7 @@ All 4 design phases are in scope for this release.
 ## Dependencies
 
 ### Prerequisites (Must Exist Before Implementation)
-- `sprk_aiplaybook` table with at least one active playbook (seed playbook must exist for import)
+- `sprk_analysisplaybook` table with at least one active playbook (seed playbook must exist for import)
 - `sprk_aichatsummary` Dataverse table ✅ (created 2026-03-14)
 - `sprk_aichatmessage` Dataverse table ✅ (created 2026-03-14)
 - SprkChatPane deployed and functional ✅
@@ -241,7 +241,7 @@ All 4 design phases are in scope for this release.
 
 ### External Dependencies
 - PAC CLI available in deployment pipeline for seed data import
-- Dataverse solution package authoring for `sprk_aichatcontextmap` (same solution as `sprk_aiplaybook`, `sprk_aichatsummary`, `sprk_aichatmessage`)
+- Dataverse solution package authoring for `sprk_aichatcontextmap` (same solution as `sprk_analysisplaybook`, `sprk_aichatsummary`, `sprk_aichatmessage`)
 
 ---
 

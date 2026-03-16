@@ -13,7 +13,7 @@
 | 001 | Add PageType to ChatHostContext record | 1A | backend | FULL | A | — | ✅ |
 | 002 | Make ChatSession.PlaybookId nullable | 1A | backend | FULL | A | — | ✅ |
 | 003 | Create sprk_aichatcontextmap entity | 1B | dataverse | FULL | A | — | ✅ |
-| 004 | Create seed data JSON for PAC CLI | 1B | dataverse | STD | A | 003 | 🔲 |
+| 004 | Create seed data JSON for PAC CLI | 1B | dataverse | STD | A | 003 | ✅ |
 | 010 | Create ChatContextMappingService | 1A | backend | FULL | B | 001,003 | ✅ |
 | 011 | Create GET /context-mappings endpoint | 1A | backend | FULL | B | 001,010 | ✅ |
 | 012 | Add pageType to IHostContext + detectPageType() | 1C | client | FULL | B | — | ✅ |
@@ -22,23 +22,23 @@
 | 015 | Replace DEFAULT_PLAYBOOK_MAP with API call | 1C | client | FULL | C | 011,012 | ✅ |
 | 016 | Implement no-mapping fallback UI | 1C | client | FULL | C | 012 | ✅ |
 | 017 | Phase 1 integration wiring + smoke test | 1-int | integration | STD | D | all P1 | ✅ |
-| 018 | Deploy Phase 1 to dev | 1-dpl | deploy | STD | D | 017 | 🔲 |
+| 018 | Deploy Phase 1 to dev | 1-dpl | deploy | STD | D | 017 | ✅ |
 | 020 | Wire SprkChatContextSelector to availablePlaybooks | 2 | client | FULL | E | 017 | ✅ |
 | 021 | Implement playbook switching | 2 | client | FULL | E | 017 | ✅ |
 | 022 | Client sessionStorage caching | 2 | client | STD | E | 015 | ✅ |
-| 023 | Phase 2 tests | 2 | client | STD | H | 020-022 | 🔲 |
+| 023 | Phase 2 tests | 2 | client | STD | H | 020-022 | ✅ |
 | 030 | Enrichment unit tests (tests-first) | 3 | backend | STD | F | 017 | ✅ |
 | 031 | Implement system prompt enrichment | 3 | backend | FULL | H | 030 | ✅ |
 | 032 | Audit telemetry for EntityName exclusion | 3 | backend | STD | F | 017 | ✅ |
-| 033 | Enrichment integration test | 3 | backend | STD | I | 031 | 🔲 |
-| 040 | Create admin form for sprk_aichatcontextmap | 4 | dataverse | STD | G | 003 | 🔲 |
+| 033 | Enrichment integration test | 3 | backend | STD | I | 031 | ✅ |
+| 040 | Create admin form for sprk_aichatcontextmap | 4 | dataverse | STD | G | 003 | ✅ |
 | 041 | Cache eviction endpoint | 4 | backend | FULL | G | 010 | ✅ |
-| 042 | Wire "Refresh Mappings" button | 4 | dataverse | FULL | H | 040,041 | 🔲 |
-| 043 | Admin workflow tests | 4 | dataverse | STD | I | 042 | 🔲 |
-| 050 | Full end-to-end integration test | 5 | integration | FULL | J | 023,033,043 | 🔲 |
-| 051 | Performance validation | 5 | integration | STD | J | 050 | 🔲 |
-| 052 | Deploy all phases to dev | 5 | deploy | STD | J | 050 | 🔲 |
-| 090 | Project wrap-up | 5 | wrap-up | MIN | J | 052 | 🔲 |
+| 042 | Wire "Refresh Mappings" button | 4 | dataverse | FULL | H | 040,041 | ✅ |
+| 043 | Admin workflow tests | 4 | dataverse | STD | I | 042 | ✅ |
+| 050 | Full end-to-end integration test | 5 | integration | FULL | J | 023,033,043 | ✅ |
+| 051 | Performance validation | 5 | integration | STD | J | 050 | ✅ |
+| 052 | Deploy all phases to dev | 5 | deploy | STD | J | 050 | ✅ |
+| 090 | Project wrap-up | 5 | wrap-up | MIN | J | 052 | ✅ |
 
 ---
 

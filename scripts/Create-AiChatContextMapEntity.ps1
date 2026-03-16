@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Creates the sprk_aichatcontextmap entity, its local option set (sprk_pagetype),
-    all attributes, and the lookup relationship to sprk_aiplaybook using the
+    all attributes, and the lookup relationship to sprk_analysisplaybook using the
     Dataverse Metadata Web API. Requires Azure CLI authentication.
 
 .PARAMETER EnvironmentUrl
@@ -199,15 +199,15 @@ function Main {
 
     # --- Step 2: Verify lookup target exists ---
     Write-Host ""
-    Write-Host "Step 2: Verifying lookup target sprk_aiplaybook exists..." -ForegroundColor Cyan
-    if (-not (Test-EntityExists -Token $token -BaseUrl $EnvironmentUrl -LogicalName "sprk_aiplaybook")) {
-        Write-Host "  WARNING: sprk_aiplaybook entity does not exist!" -ForegroundColor Red
-        Write-Host "  The lookup relationship will fail. Create sprk_aiplaybook first." -ForegroundColor Red
+    Write-Host "Step 2: Verifying lookup target sprk_analysisplaybook exists..." -ForegroundColor Cyan
+    if (-not (Test-EntityExists -Token $token -BaseUrl $EnvironmentUrl -LogicalName "sprk_analysisplaybook")) {
+        Write-Host "  WARNING: sprk_analysisplaybook entity does not exist!" -ForegroundColor Red
+        Write-Host "  The lookup relationship will fail. Create sprk_analysisplaybook first." -ForegroundColor Red
         Write-Host "  Continuing with entity and non-lookup attributes..." -ForegroundColor Yellow
         $skipLookup = $true
     }
     else {
-        Write-Host "  sprk_aiplaybook exists." -ForegroundColor Green
+        Write-Host "  sprk_analysisplaybook exists." -ForegroundColor Green
         $skipLookup = $false
     }
 
@@ -272,11 +272,12 @@ function Main {
             "IsGlobal"      = $false
             "OptionSetType" = "Picklist"
             "Options"       = @(
-                @{ "Value" = 100000000; "Label" = New-Label -Text "Form" }
-                @{ "Value" = 100000001; "Label" = New-Label -Text "List" }
-                @{ "Value" = 100000002; "Label" = New-Label -Text "Dashboard" }
-                @{ "Value" = 100000003; "Label" = New-Label -Text "Workspace" }
-                @{ "Value" = 100000004; "Label" = New-Label -Text "Any" }
+                @{ "Value" = 100000000; "Label" = New-Label -Text "entityrecord" }
+                @{ "Value" = 100000001; "Label" = New-Label -Text "entitylist" }
+                @{ "Value" = 100000002; "Label" = New-Label -Text "dashboard" }
+                @{ "Value" = 100000003; "Label" = New-Label -Text "webresource" }
+                @{ "Value" = 100000004; "Label" = New-Label -Text "custom" }
+                @{ "Value" = 100000005; "Label" = New-Label -Text "any" }
             )
         }
     }
@@ -328,13 +329,13 @@ function Main {
         }
     }
 
-    # --- Step 5: Create lookup relationship to sprk_aiplaybook ---
+    # --- Step 5: Create lookup relationship to sprk_analysisplaybook ---
     Write-Host ""
-    Write-Host "Step 5: Creating lookup relationship to sprk_aiplaybook..." -ForegroundColor Cyan
+    Write-Host "Step 5: Creating lookup relationship to sprk_analysisplaybook..." -ForegroundColor Cyan
 
     if ($skipLookup) {
-        Write-Host "  SKIPPED: sprk_aiplaybook does not exist yet." -ForegroundColor Yellow
-        Write-Host "  Re-run this script after creating sprk_aiplaybook to add the lookup." -ForegroundColor Yellow
+        Write-Host "  SKIPPED: sprk_analysisplaybook does not exist yet." -ForegroundColor Yellow
+        Write-Host "  Re-run this script after creating sprk_analysisplaybook to add the lookup." -ForegroundColor Yellow
     }
     else {
         # Check if lookup attribute already exists
@@ -345,8 +346,8 @@ function Main {
         else {
             $relationshipDef = @{
                 "@odata.type"          = "Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata"
-                "SchemaName"           = "sprk_aiplaybook_aichatcontextmap_playbookid"
-                "ReferencedEntity"     = "sprk_aiplaybook"
+                "SchemaName"           = "sprk_analysisplaybook_chatcontextmap_playbookid"
+                "ReferencedEntity"     = "sprk_analysisplaybook"
                 "ReferencingEntity"    = "sprk_aichatcontextmap"
                 "CascadeConfiguration" = @{
                     "Assign"   = "NoCascade"
@@ -443,8 +444,8 @@ function Main {
     Write-Host "Fields created:" -ForegroundColor White
     Write-Host "  - sprk_name          (string, primary name, required)" -ForegroundColor Gray
     Write-Host "  - sprk_entitytype    (string, required)" -ForegroundColor Gray
-    Write-Host "  - sprk_pagetype      (choice: form/list/dashboard/workspace/any)" -ForegroundColor Gray
-    Write-Host "  - sprk_playbookid    (lookup -> sprk_aiplaybook, required)" -ForegroundColor Gray
+    Write-Host "  - sprk_pagetype      (choice: entityrecord/entitylist/dashboard/webresource/custom/any)" -ForegroundColor Gray
+    Write-Host "  - sprk_playbookid    (lookup -> sprk_analysisplaybook, required)" -ForegroundColor Gray
     Write-Host "  - sprk_sortorder     (integer, 0-10000)" -ForegroundColor Gray
     Write-Host "  - sprk_isdefault     (boolean)" -ForegroundColor Gray
     Write-Host "  - sprk_description   (multiline text)" -ForegroundColor Gray
@@ -453,8 +454,8 @@ function Main {
 
     if ($skipLookup) {
         Write-Host "ACTION REQUIRED:" -ForegroundColor Red
-        Write-Host "  Lookup sprk_playbookid was SKIPPED because sprk_aiplaybook does not exist." -ForegroundColor Yellow
-        Write-Host "  After creating sprk_aiplaybook, re-run this script to add the lookup." -ForegroundColor Yellow
+        Write-Host "  Lookup sprk_playbookid was SKIPPED because sprk_analysisplaybook does not exist." -ForegroundColor Yellow
+        Write-Host "  After creating sprk_analysisplaybook, re-run this script to add the lookup." -ForegroundColor Yellow
         Write-Host ""
     }
 

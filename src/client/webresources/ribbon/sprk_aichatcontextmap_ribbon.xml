@@ -1,0 +1,90 @@
+<!--
+  AI Chat Context Map Ribbon Customization
+
+  Adds "Refresh Cache" button to:
+  1. Form Command Bar - sprk_aichatcontextmap main form
+  2. List View (HomepageGrid) - sprk_aichatcontextmap list view
+
+  Web Resource: sprk_aichatcontextmap_ribbon.js
+  Endpoint: DELETE /api/ai/chat/context-mappings/cache
+
+  Version: 1.0.0
+-->
+<RibbonDiffXml>
+  <CustomActions>
+
+    <!-- ================================================================== -->
+    <!-- 1. FORM COMMAND BAR: "Refresh Cache" Button                        -->
+    <!-- ================================================================== -->
+    <CustomAction Id="Spaarke.ChatContextMap.RefreshCache.Form.CustomAction"
+                  Location="Mscrm.Form.sprk_aichatcontextmap.MainTab.Actions.Controls._children"
+                  Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.ChatContextMap.RefreshCache.Form.Button"
+                Command="Spaarke.ChatContextMap.RefreshCache.Command"
+                LabelText="Refresh Cache"
+                Alt="Refresh Context Mapping Cache"
+                ToolTipTitle="Refresh Cache"
+                ToolTipDescription="Evict all cached context mappings from Redis. New mappings will be loaded from Dataverse on the next request."
+                TemplateAlias="o1"
+                Image16by16="/_imgs/ribbon/Refresh_16.png"
+                Image32by32="/_imgs/ribbon/Refresh_32.png"
+                ModernImage="Refresh" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- ================================================================== -->
+    <!-- 2. LIST VIEW: "Refresh Cache" Button                               -->
+    <!-- ================================================================== -->
+    <CustomAction Id="Spaarke.ChatContextMap.RefreshCache.Grid.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_aichatcontextmap.MainTab.Actions.Controls._children"
+                  Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.ChatContextMap.RefreshCache.Grid.Button"
+                Command="Spaarke.ChatContextMap.RefreshCache.Command"
+                LabelText="Refresh Cache"
+                Alt="Refresh Context Mapping Cache"
+                ToolTipTitle="Refresh Cache"
+                ToolTipDescription="Evict all cached context mappings from Redis. New mappings will be loaded from Dataverse on the next request."
+                TemplateAlias="o1"
+                Image16by16="/_imgs/ribbon/Refresh_16.png"
+                Image32by32="/_imgs/ribbon/Refresh_32.png"
+                ModernImage="Refresh" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+  </CustomActions>
+
+  <CommandDefinitions>
+
+    <!-- ================================================================== -->
+    <!-- Command: Refresh Cache (shared by form and grid buttons)           -->
+    <!-- ================================================================== -->
+    <CommandDefinition Id="Spaarke.ChatContextMap.RefreshCache.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.ChatContextMap.RefreshCache.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_aichatcontextmap_ribbon.js"
+                           FunctionName="refreshMappings">
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <EnableRules>
+
+      <!-- Enable Rule: Always enabled -->
+      <EnableRule Id="Spaarke.ChatContextMap.RefreshCache.EnableRule">
+        <CustomRule Library="$webresource:sprk_aichatcontextmap_ribbon.js"
+                   FunctionName="Spaarke_EnableRefreshMappings"
+                   Default="true">
+        </CustomRule>
+      </EnableRule>
+
+    </EnableRules>
+  </RuleDefinitions>
+</RibbonDiffXml>
