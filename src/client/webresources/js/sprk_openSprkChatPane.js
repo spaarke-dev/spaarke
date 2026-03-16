@@ -36,7 +36,7 @@ Spaarke.SprkChat = Spaarke.SprkChat || {};
     // ========================================================================
 
     /** Deterministic pane ID for singleton behavior */
-    var PANE_ID = "sprk-chat-pane";
+    var PANE_ID = "sprk-chat";
 
     /** Title displayed in the side pane header */
     var PANE_TITLE = "SprkChat";

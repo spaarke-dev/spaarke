@@ -20,6 +20,7 @@
     "@lexical/react": "^0.41.0",
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
+    "d3-force": "^3.0.0",
     "diff": "^8.0.3",
     "lexical": "^0.41.0",
     "react": "^19.0.0",

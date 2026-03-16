@@ -4,6 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SprkChat Pane</title>
+  <!-- Inject SidePaneManager into parent Dataverse shell (registers SprkChat pane) -->
+  <script>
+  (function() {
+      try {
+          var parentDoc = window.parent && window.parent !== window && window.parent.document;
+          if (!parentDoc) return;
+          if (parentDoc.querySelector('script[data-sprk-sidepane]')) return;
+          var s = parentDoc.createElement('script');
+          s.src = '/WebResources/sprk_SidePaneManager';
+          s.setAttribute('data-sprk-sidepane', 'true');
+          parentDoc.head.appendChild(s);
+      } catch (e) {
+          console.warn('[SidePane] Could not inject into parent frame:', e);
+      }
+  })();
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     /* 100vh fills the iframe viewport in Dataverse; 100% alone does not */

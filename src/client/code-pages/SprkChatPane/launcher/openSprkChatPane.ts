@@ -85,7 +85,7 @@ interface AppSidePanes {
 // ============================================================================
 
 /** Deterministic pane ID for singleton behavior */
-const SPRK_CHAT_PANE_ID = 'sprk-chat-pane';
+const SPRK_CHAT_PANE_ID = 'sprk-chat';
 
 /** Title displayed in the side pane header */
 const SPRK_CHAT_PANE_TITLE = 'SprkChat';
