@@ -43,6 +43,7 @@ import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import { navigateToEntity } from '../../utils/navigation';
 import type { IWebApi } from '../../types/xrm';
+import { provisionSecureProject } from './provisioningService';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -94,7 +95,9 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
       entityLabel: 'project',
       filesStepSubtitle:
         'Upload documents to associate with this project. The AI will extract key information to assist with project setup.',
-      finishingLabel: 'Creating project\u2026',
+      finishingLabel: formValues.isSecure
+        ? 'Creating project and provisioning secure infrastructure\u2026'
+        : 'Creating project\u2026',
 
       infoStep: {
         id: 'create-record',
@@ -162,6 +165,24 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
         const projectId = result.projectId!;
         const projectName = result.projectName!;
 
+        // 1b. Provision Secure Project infrastructure (BU, SPE container, Account)
+        //     when the Secure Project toggle is enabled.
+        let provisioningWarning: string | undefined;
+        if (mergedFormValues.isSecure) {
+          const provisionResult = await provisionSecureProject({
+            projectId,
+            // Use project name as the ProjectRef when no dedicated ref field is available.
+            // The BU will be named "SP-{projectName}" on the backend.
+            projectRef: projectName,
+          });
+
+          if (!provisionResult.success) {
+            // Non-fatal — project record was created. Log the warning so it shows
+            // on the success screen. The admin can provision manually or retry.
+            provisioningWarning = provisionResult.errorMessage;
+          }
+        }
+
         // 2. Upload files to SPE + create document records
         if (context.uploadedFiles.length > 0 && context.speContainerId) {
           try {
@@ -214,6 +235,15 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
 
+        // Include provisioning failure in warnings if present
+        if (provisioningWarning) {
+          warnings.push(
+            `Secure Project provisioning failed: ${provisioningWarning} — ` +
+            'The project record was created but the Business Unit, SPE container, and External Access Account ' +
+            'may need to be provisioned manually.'
+          );
+        }
+
         const hasWarnings = warnings.length > 0;
 
         const viewProject = () => {
@@ -232,7 +262,11 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
               style={{ color: tokens.colorPaletteGreenForeground1 }}
             />
           ),
-          title: hasWarnings ? 'Project created with warnings' : 'Project created!',
+          title: hasWarnings
+            ? 'Project created with warnings'
+            : mergedFormValues.isSecure
+            ? 'Secure Project created!'
+            : 'Project created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
               <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
@@ -241,6 +275,8 @@ const ProjectWizardDialog: React.FC<IProjectWizardDialogProps> = ({ open, onClos
               has been created
               {hasWarnings
                 ? ', though some operations could not complete. See details below.'
+                : mergedFormValues.isSecure
+                ? ' with its Business Unit, document container, and external access account provisioned.'
                 : ' and is ready to use.'}
             </Text>
           ),

@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure Entra External ID Identity Provider</title>
     <phase>3: Power Pages Configuration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>019</dependencies>
     <blocks>021</blocks>

@@ -1,0 +1,5 @@
+{
+  "siteName": "Spaarke External Portal",
+  "defaultLandingPage": "index.html",
+  "compiledPath": "./dist"
+}

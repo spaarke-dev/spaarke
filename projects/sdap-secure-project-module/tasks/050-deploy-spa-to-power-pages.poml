@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy SPA to Power Pages via PAC CLI</title>
     <phase>5: Power Pages Code Page SPA — Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>049</dependencies>
     <blocks>060</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Build Invite External User Dialog</title>
     <phase>5: Power Pages Code Page SPA — Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>041</dependencies>
     <blocks>049</blocks>

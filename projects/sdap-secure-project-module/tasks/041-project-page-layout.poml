@@ -3,7 +3,7 @@
   <metadata>
     <title>Build Project Page Layout</title>
     <phase>5: Power Pages Code Page SPA — Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>033, 034, 035</dependencies>
     <blocks>042, 043, 044, 045</blocks>

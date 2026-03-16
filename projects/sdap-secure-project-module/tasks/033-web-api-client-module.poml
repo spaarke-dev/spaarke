@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Power Pages Web API Client Module</title>
     <phase>4: Power Pages Code Page SPA — Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>031, 032</dependencies>
     <blocks>040</blocks>

@@ -1,8 +1,9 @@
 # Secure Project & External Access Platform
 
-> **Status**: Planning
+> **Status**: Complete
 > **Branch**: `feature/sdap-secure-project-module`
 > **Created**: 2026-03-16
+> **Completed**: 2026-03-16
 > **Predecessor**: N/A (greenfield)
 
 ## Quick Links
@@ -58,15 +59,59 @@ Build a Secure Project module on Power Pages with a React 18 Code Page SPA, leve
 
 ## Graduation Criteria
 
-1. [ ] Core User creates Secure Project; BU, SPE container, and External Access Account provisioned automatically
-2. [ ] Core User invites external Contact; invitation email sent via `sprk_communication`; Contact redeems invitation and authenticates via Entra External ID
-3. [ ] External workspace SPA loads within 3 seconds; shows only accessible projects
-4. [ ] Project page displays documents, events, tasks, contacts — all scoped to access level
-5. [ ] Document upload/download respects access level (View Only: no download/upload)
-6. [ ] AI toolbar buttons invoke playbooks; results displayed as structured output; no playbook internals visible
-7. [ ] Semantic search returns only accessible project documents (AI Search `project_ids` filter)
-8. [ ] Access revocation cascades across all three UAC planes
-9. [ ] Project closure deactivates all participation records and removes SPE access
-10. [ ] Full audit trail queryable (who granted, when, to whom, what level)
-11. [ ] SPA meets Fluent UI v9 standards: dark mode, high-contrast, WCAG 2.1 AA
-12. [ ] All unit tests pass; integration tests cover grant/revoke/search flows
+1. [x] Core User creates Secure Project; BU, SPE container, and External Access Account provisioned automatically
+2. [x] Core User invites external Contact; invitation email sent via `sprk_communication`; Contact redeems invitation and authenticates via Entra External ID
+3. [x] External workspace SPA loads within 3 seconds; shows only accessible projects
+4. [x] Project page displays documents, events, tasks, contacts — all scoped to access level
+5. [x] Document upload/download respects access level (View Only: no download/upload)
+6. [x] AI toolbar buttons invoke playbooks; results displayed as structured output; no playbook internals visible
+7. [x] Semantic search returns only accessible project documents (AI Search `project_ids` filter)
+8. [x] Access revocation cascades across all three UAC planes
+9. [x] Project closure deactivates all participation records and removes SPE access
+10. [x] Full audit trail queryable (who granted, when, to whom, what level)
+11. [x] SPA meets Fluent UI v9 standards: dark mode, high-contrast, WCAG 2.1 AA
+12. [x] All unit tests pass; integration tests cover grant/revoke/search flows
+
+---
+
+## Completion Summary
+
+**Project completed**: 2026-03-16
+
+### What Was Built
+
+| Component | Description |
+|-----------|-------------|
+| `sprk_externalrecordaccess` table | Participation junction table — single record per external user per project, with access level, expiry, granted-by, and statecode |
+| `sprk_project` extensions | Added `sprk_issecure`, `sprk_securitybuid`, `sprk_externalaccountid` fields; views and subgrid for participant management |
+| BFF API — External Access module | 7 new endpoints: grant, revoke, invite, SPE container membership, external user context, project closure, and the ExternalCallerAuthorizationFilter |
+| Power Pages configuration | Entra External ID IDP, web roles, full table permission parent-chain, Web API site settings, CSP/CORS, OAuth implicit grant |
+| Power Pages Code Page SPA | React 18 + Vite + Fluent v9 SPA: workspace home, project page, document library, events, tasks, contacts, AI toolbar, semantic search, invite dialog |
+| Create Project Wizard extension | Secure Project toggle step with BU + SPE container + External Access Account provisioning |
+| CloseProjectDialog | Internal UI for project closure with cascading revocation across all three UAC planes |
+| Unit tests | BFF authorization filters, grant/revoke logic, SPE membership service, invitation service |
+| Integration tests | Grant/revoke/search flows, E2E: creation, invitation, access levels, revocation, closure |
+| Deployment guides | Consolidated runbook (52-item checklist) covering all 7 phases |
+
+### Key Architectural Decisions
+
+| Decision | Outcome |
+|----------|---------|
+| Single participation table (`sprk_externalrecordaccess`) | Drives all three UAC planes from one record; future-proof for matters, e-billing |
+| Power Pages built-in tables (no replication) | Leveraged `mspp_webrole`, `mspp_entitypermission`, `adx_invitation` natively |
+| Invitation-only access (no self-service registration) | Security posture: owner controls who gets access |
+| View Only cannot download or trigger AI | IP protection enforced at BFF API and SPA access level gate |
+| No two-step approval flow | Owner confirmed: single-step grant, immediate provisioning |
+| Email via existing `sprk_communication` | No new email infrastructure |
+
+### Deferred to Post-MVP
+
+- SprkChat for external users
+- External user invitation step in Create Project Wizard (task 062b — deferred by owner)
+- Teams notifications
+- Mobile-specific UI
+- Matters, e-billing, ad-hoc sharing (UAC model supports these — future phases)
+
+### Deployment Status
+
+All components deployed to dev environment (`https://spaarkedev1.crm.dynamics.com`). See [phase7-task075-final-deployment-validation.md](notes/phase7-task075-final-deployment-validation.md) for the complete deployment runbook and smoke test checklist.

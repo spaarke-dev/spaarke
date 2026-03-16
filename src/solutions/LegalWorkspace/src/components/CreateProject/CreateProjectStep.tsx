@@ -46,6 +46,7 @@ import {
 import { ProjectService } from './projectService';
 import { LookupField } from '../CreateMatter/LookupField';
 import { AiFieldTag } from '../CreateMatter/AiFieldTag';
+import { SecureProjectSection } from './SecureProjectSection';
 import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
@@ -355,6 +356,13 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
     []
   );
 
+  const handleSecureChange = React.useCallback(
+    (value: boolean) => {
+      setFormState((prev) => ({ ...prev, isSecure: value }));
+    },
+    []
+  );
+
   // ── Derived ───────────────────────────────────────────────────────────
   const isLoading = aiState.status === 'loading';
   const hasAnyPrefill = aiState.prefilledFields.size > 0;
@@ -480,6 +488,14 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
             />
           </Field>
         </div>
+      )}
+
+      {/* ── Secure Project toggle ── */}
+      {!isLoading && (
+        <SecureProjectSection
+          isSecure={formState.isSecure}
+          onSecureChange={handleSecureChange}
+        />
       )}
     </div>
   );

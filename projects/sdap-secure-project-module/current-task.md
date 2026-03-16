@@ -10,55 +10,33 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Execute task 001 |
+| **Task** | PROJECT COMPLETE |
+| **Step** | N/A |
+| **Status** | All tasks completed |
+| **Next Action** | Project wrap-up complete. Merge branch `feature/sdap-secure-project-module` to master. |
 
-### Files Modified This Session
-- None yet
+### Project Status
+All 41 tasks complete (task 062b deferred/skipped by owner decision). Task 090 (Project Wrap-Up) completed 2026-03-16.
 
-### Critical Context
-Project initialized. Ready for task execution.
-
----
-
-## Active Task (Full Details)
-
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+### Files Modified (Task 090)
+- `projects/sdap-secure-project-module/README.md` (status → Complete, graduation criteria checked, completion summary added)
+- `projects/sdap-secure-project-module/plan.md` (version → 1.1, phase completion record added)
+- `projects/sdap-secure-project-module/notes/lessons-learned.md` (created — final retrospective)
+- `projects/sdap-secure-project-module/tasks/TASK-INDEX.md` (004 → ✅, 062b → ⏭️, 090 → ✅, project complete note added)
+- `projects/sdap-secure-project-module/tasks/090-project-wrap-up.poml` (status → completed)
+- `projects/sdap-secure-project-module/current-task.md` (this file — project complete)
 
 ---
 
-## Progress
+## Active Task
 
-### Completed Steps
-*No steps completed yet*
-
-### Current Step
-*No active step*
-
-### Files Modified (All Task)
-*No files modified yet*
-
-### Decisions Made
-*No decisions recorded yet*
+**None — Project Complete**
 
 ---
 
 ## Next Action
 
-**Next Step**: Execute task 001
-
-**Pre-conditions**:
-- Project initialized with all artifacts
-- Feature branch created
+Run `/merge-to-master` (or `push-to-github`) to merge branch `feature/sdap-secure-project-module` into master.
 
 ---
 
@@ -68,58 +46,13 @@ Project initialized. Ready for task execution.
 
 ---
 
-## Session Notes
-
-### Current Session
-- Started: 2026-03-16
-- Focus: Project initialization
-
-### Key Learnings
-*None yet*
-
-### Handoff Notes
-*No handoff notes*
-
----
-
 ## Quick Reference
 
 ### Project Context
 - **Project**: sdap-secure-project-module
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-001: Minimal API - all new BFF endpoints
-- ADR-007: SpeFileStore facade - SPE operations
-- ADR-008: Endpoint filters - external authorization
-- ADR-009: Redis-first caching - access data
-- ADR-021: Fluent UI v9 - SPA UI
-- ADR-022: PCF platform libs - Code Page: React 18 bundled
-
-### Knowledge Files Loaded
-- `docs/architecture/uac-access-control.md` - UAC three-plane model
-- `docs/architecture/power-pages-spa-guide.md` - Power Pages SPA guide
-- `docs/architecture/power-pages-access-control.md` - Access control config
-
----
-
-## Recovery Instructions
-
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` - Full project context reload + master sync
-- `/context-handoff` - Save current state before compaction
-- "where was I?" - Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+- **Lessons Learned**: [`notes/lessons-learned.md`](./notes/lessons-learned.md)
 
 ---
 

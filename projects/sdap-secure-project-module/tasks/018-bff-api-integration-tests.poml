@@ -3,7 +3,7 @@
   <metadata>
     <title>Integration Tests for External Access Flows</title>
     <phase>2: BFF API — External Access Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>017</dependencies>
     <blocks>none</blocks>

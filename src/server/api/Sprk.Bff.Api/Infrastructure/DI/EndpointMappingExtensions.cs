@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Office;
@@ -158,6 +159,11 @@ public static class EndpointMappingExtensions
         // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
         // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
         app.MapContainerItemEndpoints();
+
+        // External access endpoints:
+        //   /api/v1/external/*        — Power Pages portal users (portal JWT auth)
+        //   /api/v1/external-access/* — Internal management (Azure AD auth)
+        app.MapExternalAccessEndpoints();
     }
 
     private static void MapSpaFallback(WebApplication app)

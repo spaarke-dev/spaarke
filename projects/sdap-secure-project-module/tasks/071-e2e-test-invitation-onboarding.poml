@@ -3,7 +3,7 @@
   <metadata>
     <title>E2E Test — External User Invitation &amp; Onboarding</title>
     <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>062</dependencies>
     <blocks>075</blocks>
@@ -46,4 +46,26 @@
     <criterion>Web role assigned after redemption</criterion>
     <criterion>SPA access granted with correct project visibility</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-03-16. Created comprehensive Playwright E2E test file:
+    tests/e2e/specs/secure-project/invitation-onboarding.spec.ts
+
+    Three test suites implemented:
+    1. "BFF API layer" — direct HTTP tests for POST /api/v1/external-access/invite,
+       verifying adx_invitation record creation, web role association (N:N),
+       and sprk_communication email record. Covers Steps 2-4 of the task flow.
+
+    2. "InviteUserDialog UI" — full Playwright UI tests for the SPA InviteUserDialog
+       component using Playwright route mocking. Covers happy path, validation errors,
+       error handling (retry from error view, cancel), and access control
+       (ViewOnly users cannot see invite button). Covers Steps 1 and 7.
+
+    3. "post-redemption Dataverse verification" — tests verifying Dataverse state
+       after a real user redeems an invitation: Entra External ID identity link,
+       web role assignment to Contact, and /external/me endpoint response.
+       Covers Steps 5 and 6. Requires REDEEMED_CONTACT_ID env var.
+
+    Environment variables documented in tests/e2e/config/.env.example.
+    Live environment required for BFF API layer suite; mocked for UI suite.
+  </notes>
 </task>

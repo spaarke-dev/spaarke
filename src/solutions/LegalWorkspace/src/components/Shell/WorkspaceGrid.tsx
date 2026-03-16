@@ -76,6 +76,10 @@ const LazyWorkAssignmentWizardDialog = React.lazy(
   () => import("../CreateWorkAssignment/WorkAssignmentWizardDialog")
 );
 
+const LazyCloseProjectDialog = React.lazy(
+  () => import("../CreateProject/CloseProjectDialog")
+);
+
 // ---------------------------------------------------------------------------
 // Suspense fallback: Fluent Spinner shown while lazy chunk loads
 // ---------------------------------------------------------------------------
@@ -351,6 +355,39 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCloseWorkAssignmentWizard = React.useCallback(() => {
     setIsWorkAssignmentWizardOpen(false);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Close Project dialog state
+  // -------------------------------------------------------------------------
+
+  const [closeProjectContext, setCloseProjectContext] = React.useState<{
+    projectId: string;
+    projectName: string;
+    containerId?: string;
+  } | null>(null);
+
+  const handleOpenCloseProjectDialog = React.useCallback(
+    (projectId: string, projectName: string, containerId?: string) => {
+      setCloseProjectContext({ projectId, projectName, containerId });
+    },
+    []
+  );
+
+  const handleCloseProjectDialog = React.useCallback(() => {
+    setCloseProjectContext(null);
+  }, []);
+
+  // Expose the close-project dialog opener on the window so it can be triggered
+  // from Xrm ribbon commands or command bar buttons on the project form.
+  // Usage: window.__SPAARKE_OPEN_CLOSE_PROJECT__(projectId, projectName, containerId?)
+  React.useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__SPAARKE_OPEN_CLOSE_PROJECT__ = handleOpenCloseProjectDialog;
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__SPAARKE_OPEN_CLOSE_PROJECT__;
+    };
+  }, [handleOpenCloseProjectDialog]);
 
   // -------------------------------------------------------------------------
   // Quick Start wizard dialog state
@@ -776,6 +813,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {isWorkAssignmentWizardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyWorkAssignmentWizardDialog open={isWorkAssignmentWizardOpen} onClose={handleCloseWorkAssignmentWizard} webApi={webApi} />
+        </React.Suspense>
+      )}
+
+      {/* Close Secure Project confirmation dialog — triggered via ribbon command or
+          window.__SPAARKE_OPEN_CLOSE_PROJECT__(projectId, projectName, containerId?).
+          Lazy-loaded: chunk only fetched on first user interaction. */}
+      {closeProjectContext !== null && (
+        <React.Suspense fallback={<DialogLoadingFallback />}>
+          <LazyCloseProjectDialog
+            open={closeProjectContext !== null}
+            projectId={closeProjectContext.projectId}
+            projectName={closeProjectContext.projectName}
+            containerId={closeProjectContext.containerId}
+            onClose={handleCloseProjectDialog}
+          />
         </React.Suspense>
       )}
     </>

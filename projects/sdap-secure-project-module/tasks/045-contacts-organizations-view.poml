@@ -3,7 +3,7 @@
   <metadata>
     <title>Build Contacts and Organizations View</title>
     <phase>5: Power Pages Code Page SPA — Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>041</dependencies>
     <blocks>049</blocks>

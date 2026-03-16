@@ -3,7 +3,7 @@
   <metadata>
     <title>Create sprk_externalrecordaccess Table in Dataverse</title>
     <phase>1: Data Model &amp; Dataverse Configuration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 010</blocks>

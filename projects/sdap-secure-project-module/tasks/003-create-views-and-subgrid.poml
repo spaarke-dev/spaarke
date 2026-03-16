@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Views and Subgrid for External Record Access</title>
     <phase>1: Data Model &amp; Dataverse Configuration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>none</blocks>

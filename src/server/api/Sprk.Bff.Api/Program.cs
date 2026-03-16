@@ -20,6 +20,9 @@ builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IDocumentStorag
 // Authentication & Authorization (Azure AD JWT + authorization policies)
 builder.Services.AddAuthorizationModule(builder.Configuration);
 
+// External access (Power Pages portal token validation, Contact participation service)
+builder.Services.AddExternalAccess();
+
 // Scorecard Calculator Service
 builder.Services.AddScoped<Sprk.Bff.Api.Services.ScorecardCalculatorService>();
 
