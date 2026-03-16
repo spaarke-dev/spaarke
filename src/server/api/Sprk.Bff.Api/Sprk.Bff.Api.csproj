@@ -24,10 +24,10 @@
     <!-- Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 -->
     <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.4.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc1" />
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
-    <PackageReference Include="OpenAI" Version="2.8.0" />
+    <PackageReference Include="OpenAI" Version="2.9.1" />
 
     <!-- Azure packages -->
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
