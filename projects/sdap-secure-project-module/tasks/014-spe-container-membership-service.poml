@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement SPE Container Membership Service</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>011, 012</blocks>
+    <tags>bff-api, api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — SPE container membership via Graph API, security-critical</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Extend the SpeFileStore facade (or create a dedicated ExternalContainerMembershipService) to add and remove external Contacts from SPE containers via the Microsoft Graph API. Map access levels to SPE roles (Reader for View Only, Writer for Collaborate/Full Access).</prompt>
+  <role>You are a .NET engineer implementing SharePoint Embedded container membership management for external users via the Microsoft Graph API.</role>
+  <goal>External Contacts can be added to and removed from SPE containers with the correct role (Reader/Writer) based on their access level, all through the SpeFileStore facade.</goal>
+  <context>
+    <background>SharePoint Embedded containers have their own permission model separate from Dataverse. When an external user is granted access to a project, they must also be added to the project's SPE container so they can access documents. The Graph API endpoint POST /drives/{containerId}/permissions is used to grant access. The OverrideTenantSharingCapability setting may be required to allow external sharing.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs (modify — add membership methods)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/StorageModule.cs (modify if needed)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-007">All SPE operations must go through the SpeFileStore facade — no Graph SDK types above facade</constraint>
+    <constraint source="ADR-010">Use concrete DI registrations</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Analyze existing SpeFileStore to understand current Graph API integration patterns</step>
+    <step order="2">Add AddContainerMemberAsync method: accepts containerId, contactEmail, accessLevel</step>
+    <step order="3">Map access level to SPE role: View Only → Reader, Collaborate → Writer, Full Access → Writer</step>
+    <step order="4">Implement Graph API call: POST /drives/{containerId}/permissions with appropriate role grant</step>
+    <step order="5">Handle OverrideTenantSharingCapability requirement for external users</step>
+    <step order="6">Add RemoveContainerMemberAsync method: accepts containerId, contactEmail</step>
+    <step order="7">Implement Graph API call to remove permission from container</step>
+    <step order="8">Add error handling for common failure scenarios (container not found, permission denied, user not found)</step>
+    <step order="9">Ensure no Graph SDK types leak above the facade (return domain types only)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>External user added to SPE container via Graph API with correct role</criterion>
+    <criterion>External user removed from SPE container via Graph API</criterion>
+    <criterion>Access level correctly mapped to SPE role (Reader/Writer)</criterion>
+    <criterion>No Graph SDK types leak above the SpeFileStore facade</criterion>
+    <criterion>Error handling covers container not found, permission denied, user not found</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="sdap-secure-project-module">
+  <metadata>
+    <title>E2E Test — Access Level Enforcement</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>075</blocks>
+    <tags>testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — E2E verification of access level matrix</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Test all three access levels against all capabilities: download, upload, create tasks, AI toolbar, invite. Verify View Only restrictions, Collaborate capabilities, and Full Access permissions match the capability matrix from spec FR-03.</prompt>
+  <role>You are a QA engineer writing end-to-end tests for the access level enforcement across all SPA capabilities.</role>
+  <goal>Verified that each access level enforces the exact capability matrix — no more, no less — across all SPA features.</goal>
+  <context>
+    <background>Access level enforcement is the core security feature of the external SPA. Each of the three levels (View Only, Collaborate, Full Access) has a specific set of allowed capabilities. This test verifies that the enforcement is correct for every combination of access level and capability.</background>
+    <relevant-files>
+      <file>tests/e2e/ (create test files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Test all three access levels against all capabilities</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create E2E test for access level enforcement</step>
+    <step order="2">Set up three test users: one per access level (View Only, Collaborate, Full Access)</step>
+    <step order="3">Test View Only: verify NO download, NO upload, NO create tasks/events, NO AI toolbar, NO invite</step>
+    <step order="4">Test Collaborate: verify download YES, upload YES, create tasks/events YES, AI toolbar YES, invite NO</step>
+    <step order="5">Test Full Access: verify all capabilities YES including invite</step>
+    <step order="6">Test server-side enforcement: verify API rejects unauthorized operations even if client UI is bypassed</step>
+    <step order="7">Document test results against the capability matrix</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>View Only enforces all restrictions correctly</criterion>
+    <criterion>Collaborate enables all CRUD + AI capabilities, no invite</criterion>
+    <criterion>Full Access enables all capabilities including invite</criterion>
+    <criterion>Server-side enforcement verified (API rejects unauthorized ops)</criterion>
+  </acceptance-criteria>
+</task>

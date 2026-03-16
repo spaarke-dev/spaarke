@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement External Caller Authorization Filter</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>011, 012, 013, 014, 015, 016</blocks>
+    <tags>bff-api, auth, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — auth-critical, foundational filter for all external endpoints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create an ExternalCallerAuthorizationFilter that validates portal-issued OAuth tokens, resolves the authenticated Contact, and determines which projects the Contact can access via sprk_externalrecordaccess queries. Extend AuthorizationService to support Contact-based callers alongside existing SystemUser callers. Cache access data in Redis with 60-second TTL.</prompt>
+  <role>You are a .NET security engineer implementing the authorization layer that bridges Power Pages portal authentication with the BFF API's internal authorization model.</role>
+  <goal>External portal users are authenticated and authorized through the BFF API using the same endpoint filter pattern as internal users, with Contact-based access resolution backed by Redis caching.</goal>
+  <context>
+    <background>The BFF API currently authorizes internal SystemUser callers. External users authenticate through Power Pages (Entra External ID) and receive portal-issued OAuth tokens. This filter intercepts those tokens, identifies the Contact, queries sprk_externalrecordaccess for their project access, and makes that data available to downstream endpoint handlers. This is the single most critical security component in the module.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Authorization/AuthorizationService.cs (modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Authorization/ExternalCallerAuthorizationFilter.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Authorization/CachedAccessDataSource.cs (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware</constraint>
+    <constraint source="ADR-009">Redis-first caching — cache access data with 60s TTL</constraint>
+    <constraint source="ADR-010">Concrete DI registrations — no unnecessary interfaces</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Analyze existing AuthorizationService to understand current SystemUser-based auth flow</step>
+    <step order="2">Create ExternalCallerAuthorizationFilter implementing IEndpointFilter</step>
+    <step order="3">Implement portal token validation — detect portal issuer in token claims, validate signature</step>
+    <step order="4">Implement Contact resolution — map token subject claim to Contact record in Dataverse</step>
+    <step order="5">Extend AuthorizationService to support a CallerType enum (Internal/External) and Contact-based resolution</step>
+    <step order="6">Query sprk_externalrecordaccess for active records where sprk_contactid matches the authenticated Contact</step>
+    <step order="7">Build access data object: list of (projectId, accessLevel) tuples accessible by this Contact</step>
+    <step order="8">Integrate with CachedAccessDataSource — cache access data in Redis with 60s TTL, keyed by Contact ID</step>
+    <step order="9">Make access data available to downstream handlers via HttpContext.Items or a scoped service</step>
+    <step order="10">Register filter and services in DI (concrete types per ADR-010)</step>
+    <step order="11">Add unit tests for token validation, Contact resolution, access data caching</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ExternalCallerAuthorizationFilter validates portal-issued OAuth tokens</criterion>
+    <criterion>Contact-based access resolution works — correct projects returned for a given Contact</criterion>
+    <criterion>Redis caching active with 60s TTL for access data</criterion>
+    <criterion>Filter rejects invalid or expired tokens with 401</criterion>
+    <criterion>Filter returns 403 when Contact has no active access records</criterion>
+    <criterion>Existing internal auth flow is not broken</criterion>
+  </acceptance-criteria>
+</task>

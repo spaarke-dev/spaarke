@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="sdap-secure-project-module">
+  <metadata>
+    <title>Add Secure Project Toggle to Create Project Wizard</title>
+    <phase>6: Create Project Wizard Extension</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>061</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code modification — extending existing wizard with security-impacting toggle</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Extend the existing Create Project wizard with an "Is this a Secure Project?" toggle step. When toggled on, display additional information about what secure project creation entails. Set sprk_issecure on the created project record.</prompt>
+  <role>You are a React frontend engineer extending the existing Create Project wizard to support secure project designation.</role>
+  <goal>The Create Project wizard includes a clear toggle for secure project creation, with appropriate context and the sprk_issecure field set on the project record.</goal>
+  <context>
+    <background>The existing Create Project wizard creates sprk_project records. This extension adds a toggle that marks a project as secure. When toggled, the wizard will (in subsequent tasks) provision additional infrastructure (BU, SPE container, Account). The toggle must be prominent and clearly explained since it is irreversible.</background>
+    <relevant-files>
+      <file>Existing Create Project wizard code page (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Switch component for toggle</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Locate existing Create Project wizard code page</step>
+    <step order="2">Add "Secure Project" step or section with Fluent v9 Switch toggle</step>
+    <step order="3">Add explanatory text: what secure project creation means, that it is irreversible</step>
+    <step order="4">When toggle is on, show additional info about BU creation, SPE container, external access</step>
+    <step order="5">Include sprk_issecure=true in the project creation payload when toggle is on</step>
+    <step order="6">Verify toggle state persists through wizard navigation (back/next)</step>
+    <step order="7">Verify sprk_issecure is set correctly on the created project record</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Toggle appears in Create Project wizard</criterion>
+    <criterion>Explanatory text clearly communicates implications</criterion>
+    <criterion>sprk_issecure set to true on project record when toggled on</criterion>
+    <criterion>Toggle state persists through wizard navigation</criterion>
+  </acceptance-criteria>
+</task>

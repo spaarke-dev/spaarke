@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Smart To-Do Component</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — CRUD component with access-level enforcement</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build the SmartTodo component for the project page Tasks tab. List tasks with status and due date, implement task creation and status updates (Collaborate/Full Access only), and reference the existing TodoDetailSidePane pattern.</prompt>
+  <role>You are a React frontend engineer building the task management component for external project participants.</role>
+  <goal>External users can view tasks, and create/update them if their access level permits, with a UI consistent with the internal TodoDetailSidePane.</goal>
+  <context>
+    <background>Tasks (sprk_event with todoflag=true) are action items associated with a project. External users need to see their tasks, mark them complete, and (if they have Collaborate or Full Access) create new ones. The internal TodoDetailSidePane provides the design pattern to follow.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/SmartTodo.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components exclusively</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/TodoDetailSidePane/ (reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create SmartTodo.tsx component</step>
+    <step order="2">Fetch tasks for the project from Web API (sprk_event where todoflag=true, filtered by project)</step>
+    <step order="3">Display tasks in a list with status indicator, title, due date, assignee</step>
+    <step order="4">Implement "Create Task" button — visible only for Collaborate and Full Access users</step>
+    <step order="5">Implement task status toggle (complete/incomplete) — available for Collaborate and Full Access</step>
+    <step order="6">Create task dialog with fields: title, description, due date, priority</step>
+    <step order="7">Submit new/updated task via Web API (POST/PATCH with CSRF token)</step>
+    <step order="8">Add empty state for projects with no tasks</step>
+    <step order="9">Reference TodoDetailSidePane (src/solutions/TodoDetailSidePane/) for design consistency</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Tasks listed with status, title, due date</criterion>
+    <criterion>Create Task button visible only for Collaborate/Full Access</criterion>
+    <criterion>Task status toggle works for Collaborate/Full Access</criterion>
+    <criterion>View Only users can see tasks but cannot create or modify</criterion>
+    <criterion>Design consistent with internal TodoDetailSidePane</criterion>
+  </acceptance-criteria>
+</task>

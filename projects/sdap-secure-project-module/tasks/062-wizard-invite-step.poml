@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="sdap-secure-project-module">
+  <metadata>
+    <title>Add External User Invitation Step to Wizard</title>
+    <phase>6: Create Project Wizard Extension</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>061</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — wizard step with API integration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add an optional step to the Create Project wizard that allows inviting initial external users immediately after project creation. The step includes email input with access level selection and calls the invitation endpoint. Users can skip this step and invite later.</prompt>
+  <role>You are a React frontend engineer adding the invitation step to the Create Project wizard for immediate external user onboarding.</role>
+  <goal>Project creators can optionally invite external users during project creation, streamlining the onboarding process.</goal>
+  <context>
+    <background>After creating a secure project and provisioning its infrastructure, the natural next step is to invite the external users who will participate. This optional wizard step allows adding one or more email addresses with access levels. Each invitation is sent via the BFF invitation endpoint. The step can be skipped entirely — invitations can always be sent later from the project page.</background>
+    <relevant-files>
+      <file>Existing Create Project wizard code page (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add invitation step to wizard (appears only when Secure Project toggle is on)</step>
+    <step order="2">Build email input with "Add" button to build a list of invitees</step>
+    <step order="3">Add access level selection per invitee (View Only, Collaborate, Full Access)</step>
+    <step order="4">Show list of pending invitations with remove option</step>
+    <step order="5">Add "Skip" button to bypass invitation step</step>
+    <step order="6">On step completion, call BFF invitation endpoint for each invitee</step>
+    <step order="7">Show success/failure status per invitation</step>
+    <step order="8">Handle partial failures (some invitations succeed, some fail)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Invitation step appears only when Secure Project toggle is on</criterion>
+    <criterion>Users can add multiple invitees with different access levels</criterion>
+    <criterion>Skip button allows bypassing the step</criterion>
+    <criterion>Each invitation calls the BFF invitation endpoint</criterion>
+    <criterion>Per-invitation success/failure feedback shown</criterion>
+  </acceptance-criteria>
+</task>

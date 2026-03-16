@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement BU and Container Provisioning in Wizard</title>
+    <phase>6: Create Project Wizard Extension</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — cross-layer (frontend + API), creates infrastructure resources</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>When the Secure Project toggle is on, extend the wizard to call the BFF API to provision: a child Business Unit (SP-{ProjectRef}), an SPE container, and an External Access Account owned by the BU. Store all references on the project record. Handle the umbrella BU case where an existing BU/Account can be selected.</prompt>
+  <role>You are a full-stack engineer implementing the secure project provisioning flow that spans the wizard frontend and BFF API backend.</role>
+  <goal>The Create Project wizard automatically provisions all required infrastructure (BU, SPE container, Account) when creating a secure project, storing references on the project record.</goal>
+  <context>
+    <background>A secure project requires three pieces of infrastructure: (1) a child Business Unit for Dataverse row-level security isolation, (2) an SPE container for document storage with its own permission boundary, and (3) an Account record owned by the BU that external contacts are associated with. The wizard orchestrates this by calling a BFF API provisioning endpoint. For organizations with existing secure projects, an "umbrella BU" option allows reusing an existing BU/Account.</background>
+    <relevant-files>
+      <file>Existing Create Project wizard code page (modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (modify — add provisioning endpoint)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-007">SPE container creation through SpeFileStore facade</constraint>
+    <constraint source="ADR-001">Use Minimal API for provisioning endpoint</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create BFF API endpoint: POST /api/external-access/provision-project</step>
+    <step order="2">Implement BU creation: create child BusinessUnit named SP-{ProjectRef} under root BU</step>
+    <step order="3">Implement SPE container provisioning via SpeFileStore facade</step>
+    <step order="4">Create External Access Account owned by the new BU</step>
+    <step order="5">Store references on project record: sprk_securitybuid, sprk_externalaccountid, container ID</step>
+    <step order="6">Implement umbrella BU selection: allow selecting existing BU/Account for multi-project organizations</step>
+    <step order="7">Update wizard frontend: call provisioning endpoint after project creation when toggle is on</step>
+    <step order="8">Show provisioning progress in wizard (creating BU... creating container... creating account...)</step>
+    <step order="9">Handle provisioning failures gracefully (rollback partial provisioning)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Child BU created with correct name (SP-{ProjectRef})</criterion>
+    <criterion>SPE container provisioned</criterion>
+    <criterion>External Access Account created and owned by BU</criterion>
+    <criterion>All references stored on project record</criterion>
+    <criterion>Umbrella BU selection works for multi-project scenarios</criterion>
+    <criterion>Provisioning failures handled with rollback</criterion>
+  </acceptance-criteria>
+</task>

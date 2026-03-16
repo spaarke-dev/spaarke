@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="sdap-secure-project-module">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>075</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task — project closure and cleanup</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Perform project wrap-up: run /code-review on all project code, run /adr-check for compliance, run /repo-cleanup for hygiene. Update README.md status to Complete, update plan.md milestones, create lessons-learned.md, and update TASK-INDEX.md with all tasks marked completed.</prompt>
+  <role>You are a project manager performing the final wrap-up activities for the Secure Project module.</role>
+  <goal>Project is formally closed with all quality gates passed, documentation updated, and repository cleaned.</goal>
+  <context>
+    <background>Project wrap-up ensures that all artifacts are in their final state, quality gates have been passed, and the repository is clean. This is the last task in the project and transitions the project from "active development" to "completed".</background>
+    <relevant-files>
+      <file>projects/sdap-secure-project-module/README.md (modify)</file>
+      <file>projects/sdap-secure-project-module/plan.md (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="process">All quality gates must pass before marking project complete</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run /code-review on all project code — address any findings</step>
+    <step order="2">Run /adr-check — verify all ADR constraints are satisfied</step>
+    <step order="3">Run /repo-cleanup — clean up ephemeral files, validate structure</step>
+    <step order="4">Update projects/sdap-secure-project-module/README.md status to "Complete"</step>
+    <step order="5">Update projects/sdap-secure-project-module/plan.md — mark all milestones complete with dates</step>
+    <step order="6">Create projects/sdap-secure-project-module/notes/lessons-learned.md</step>
+    <step order="7">Update TASK-INDEX.md — all tasks marked with completed status</step>
+    <step order="8">Final commit with all wrap-up changes</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Code review passes with no critical findings</criterion>
+    <criterion>ADR check passes — all constraints satisfied</criterion>
+    <criterion>Repository cleanup complete</criterion>
+    <criterion>README and plan.md updated with completion status</criterion>
+    <criterion>TASK-INDEX.md shows all tasks completed</criterion>
+  </acceptance-criteria>
+</task>

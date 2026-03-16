@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="sdap-secure-project-module">
+  <metadata>
+    <title>Integration Tests for External Access Flows</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — integration tests with WebApplicationFactory</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Write integration tests that verify the full external access flows against the dev environment: grant access (verify three planes provisioned), revoke access (verify cleanup across planes), and search with project_ids filter (verify correct results). Use the WebApplicationFactory pattern.</prompt>
+  <role>You are a .NET test engineer writing integration tests to validate end-to-end external access flows.</role>
+  <goal>Integration tests verify that grant, revoke, and search operations work correctly across all three UAC planes (Dataverse, Power Pages, SPE).</goal>
+  <context>
+    <background>Unit tests verify individual components in isolation. Integration tests verify that the components work together correctly — that granting access actually creates records in Dataverse, assigns web roles, and provisions SPE membership. These tests run against the dev environment.</background>
+    <relevant-files>
+      <file>tests/integration/Spe.Integration.Tests/ExternalAccess/ (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Use WebApplicationFactory pattern following existing integration test patterns</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create ExternalAccessIntegrationTests.cs using WebApplicationFactory</step>
+    <step order="2">Test grant flow: POST /api/external-access/grant → verify Dataverse record created, web role assigned, SPE membership provisioned</step>
+    <step order="3">Test revoke flow: POST /api/external-access/revoke → verify Dataverse record deactivated, SPE membership removed, web role conditionally removed</step>
+    <step order="4">Test search with project_ids filter: verify only accessible project documents returned</step>
+    <step order="5">Test context endpoint: GET /api/external-access/context → verify correct projects and access levels</step>
+    <step order="6">Test invitation flow: POST /api/external-access/invite → verify invitation record created</step>
+    <step order="7">Add cleanup/teardown to ensure test data is removed after each test run</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Integration tests pass against dev environment</criterion>
+    <criterion>Grant flow verifies all three UAC planes</criterion>
+    <criterion>Revoke flow verifies cleanup across all planes</criterion>
+    <criterion>Search filter correctly scopes results to accessible projects</criterion>
+  </acceptance-criteria>
+</task>

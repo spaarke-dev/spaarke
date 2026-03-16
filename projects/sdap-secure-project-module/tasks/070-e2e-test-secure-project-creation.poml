@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="sdap-secure-project-module">
+  <metadata>
+    <title>E2E Test — Secure Project Creation Flow</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>075</blocks>
+    <tags>testing, e2e-test, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — E2E verification of creation flow</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Test the full secure project creation flow end-to-end: wizard with secure toggle → BU created → SPE container provisioned → Account created → project record has all references. Verify in Dataverse.</prompt>
+  <role>You are a QA engineer writing end-to-end tests for the secure project creation flow.</role>
+  <goal>Verified that the complete secure project creation flow works correctly, with all infrastructure provisioned and all references stored.</goal>
+  <context>
+    <background>The secure project creation flow is the entry point for the entire module. If this flow fails, nothing else works. This E2E test verifies the full chain: wizard toggle → API provisioning → Dataverse record verification.</background>
+    <relevant-files>
+      <file>tests/e2e/ (create test files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Test against dev environment</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create E2E test for secure project creation flow</step>
+    <step order="2">Test: Create project with secure toggle ON via wizard</step>
+    <step order="3">Verify: child BU created with correct name (SP-{ProjectRef})</step>
+    <step order="4">Verify: SPE container provisioned and accessible</step>
+    <step order="5">Verify: External Access Account created and owned by BU</step>
+    <step order="6">Verify: project record has sprk_issecure=true, sprk_securitybuid, sprk_externalaccountid populated</step>
+    <step order="7">Clean up test data after verification</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Secure project creation works end-to-end</criterion>
+    <criterion>All infrastructure (BU, container, Account) provisioned correctly</criterion>
+    <criterion>All references stored on project record</criterion>
+  </acceptance-criteria>
+</task>

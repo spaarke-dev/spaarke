@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Power Pages Web API Client Module</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>031, 032</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, power-pages</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — typed OData client for all SPA data access</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create a typed client that wraps the Power Pages Web API (/_api/) with OData 4.0 patterns. Include CSRF token handling, OData version headers, and typed methods for project, document, event, and contact queries.</prompt>
+  <role>You are a frontend engineer building the data access layer for the Power Pages SPA.</role>
+  <goal>A typed, reusable Web API client that provides OData query capabilities for all Dataverse tables the SPA needs, with proper CSRF and header management.</goal>
+  <context>
+    <background>The Power Pages Web API exposes Dataverse tables via OData 4.0 at the /_api/ endpoint. All requests must include OData-Version and OData-MaxVersion headers. Write operations require the CSRF anti-forgery token. This client abstracts these details and provides typed methods for each table the SPA queries.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/api/web-api-client.ts (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="power-pages">All Web API calls must include OData-Version: 4.0 header</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create src/client/external-spa/src/api/web-api-client.ts</step>
+    <step order="2">Define TypeScript interfaces for Project, Document, Event, Contact, Organization</step>
+    <step order="3">Create base OData query builder with $select, $filter, $expand, $orderby, $top support</step>
+    <step order="4">Implement request wrapper: add OData-Version header, CSRF token for writes, Accept: application/json</step>
+    <step order="5">Create getProjects() — query sprk_projects with typed response</step>
+    <step order="6">Create getDocuments(projectId) — query sprk_documents filtered by project</step>
+    <step order="7">Create getEvents(projectId) — query sprk_events filtered by project</step>
+    <step order="8">Create getContacts(projectId) — query contacts filtered by project</step>
+    <step order="9">Create createEvent(), updateEvent() — write operations with CSRF token</step>
+    <step order="10">Export client instance and all types</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Typed OData queries work against Power Pages Web API</criterion>
+    <criterion>OData-Version: 4.0 header included in all requests</criterion>
+    <criterion>CSRF token included in all write operations</criterion>
+    <criterion>Query builder supports $select, $filter, $expand, $orderby, $top</criterion>
+    <criterion>All entity types have TypeScript interfaces</criterion>
+  </acceptance-criteria>
+</task>

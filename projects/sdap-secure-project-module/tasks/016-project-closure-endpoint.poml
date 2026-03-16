@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Project Closure Endpoint</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — bulk revocation with data integrity requirements</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create a POST /api/external-access/close-project endpoint that performs bulk revocation of all external access for a project: deactivates all sprk_externalrecordaccess records, removes all external contacts from the SPE container, updates project status, and preserves the container for archival.</prompt>
+  <role>You are a .NET API engineer implementing the project closure endpoint that cleanly terminates all external access while preserving data for retention.</role>
+  <goal>A single API call closes a secure project by revoking all external access across all UAC planes, while preserving the SPE container and its contents for archival purposes.</goal>
+  <context>
+    <background>When a secure project is completed or closed, all external access must be revoked immediately. However, the SPE container and its documents must be preserved for legal retention and compliance. This endpoint performs a bulk version of the revoke operation — deactivating all participation records, removing all external users from the container, and updating project status — but does not delete the container.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessService.cs (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-007">All SPE operations through SpeFileStore facade</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define POST /api/external-access/close-project endpoint with request model (projectId)</step>
+    <step order="2">Add CloseProjectAsync method to ExternalAccessService</step>
+    <step order="3">Query all active sprk_externalrecordaccess records for the project</step>
+    <step order="4">Bulk deactivate all participation records (set statecode=Inactive)</step>
+    <step order="5">Bulk remove all external contacts from the SPE container via SpeFileStore</step>
+    <step order="6">For each contact, check remaining active records — remove web role if none remain</step>
+    <step order="7">Update project status to closed/inactive</step>
+    <step order="8">Do NOT delete the SPE container — preserve for archival</step>
+    <step order="9">Return closure summary: count of revoked records, contacts affected</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All external access records for the project are deactivated</criterion>
+    <criterion>All external contacts removed from SPE container</criterion>
+    <criterion>Web roles removed for contacts with no remaining active access</criterion>
+    <criterion>SPE container preserved (not deleted)</criterion>
+    <criterion>Project status updated to closed</criterion>
+  </acceptance-criteria>
+</task>

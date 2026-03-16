@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Access Level Enforcement Throughout SPA</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>040, 041, 042, 043, 044, 045, 046, 047, 048</dependencies>
+    <blocks>050</blocks>
+    <tags>frontend, react, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — cross-cutting access enforcement across all components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create a useAccessLevel hook and apply access-level enforcement across all SPA components. View Only users see no download/upload/create/AI toolbar. Collaborate users get full CRUD and AI. Full Access users additionally get invitation capability. Test all three access levels thoroughly.</prompt>
+  <role>You are a frontend security engineer implementing the client-side access level enforcement layer across the entire SPA.</role>
+  <goal>Every UI element in the SPA correctly reflects the user's access level — View Only sees read-only views, Collaborate sees full CRUD + AI, Full Access sees everything including invitation.</goal>
+  <context>
+    <background>Access level enforcement is the client-side counterpart to the server-side authorization filter. While the server enforces access at the API level, the client must show/hide UI elements based on the user's access level for a good user experience. This is a cross-cutting concern that touches every feature component built in tasks 040-048.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/hooks/useAccessLevel.ts (create)</file>
+      <file>src/client/external-spa/src/components/ (modify — multiple component files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="auth">Client-side enforcement is UX only — server-side enforcement is the security boundary</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create useAccessLevel.ts hook — resolve current user's access level for the active project from context</step>
+    <step order="2">Define capability matrix: View Only (read), Collaborate (read+write+AI), Full Access (read+write+AI+invite)</step>
+    <step order="3">Create helper functions: canUpload(), canDownload(), canCreate(), canUseAi(), canInvite()</step>
+    <step order="4">Apply to DocumentLibrary: hide upload/download for View Only</step>
+    <step order="5">Apply to EventsCalendar: hide create button for View Only</step>
+    <step order="6">Apply to SmartTodo: hide create/update for View Only</step>
+    <step order="7">Apply to AiToolbar: hide entirely for View Only</step>
+    <step order="8">Apply to SemanticSearch: available for all levels (read-only operation)</step>
+    <step order="9">Apply to InviteUserDialog: only visible for Full Access</step>
+    <step order="10">Test all three access levels: verify correct UI state for each</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useAccessLevel hook correctly resolves access level per project</criterion>
+    <criterion>View Only: no upload, no download, no create, no AI toolbar, no invite</criterion>
+    <criterion>Collaborate: upload, download, create, AI toolbar — no invite</criterion>
+    <criterion>Full Access: all capabilities including invite</criterion>
+    <criterion>All components use the hook consistently</criterion>
+  </acceptance-criteria>
+</task>

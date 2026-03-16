@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build AI Toolbar (Playbook-Driven)</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — AI integration with IP protection requirements</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build the AiToolbar component with toolbar buttons for Summarize Document, Summarize Project, and Run Analysis. Each button invokes a playbook via the BFF API and displays results as structured output. The toolbar is only visible for Collaborate/Full Access users. Playbook definitions must never be exposed to the client.</prompt>
+  <role>You are a React frontend engineer building the AI-powered toolbar that provides playbook-driven analysis capabilities to external users.</role>
+  <goal>External users with Collaborate/Full Access can invoke AI playbooks via toolbar buttons and see structured results, without any exposure of playbook internals.</goal>
+  <context>
+    <background>The AI toolbar exposes pre-defined playbooks as simple button actions. When a user clicks "Summarize Document", the SPA calls the BFF API with the playbook ID and document context. The BFF orchestrates the AI pipeline and returns structured results. The client never sees the playbook definition, prompt templates, or AI model details — this protects IP and prevents prompt injection.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/AiToolbar.tsx (create)</file>
+      <file>src/client/external-spa/src/hooks/usePlaybookExecution.ts (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">AI features via BFF API — do not create separate AI service</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 components for toolbar</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create usePlaybookExecution.ts hook — call BFF API playbook endpoint, handle streaming/polling, return results</step>
+    <step order="2">Create AiToolbar.tsx component with Fluent v9 Toolbar</step>
+    <step order="3">Add "Summarize Document" button — invoke document summarization playbook for selected document</step>
+    <step order="4">Add "Summarize Project" button — invoke project summarization playbook</step>
+    <step order="5">Add "Run Analysis" button — invoke analysis playbook with configurable scope</step>
+    <step order="6">Display results as structured output (formatted sections, not raw chat)</step>
+    <step order="7">Show loading/progress indicator during playbook execution</step>
+    <step order="8">Hide toolbar entirely for View Only users</step>
+    <step order="9">Ensure no playbook definitions, prompts, or model details are exposed to the client</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Toolbar buttons invoke playbooks via BFF API</criterion>
+    <criterion>Results displayed as structured output (not raw chat)</criterion>
+    <criterion>Toolbar hidden for View Only users</criterion>
+    <criterion>No playbook internals (definitions, prompts, model IDs) visible in client code or network traffic</criterion>
+    <criterion>Loading indicator shown during execution</criterion>
+  </acceptance-criteria>
+</task>

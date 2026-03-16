@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Contacts and Organizations View</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — data display component with table permission scoping</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build the ContactsOrganizations component for the project page Contacts tab. Show project contacts and organizations in a read-only DataGrid, scoped by the table permission chain to only show records the user is authorized to see.</prompt>
+  <role>You are a React frontend engineer building the contacts and organizations view for external project participants.</role>
+  <goal>External users can view the contacts and organizations associated with their accessible projects, displayed in a clean read-only grid.</goal>
+  <context>
+    <background>External users need to see who else is involved in a project — other contacts and their organizations. This is a read-only view for all access levels. The data is scoped by the Power Pages table permission chain, so users only see contacts and organizations associated with their granted projects.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/ContactsOrganizations.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components exclusively</constraint>
+    <constraint source="ADR-012">Use DataGrid from @spaarke/ui-components</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create ContactsOrganizations.tsx component</step>
+    <step order="2">Fetch contacts for the project from Web API (contact filtered by project relationship)</step>
+    <step order="3">Fetch organizations for the project from Web API (sprk_organization filtered by project)</step>
+    <step order="4">Display contacts in DataGrid with columns: Name, Email, Role, Organization</step>
+    <step order="5">Display organizations in DataGrid with columns: Name, Type, Contact Count</step>
+    <step order="6">All data is read-only — no create/edit/delete for any access level</step>
+    <step order="7">Add empty states for no contacts and no organizations</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Contacts displayed in read-only DataGrid with correct columns</criterion>
+    <criterion>Organizations displayed in read-only DataGrid with correct columns</criterion>
+    <criterion>Data scoped to project (only authorized records visible)</criterion>
+    <criterion>Read-only for all access levels (no CRUD buttons)</criterion>
+  </acceptance-criteria>
+</task>

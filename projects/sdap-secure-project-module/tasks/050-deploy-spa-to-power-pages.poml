@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="sdap-secure-project-module">
+  <metadata>
+    <title>Deploy SPA to Power Pages via PAC CLI</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>049</dependencies>
+    <blocks>060</blocks>
+    <tags>deploy, power-pages, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — follows established code-page-deploy skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build the SPA with npm run build, upload the dist/ output to Power Pages via pac pages upload-code-site, activate the site if this is the first deployment, and verify the SPA loads in a browser.</prompt>
+  <role>You are a DevOps engineer deploying the Power Pages Code Page SPA.</role>
+  <goal>The SPA is deployed to Power Pages and accessible to authenticated external users via a browser.</goal>
+  <context>
+    <background>The Power Pages Code Page SPA is deployed by uploading the Vite build output to Power Pages using the PAC CLI. The first deployment may require site activation. Once deployed, the SPA is served at the Power Pages URL and authenticated users can access it.</background>
+    <relevant-files>
+      <file>src/client/external-spa/dist/ (build output)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="deploy">Use PAC CLI for Power Pages deployment</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run npm run build in src/client/external-spa/ to produce dist/</step>
+    <step order="2">Verify dist/ contains all expected assets (index.html, JS bundles, CSS)</step>
+    <step order="3">Upload to Power Pages via pac pages upload-code-site</step>
+    <step order="4">Activate site if this is the first deployment</step>
+    <step order="5">Verify SPA loads in browser at Power Pages URL</step>
+    <step order="6">Verify authentication flow works (redirect to Entra External ID login)</step>
+    <step order="7">Verify home page loads with user context after login</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SPA deployed to Power Pages successfully</criterion>
+    <criterion>SPA loads in browser at Power Pages URL</criterion>
+    <criterion>Authentication redirect works</criterion>
+    <criterion>Home page displays after successful login</criterion>
+  </acceptance-criteria>
+</task>

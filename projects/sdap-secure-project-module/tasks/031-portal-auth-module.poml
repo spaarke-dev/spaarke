@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Portal Auth Module</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033, 034</blocks>
+    <tags>frontend, auth, power-pages</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Auth code — security-critical client-side authentication module</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create the portal authentication module that retrieves the current portal user context, manages anti-forgery tokens for CSRF protection, and provides a typed wrapper for Power Pages API calls with session expiry handling.</prompt>
+  <role>You are a frontend security engineer implementing the client-side authentication layer for the Power Pages SPA.</role>
+  <goal>The SPA can reliably identify the current portal user, include CSRF tokens in write operations, and handle session expiry gracefully.</goal>
+  <context>
+    <background>Power Pages provides server-side authentication — the SPA needs to retrieve the current user context from the portal session. All write operations via the Web API require an anti-forgery token (CSRF protection). The module must also detect session expiry and redirect to the login page.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/auth/portal-auth.ts (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="auth">CSRF token must be included in all write operations</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create src/client/external-spa/src/auth/portal-auth.ts</step>
+    <step order="2">Implement getPortalUser() — fetch current user from /_layout/tokenhtml endpoint or equivalent</step>
+    <step order="3">Implement getAntiForgeryToken() — retrieve CSRF token from portal page</step>
+    <step order="4">Implement portalApiCall() — typed fetch wrapper that includes CSRF token for POST/PUT/DELETE</step>
+    <step order="5">Create ApiError class with status code, message, correlation ID</step>
+    <step order="6">Implement session expiry detection — redirect to login page on 401/403</step>
+    <step order="7">Export all functions and types for use by other modules</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>getPortalUser() retrieves current authenticated user context</criterion>
+    <criterion>getAntiForgeryToken() retrieves CSRF token</criterion>
+    <criterion>portalApiCall() includes CSRF token in write operations</criterion>
+    <criterion>Session expiry redirects to login page</criterion>
+    <criterion>ApiError class provides structured error information</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Events Calendar Component</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — CRUD component with access-level enforcement</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build the EventsCalendar component for the project page Events tab. List events with an upcoming view, implement event creation dialog (Collaborate/Full Access only), and reference the existing EventsPage pattern for design consistency.</prompt>
+  <role>You are a React frontend engineer building the events management component for external project participants.</role>
+  <goal>External users can view upcoming events and create new events (if their access level permits), with a UI consistent with the internal EventsPage.</goal>
+  <context>
+    <background>Events (sprk_event) are shared calendar items associated with a project — meetings, deadlines, milestones. External users need to see upcoming events and, if they have Collaborate or Full Access, create new ones. The internal EventsPage provides the design pattern to follow.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/EventsCalendar.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components exclusively</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/EventsPage/ (reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create EventsCalendar.tsx component</step>
+    <step order="2">Fetch events for the project from Web API (sprk_event filtered by project, ordered by date)</step>
+    <step order="3">Display events in an upcoming view (list with date, title, description, status)</step>
+    <step order="4">Implement "Create Event" button — visible only for Collaborate and Full Access users</step>
+    <step order="5">Create event dialog with fields: title, date, description, type</step>
+    <step order="6">Submit new event via Web API (POST with CSRF token)</step>
+    <step order="7">Add empty state for projects with no events</step>
+    <step order="8">Reference EventsPage (src/solutions/EventsPage/) for layout and styling consistency</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Events listed in upcoming view with correct data</criterion>
+    <criterion>Create Event button visible only for Collaborate/Full Access</criterion>
+    <criterion>Event creation dialog works with correct field validation</criterion>
+    <criterion>View Only users cannot create events</criterion>
+    <criterion>Design consistent with internal EventsPage</criterion>
+  </acceptance-criteria>
+</task>

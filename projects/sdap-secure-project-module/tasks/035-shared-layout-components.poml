@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="sdap-secure-project-module">
+  <metadata>
+    <title>Create Shared Layout Components</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — reusable layout components used across all pages</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create shared layout components (PageContainer, NavigationBar, SectionCard) that provide consistent structure across all SPA pages. Import and use existing @spaarke/ui-components where applicable. Style exclusively with Fluent design tokens.</prompt>
+  <role>You are a React frontend engineer building the reusable layout component library for the SPA.</role>
+  <goal>A set of consistent, reusable layout components that all feature pages can use, styled with Fluent design tokens and supporting dark mode.</goal>
+  <context>
+    <background>All SPA pages need consistent layout structure — page containers with proper margins, navigation bars, and content cards. These components should leverage the existing @spaarke/ui-components library (DataGrid, StatusBadge) where applicable and use only Fluent v9 design tokens for styling to ensure dark mode compatibility.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/ (create multiple)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Style with Fluent v9 design tokens only — no hard-coded colors</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components shared library where applicable</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/ (reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create PageContainer.tsx — responsive container with max-width, padding, Fluent tokens</step>
+    <step order="2">Create NavigationBar.tsx — breadcrumb-style navigation with Fluent TabList or similar</step>
+    <step order="3">Create SectionCard.tsx — card component for content sections with header, body, optional actions</step>
+    <step order="4">Import DataGrid, StatusBadge from @spaarke/ui-components and verify they render correctly in the SPA context</step>
+    <step order="5">Use only Fluent design tokens (tokens.colorNeutralBackground1, etc.) — no hard-coded colors</step>
+    <step order="6">Verify all components support dark mode (switch theme and inspect)</step>
+    <step order="7">Export all components from a components/index.ts barrel file</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PageContainer, NavigationBar, SectionCard components created and exported</criterion>
+    <criterion>All components use Fluent v9 design tokens exclusively</criterion>
+    <criterion>All components support dark mode without visual issues</criterion>
+    <criterion>@spaarke/ui-components (DataGrid, StatusBadge) importable and renderable</criterion>
+  </acceptance-criteria>
+</task>
