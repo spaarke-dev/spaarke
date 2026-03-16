@@ -23,7 +23,7 @@
     <!-- Agent Framework (Phase 1 - AIPL-002, AIPL-050) - PINNED: Do NOT upgrade without testing -->
     <!-- Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 -->
     <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.4.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc1" />
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
@@ -43,7 +43,7 @@
 
     <!-- Caching -->
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.4" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 
