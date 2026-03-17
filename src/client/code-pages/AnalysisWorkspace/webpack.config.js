@@ -35,6 +35,11 @@ module.exports = (env) => {
         // Resolve workspace dependency to shared library source for bundling
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
         '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
+        // Force single React instance — shared lib has React 18 in its node_modules,
+        // which conflicts with this page's React 19. Deduplicate to this page's copy.
+        'react': path.resolve(__dirname, 'node_modules/react'),
+        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+        'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime'),
       },
       modules: [
         path.resolve(__dirname, 'node_modules'),
