@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-035" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Dynamic Slash Command Resolution at Session Initialization</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies useChatContextMapping.ts hook and SprkChatInput.tsx. Frontend tag, .ts/.tsx file modification. Adds API call at session init with state management, merging logic for dynamic and system commands. Correctness is critical since R2-036, R2-037, R2-038 build on this.</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    On SprkChat session creation, call the context mapping endpoint to retrieve dynamic slash commands for the current session context (playbook + scope). Populate the `dynamicSlashCommands` prop on `SprkChatInput` with the resolved commands, merging them with `DEFAULT_SLASH_COMMANDS` (system commands that are always available). Re-fetch dynamic commands when the active playbook or context changes.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChatInput receives a populated `dynamicSlashCommands` array at session start, sourced from the context mapping endpoint. System commands (always available) are always present. Dynamic commands from playbooks and scopes appear only when relevant. Re-fetching on context change works correctly. Commands from different sources (system vs playbook vs scope) are distinguishable via a source field on the command object.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-05, FR-17 dynamic command resolution">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, context resolver patterns">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Hook to extend — context mapping logic">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+    <file purpose="Component to update — receives dynamicSlashCommands prop">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file purpose="Slash command type definitions — existing type shape">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+    <file purpose="ADR-012 — shared component library callback-based props">../.claude/adr/ADR-012-shared-components.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-17">Command catalog MUST be auto-generated from metadata-driven queries — no static relationship table</constraint>
+    <constraint source="ADR-012">MUST use callback-based props and the shared useChatContextMapping hook pattern — no direct fetch calls in SprkChatInput component</constraint>
+    <constraint source="spec MUST">MUST NOT create static playbook relationship tables — dynamic resolution only</constraint>
+    <constraint source="spec">System commands (DEFAULT_SLASH_COMMANDS) MUST always be present regardless of context — merge, not replace</constraint>
+    <constraint source="spec">Re-fetch MUST occur when playbook or context changes — stale commands from a previous context are incorrect</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF context mapping endpoint (task R2-019): GET /api/ai/chat/sessions/{id}/commands — returns { systemCommands: SlashCommand[], dynamicCommands: SlashCommand[] } where each command has source: "system" | "playbook" | "scope"</pattern>
+      <pattern>useChatContextMapping hook pattern: fetches context data and returns it for consumption by SprkChat — extend it to include command resolution</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R1 implemented static slash commands defined in `DEFAULT_SLASH_COMMANDS` constant. R2 requires these to merge with dynamically resolved commands from the BFF context mapping endpoint. The BFF task R2-019 implements the command resolution service; this task wires the frontend to consume it.
+
+      The `ISprkChatInputProps.dynamicSlashCommands` prop already exists in the shared library type definitions from R1 but was never populated. The `useChatContextMapping` hook already calls the context mapping endpoint for other purposes — extend it to also fetch commands.
+
+      Each `SlashCommand` in the merged list needs a `source` discriminator ("system" | "playbook" | "scope") so R2-036 can group them visually in the slash menu.
+    </background>
+    <dependencies>
+      Depends on R2-006 (Phase 1 deploy, session infrastructure). Can run in parallel with R2-030, R2-031, R2-032, R2-033. Tasks R2-036, R2-037, R2-038 depend on this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read useChatContextMapping.ts to understand the current context mapping implementation, what it already fetches, and the hook's return shape</step>
+    <step order="1">Read slashCommandMenu.types.ts to understand the existing SlashCommand type — determine if a source field already exists or needs to be added</step>
+    <step order="2">Add source: "system" | "playbook" | "scope" field to the SlashCommand type (or extended interface) in slashCommandMenu.types.ts if not present</step>
+    <step order="3">Extend useChatContextMapping to call GET /api/ai/chat/sessions/{id}/commands on session init — add resolvedCommands to hook state</step>
+    <step order="4">Implement merge logic in useChatContextMapping: combine DEFAULT_SLASH_COMMANDS (source="system") with dynamic commands from BFF — deduplicate by command name/key</step>
+    <step order="5">Add re-fetch trigger in useChatContextMapping: when playbookId or contextId changes (dependency array), re-call the commands endpoint and update state</step>
+    <step order="6">Return resolvedCommands from useChatContextMapping hook</step>
+    <step order="7">Update SprkChat.tsx to pass resolvedCommands to the dynamicSlashCommands prop of SprkChatInput</step>
+    <step order="8">Verify SprkChatInput correctly uses the dynamicSlashCommands prop to populate SlashCommandMenu — read SprkChatInput.tsx to confirm the prop wiring</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-035 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">useChatContextMapping.ts — extended with command resolution fetch, merge logic, context-change re-fetch</artifact>
+    <artifact type="code">slashCommandMenu.types.ts — extended SlashCommand type with source discriminator</artifact>
+    <artifact type="code">SprkChat.tsx — updated to pass resolvedCommands to SprkChatInput dynamicSlashCommands prop</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On session init, useChatContextMapping fetches /api/ai/chat/sessions/{id}/commands and populates resolvedCommands</criterion>
+    <criterion testable="true">System commands from DEFAULT_SLASH_COMMANDS are always present in resolvedCommands regardless of context</criterion>
+    <criterion testable="true">Dynamic commands from BFF are merged with system commands without duplication</criterion>
+    <criterion testable="true">Each resolved command has a source field: "system", "playbook", or "scope"</criterion>
+    <criterion testable="true">When playbook or context changes, resolvedCommands re-fetches and updates</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

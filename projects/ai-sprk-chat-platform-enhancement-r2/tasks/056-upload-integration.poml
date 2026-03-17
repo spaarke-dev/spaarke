@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-056" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Upload Integration — Drag-and-Drop to Context Injection</title>
+    <status>pending</status>
+    <phase>4</phase>
+    <tags>integration</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task connecting upload zone (R2-040), processing feedback (R2-041), SPE persistence (R2-042) to BFF upload endpoint (R2-013) and SPE persistence endpoint (R2-014). Tags include integration. NFR-02 processing time verification and session cleanup (NFR-06) testing required.</rigor-reason>
+    <dependencies>[013, 014, 040, 041, 042]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the complete document upload pipeline end-to-end: drag-and-drop in SprkChat → BFF upload endpoint (R2-013) → Document Intelligence extraction → processing feedback in chat → context injection into session → optional SPE persistence (R2-014). Verify processing time NFR-02 (&lt;15 seconds for &lt;50 pages) and session cleanup NFR-06 (uploaded docs deleted on session end).
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Dragging a PDF into SprkChat triggers upload to the BFF, Document Intelligence extracts the text, a processing status message shows progress in chat, on completion the document is available for AI reasoning, and optionally the user can save it to SPE. Processing completes within 15 seconds for a 50-page document. Asking about the uploaded document's content gets an accurate AI response.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-13, FR-14, NFR-02, NFR-06">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — upload architecture, session cleanup pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF upload endpoint — R2-013 implementation">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="BFF SPE persistence endpoint — R2-014 implementation">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="Document upload zone component — R2-040 implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+    <file purpose="ADR-015 — no document content logging">../.claude/adr/ADR-015-ai-data-governance.md</file>
+    <file purpose="Text extraction pattern — Document Intelligence routing">../.claude/patterns/ai/text-extraction.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-02">Document processing MUST complete within 15 seconds for documents under 50 pages — measure wall-clock time from upload completion to processing_complete event</constraint>
+    <constraint source="spec NFR-06">Session-scoped uploaded documents MUST be auto-deleted when the chat session ends — verify cleanup occurs (check BFF session cleanup handler)</constraint>
+    <constraint source="ADR-015">MUST NOT log extracted document text — verify BFF Document Intelligence extraction does not write text content to logs</constraint>
+    <constraint source="spec">After processing, AI MUST be able to answer questions about the uploaded document's content — verify end-to-end context injection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+    </files>
+    <patterns>
+      <pattern>Processing time measurement: compare timestamp of upload_complete and document_processing_complete SSE events — must be &lt;15s for &lt;50 page documents</pattern>
+      <pattern>Session cleanup verification: end the session (close SprkChatPane) and check BFF logs or temporary storage to confirm uploaded document files are deleted</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks R2-013 (BFF upload) and R2-014 (BFF SPE persistence) were implemented in Phase 2. Tasks R2-040-042 (frontend upload zone, feedback, save UX) were implemented in Phase 3. This integration task verifies they work together with Document Intelligence in the dev environment.
+
+      The BFF receives the uploaded file as a multipart form upload, calls Document Intelligence for text extraction, stores the extracted text session-scoped, and emits SSE events for processing progress. The frontend upload zone (R2-040) calls the BFF endpoint and displays progress from R2-041.
+    </background>
+    <dependencies>
+      Depends on R2-013, R2-014 (BFF upload), R2-040, R2-041, R2-042 (frontend upload). All must be complete.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Prepare a test PDF document of approximately 20 pages for upload testing</step>
+    <step order="1">Drag the PDF into SprkChatPane — verify the upload zone overlay appears and the file type is accepted</step>
+    <step order="2">Drop the file — verify upload progress indicator shows and upload completes</step>
+    <step order="3">Verify "Processing [filename]..." system message appears in chat with Spinner</step>
+    <step order="4">Measure time from upload completion to processing_complete SSE event — must be under 15 seconds for a 20-page document</step>
+    <step order="5">After processing_complete: verify "Document added to context" message appears with filename and page count</step>
+    <step order="6">Ask a specific question about content from the uploaded document — verify AI response references the document content accurately</step>
+    <step order="7">Test optional SPE persistence: click "Save to matter files" button — verify file appears in SPE container via the file browser (or file browser after refresh)</step>
+    <step order="8">Test session cleanup (NFR-06): close the SprkChatPane and re-open; verify the uploaded document is no longer available in the new session (session-scoped cleanup)</step>
+    <step order="9">Fix any issues found in the upload→process→inject pipeline</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-056 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to BFF upload endpoint, Document Intelligence integration, or session cleanup</artifact>
+    <artifact type="code">Any fixes to frontend upload → processing feedback → context injection pipeline</artifact>
+    <artifact type="docs">notes/056-upload-integration-findings.md — processing time measurements, issues found</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Drag-and-drop of a PDF triggers upload, processing, and "Document added to context" confirmation in chat</criterion>
+    <criterion testable="true">Processing completes within 15 seconds for a document under 50 pages</criterion>
+    <criterion testable="true">AI can answer specific questions about the uploaded document's content after processing completes</criterion>
+    <criterion testable="true">Save to matter files persists the document to the SPE container (when matter context available)</criterion>
+    <criterion testable="true">Uploaded document is not available in a new session (session-scoped cleanup confirmed)</criterion>
+  </acceptance-criteria>
+</task>

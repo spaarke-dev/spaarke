@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-041" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Upload Processing Status Feedback in Chat</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChat.tsx message flow to insert processing status messages. Frontend tag, .tsx modification. SSE-based processing progress events need careful state management to avoid duplicate messages and clean up on completion.</rigor-reason>
+    <dependencies>[040]</dependencies>
+  </metadata>
+
+  <prompt>
+    After a document is uploaded to SprkChat, show processing status feedback in the chat message stream. Display a "Processing document..." message with an animated progress indicator while Document Intelligence extracts the text. On completion, replace or update the message to show "Document added to context — [filename], [N] pages" with the document name and page count. Show an error message if processing fails.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    After upload, the chat shows a system message with animated spinner: "Processing [filename]...". When the BFF completes Document Intelligence extraction, the message updates to a success state: "Document added to context — [filename], [N] pages". The document count badge on the context indicator updates to reflect the newly added document. Errors show inline in the message.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-13 upload processing feedback, NFR-02 &lt;15s processing">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, SSE event types">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Main component — message insertion and state">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="Message renderer — system message type rendering">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+    <file purpose="SSE events pattern — upload_processing_start, upload_processing_complete events">../.claude/patterns/ai/streaming-endpoints.md</file>
+    <file purpose="ADR-021 — Fluent v9 semantic tokens">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Processing message spinner MUST use Fluent v9 Spinner component — no custom CSS animation</constraint>
+    <constraint source="ADR-015">MUST NOT log or display extracted document text in the processing feedback — only show filename, page count, and status</constraint>
+    <constraint source="spec NFR-02">Processing must complete within 15 seconds for documents under 50 pages — if processing takes longer, show a "still processing" extended wait message</constraint>
+    <constraint source="spec">Processing status messages MUST be system-type messages (not user or assistant) — visually distinct from chat conversation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF document processing events (task R2-013): document_processing_start {documentId, filename}, document_processing_complete {documentId, filename, pageCount}, document_processing_error {documentId, error}</pattern>
+      <pattern>System message insertion: add a message with role="system" and a documentStatus type — update in place by documentId when complete event arrives</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      After the drag-and-drop upload (R2-040), the BFF processes the document through Document Intelligence. The BFF sends SSE events on the chat session's SSE connection (not a separate stream) to communicate processing progress: `document_processing_start`, `document_processing_complete`, `document_processing_error`. The chat UI should insert a system message that tracks these events in real-time.
+
+      The context indicator (document count badge, from R2-043) also needs to update when a document is added to context — coordinate with R2-043 on what event triggers the badge update.
+    </background>
+    <dependencies>
+      Depends on R2-040 (upload zone). Can run in parallel with R2-042, R2-043, R2-044.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChat.tsx message array management and types.ts to understand message type discriminators available for system messages</step>
+    <step order="1">Read streaming-endpoints.md to understand document_processing_start/complete/error event shapes from the BFF</step>
+    <step order="2">Add a documentStatus message type to the SprkChatMessage type union in types.ts: { role: "system", type: "documentStatus", documentId: string, filename: string, status: "processing" | "complete" | "error", pageCount?: number, error?: string }</step>
+    <step order="3">On document_processing_start SSE event: insert a new documentStatus message with status="processing" and the filename into the messages array</step>
+    <step order="4">On document_processing_complete SSE event: find the message by documentId and update it to status="complete" with pageCount</step>
+    <step order="5">On document_processing_error SSE event: find the message by documentId and update it to status="error" with the error description</step>
+    <step order="6">Add DocumentStatusMessage rendering to SprkChatMessageRenderer: processing state shows Fluent v9 Spinner + "Processing [filename]..."; complete state shows CheckmarkCircle icon + "Document added to context — [filename], [N] pages"; error state shows ErrorCircle icon + error text</step>
+    <step order="7">Add a 15-second timeout check: if processing_complete event does not arrive within 15 seconds of start, update message to "Still processing [filename]..." with a note to wait</step>
+    <step order="8">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-041 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">types.ts — extended with documentStatus message type</artifact>
+    <artifact type="code">SprkChat.tsx — updated to handle document_processing_start/complete/error SSE events and insert/update documentStatus messages</artifact>
+    <artifact type="code">SprkChatMessageRenderer.tsx — updated to render documentStatus messages with Spinner/checkmark/error icon states</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After file drop, a system message appears: "Processing [filename]..." with Fluent v9 Spinner</criterion>
+    <criterion testable="true">On processing complete, the message updates to "Document added to context — [filename], [N] pages" with CheckmarkCircle icon</criterion>
+    <criterion testable="true">On processing error, the message shows an error description with ErrorCircle icon</criterion>
+    <criterion testable="true">Processing messages do not appear in conversation as user or assistant messages — they are visually distinct system messages</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

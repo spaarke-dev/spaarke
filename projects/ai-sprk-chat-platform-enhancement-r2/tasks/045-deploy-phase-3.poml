@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-045" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Deploy Phase 3 — SprkChatPane and AnalysisWorkspace Web Resources</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>deploy, dataverse</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task following code-page-deploy skill: webpack build + inline HTML + Dataverse web resource upload. Tags include deploy and dataverse. STANDARD rigor for deployment tasks with explicit steps and skill to follow.</rigor-reason>
+    <dependencies>[030, 031, 032, 033, 034, 035, 036, 037, 038, 039, 040, 041, 042, 043, 044]</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 3 frontend changes to Dataverse: build the SprkChatPane Code Page (webpack + inline HTML) and AnalysisWorkspace Code Page (webpack + inline HTML), upload both as Dataverse web resources, and publish customizations. Verify the deployed changes work correctly in the browser — check markdown rendering, typing indicator, and slash command grouping.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Both SprkChatPane and AnalysisWorkspace web resources are updated in Dataverse with all Phase 3 changes. The deployed SprkChatPane shows formatted markdown in chat messages, grouped slash commands, drag-and-drop upload zone, and the Open in Word button. Browser verification confirms no console errors and basic functionality works.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — deployment targets, web resource names">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — deployment skill, web resource names">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Code Page deploy skill — two-step webpack + inline HTML build pipeline">../.claude/skills/code-page-deploy/SKILL.md</file>
+    <file purpose="Dataverse deploy skill — web resource upload procedure">../.claude/skills/dataverse-deploy/SKILL.md</file>
+    <file purpose="SprkChatPane code page — confirm build entry point">src/client/code-pages/SprkChatPane/</file>
+    <file purpose="AnalysisWorkspace code page — confirm build entry point">src/client/code-pages/AnalysisWorkspace/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md skills">MUST use code-page-deploy skill for the two-step build pipeline (webpack → inline HTML) — do not manually inline scripts</constraint>
+    <constraint source="CLAUDE.md skills">MUST use dataverse-deploy skill for web resource upload — do not use raw pac CLI commands directly</constraint>
+    <constraint source="spec">MUST deploy both SprkChatPane AND AnalysisWorkspace — AnalysisWorkspace receives write-back events from SprkChatBridge</constraint>
+    <constraint source="spec">MUST publish customizations after upload — unpublished web resources do not take effect</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/code-pages/SprkChatPane/</file>
+      <file>src/client/code-pages/AnalysisWorkspace/</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern>Code page deploy two-step: (1) webpack build produces bundle.js, (2) inline-html script embeds bundle.js into index.html producing a single .html file for Dataverse web resource upload</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 3 frontend changes (tasks 030-044) are all in the shared component library (Spaarke.UI.Components) and the SprkChatPane/AnalysisWorkspace code pages. These need to be built and deployed as Dataverse web resources before Phase 4 integration testing can begin. The shared library changes are bundled into the code pages — no separate library deployment step is needed.
+    </background>
+    <dependencies>
+      Depends on all Phase 3 tasks (030-044) completing. This is the final Phase 3 task before Phase 4 integration begins.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read code-page-deploy SKILL.md to confirm the exact build and deploy steps for this environment</step>
+    <step order="1">Build SprkChatPane: follow code-page-deploy skill — run webpack in SprkChatPane directory, then run inline-html script</step>
+    <step order="2">Build AnalysisWorkspace: follow code-page-deploy skill — run webpack in AnalysisWorkspace directory, then run inline-html script</step>
+    <step order="3">Upload SprkChatPane web resource to Dataverse using dataverse-deploy skill — confirm web resource name (sprk_sprkchatpane or equivalent)</step>
+    <step order="4">Upload AnalysisWorkspace web resource to Dataverse using dataverse-deploy skill — confirm web resource name</step>
+    <step order="5">Publish customizations to make the new web resource versions live</step>
+    <step order="6">Open SprkChatPane in browser — verify markdown rendering in chat messages (bold, headings visible)</step>
+    <step order="7">Verify slash command menu shows category grouping (System / Playbook / Scope sections)</step>
+    <step order="8">Verify drag-and-drop zone appears when dragging a file over the chat area</step>
+    <step order="9">Check browser console for JavaScript errors — resolve any that appear</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-045 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">Updated SprkChatPane web resource in Dataverse (sprk_sprkchatpane) — Phase 3 frontend changes deployed</artifact>
+    <artifact type="config">Updated AnalysisWorkspace web resource in Dataverse — Phase 3 frontend changes deployed</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SprkChatPane loads without JavaScript errors in the browser console</criterion>
+    <criterion testable="true">Chat messages render formatted markdown (test by sending a message with **bold** text)</criterion>
+    <criterion testable="true">Slash command menu shows grouped categories when / is typed</criterion>
+    <criterion testable="true">Drag-and-drop zone overlay appears when a file is dragged over the chat area</criterion>
+    <criterion testable="true">Open in Word button is visible in the toolbar (may be disabled without matter context — that is expected)</criterion>
+    <criterion testable="true">AnalysisWorkspace loads without JavaScript errors</criterion>
+  </acceptance-criteria>
+</task>

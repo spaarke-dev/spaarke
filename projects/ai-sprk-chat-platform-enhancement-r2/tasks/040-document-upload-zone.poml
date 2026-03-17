@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-040" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Drag-and-Drop Document Upload Zone in SprkChat</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new SprkChatUploadZone.tsx component and modifies SprkChat.tsx. Frontend and fluent-ui tags, new .tsx file. File type validation, upload progress, drag state management add significant complexity. ADR-021 and ADR-012 apply.</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a drag-and-drop upload zone component (`SprkChatUploadZone`) that appears in SprkChat when the user drags a file over the chat area. Validate file types (PDF, DOCX, TXT, MD) and size (max 50MB). Show an upload progress indicator during upload. Apply Fluent v9 styling throughout with full dark mode support.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    A drop zone overlay appears when a user drags a file over the SprkChat area. Accepted file types (PDF, DOCX, TXT, MD) show a "Drop to analyze" invitation; rejected types show an "Unsupported file type" indicator. Files exceeding 50MB show an error. On drop of a valid file, upload begins with a progress indicator. All UI uses Fluent v9 semantic tokens.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-13 document upload via drag-and-drop, NFR-02 processing &lt;15s for &lt;50 pages">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, upload architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Main component — drag event integration point">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="ADR-021 — Fluent v9 design system, dark mode">../.claude/adr/ADR-012-shared-components.md</file>
+    <file purpose="ADR-012 — shared component library patterns">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-13">Accepted file types: PDF (.pdf), DOCX (.docx), TXT (.txt), Markdown (.md) — reject all other types with a user-visible error</constraint>
+    <constraint source="spec FR-13">Maximum file size: 50MB — validate before initiating upload, show clear error for oversized files</constraint>
+    <constraint source="ADR-021">Drop zone overlay MUST use Fluent v9 semantic tokens for all colors — dragover active state, accepted state, rejected state use distinct semantic tokens</constraint>
+    <constraint source="ADR-012">SprkChatUploadZone MUST be a self-contained component accepting an onUpload callback prop — no direct BFF calls inside the component</constraint>
+    <constraint source="spec MUST">MUST NOT log document content — the upload component handles only the file bytes; text extraction happens in the BFF</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern>HTML5 drag-and-drop: onDragOver/onDragEnter set isDragging=true (prevent default); onDragLeave/onDrop set isDragging=false — use dragCounter ref to handle nested element drag events correctly</pattern>
+      <pattern>File type validation: check file.type MIME type AND file extension as fallback (MIME types can be empty for some .md files)</pattern>
+      <pattern>Upload progress: use XMLHttpRequest with progress event OR fetch with ReadableStream to track upload progress percentage</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R2 allows users to upload documents directly into the SprkChat session for analysis. The upload zone is an overlay that appears only when dragging — it does not take up permanent space in the chat layout. This is the UI layer; the BFF upload endpoint (task R2-013) handles processing. The upload zone calls an `onUpload(file: File)` callback prop, which SprkChat.tsx uses to call the BFF endpoint.
+
+      Chat session context: ChatHostContext (e.g., which matter is open) is needed by the BFF to associate the session — the upload zone component does not need it, but SprkChat.tsx passes the session ID in the upload request.
+    </background>
+    <dependencies>
+      Depends on R2-006 (Phase 1 deploy, session infrastructure). Can run in parallel with R2-030-039. Tasks R2-041 (upload processing feedback) and R2-042 (save to matter files) depend on this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChat.tsx to understand the current component structure, layout, and how to integrate a drag overlay without disrupting existing chat layout</step>
+    <step order="1">Create SprkChatUploadZone.tsx in the SprkChat directory — props: isDragging, isValidFileType, onDrop, uploadProgress (0-100 | null), error string | null</step>
+    <step order="2">Implement drag-and-drop detection in SprkChat.tsx: add onDragOver/onDragEnter/onDragLeave/onDrop handlers; use a dragCounter ref to handle nested element enter/leave correctly; set isDragging state</step>
+    <step order="3">Pass the dragged file's type to SprkChatUploadZone — validate against accepted MIME types: application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/plain, text/markdown</step>
+    <step order="4">Implement file size check on drop: if file.size > 52428800 (50MB), set an error state and do not call onUpload</step>
+    <step order="5">On valid file drop, call the onUpload(file) prop with the File object — this bubbles up to SprkChat.tsx which calls the BFF endpoint</step>
+    <step order="6">Add upload progress tracking in SprkChat.tsx: use XMLHttpRequest with progress event to track upload percentage (0-100); pass to SprkChatUploadZone as uploadProgress prop</step>
+    <step order="7">Style SprkChatUploadZone: full-area overlay with semi-transparent background using colorNeutralBackground1Alpha, border using colorBrandStroke1, icon (DocumentAdd) centered — accepted state vs rejected state have distinct visual treatment</step>
+    <step order="8">Style upload progress: Fluent v9 ProgressBar component showing upload percentage</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-040 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SprkChatUploadZone.tsx — new drag-and-drop overlay component with file type validation, size validation, progress indicator</artifact>
+    <artifact type="code">SprkChat.tsx — updated with drag event handlers, onUpload callback, upload progress state management</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dragging a file over SprkChat shows the drop zone overlay</criterion>
+    <criterion testable="true">Dragging a PDF/DOCX/TXT/MD file shows "Drop to analyze" invitation (accepted state)</criterion>
+    <criterion testable="true">Dragging an unsupported file type (e.g., .jpg) shows rejection indicator</criterion>
+    <criterion testable="true">Dropping a file larger than 50MB shows an error and does not initiate upload</criterion>
+    <criterion testable="true">Dropping a valid file triggers upload with visible progress indicator (0-100%)</criterion>
+    <criterion testable="true">All styles use Fluent v9 semantic tokens — dark mode renders correctly</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

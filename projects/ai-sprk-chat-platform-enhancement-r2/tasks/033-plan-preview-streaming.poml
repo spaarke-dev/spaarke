@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-033" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>PlanPreviewCard SSE Plan Step Progress Streaming</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies PlanPreviewCard.tsx with streaming state management for plan step execution progress. Frontend tag, .tsx file modification. Real-time SSE event handling for plan steps adds complexity.</rigor-reason>
+    <dependencies>[031]</dependencies>
+  </metadata>
+
+  <prompt>
+    Update `PlanPreviewCard` to display real-time plan step execution progress streamed via SSE. Handle `plan_step_start` and `plan_step_complete` SSE events to show each step transitioning from pending → running → complete with visual progress indicators. Support a cancel button to abort mid-execution via the AbortController from useSseStream.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    PlanPreviewCard displays plan steps with live status indicators: pending (clock icon), running (spinner), complete (checkmark). Step indicators update in real-time as `plan_step_start` and `plan_step_complete` SSE events arrive. A cancel button is visible during execution and aborts the stream when clicked. Visual design uses Fluent v9 semantic tokens for all states.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-04 write-back streaming, plan preview patterns">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — streaming architecture, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Component to modify — current plan preview card">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+    <file purpose="SSE streaming hook — cancellation and event handling patterns">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file purpose="ADR-021 — Fluent v9 semantic tokens, motion, dark mode">../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="SSE streaming canonical pattern">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Step status icons (pending, running, complete) MUST use Fluent v9 icons from @fluentui/react-icons — no custom SVG icons</constraint>
+    <constraint source="ADR-021">Step status colors MUST use Fluent v9 semantic tokens: colorStatusSuccessForeground1 for complete, colorBrandForeground1 for running, colorNeutralForeground3 for pending</constraint>
+    <constraint source="spec MUST">Cancellation MUST use the AbortController cancel() function from useSseStream — not a UI-only cancel that leaves the stream open</constraint>
+    <constraint source="spec MUST">MUST NOT cache streaming tokens (ADR-014) — step status updates are ephemeral; only final plan result is persisted</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern>SSE plan step events from BFF: plan_step_start {stepId, stepName}, plan_step_complete {stepId, stepName, output} — handle these in useSseStream event dispatch</pattern>
+      <pattern>Fluent v9 Spinner for running state: import Spinner from @fluentui/react-components, size="extra-small"</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R1 implemented PlanPreviewCard to show a static list of plan steps before execution. R2 requires real-time step execution feedback: as the BFF executes each plan step, SSE events (`plan_step_start`, `plan_step_complete`) arrive and the card must update to show execution progress. This is the plan execution UI counterpart to the SSE streaming chat text in task R2-031.
+
+      The BFF emits `plan_step_start` when beginning a step (show spinner on that step) and `plan_step_complete` when a step finishes (show checkmark). If execution is cancelled or errors, steps that did not complete show as pending or error state.
+    </background>
+    <dependencies>
+      Depends on R2-031 (useSseStream enhancement for AbortController and event dispatch). Can run in parallel with R2-030 and R2-032. Task R2-034 (dark mode audit) depends on this.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read PlanPreviewCard.tsx to understand current step rendering, props, and state structure</step>
+    <step order="1">Read useSseStream.ts (after R2-031 changes) to understand how plan_step_start and plan_step_complete events are dispatched from the hook</step>
+    <step order="2">Add plan step execution state to PlanPreviewCard: a stepStatuses map (stepId → "pending" | "running" | "complete" | "error")</step>
+    <step order="3">Wire plan_step_start events from SSE: set stepStatuses[stepId] = "running", show Fluent v9 Spinner on that step row</step>
+    <step order="4">Wire plan_step_complete events from SSE: set stepStatuses[stepId] = "complete", show Fluent v9 CheckmarkCircle icon (colorStatusSuccessForeground1)</step>
+    <step order="5">Show pending steps with Clock icon (colorNeutralForeground3) before execution starts</step>
+    <step order="6">Add cancel button (Fluent v9 Button, appearance="subtle") visible during execution — calls the cancel() function passed via props from SprkChat</step>
+    <step order="7">Handle error state: if SSE error event fires during execution, mark unfinished steps as "error" with ErrorCircle icon (colorStatusDangerForeground1)</step>
+    <step order="8">Verify PlanPreviewCard receives the cancel function and step event callbacks as props from SprkChat — update SprkChat.tsx to pass them</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-033 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">PlanPreviewCard.tsx — updated with real-time step status tracking, SSE event handlers, cancel button</artifact>
+    <artifact type="code">SprkChat.tsx — updated to pass cancel function and step event callbacks to PlanPreviewCard</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When plan execution begins, step rows show Spinner for the running step and Clock icons for pending steps</criterion>
+    <criterion testable="true">On plan_step_complete event, the step row transitions from Spinner to CheckmarkCircle icon (green semantic token)</criterion>
+    <criterion testable="true">Cancel button appears during execution; clicking it aborts the SSE stream</criterion>
+    <criterion testable="true">On SSE error, unfinished steps show ErrorCircle icon (red semantic token)</criterion>
+    <criterion testable="true">All step status colors use Fluent v9 semantic tokens — no hard-coded color values</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

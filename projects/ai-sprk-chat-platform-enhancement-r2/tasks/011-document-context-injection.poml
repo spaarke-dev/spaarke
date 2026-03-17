@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-011" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Context Injection Service — Conversation-Aware Semantic Chunking with 30K Token Budget</title>
+    <status>pending</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, document-intelligence</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates a new DocumentContextService class with complex AI logic (embedding similarity, chunk selection, token budget management); critical for FR-02 and FR-03; downstream tasks R2-012 and R2-013 depend on this class</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new class `DocumentContextService` in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` that
+    injects source document content into SprkChat conversations within a 30K token budget using
+    conversation-aware semantic chunking.
+
+    **Class design** (factory-instantiated, NOT DI-registered per ADR-010):
+    ```csharp
+    public class DocumentContextService
+    {
+        public DocumentContextService(SpeFileStore speFileStore, SemanticDocumentChunker chunker,
+            IChatClient embeddingClient, IDistributedCache cache) { ... }
+
+        public Task&lt;DocumentContextResult&gt; InjectDocumentContextAsync(
+            string sessionId, string documentId, IReadOnlyList&lt;ChatMessage&gt; chatHistory,
+            CancellationToken cancellationToken = default);
+    }
+    ```
+
+    **Behavior**:
+    1. Retrieve document binary from `SpeFileStore.GetFileAsync(documentId)` using the facade (not Graph SDK)
+    2. Extract text via `SemanticDocumentChunker` (or appropriate existing text extraction service) — produces
+       a list of `DocumentChunk` records with text, token count, and position metadata
+    3. If total document tokens &lt;= 30K: inject all chunks verbatim into the system prompt section
+    4. If total document tokens &gt; 30K (conversation-aware re-selection):
+       a. Generate an embedding for the latest user message in `chatHistory`
+       b. Score each chunk by cosine similarity to the latest message embedding
+       c. Select top-N chunks that fit within the 30K token budget (greedy by similarity score)
+       d. Include positional context header ("Showing sections most relevant to your question...")
+    5. Return `DocumentContextResult` containing: selected chunks, total tokens used, whether truncation occurred
+    6. Integrate with `PlaybookChatContextProvider` — the context provider calls `InjectDocumentContextAsync`
+       and appends the selected chunks to the document context section of the system prompt
+
+    **Data governance**: MUST NOT log chunk text content per ADR-015. Log only metadata: document ID,
+    total chunks, selected chunk count, token budget used.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `DocumentContextService` exists in `Services/Ai/Chat/`, is factory-instantiated by `SprkChatAgentFactory`,
+    correctly retrieves document content via `SpeFileStore`, performs conversation-aware chunk selection within
+    the 30K token budget, and integrates with `PlaybookChatContextProvider` to inject chunks into the system
+    prompt. AI can answer questions about document content without the user pasting text (FR-02). Asking about
+    different document sections in sequence surfaces the relevant section content (FR-03).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-02, FR-03, NFR-05 (128K window), NFR-02 (15s processing), ADR-015 data governance">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DI budget constraint, factory pattern, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Playbook context provider — integration point for document chunk injection">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    <file purpose="Agent factory — factory instantiation pattern to follow for new services">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="Text extraction pattern — document chunking and routing">../.claude/patterns/ai/text-extraction.md</file>
+    <file purpose="SpeFileStore facade — how to retrieve document content without Graph SDK leakage">src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-007">MUST use SpeFileStore facade for all document retrieval — MUST NOT inject or use GraphServiceClient above the facade</constraint>
+    <constraint source="ADR-010">MUST NOT add DocumentContextService to DI — MUST be instantiated by SprkChatAgentFactory.ResolveTools() or the agent factory method; DI budget is already at 16 (over limit)</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext through the pipeline; MUST use SpeFileStore for file operations; MUST extend BFF, not a separate service</constraint>
+    <constraint source="ADR-015">MUST NOT log document text content — log only document ID, chunk counts, and token budget metadata; MUST send minimum necessary text to AI model</constraint>
+    <constraint source="spec NFR-05">MUST NOT exceed 128K total token context window — 30K document budget is part of the overall budget; enforce hard limit with graceful truncation</constraint>
+    <constraint source="spec FR-03">Chunk selection MUST be conversation-aware: re-select relevant chunks using embedding similarity to the latest user message after each turn (not static selection at session init)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtraction/</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Factory instantiation: SprkChatAgentFactory.ResolveTools() uses `new ServiceClass(dep1, dep2)` with dependencies resolved from IServiceProvider — follow this exact pattern for DocumentContextService</pattern>
+      <pattern>Cosine similarity for chunk selection: embed the latest user message, compute dot product against pre-computed chunk embeddings, sort descending, select greedy until token budget exhausted</pattern>
+      <pattern>Token counting: use existing token counting utility in the codebase (check TextExtractionService or a TokenCounter helper) rather than creating a new one</pattern>
+      <pattern>PlaybookChatContextProvider integration: the context provider builds a system prompt string — append document chunks to the "document context" section following the existing 8K playbook context section</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 could only reason about content the user explicitly pasted into the chat. R2 introduces
+      automatic document context injection: when a session opens with a document ID (from AnalysisWorkspace),
+      `DocumentContextService` retrieves the document, chunks it, and injects the most relevant sections into
+      the system prompt. The 30K token budget is the document's allocation within the overall 128K context
+      window — it leaves room for playbook context (8K), conversation history, and the model's response.
+
+      Conversation-aware re-selection (FR-03) means that after each user message, the service re-evaluates
+      which document chunks are most relevant to the conversation so far. This adds per-turn latency but
+      dramatically improves accuracy for long documents where the user asks about different sections in sequence.
+
+      `SemanticDocumentChunker` or an equivalent text extraction service should already exist in
+      `Services/Ai/TextExtraction/` — use it rather than re-implementing chunking logic. If it does not
+      exist, create a minimal wrapper around Document Intelligence's chunking output.
+    </background>
+    <dependencies>
+      Depends on Task R2-006 (Phase 1 deployment). Safe to run in parallel with R2-010, R2-013, R2-014,
+      R2-015 through R2-019. Task R2-012 depends on this task (multi-document extends DocumentContextService).
+      Task R2-013 (document upload) calls DocumentContextService after extraction. Own files:
+      `Services/Ai/Chat/DocumentContextService.cs` and `Models/Ai/Chat/DocumentContextResult.cs`.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `PlaybookChatContextProvider.cs` and `SprkChatAgentFactory.cs` to understand the existing context injection pattern and factory instantiation approach</step>
+    <step order="1">Read `.claude/patterns/ai/text-extraction.md` and explore `Services/Ai/TextExtraction/` to identify the existing chunking/extraction classes available</step>
+    <step order="2">Read `SpeFileStore.cs` to understand the correct facade method for file retrieval (likely `GetFileAsync` or `GetFileContentAsync`)</step>
+    <step order="3">Design the `DocumentContextResult` model: `{ SelectedChunks: IReadOnlyList&lt;DocumentChunk&gt;, TotalTokensUsed: int, WasTruncated: bool, TruncationReason: string? }`</step>
+    <step order="4">Create `DocumentContextService.cs` in `Services/Ai/Chat/` with the constructor signature taking `SpeFileStore`, `SemanticDocumentChunker` (or equivalent), `IChatClient` for embeddings, and `IDistributedCache`</step>
+    <step order="5">Implement `InjectDocumentContextAsync`: retrieve document via SpeFileStore, extract/chunk text, count total tokens</step>
+    <step order="6">Implement the budget check: if total tokens &lt;= 30K inject all; if &gt; 30K implement conversation-aware re-selection using embedding similarity to latest user message</step>
+    <step order="7">Implement cosine similarity scoring and greedy chunk selection up to the 30K token budget limit</step>
+    <step order="8">Add logging for metadata only (document ID, chunk counts, tokens used) — MUST NOT log chunk text per ADR-015</step>
+    <step order="9">Wire `DocumentContextService` into `SprkChatAgentFactory` using factory instantiation (not DI registration); wire into `PlaybookChatContextProvider` so chunks are appended to system prompt</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` — verify no build errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-011 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DocumentContextService.cs — new service for document context injection with conversation-aware chunking</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentContextResult.cs — result model with selected chunks, token usage, truncation metadata</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs — updated to factory-instantiate DocumentContextService</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs — updated to call DocumentContextService and append chunks to system prompt</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When a session opens with a document ID, the AI system prompt contains text from that document (verified by inspecting system prompt in debug logging with ADR-015 compliant log level)</criterion>
+    <criterion testable="true">When a document exceeds 30K tokens, only chunks fitting within the budget are selected (no context window overflow)</criterion>
+    <criterion testable="true">When the user asks about section 8 of a long document after initially asking about section 1, the system prompt for the second turn contains section 8 chunks (conversation-aware re-selection)</criterion>
+    <criterion testable="true">DocumentContextService is NOT registered in the DI container — verify by checking the AiModule/ServiceCollectionExtensions registrations remain at current count</criterion>
+    <criterion testable="true">No document chunk text appears in application logs at any log level (ADR-015 compliance)</criterion>
+    <criterion testable="true">SpeFileStore is the only file retrieval mechanism used — no direct GraphServiceClient calls in DocumentContextService</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors introduced by this task</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 30K token budget for document context is one part of the overall 128K context window. The full
+    breakdown is roughly: 8K playbook context, 30K document context, ~40K conversation history, ~50K
+    model response headroom. Never let the sum exceed 128K — `DocumentContextService` should enforce its
+    own 30K limit and trust `PlaybookChatContextProvider` to enforce the overall budget.
+
+    If `SemanticDocumentChunker` does not exist in `Services/Ai/TextExtraction/`, look for an equivalent
+    class that wraps Document Intelligence chunking output. Do not implement paragraph-based chunking from
+    scratch — reuse existing extraction infrastructure. Document the actual class name used in
+    `notes/011-document-context-classes.md` for downstream tasks R2-012 and R2-013 to reference.
+
+    Task R2-012 (multi-document) will extend this class — design `InjectDocumentContextAsync` with a
+    single document ID to keep the interface simple; R2-012 will add the multi-document overload.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group A — safe to run after R2-006 completes, in parallel with R2-010, R2-013 through R2-019. Own files: DocumentContextService.cs, DocumentContextResult.cs, updates to SprkChatAgentFactory.cs and PlaybookChatContextProvider.cs. Task R2-012 depends on this task completing first.</protocol>
+  </execution>
+</task>

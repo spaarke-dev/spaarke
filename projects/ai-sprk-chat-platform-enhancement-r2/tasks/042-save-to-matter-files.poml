@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-042" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Save Uploaded Document to Matter Files (SPE Persistence UX)</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChat.tsx to add SPE persistence action button on document status messages. Frontend tag, .tsx modification. Requires ChatHostContext availability check and BFF endpoint call for SPE persistence. Connects to SpeFileStore via BFF.</rigor-reason>
+    <dependencies>[040]</dependencies>
+  </metadata>
+
+  <prompt>
+    After a document is successfully uploaded and processed, show a "Save to matter files" action button on the document status message. On click, call the BFF SPE persistence endpoint to save the uploaded document to the matter's SPE container. Show success with a file link and failure with an error message. The action is only available when ChatHostContext has matter/container information.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Processed documents show a "Save to matter files" action button (Fluent v9 Button, appearance="primary") in their status message. Clicking it calls the BFF persistence endpoint. On success, the button is replaced with "Saved — [View in Files]" with a link. On failure, shows an error toast. The button is not shown when no matter context (containerId) is available.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-14 optional SPE persistence, ChatHostContext">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — SpeFileStore pattern, ChatHostContext flow">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Main component — ChatHostContext access, document status message actions">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="Message renderer — document status message rendering with actions">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+    <file purpose="ADR-013 — SpeFileStore pattern, ChatHostContext flow">../.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="ADR-021 — Fluent v9 Button, Toast usage">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">MUST use SpeFileStore via BFF API (POST /api/ai/chat/sessions/{id}/documents/{docId}/persist) — no direct SharePoint API calls from frontend</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext (containerId, entityId) to the BFF persistence endpoint — required for SPE container identification</constraint>
+    <constraint source="spec FR-14">Save action MUST only appear when ChatHostContext contains a matter/container context — hide if containerId is absent</constraint>
+    <constraint source="ADR-021">Save action button MUST use Fluent v9 Button — no custom button implementations</constraint>
+    <constraint source="spec NFR-06">After SPE persistence, the session-scoped temp document remains for the chat session — the save action creates a COPY in SPE, does not move</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF persistence endpoint (R2-014): POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist — returns { fileUrl: string, filename: string }</pattern>
+      <pattern>ChatHostContext in SprkChat: read containerId from existing context props — if null/undefined, do not show save button</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Documents uploaded to SprkChat are stored as session-scoped temporary files in BFF memory or Azure Blob (task R2-013). They are automatically cleaned up when the session ends (NFR-06). The user may want to persist the document to the matter's SPE container for future access — this is optional and user-initiated.
+
+      The BFF persistence endpoint (R2-014) copies the session document to the SPE container and returns the SharePoint file URL. The frontend shows this URL as a "View in Files" link after successful save.
+    </background>
+    <dependencies>
+      Depends on R2-040 (upload zone creates session documents). Can run in parallel with R2-041, R2-043, R2-044. Connects to BFF task R2-014 during Phase 4 integration.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChat.tsx to understand how ChatHostContext is accessed and what containerId/entityId fields are available</step>
+    <step order="1">Read the documentStatus message type (from R2-041 types.ts extension) to understand where to attach persistence state</step>
+    <step order="2">Add persistenceState to the documentStatus message type: "idle" | "saving" | "saved" | "error", plus savedFileUrl?: string</step>
+    <step order="3">Update SprkChatMessageRenderer: on documentStatus messages with status="complete", show "Save to matter files" button (Fluent v9 Button, appearance="primary") only if ChatHostContext.containerId is truthy</step>
+    <step order="4">Wire the save button onClick: call POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist with containerId in request body; update message persistenceState to "saving" (show Spinner on button)</step>
+    <step order="5">On success: update message persistenceState to "saved" and savedFileUrl from response; replace button with "Saved — View in Files" link (Fluent v9 Link component, opens new tab)</step>
+    <step order="6">On failure: update message persistenceState to "error"; show Fluent v9 Toast error notification with error message; restore save button</step>
+    <step order="7">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-042 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">types.ts — documentStatus message type extended with persistenceState and savedFileUrl</artifact>
+    <artifact type="code">SprkChatMessageRenderer.tsx — "Save to matter files" button rendered for completed documents when containerId is available</artifact>
+    <artifact type="code">SprkChat.tsx — save action handler calling BFF persistence endpoint with ChatHostContext</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After document processing completes, "Save to matter files" button appears (when containerId is present)</criterion>
+    <criterion testable="true">When no matter context (containerId is null), the save button is not shown</criterion>
+    <criterion testable="true">Clicking save button shows loading state on the button, calls BFF endpoint</criterion>
+    <criterion testable="true">On success, button is replaced with "Saved — View in Files" link that opens SharePoint URL in a new tab</criterion>
+    <criterion testable="true">On failure, error toast appears and save button is restored</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

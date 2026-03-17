@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-053" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Dynamic Slash Command Integration — Context Mapping to Slash Menu</title>
+    <status>pending</status>
+    <phase>4</phase>
+    <tags>frontend, integration</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task wiring BFF context mapping endpoint (R2-019, R2-020, R2-021) to frontend slash menu (R2-035, R2-036, R2-037). Tags include frontend, integration. Tests dynamic command catalog generation from multiple BFF sources and command execution routing.</rigor-reason>
+    <dependencies>[019, 020, 021, 035, 036, 037]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the BFF dynamic command resolution endpoint (R2-019) to the frontend slash command pipeline (R2-035 through R2-037). Verify the context mapping endpoint returns commands from all three sources (playbook actions, context-matched playbooks, scope capabilities) and they appear correctly in the grouped slash menu. Verify command execution routes to the correct handler (playbook action, scope capability, or system command).
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Opening SprkChat on an analysis record shows dynamically resolved slash commands in the menu, grouped by System/Playbook/Scope categories. Commands from a different analysis record type show a different set of playbook commands. Executing a slash command routes to the correct BFF handler. System commands always appear regardless of context.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-05 dynamic slash commands, FR-11 scope capabilities, FR-17 metadata-driven catalog">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — command resolution architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF command resolution endpoint — R2-019 implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="Frontend command resolution hook — R2-035 implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+    <file purpose="SlashCommandMenu — R2-036 grouped menu">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    <file purpose="Analysis scopes pattern — scope capability model">../.claude/patterns/ai/analysis-scopes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-17">Command catalog MUST be auto-generated from metadata — verify no hard-coded command lists exist in either BFF or frontend</constraint>
+    <constraint source="spec">Different analysis record types MUST show different playbook commands — verify by testing with two different analysis record types</constraint>
+    <constraint source="spec">Scope commands MUST appear independently of active playbook — verify scope commands remain after playbook switch</constraint>
+    <constraint source="spec">System commands MUST always appear — verify /help and other system commands are always present regardless of context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+    </files>
+    <patterns>
+      <pattern>Verification approach: use Dataverse test records — open SprkChat on a matter record vs a contract record and compare the slash menu contents</pattern>
+      <pattern>Command execution routing: slash command with source="playbook" routes to PlaybookDispatcher; source="scope" routes to scope tool handler; source="system" routes to local handler</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks R2-019-021 (BFF) and R2-035-037 (frontend) were implemented in Phases 2 and 3. This integration task verifies the full pipeline: BFF metadata-driven command resolution → frontend hook → slash menu. The key validation is that commands differ by analysis record type (proving metadata-driven, not static).
+    </background>
+    <dependencies>
+      Depends on R2-019 (command resolution service), R2-020 (AnalysisChatContextResolver), R2-021 (scope capabilities service), R2-035 (frontend resolution), R2-036 (menu grouping), R2-037 (scope commands).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the BFF command resolution endpoint (R2-019) implementation to understand the response format and how commands are categorized</step>
+    <step order="1">Read useChatContextMapping.ts (after R2-035 and R2-037 changes) to understand how BFF response is parsed and merged</step>
+    <step order="2">Open SprkChat on a matter analysis record — verify /commands endpoint is called and returns commands</step>
+    <step order="3">Verify slash menu shows three groups (System, Playbook, Scope) when / is typed in SprkChatInput</step>
+    <step order="4">Open SprkChat on a different analysis record type — verify the Playbook group shows different commands</step>
+    <step order="5">Verify System commands (e.g., /help, /clear) appear in both contexts</step>
+    <step order="6">Verify scope commands appear in both contexts when the same scope is active</step>
+    <step order="7">Execute a playbook command from the slash menu — verify it routes to the PlaybookDispatcher (check BFF logs or network request)</step>
+    <step order="8">Execute a scope command from the slash menu — verify it routes to the scope tool handler</step>
+    <step order="9">Fix any routing mismatches, endpoint URL issues, or response format mismatches found</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-053 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to useChatContextMapping.ts command parsing or routing logic</artifact>
+    <artifact type="code">Any fixes to BFF command resolution response format or endpoint URL</artifact>
+    <artifact type="docs">notes/053-command-integration-findings.md — command routing results, issues found</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Slash menu on a matter analysis record shows playbook commands specific to matter analysis</criterion>
+    <criterion testable="true">Slash menu on a different record type shows different playbook commands</criterion>
+    <criterion testable="true">System commands appear in all contexts</criterion>
+    <criterion testable="true">Scope commands appear independent of active playbook</criterion>
+    <criterion testable="true">Executing a playbook slash command triggers the PlaybookDispatcher flow</criterion>
+  </acceptance-criteria>
+</task>

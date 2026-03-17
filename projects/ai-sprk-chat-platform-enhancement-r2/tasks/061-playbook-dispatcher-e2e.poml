@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-061" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Playbook Dispatcher End-to-End Tests</title>
+    <status>pending</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit test cases for PlaybookDispatcher. Tags include testing and integration-test. STANDARD rigor: new test files, explicit NFR-04 timing constraint, tests both HITL and autonomous execution paths.</rigor-reason>
+    <dependencies>[052]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the PlaybookDispatcher covering: semantic matching accuracy (correct playbook matched), parameter extraction (correct values extracted from natural language), HITL vs autonomous execution path selection, and dispatch timing (NFR-04: &lt;2 seconds for vector search + LLM refinement). Tests should mock the AI Search index for deterministic matching.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests exist and pass for: PlaybookDispatcher correctly matches "send this by email" to the email playbook, correctly extracts the recipient from "send to john@example.com", selects HITL path for dialog output type, selects autonomous path for text output type, and completes dispatch within 2 seconds.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-06, FR-07, FR-08, NFR-04 PlaybookDispatcher requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — PlaybookDispatcher architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="PlaybookDispatcher service under test">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="ADR-013 — AI architecture, tool framework">../.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="ADR-016 — rate limiting">../.claude/adr/ADR-016-ai-rate-limits.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-04">Dispatch MUST complete within 2 seconds — tests MUST measure wall-clock time and assert the bound</constraint>
+    <constraint source="spec">Tests MUST cover both HITL (requiresConfirmation=true) and autonomous (requiresConfirmation=false) paths</constraint>
+    <constraint source="spec">Tests MUST mock AI Search index for deterministic matching — avoid real vector search in automated tests</constraint>
+    <constraint source="spec">Parameter extraction accuracy test: provide at least 3 different natural language phrasings and verify correct extraction</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>tests/</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>Mock AI Search for testing: create a FakePlaybookSearchService implementing IPlaybookSearchService that returns deterministic matches based on input text pattern</pattern>
+      <pattern>Mock LLM for parameter extraction: create a FakeChatCompletionService that returns a JSON parameter extraction result for known test phrases</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      PlaybookDispatcher integration was verified manually in R2-052. This Phase 5 task creates automated tests that mock the AI dependencies (vector search, LLM refinement) for determinism and speed, while still testing the full dispatch logic, parameter extraction, and output routing.
+    </background>
+    <dependencies>
+      Depends on R2-052 (playbook dispatch integration). Phase 5, runs after Phase 4 deploy (R2-058).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Locate the PlaybookDispatcher service implementation and identify its injectable dependencies (IPlaybookSearchService, IChatCompletionService, etc.)</step>
+    <step order="1">Create FakePlaybookSearchService that returns a mock email playbook match for input containing "email" or "send"</step>
+    <step order="2">Create FakeLlmParameterExtractor that returns {"recipient":"john@example.com"} for input containing "john@example.com"</step>
+    <step order="3">Write test: DispatcherMatchesEmailPlaybook — input "send this by email to john@example.com", assert email playbook is matched</step>
+    <step order="4">Write test: DispatcherExtractsRecipient — assert recipient="john@example.com" is in the extracted parameters</step>
+    <step order="5">Write test: HitlPath_ReturnsDialogOutput — for playbook with requiresConfirmation=true, assert dispatch result has OutputType=Dialog</step>
+    <step order="6">Write test: AutonomousPath_ExecutesDirectly — for playbook with requiresConfirmation=false, assert dispatch result has OutputType=Text and no dialog event emitted</step>
+    <step order="7">Write test: DispatchCompletes_WithinTwoSeconds — measure wall-clock time for dispatch with mock services, assert under 2000ms</step>
+    <step order="8">Write test: NoMatchFound_ReturnsNullDispatch — input with no matching trigger phrases, assert dispatcher returns null/no-match result gracefully</step>
+    <step order="9">Run tests: dotnet test tests/ --filter "PlaybookDispatcher" — verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-061 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">PlaybookDispatcherIntegrationTests.cs — xUnit tests for matching, parameter extraction, HITL/autonomous paths, timing</artifact>
+    <artifact type="code">FakePlaybookSearchService.cs — mock AI Search for deterministic testing</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "PlaybookDispatcher" exits with 0 failures</criterion>
+    <criterion testable="true">DispatcherMatchesEmailPlaybook test passes</criterion>
+    <criterion testable="true">DispatcherExtractsRecipient test passes (correct parameter extraction)</criterion>
+    <criterion testable="true">HitlPath_ReturnsDialogOutput test passes</criterion>
+    <criterion testable="true">AutonomousPath_ExecutesDirectly test passes</criterion>
+    <criterion testable="true">DispatchCompletes_WithinTwoSeconds test passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-065" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Rate Limiting and Backpressure Verification Tests</title>
+    <status>pending</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task verifying ADR-016 compliance across all new AI endpoints. Tags include testing and integration-test. STANDARD rigor: new test files, tests 429/503 responses with ProblemDetails format, concurrency bounds. Explicit ADR-016 constraint compliance.</rigor-reason>
+    <dependencies>[024]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests verifying ADR-016 rate limiting compliance for all new AI endpoints added in R2 (SSE streaming, dispatcher, upload, export). Tests verify: 429 responses are returned (with ProblemDetails format, ADR-019) when rate limits are exceeded, 503 responses are returned when concurrency bounds are exceeded, and Retry-After headers are included in 429 responses.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests verify that all R2 AI endpoints return properly formatted 429/503 ProblemDetails responses when rate/concurrency limits are exceeded. Tests confirm Retry-After header is present on 429 responses. Existing tests for Phase 1 endpoints continue to pass (no regression).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — NFR-07 rate limiting on all AI endpoints">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — rate limiting architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Rate limiting implementation — R2-024">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="ADR-016 — rate limiting requirements, concurrency bounds">../.claude/adr/ADR-016-ai-rate-limits.md</file>
+    <file purpose="ADR-019 — ProblemDetails format for error responses">../.claude/adr/ADR-019-problemdetails.md</file>
+    <file purpose="Endpoint filters pattern — how rate limiting is applied">../.claude/patterns/api/endpoint-filters.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-016">429 MUST include Retry-After header — verify presence in test assertions</constraint>
+    <constraint source="ADR-019">Rate limit error responses MUST use ProblemDetails format — assert Content-Type: application/problem+json</constraint>
+    <constraint source="spec NFR-07">ALL R2 AI endpoints MUST be rate limited — verify: SSE streaming, dispatcher, upload, export endpoints</constraint>
+    <constraint source="ADR-016">503 for concurrency exceeded MUST also use ProblemDetails format — not a generic error string</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>tests/</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern>Rate limit test approach: configure test environment with low rate limit (e.g., 2 requests/minute), send 3 requests, assert third returns 429</pattern>
+      <pattern>ProblemDetails assertion: assert response.Content.Headers.ContentType.MediaType == "application/problem+json" and response body has "type", "title", "status" fields</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task R2-024 applied rate limiting to all new R2 endpoints. This verification task creates automated tests to confirm all endpoints are covered and produce correctly formatted error responses per ADR-016 and ADR-019.
+    </background>
+    <dependencies>
+      Depends on R2-024 (rate limiting applied). Phase 5, after R2-058.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read ADR-016-ai-rate-limits.md to understand the rate limiting configuration (requests per minute, concurrency bounds) for this project</step>
+    <step order="1">Identify all R2 AI endpoints that require rate limiting: SSE chat endpoint, dispatcher endpoint, upload endpoint, export endpoint</step>
+    <step order="2">Configure test application factory with low rate limits (e.g., 2 req/min) for deterministic testing</step>
+    <step order="3">Write test: SseEndpoint_Returns429_WhenRateLimited — send requests exceeding limit, assert 429 with ProblemDetails and Retry-After header</step>
+    <step order="4">Write test: DispatcherEndpoint_Returns429_WhenRateLimited — same for dispatcher endpoint</step>
+    <step order="5">Write test: UploadEndpoint_Returns429_WhenRateLimited — same for upload endpoint</step>
+    <step order="6">Write test: ExportEndpoint_Returns429_WhenRateLimited — same for export endpoint</step>
+    <step order="7">Write test: ConcurrencyExceeded_Returns503 — configure concurrency limit to 1, send 2 concurrent requests, assert second returns 503 with ProblemDetails</step>
+    <step order="8">Write test: RateLimitResponse_HasProblemDetailsFormat — assert all rate limit responses have Content-Type: application/problem+json and required ProblemDetails fields</step>
+    <step order="9">Run tests: dotnet test tests/ --filter "RateLimit" — verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-065 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">RateLimitingIntegrationTests.cs — xUnit tests for 429/503 responses across all R2 AI endpoints</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "RateLimit" exits with 0 failures</criterion>
+    <criterion testable="true">429 responses for all four R2 AI endpoints (SSE, dispatcher, upload, export) are verified by tests</criterion>
+    <criterion testable="true">429 responses include Retry-After header</criterion>
+    <criterion testable="true">All rate limit error responses have Content-Type: application/problem+json</criterion>
+    <criterion testable="true">ConcurrencyExceeded_Returns503 test passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-012" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Multi-Document Context — Shared 30K Token Budget Across Document Sets with Proportional Allocation</title>
+    <status>pending</status>
+    <phase>2</phase>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — extends DocumentContextService with multi-document overload; implements proportional budget allocation and cross-document chunk ranking; supports FR-12 (multi-document analysis)</rigor-reason>
+    <dependencies>[011]</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend `DocumentContextService` (created in Task R2-011) to support multi-document analysis where
+    multiple document IDs share a single 30K token budget with intelligent proportional allocation.
+
+    **New overload**:
+    ```csharp
+    public Task&lt;MultiDocumentContextResult&gt; InjectMultiDocumentContextAsync(
+        string sessionId, IReadOnlyList&lt;string&gt; documentIds, IReadOnlyList&lt;ChatMessage&gt; chatHistory,
+        CancellationToken cancellationToken = default);
+    ```
+
+    **Budget allocation strategy**:
+    1. Start with equal proportional allocation: each document gets `30K / N` tokens as its initial budget
+    2. Retrieve and chunk all documents in parallel (bounded concurrency — max 5 concurrent per ADR-016)
+    3. For documents smaller than their proportional share, reallocate unused tokens to other documents
+       proportionally ("leftover reallocation")
+    4. Apply conversation-aware chunk selection per document using the same embedding similarity approach
+       from Task R2-011 (latest user message embedding → cosine similarity → select top chunks within budget)
+    5. Cross-document chunk interleaving: merge selected chunks from all documents sorted by relevance
+       score (not by document) so the most relevant content from any document appears first in the prompt
+
+    **Result model**:
+    ```csharp
+    public record MultiDocumentContextResult(
+        IReadOnlyList&lt;DocumentChunkGroup&gt; DocumentGroups,  // per-document: chunks + tokens used
+        IReadOnlyList&lt;DocumentChunk&gt; MergedChunks,          // cross-document interleaved by relevance
+        int TotalTokensUsed,
+        bool AnyTruncated);
+    ```
+
+    **Integration**: `PlaybookChatContextProvider` should call the multi-document overload when `chatHistory`
+    carries multiple document IDs in `ChatHostContext.DocumentIds`. Each document group in the system prompt
+    includes a header: `[Document: {filename}]` to help the AI attribute quotes correctly.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `DocumentContextService` has a working multi-document overload that respects the 30K shared budget via
+    proportional allocation with leftover reallocation, applies conversation-aware chunk selection per
+    document, and interleaves chunks cross-document by relevance score. AI can cross-reference and compare
+    across 5 documents in a single session (FR-12).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-12 (multi-document), NFR-05 (128K total budget)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, DI budget, architecture decisions">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="DocumentContextService from R2-011 — the class being extended">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DocumentContextService.cs</file>
+    <file purpose="Core chat agent — ChatHostContext definition and document IDs flow">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="Text extraction pattern — existing chunking infrastructure">../.claude/patterns/ai/text-extraction.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-016">Parallel document retrieval MUST be bounded — use `SemaphoreSlim` or a bounded `Channel` to limit concurrency to max 5 documents processed simultaneously; MUST NOT use unbounded `Task.WhenAll`</constraint>
+    <constraint source="ADR-015">MUST NOT log document text content for any of the multiple documents — log only document IDs, chunk counts, and per-document token allocations</constraint>
+    <constraint source="spec NFR-05">Total tokens across all documents MUST NOT exceed 30K budget — enforce hard cap with graceful truncation when allocation is exhausted</constraint>
+    <constraint source="spec FR-12">MUST support at least 5 simultaneous documents within the shared 30K budget — proportional allocation must degrade gracefully as N increases</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext.DocumentIds through the pipeline — multi-document mode activates automatically when multiple IDs are present</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DocumentContextService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>Bounded parallel retrieval: `var semaphore = new SemaphoreSlim(5); await Task.WhenAll(documentIds.Select(id => ProcessWithSemaphore(id, semaphore)))` — limits to 5 concurrent SpeFileStore calls</pattern>
+      <pattern>Leftover reallocation: first pass allocates N/each; collect leftover from small docs; second pass redistributes to docs still under their optimal allocation</pattern>
+      <pattern>Cross-document interleaving: collect all (chunk, relevanceScore, documentIndex) tuples; sort by relevanceScore descending; take until budget exhausted</pattern>
+      <pattern>Document attribution header in prompt: `\n\n[Document: {filename}]\n{chunk.Text}` — helps AI cite sources correctly in responses</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task R2-011 created single-document context injection. R2 also requires multi-document analysis
+      (FR-12): users can select multiple documents from the AnalysisWorkspace file list and ask the AI
+      to compare, cross-reference, or synthesize across them. The challenge is fair budget allocation —
+      with 5 documents sharing 30K tokens, each gets at most 6K tokens, which may not represent long
+      documents well. The leftover reallocation strategy allows short documents to donate their unused
+      budget to longer ones, maximizing information density in the context window.
+
+      Cross-document chunk interleaving is important for comparison tasks: rather than presenting all
+      of document 1, then all of document 2 (which wastes early context on less-relevant content),
+      interleaving by relevance score surfaces the most pertinent passages from any document first.
+    </background>
+    <dependencies>
+      Strictly depends on Task R2-011 (DocumentContextService must exist first). Safe to run in parallel
+      with R2-013, R2-014, R2-015 through R2-019 after R2-011 completes. Own files: updates to
+      DocumentContextService.cs, new MultiDocumentContextResult.cs, updates to PlaybookChatContextProvider.cs.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the completed `DocumentContextService.cs` from R2-011 to understand the single-document implementation before extending it</step>
+    <step order="1">Design `MultiDocumentContextResult` and `DocumentChunkGroup` record models</step>
+    <step order="2">Create `InjectMultiDocumentContextAsync` overload with the bounded parallel retrieval pattern (SemaphoreSlim max 5)</step>
+    <step order="3">Implement initial proportional allocation: `perDocBudget = 30_000 / documentIds.Count`</step>
+    <step order="4">Implement leftover reallocation: collect unused tokens from docs smaller than their budget and redistribute proportionally to remaining docs</step>
+    <step order="5">Apply conversation-aware chunk selection per document (reuse single-doc embedding similarity logic from R2-011)</step>
+    <step order="6">Implement cross-document chunk interleaving: merge all (chunk, score, docIndex) tuples, sort by score descending, enforce total budget cap</step>
+    <step order="7">Add `[Document: {filename}]` attribution headers before each document's chunks in the system prompt</step>
+    <step order="8">Update `PlaybookChatContextProvider` to call multi-document overload when `ChatHostContext.DocumentIds.Count &gt; 1`</step>
+    <step order="9">Verify no unbounded `Task.WhenAll` — confirm SemaphoreSlim or equivalent bounding is in place</step>
+    <step order="10">Run `dotnet build` — verify no errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-012 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DocumentContextService.cs — extended with InjectMultiDocumentContextAsync overload</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/MultiDocumentContextResult.cs — new result model with DocumentChunkGroup per document and interleaved MergedChunks</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs — updated to dispatch to multi-document overload when multiple document IDs present</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With 5 documents totaling 100K tokens, the multi-document result uses at most 30K tokens total across all documents</criterion>
+    <criterion testable="true">A small document (5K tokens) donates its unused budget from a 6K-per-doc allocation to the other four documents (leftover reallocation)</criterion>
+    <criterion testable="true">Parallel document retrieval is bounded at max 5 concurrent calls — SemaphoreSlim or equivalent present in the implementation</criterion>
+    <criterion testable="true">MergedChunks are ordered by relevance score (cross-document), not by document order</criterion>
+    <criterion testable="true">Each document's chunks are preceded by `[Document: {filename}]` attribution header in the system prompt</criterion>
+    <criterion testable="true">No document text content appears in logs for any of the multiple documents (ADR-015)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `ChatHostContext.DocumentIds` field may need to be added if it only holds a single document ID
+    currently. Check the model definition before implementing — if the field is already a collection,
+    use it directly. If it is a single string, update the model and adjust callers accordingly (coordinate
+    with the R2-013 task if file overlap exists, but DocumentContextService.cs and ChatHostContext.cs
+    are different files so parallel execution should be safe).
+
+    With very large document sets (20+ documents), the 30K/N allocation becomes extremely small per
+    document. Consider adding a practical maximum of N=20 documents with a user-facing message if
+    exceeded. This is defensive programming — the acceptance criteria only require 5 documents to work.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group A — MUST run after R2-011 completes. Safe to run in parallel with R2-013, R2-014, and Group B tasks. Own files: DocumentContextService.cs (extension), MultiDocumentContextResult.cs (new), PlaybookChatContextProvider.cs (routing update).</protocol>
+  </execution>
+</task>

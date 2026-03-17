@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-067" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Deploy Phase 5 — Final Deployment with Security Fixes</title>
+    <status>pending</status>
+    <phase>5</phase>
+    <tags>deploy, azure, dataverse</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Final deployment task applying Phase 5 security fixes and test-revealed bugs to the dev environment. Tags include deploy, azure, dataverse. STANDARD rigor for deployment following established skills.</rigor-reason>
+    <dependencies>[060, 061, 062, 063, 064, 065, 066]</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 5 fixes (security audit fixes, test-revealed bugs) to the dev environment. Deploy BFF API changes and rebuild/redeploy SprkChatPane and AnalysisWorkspace web resources. Run a final acceptance verification against the deployed environment covering all 16 success criteria from spec.md. Document readiness for Phase 6 wrap-up.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    All Phase 5 security fixes and test-revealed bugs are deployed to dev. A final acceptance check confirms all 16 success criteria from spec.md are met in the deployed environment. The project is ready for Phase 6 wrap-up (quality gates, documentation, merge).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — all 16 success criteria for final verification">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — deployment skills, acceptance criteria">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF deploy script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="BFF deploy skill">../.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="Code page deploy skill">../.claude/skills/code-page-deploy/SKILL.md</file>
+    <file purpose="Dataverse deploy skill">../.claude/skills/dataverse-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md">MUST use established deployment skills — no ad-hoc deployment commands</constraint>
+    <constraint source="spec">MUST verify all 16 success criteria after final deployment — this is the production readiness gate</constraint>
+    <constraint source="spec">Any success criterion that FAILS must be investigated and fixed before this task can be marked complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/README.md</file>
+    </files>
+    <patterns>
+      <pattern>The 16 success criteria are in spec.md — read the "Success Criteria" section and verify each one systematically in the deployed environment</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 5 testing (060-066) may have revealed additional bugs or security issues that required fixes. This final deployment applies those fixes and performs the formal acceptance verification against all 16 spec success criteria. If all criteria pass, the project is code-complete and ready for Phase 6 wrap-up.
+    </background>
+    <dependencies>
+      Depends on all Phase 5 tests completing (060-066). This is the final Phase 5 task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Run dotnet build src/server/api/Sprk.Bff.Api/ — verify clean build with all Phase 5 fixes</step>
+    <step order="1">Run dotnet test to verify all tests pass after Phase 5 fixes</step>
+    <step order="2">Deploy BFF API via bff-deploy skill</step>
+    <step order="3">Build and deploy SprkChatPane via code-page-deploy skill</step>
+    <step order="4">Build and deploy AnalysisWorkspace via code-page-deploy skill</step>
+    <step order="5">Publish Dataverse customizations</step>
+    <step order="6">Verify BFF health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns 200</step>
+    <step order="7">Systematically verify each of the 16 success criteria from spec.md in the deployed environment — check each criterion as pass or fail</step>
+    <step order="8">For any failing criteria: investigate, fix, redeploy, and re-verify</step>
+    <step order="9">Document acceptance results in notes/067-final-acceptance-results.md — list each criterion with pass/fail and evidence</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-067 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">BFF API deployed to spe-api-dev-67e2xz with all Phase 5 fixes</artifact>
+    <artifact type="config">SprkChatPane and AnalysisWorkspace web resources updated with Phase 5 fixes</artifact>
+    <artifact type="docs">notes/067-final-acceptance-results.md — all 16 success criteria verified with pass/fail evidence</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test exits with 0 failures after all Phase 5 fixes</criterion>
+    <criterion testable="true">GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns HTTP 200</criterion>
+    <criterion testable="true">notes/067-final-acceptance-results.md lists all 16 success criteria as PASS</criterion>
+    <criterion testable="true">No JavaScript errors in browser console for deployed SprkChatPane</criterion>
+    <criterion testable="true">All 16 spec success criteria verified in deployed environment</criterion>
+  </acceptance-criteria>
+</task>

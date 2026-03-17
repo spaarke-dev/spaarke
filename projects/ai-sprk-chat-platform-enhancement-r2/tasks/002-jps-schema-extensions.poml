@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-002" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>JPS Schema Extensions — Output Node Type, requiresConfirmation Flag, Trigger Metadata</title>
+    <status>pending</status>
+    <phase>1</phase>
+    <tags>jps, schema, ai, foundation</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies TypeScript types in shared library and backend C# models. Tags include ai; touches .ts/.tsx and .cs files. 8+ steps. Changes are consumed by Phase 2 Group B (PlaybookDispatcher) and Phase 3 Group D (slash commands) so correctness is critical.</rigor-reason>
+    <dependencies>[]</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend the JPS (JSON Playbook Schema) definition in three ways to support the SprkChat R2 Playbook Dispatcher and HITL/autonomous execution patterns:
+
+    1. **Add `output` node type** to PlaybookNodeType enum/union. The output node has these new properties:
+       - `outputType`: enum — `"text"` | `"dialog"` | `"navigation"` | `"download"` | `"insert"`
+       - `targetPage`: string (optional) — Code Page web resource name for dialog/navigation outputs (e.g., "sprk_emailcomposer")
+       - `prePopulateFields`: Record&lt;string, string&gt; (optional) — field name → AI-extracted value mapping for pre-populating target dialogs
+
+    2. **Add `requiresConfirmation` boolean flag** on action nodes (all node types that represent an executable step):
+       - Default: `true` for `dialog` output type, `false` for `text` output type
+       - When `true`: PlaybookDispatcher opens HITL confirmation UI before executing
+       - When `false`: PlaybookDispatcher executes autonomously without user confirmation
+
+    3. **Add trigger metadata fields** to the JPS root-level playbook definition:
+       - `triggerPhrases`: string[] (optional) — natural language phrases for semantic matching
+       - `recordType`: string (optional) — e.g., "matter", "project"
+       - `entityType`: string (optional) — Dataverse logical entity name
+
+    These changes must be applied to: (a) TypeScript types in the shared component library or PlaybookBuilder code page, (b) the C# model classes used by BFF for deserializing JPS definitions, and (c) the JPS JSON schema validation file if one exists.
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    PlaybookNodeType TypeScript union and corresponding C# models both include the `output` node type with full property definitions. Action nodes have `requiresConfirmation?: boolean`. The JPS root object has optional `triggerPhrases`, `recordType`, `entityType` fields. `dotnet build` and TypeScript compilation both pass with 0 errors. `jps-validate` skill passes on updated JPS definitions.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-07, FR-08, FR-18, JPS architecture extensions scope item 12">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — JPS architecture, existing patterns, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="JPS schema and playbook architecture reference">docs/architecture/playbook-architecture.md</file>
+    <file purpose="JPS validation skill — understand how validation works before modifying schema">../.claude/skills/jps-validate/SKILL.md</file>
+    <file purpose="ADR-013 — AI architecture, extend BFF, no separate service">../.claude/adr/ADR-013-ai-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">MUST extend BFF models in Sprk.Bff.Api — no separate AI microservice or separate schema service</constraint>
+    <constraint source="spec FR-07">output node type MUST support typed outputs: text, dialog, navigation, download, insert — these map to distinct playbook dispatch behaviors in PlaybookDispatcher (R2-015)</constraint>
+    <constraint source="spec FR-08">requiresConfirmation MUST default to true for dialog output type and false for text output type when not explicitly set — implement this defaulting logic in PlaybookDispatcher (task R2-018), not in the schema itself</constraint>
+    <constraint source="spec FR-18">Trigger metadata (triggerPhrases, recordType, entityType) at JPS root level is for execution-time behavior reference only — queryable matching uses Dataverse fields (task R2-001), NOT JPS JSON. Do not build dispatch logic on JPS trigger metadata.</constraint>
+    <constraint source="spec MUST">MUST NOT create static playbook relationship tables — JPS extensions are runtime behavior only</constraint>
+    <constraint source="spec">TypeScript types MUST be backward compatible — existing playbook JPS definitions without output nodes must still parse correctly (all new fields are optional)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+    <patterns>
+      <pattern>JPS PlaybookNodeType location: search for PlaybookNodeType in src/client/code-pages/PlaybookBuilder/src/types/ — this is the TypeScript source of truth for node types</pattern>
+      <pattern>BFF JPS deserialization: search for JPS or PlaybookNode in src/server/api/Sprk.Bff.Api/Models/ or Services/Ai/ to find the C# model classes that parse JPS JSON</pattern>
+      <pattern>Backward-compatible schema extension: add all new properties as optional (TypeScript: `fieldName?: Type`; C# JSON: use `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`)</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The JPS (JSON Playbook Schema) is the executable definition of a playbook's steps and actions, stored as JSON in Dataverse on `sprk_analysisplaybook.sprk_jpsdefinition`. The current schema supports step nodes, action nodes, and condition nodes. R2 requires adding an `output` node to declare what a completed playbook action produces (a text response, a dialog to open, a navigation, etc.) and a `requiresConfirmation` flag on action nodes to distinguish HITL from autonomous execution. Trigger metadata at the root level is informational — the actual matching is done via Dataverse fields (task R2-001) and the playbook-embeddings AI Search index (task R2-003).
+
+      The JPS schema is consumed in two places: (1) the PlaybookBuilder Code Page TypeScript for the visual editor, and (2) the BFF PlaybookDispatcher C# service that interprets the JPS at runtime. Both must be updated.
+    </background>
+    <dependencies>
+      No task dependencies — can start immediately in parallel with R2-001 and R2-003. Phase 2 Group B (R2-015 PlaybookDispatcher, R2-018 output handler) depends on this task completing first.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read docs/architecture/playbook-architecture.md to understand the full JPS schema and node type system</step>
+    <step order="1">Locate PlaybookNodeType TypeScript definition: search src/client/code-pages/PlaybookBuilder/src/types/ for PlaybookNodeType, PlaybookNode, and related interfaces</step>
+    <step order="2">Locate BFF C# JPS model classes: search src/server/api/Sprk.Bff.Api/ for classes that deserialize JPS JSON (PlaybookNode, PlaybookDefinition, or similar)</step>
+    <step order="3">Check if a JPS JSON schema validation file exists (e.g., jps-schema.json in infrastructure/ or docs/) — if so, update it too</step>
+    <step order="4">Add `output` to PlaybookNodeType TypeScript union type and create OutputNode interface with: outputType (enum: "text" | "dialog" | "navigation" | "download" | "insert"), targetPage?: string, prePopulateFields?: Record&lt;string, string&gt;</step>
+    <step order="5">Add `requiresConfirmation?: boolean` to the base PlaybookNode interface or ActionNode-specific interface in TypeScript</step>
+    <step order="6">Add `triggerPhrases?: string[]`, `recordType?: string`, `entityType?: string` to the root PlaybookDefinition TypeScript interface</step>
+    <step order="7">Mirror all TypeScript changes in the corresponding C# model classes: add OutputNode class with OutputType enum (Text, Dialog, Navigation, Download, Insert), RequiresConfirmation bool? property on action node class, and trigger metadata properties on PlaybookDefinition</step>
+    <step order="8">Run TypeScript compilation check on PlaybookBuilder: cd src/client/code-pages/PlaybookBuilder &amp;&amp; npm run build (or tsc --noEmit) to verify 0 type errors</step>
+    <step order="9">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify 0 C# compilation errors</step>
+    <step order="10">Run jps-validate on at least one existing playbook definition to confirm backward compatibility (existing definitions without output nodes still validate)</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-002 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">TypeScript type additions — OutputNode interface, outputType enum, requiresConfirmation flag, trigger metadata on PlaybookDefinition root</artifact>
+    <artifact type="code">C# model additions — OutputNode class, OutputType enum, RequiresConfirmation nullable bool, trigger metadata properties on PlaybookDefinition</artifact>
+    <artifact type="config">Updated JPS JSON schema file (if one exists) with new node type and fields</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TypeScript: PlaybookNodeType includes "output" as a valid node type without breaking existing type narrowing</criterion>
+    <criterion testable="true">TypeScript: An OutputNode with outputType="dialog", targetPage="sprk_emailcomposer" is valid and type-checks correctly</criterion>
+    <criterion testable="true">TypeScript: A PlaybookNode without requiresConfirmation compiles correctly (field is optional)</criterion>
+    <criterion testable="true">C# OutputType enum has values: Text, Dialog, Navigation, Download, Insert</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits with code 0</criterion>
+    <criterion testable="true">npm run build (or tsc --noEmit) in PlaybookBuilder exits with 0 type errors</criterion>
+    <criterion testable="true">Existing JPS definition (without output nodes) still deserializes correctly in C# without null reference errors</criterion>
+    <criterion testable="true">jps-validate passes on a test JPS definition containing an output node with outputType="dialog"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Search for existing node type definitions before creating new ones — the PlaybookBuilder codebase may use discriminated unions in TypeScript (e.g., `type PlaybookNode = StepNode | ActionNode | ConditionNode`). The output node should be added to this union.
+
+    In C#, OutputType is likely serialized to/from JSON strings ("text", "dialog", etc.) — use `[JsonConverter(typeof(JsonStringEnumConverter))]` with camelCase naming, consistent with existing BFF JSON serialization settings.
+
+    The `prePopulateFields` property is a key design piece: it allows the PlaybookDispatcher (task R2-018) to pass AI-extracted parameter values (e.g., extracted email recipient) through to the Code Page dialog via URL query parameters or BroadcastChannel payload.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies — can start immediately in parallel with R2-001 and R2-003. Read playbook-architecture.md FIRST to understand the full JPS structure before making changes.</protocol>
+  </execution>
+</task>

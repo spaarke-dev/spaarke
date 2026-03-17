@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-050" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SSE Streaming End-to-End Integration — BFF to Frontend</title>
+    <status>pending</status>
+    <phase>4</phase>
+    <tags>frontend, bff-api, integration</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task connecting BFF SSE endpoint (R2-010) to frontend useSseStream hook (R2-031). Tags include bff-api and frontend. Validates full stack flow including cancellation, error propagation, and NFR-01 latency. Phase 4 integration tasks always use FULL rigor for thorough end-to-end verification.</rigor-reason>
+    <dependencies>[010, 031]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the BFF SSE streaming endpoint (task R2-010) to the frontend `useSseStream` hook (task R2-031) and verify end-to-end token-by-token rendering works correctly. Test all SSE event types flow from BFF to UI (typing_start, token, done, error). Verify client-side AbortController cancellation terminates the BFF stream. Measure first-token latency to validate NFR-01 (&lt;500ms).
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Sending a chat message from SprkChatPane results in visible token-by-token streaming response from the BFF. Typing indicator appears before first token. All SSE events (typing_start, token, done, error, plan_step_start, plan_step_complete) are correctly received and handled by the frontend. Cancellation aborts the BFF connection. First token arrives within 500ms of user submit.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-09 SSE streaming, NFR-01 first token &lt;500ms">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — streaming architecture, BFF endpoint patterns">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF streaming endpoint — verify event format and headers">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="Frontend SSE hook — verify event handling and connection logic">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file purpose="SSE canonical pattern — expected event format and all event types">../.claude/patterns/ai/streaming-endpoints.md</file>
+    <file purpose="ADR-016 — rate limiting, verify 429 handling">../.claude/adr/ADR-016-ai-rate-limits.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-01">First token MUST be visible within 500ms — measure from user submit click to first token render in chat</constraint>
+    <constraint source="spec MUST">MUST stream via text/event-stream content type — verify BFF response header is Content-Type: text/event-stream</constraint>
+    <constraint source="spec MUST">Cancellation MUST propagate to BFF — verify BFF connection closes when AbortController aborts; no lingering OpenAI streaming calls</constraint>
+    <constraint source="ADR-016">MUST handle 429 (rate limited) gracefully — show user-visible error message in chat, not an unhandled exception</constraint>
+    <constraint source="ADR-014">MUST NOT cache streaming tokens — verify no token accumulation is written to Redis during streaming</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern>SSE event format from BFF: data: {"type":"token","content":"Hello"}\n\n — verify frontend correctly parses the JSON data payload</pattern>
+      <pattern>Cancellation verification: after AbortController.abort(), confirm BFF RequestAborted CancellationToken fires and stops the OpenAI stream enumeration</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks R2-010 (BFF SSE endpoint) and R2-031 (frontend useSseStream) were implemented in Phases 2 and 3 respectively without being wired together. This integration task verifies that the complete flow works: SprkChatPane sends a POST request to the BFF streaming endpoint, the BFF calls Azure OpenAI with streaming enabled, tokens flow back as SSE events, the frontend renders them progressively.
+
+      Known integration risks: (1) CORS headers on SSE response, (2) Chunked transfer encoding being buffered by middleware, (3) AbortController abort signal not propagating through the BFF request pipeline correctly.
+    </background>
+    <dependencies>
+      Depends on R2-010 (BFF SSE endpoint, Phase 2) and R2-031 (frontend SSE UI, Phase 3). This is the first Phase 4 task and must complete before other integration tasks.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read ChatEndpoints.cs SSE endpoint implementation (from R2-010) to understand the event format, headers, and cancellation handling</step>
+    <step order="1">Read useSseStream.ts (from R2-031) to understand the fetch-based SSE parsing and how events are dispatched</step>
+    <step order="2">Start the BFF locally (dotnet run --project src/server/api/Sprk.Bff.Api/) and SprkChatPane dev server</step>
+    <step order="3">Send a test message — verify the BFF SSE endpoint returns Content-Type: text/event-stream and tokens stream progressively</step>
+    <step order="4">Verify typing indicator appears immediately and first token renders within 500ms — use browser DevTools Network tab to measure timing</step>
+    <step order="5">Verify all SSE event types are correctly handled: typing_start (indicator shows), token (accumulates), done (message finalized), error (error state shown)</step>
+    <step order="6">Test cancellation: click cancel mid-stream — verify the fetch AbortController aborts, streaming stops, and BFF logs show request cancelled</step>
+    <step order="7">Test 429 rate limit scenario: if rate limiting middleware is active, send rapid requests — verify 429 results in user-visible error message in chat (not unhandled exception)</step>
+    <step order="8">Fix any issues found: SSE event format mismatches, header issues, cancellation not propagating, parsing errors</step>
+    <step order="9">Re-verify all scenarios after fixes</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-050 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to ChatEndpoints.cs SSE event format, headers, or cancellation handling</artifact>
+    <artifact type="code">Any fixes to useSseStream.ts parsing logic or event dispatch</artifact>
+    <artifact type="docs">notes/050-sse-integration-findings.md — latency measurements, issues found, fixes applied</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sending a chat message results in visible token-by-token streaming response in the SprkChatPane UI</criterion>
+    <criterion testable="true">Typing indicator appears before the first token arrives</criterion>
+    <criterion testable="true">First token visible within 500ms of message submit (measured via browser DevTools)</criterion>
+    <criterion testable="true">Clicking cancel mid-stream stops the visible rendering and closes the BFF SSE connection</criterion>
+    <criterion testable="true">SSE error events result in an error message in the chat UI (not an unhandled exception)</criterion>
+    <criterion testable="true">BFF response has Content-Type: text/event-stream header</criterion>
+  </acceptance-criteria>
+</task>

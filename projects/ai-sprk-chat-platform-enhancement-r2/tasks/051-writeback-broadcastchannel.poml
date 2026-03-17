@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-051" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Write-Back Integration — BFF SSE to SprkChatBridge to Lexical Editor</title>
+    <status>pending</status>
+    <phase>4</phase>
+    <tags>frontend, integration, streaming</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex multi-layer integration: BFF SSE events → SprkChat → SprkChatBridge (BroadcastChannel) → AnalysisWorkspace useDocumentStreaming → Lexical editor. Tags include frontend, integration, and streaming. Undo snapshot before write and ADR-015 no-auth-tokens constraint require careful implementation.</rigor-reason>
+    <dependencies>[023, 031]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the complete write-back pipeline: BFF streams `document_stream_start/token/end` SSE events → SprkChat receives them and emits via `SprkChatBridge.emit()` → AnalysisWorkspace's `useDocumentStreaming` hook receives the BroadcastChannel events and writes streamed content to the Lexical editor. Verify undo snapshot is created before writing. Verify no auth tokens flow through BroadcastChannel per ADR-015.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    When the BFF streams a write-back response (document_stream_start/token/end events), the content appears in real-time in the AnalysisWorkspace Lexical editor without a page refresh. The editor cursor does not jump. An undo snapshot is created before streaming begins, so the user can undo the AI-written content. BroadcastChannel messages contain only content tokens, not auth tokens or user PII.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-04 write-back streaming end-to-end">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — SprkChatBridge event types, BroadcastChannel architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BroadcastChannel bridge — document_stream event types and emit/on methods">src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+    <file purpose="AnalysisWorkspace streaming hook — Lexical editor write logic">src/client/code-pages/AnalysisWorkspace/src/</file>
+    <file purpose="ADR-015 — no auth tokens in BroadcastChannel, data minimization">../.claude/adr/ADR-015-ai-data-governance.md</file>
+    <file purpose="SSE streaming pattern — document_stream event shapes">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">MUST NOT send auth tokens, user credentials, or sensitive PII through BroadcastChannel — only content tokens and structural metadata (targetSection, insertMode)</constraint>
+    <constraint source="spec FR-04">MUST create an undo snapshot in the Lexical editor BEFORE streaming write-back content begins — user must be able to undo the AI insertion</constraint>
+    <constraint source="spec FR-04">MUST NOT require page refresh — BroadcastChannel delivers events across code pages (SprkChatPane and AnalysisWorkspace) sharing the same origin</constraint>
+    <constraint source="spec">Write-back content MUST be streamed token-by-token to the editor — not buffered and inserted all at once</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern>BroadcastChannel event types from SprkChatBridge: document_stream_start {targetSection?, insertMode}, document_stream_token {content}, document_stream_end {} — SprkChat emits these when BFF sends the corresponding SSE events</pattern>
+      <pattern>Lexical undo snapshot: editor.update(() => { $createSnapshot(); }) before streaming — allows Ctrl+Z to revert AI-written content</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R1 implemented the BroadcastChannel bridge (SprkChatBridge.ts) with typed events including document_stream_start/token/end. Task R2-023 (Phase 2) enhanced the BFF to emit these events when write-back content is generated. This integration task wires the complete pipeline end-to-end.
+
+      SprkChatPane and AnalysisWorkspace run as separate Code Pages (separate Dataverse web resource iframes) but share the same top-level origin — BroadcastChannel works across them. SprkChat.tsx listens to BFF SSE events and re-emits them via SprkChatBridge; the AnalysisWorkspace's `useDocumentStreaming` hook listens on the other end of the BroadcastChannel.
+    </background>
+    <dependencies>
+      Depends on R2-023 (BFF write-back SSE events) and R2-031 (frontend SSE event handling). This task is Phase 4 integration — both R2-023 and R2-031 must be complete first.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChatBridge.ts to understand the current emit/on API and the exact event type signatures for document_stream events</step>
+    <step order="1">Read AnalysisWorkspace src/ directory to find the useDocumentStreaming hook — understand how it currently handles BroadcastChannel events</step>
+    <step order="2">Verify SprkChat.tsx forwards BFF document_stream_start/token/end SSE events via SprkChatBridge.emit() — add forwarding code if missing from R2-031</step>
+    <step order="3">Verify useDocumentStreaming hook in AnalysisWorkspace subscribes to SprkChatBridge document_stream events via SprkChatBridge.on()</step>
+    <step order="4">Add undo snapshot creation in useDocumentStreaming: on document_stream_start event, call editor.update(() => createUndoSnapshot()) before any token insertion</step>
+    <step order="5">Implement token-by-token insertion in useDocumentStreaming: on each document_stream_token event, append the token content to the editor at the current cursor position or target section</step>
+    <step order="6">Handle document_stream_end: finalize the insertion, move cursor to end of inserted content</step>
+    <step order="7">Verify no auth tokens in BroadcastChannel messages: inspect the SprkChatBridge emit calls in SprkChat.tsx — confirm only content and structural metadata are included</step>
+    <step order="8">Test end-to-end: trigger a write-back action in SprkChatPane — verify content streams into AnalysisWorkspace Lexical editor in real time</step>
+    <step order="9">Test undo: after write-back completes, press Ctrl+Z in the editor — verify inserted content is removed in one undo step</step>
+    <step order="10">Fix any issues found and re-test</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-051 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SprkChat.tsx — document_stream SSE event forwarding to SprkChatBridge</artifact>
+    <artifact type="code">useDocumentStreaming hook (AnalysisWorkspace) — Lexical editor token insertion with undo snapshot</artifact>
+    <artifact type="docs">notes/051-writeback-integration-findings.md — issues found, fixes applied</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Write-back action in SprkChatPane streams content into AnalysisWorkspace Lexical editor in real-time (no page refresh)</criterion>
+    <criterion testable="true">Content appears token-by-token in the editor during streaming</criterion>
+    <criterion testable="true">After write-back completes, Ctrl+Z in AnalysisWorkspace undoes the entire AI-inserted content in one step</criterion>
+    <criterion testable="true">BroadcastChannel messages do not contain auth tokens, session cookies, or user PII</criterion>
+    <criterion testable="true">Editor does not crash or lose user content that was already present before the write-back</criterion>
+  </acceptance-criteria>
+</task>

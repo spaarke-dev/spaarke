@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-034" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Dark Mode Compliance Audit — All Phase 3 Group C Components</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui, e2e-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit and remediation task — primarily involves reading code, identifying violations, and making targeted style fixes. Tags include e2e-test and fluent-ui. Some code changes expected but no architectural changes. STANDARD rigor appropriate for audit/fix tasks.</rigor-reason>
+    <dependencies>[030, 031, 032, 033]</dependencies>
+  </metadata>
+
+  <prompt>
+    Audit all new UI elements created in Phase 3 Group C tasks (R2-030 through R2-033) for dark mode compliance with ADR-021. Verify all components use only Fluent v9 semantic tokens — no hard-coded hex colors, no hard-coded RGB values, no inline style={} color assignments. Test rendering in both light (webLightTheme) and dark (webDarkTheme) Fluent themes. Fix any violations found.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    All Group C components (SprkChatMessageRenderer, TypingIndicator, SprkChatCitationPopover, PlanPreviewCard) pass dark mode inspection: rendered markdown, typing indicator, citation cards, and plan step indicators all look correct in both light and dark themes. Zero hard-coded color values remain in any modified or created files from tasks 030-033.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — dark mode requirement (ADR-021)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, ADR-021 compliance">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="ADR-021 — Fluent v9 design system, complete semantic token reference">../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="Modified in R2-030 — markdown rendering styles">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+    <file purpose="Modified in R2-031 — typing indicator, streaming UI">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="Modified in R2-032 — citation card styles">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+    <file purpose="Modified in R2-033 — plan step status colors">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 semantic tokens exclusively — colorNeutralBackground*, colorNeutralForeground*, colorBrand*, colorStatus* families</constraint>
+    <constraint source="ADR-021">MUST NOT use hard-coded hex colors (#rrggbb), RGB values, or named CSS colors</constraint>
+    <constraint source="ADR-021">MUST NOT use inline style={color: '...'} with literal color values — use makeStyles tokens instead</constraint>
+    <constraint source="spec">Dark mode is required — the SprkChatPane runs inside Dataverse which supports dark mode via Fluent v9 FluentProvider theme switching</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+    <patterns>
+      <pattern>Fluent v9 makeStyles audit: search for any string literal starting with # or containing rgb( in makeStyles() blocks and inline style props</pattern>
+      <pattern>Correct pattern: const styles = makeStyles({ container: { backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground1 } })</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      ADR-021 mandates that all UI must use Fluent v9 semantic tokens and support dark mode. During rapid implementation of tasks 030-033, developers may have introduced hard-coded colors for convenience (code block backgrounds, citation badge colors, step status indicators). This audit task systematically checks and fixes those violations before Phase 4 integration begins.
+
+      The SprkChatPane and AnalysisWorkspace Code Pages wrap their content in FluentProvider with a theme that switches between webLightTheme and webDarkTheme based on Dataverse system settings. Semantic tokens automatically adapt; hard-coded colors do not.
+    </background>
+    <dependencies>
+      Depends on all Group C tasks completing: R2-030, R2-031, R2-032, R2-033. This task is the final gate before Phase 3 Group C is considered complete. Runs in parallel with Group D and Group E tasks.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read ADR-021-fluent-design-system.md to get the full list of approved semantic token families and any specific guidance for dark mode testing</step>
+    <step order="1">Grep SprkChatMessageRenderer.tsx for hard-coded color patterns: search for #, rgb(, rgba(, hsl( in style-related code — document violations</step>
+    <step order="2">Grep SprkChat.tsx (TypingIndicator and streaming additions) for hard-coded color patterns</step>
+    <step order="3">Grep SprkChatCitationPopover.tsx for hard-coded color patterns</step>
+    <step order="4">Grep PlanPreviewCard.tsx for hard-coded color patterns</step>
+    <step order="5">For each violation found: replace hard-coded color with the appropriate Fluent v9 semantic token from the tokens object in makeStyles</step>
+    <step order="6">Check that the renderMarkdown() CSS output (injected HTML styles from R2-030) uses CSS custom properties mapped to Fluent tokens — not hard-coded values</step>
+    <step order="7">Verify TypingIndicator animation uses Fluent v9 motion tokens for timing (not hard-coded ms values)</step>
+    <step order="8">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors after all fixes</step>
+    <step order="9">Document any areas where a token does not exist for a specific color need — note in notes/034-dark-mode-audit-findings.md</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-034 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Fixed violations in SprkChatMessageRenderer.tsx, SprkChat.tsx, SprkChatCitationPopover.tsx, PlanPreviewCard.tsx — all colors use Fluent v9 semantic tokens</artifact>
+    <artifact type="docs">notes/034-dark-mode-audit-findings.md — documents any violations found, fixes applied, and any areas needing follow-up</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for hard-coded hex colors in all modified files returns zero matches</criterion>
+    <criterion testable="true">grep for inline style color/background properties with string literals returns zero matches</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors after all fixes</criterion>
+    <criterion testable="true">notes/034-dark-mode-audit-findings.md exists and documents the audit results</criterion>
+    <criterion testable="true">Visual inspection in dark theme: all Group C components render with appropriate contrast and no invisible elements</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-060" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SSE Streaming End-to-End Tests</title>
+    <status>pending</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit test cases for SSE streaming. Tags include testing and integration-test. STANDARD rigor: creates new test files, has explicit constraints (NFR-01 timing), no architectural code changes.</rigor-reason>
+    <dependencies>[050]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for SSE streaming covering: first-token latency validation (NFR-01: &lt;500ms), reconnection behavior when connection drops, cancellation cleanup verification (no lingering streams), and error event handling. Tests should run against the BFF using xUnit TestServer or the deployed dev environment.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests exist and pass for: first-token latency consistently under 500ms (measured over 10 test runs), clean cancellation (BFF stream terminates when AbortController aborts), error events propagate to the client correctly, and the SSE endpoint handles concurrent requests within concurrency bounds (ADR-016).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-09, NFR-01 SSE streaming requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — testing strategy, xUnit pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF SSE endpoint under test">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="Testing patterns — xUnit TestServer integration test pattern">../.claude/patterns/testing/</file>
+    <file purpose="ADR-016 — rate limiting, concurrency bounds">../.claude/adr/ADR-016-ai-rate-limits.md</file>
+    <file purpose="ADR-014 — no streaming token cache constraint">../.claude/adr/ADR-014-ai-caching.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-01">Tests MUST measure first-token latency — assert p95 latency under 500ms across test runs</constraint>
+    <constraint source="spec">Cancellation test MUST verify BFF-side cleanup — confirm no background Task continues after client abort</constraint>
+    <constraint source="ADR-016">Concurrency test MUST verify concurrency limits — send requests exceeding the bound and assert 429/503 responses</constraint>
+    <constraint source="spec">Tests MUST use xUnit — not NUnit or MSTest (project convention)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>tests/</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern>xUnit TestServer for BFF integration tests: WebApplicationFactory&lt;Program&gt; creates an in-memory test server — tests call the SSE endpoint via HttpClient</pattern>
+      <pattern>SSE response parsing in tests: read response stream line-by-line, parse "data: {...}" lines, measure time to first "token" event type</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 4 (R2-050) verified SSE streaming works end-to-end in the dev environment with manual testing. This Phase 5 task creates automated integration tests that can run in CI and catch regressions. The tests use xUnit TestServer for BFF tests (fast, no external dependencies) and optionally measure against the deployed dev environment for real latency.
+    </background>
+    <dependencies>
+      Depends on R2-050 (SSE integration confirmed working). Phase 5 tasks are sequential after Phase 4 deploy (R2-058).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Locate existing xUnit integration test project for the BFF — check tests/ directory for an existing WebApplicationFactory setup</step>
+    <step order="1">Create test class SseStreamingIntegrationTests.cs in the appropriate test project</step>
+    <step order="2">Write test: FirstToken_WithinLatencyBudget — send a chat message, measure time to first token event receipt, assert under 500ms (allow mock OpenAI response for determinism)</step>
+    <step order="3">Write test: Cancellation_CleansUpBffStream — send request, cancel via HttpClient.CancelPendingRequests() after first token, verify no further events on the stream</step>
+    <step order="4">Write test: ErrorEvent_PropagatesCorrectly — configure mock to throw an exception mid-stream, verify SSE error event reaches client with correct error format</step>
+    <step order="5">Write test: ConcurrencyLimit_Returns429WhenExceeded — send N+1 concurrent requests (where N is the configured limit), assert (N+1)th request returns 429</step>
+    <step order="6">Write test: StreamingTokens_NotCachedInRedis — verify no token content is written to IDistributedCache during streaming (check cache mock/spy)</step>
+    <step order="7">Run tests: dotnet test tests/ --filter "SseStreaming" — verify all pass</step>
+    <step order="8">Fix any test failures or BFF issues revealed by tests</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-060 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SseStreamingIntegrationTests.cs — xUnit tests for latency, cancellation, error events, concurrency limits</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "SseStreaming" exits with 0 failures</criterion>
+    <criterion testable="true">FirstToken_WithinLatencyBudget test passes consistently (p95 under 500ms in test environment)</criterion>
+    <criterion testable="true">Cancellation_CleansUpBffStream test passes — no lingering stream after client cancel</criterion>
+    <criterion testable="true">ErrorEvent_PropagatesCorrectly test passes</criterion>
+    <criterion testable="true">ConcurrencyLimit_Returns429WhenExceeded test passes</criterion>
+    <criterion testable="true">StreamingTokens_NotCachedInRedis test passes</criterion>
+  </acceptance-criteria>
+</task>

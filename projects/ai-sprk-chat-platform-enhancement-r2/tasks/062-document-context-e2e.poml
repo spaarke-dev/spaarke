@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-062" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Context End-to-End Tests</title>
+    <status>pending</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task for document context injection with explicit NFR-05 budget enforcement constraint. Tags include testing and integration-test. STANDARD rigor: new test files, tests chunking accuracy and budget enforcement, no architectural changes.</rigor-reason>
+    <dependencies>[054]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for document context injection covering: chunking accuracy (relevant chunks selected for a given query), token budget enforcement (NFR-05: never exceed 128K total), multi-document aggregation with 5+ documents, and conversation-aware re-selection (different queries produce different chunk selections). Tests use pre-seeded documents and mock AI Search for deterministic results.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests exist and pass for: chunks selected for a query match the relevant document sections (verified by content inspection), token budget is never exceeded even with large document sets, multi-document aggregation stays within the 30K document budget, and re-querying with a different query produces a different chunk selection.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-02, FR-03, FR-12, NFR-05 document context requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — document context service architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Document context injection service">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="Multi-document aggregation service">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="ADR-015 — no document content logging">../.claude/adr/ADR-015-ai-data-governance.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-05">Tests MUST verify 128K total token budget is never exceeded — test with documents that would exceed the budget to verify enforcement</constraint>
+    <constraint source="spec FR-03">Conversation-aware chunking test MUST verify different queries produce different chunk selections</constraint>
+    <constraint source="spec FR-12">Multi-document test MUST use at least 5 documents — verify aggregation stays within 30K document token budget</constraint>
+    <constraint source="spec">Tests use mock document content and mock AI Search embeddings for determinism — not real Azure AI Search index</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>tests/</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Test document seeding: create in-memory documents with known section content for deterministic chunk selection verification</pattern>
+      <pattern>Token budget test: create a document set that when concatenated would exceed 128K tokens — verify the injected context is truncated to stay within budget</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Document context integration was verified manually in R2-054. This task creates automated tests for the context injection service that can run in CI without real Azure AI Search or real Dataverse documents.
+    </background>
+    <dependencies>
+      Depends on R2-054 (document context integration verified working). Phase 5, runs after R2-058.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Locate document context injection service and multi-document aggregation service implementations</step>
+    <step order="1">Create test fixture with mock documents: 5 documents each with distinct section content, total exceeding 128K tokens when combined</step>
+    <step order="2">Write test: RelevantChunksSelected — query for section 3 content, verify returned chunks contain section 3 text</step>
+    <step order="3">Write test: ConversationAwareReselection — query section 1 then section 90, verify second query returns different chunks than first</step>
+    <step order="4">Write test: TokenBudgetNeverExceeded — inject 5 large documents, verify total injected tokens never exceed 128K (check token count in service response)</step>
+    <step order="5">Write test: DocumentBudgetPerDoc_30K — verify single document injection stays within 30K token budget</step>
+    <step order="6">Write test: MultiDocumentAggregation_5Docs — inject 5 documents, verify all 5 contribute to the context within shared 30K budget</step>
+    <step order="7">Write test: BudgetExceeded_GracefulDegradation — verify when budget exceeded, service returns a truncation notice (not null/exception)</step>
+    <step order="8">Run tests: dotnet test tests/ --filter "DocumentContext" — verify all pass</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-062 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">DocumentContextIntegrationTests.cs — xUnit tests for chunking, budget enforcement, multi-document aggregation</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "DocumentContext" exits with 0 failures</criterion>
+    <criterion testable="true">RelevantChunksSelected test passes</criterion>
+    <criterion testable="true">ConversationAwareReselection test passes (different chunks for different queries)</criterion>
+    <criterion testable="true">TokenBudgetNeverExceeded test passes (128K limit enforced)</criterion>
+    <criterion testable="true">MultiDocumentAggregation_5Docs test passes</criterion>
+    <criterion testable="true">BudgetExceeded_GracefulDegradation test passes</criterion>
+  </acceptance-criteria>
+</task>

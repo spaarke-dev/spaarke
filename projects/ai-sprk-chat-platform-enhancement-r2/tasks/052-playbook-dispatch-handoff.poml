@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-052" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Playbook Dispatch End-to-End — Natural Language to Dialog Handoff</title>
+    <status>pending</status>
+    <phase>4</phase>
+    <tags>frontend, bff-api, integration</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex end-to-end integration: natural language → PlaybookDispatcher → typed output → dialog_open SSE → Xrm.Navigation.navigateTo. Tags include bff-api, frontend, integration. Tests both HITL and autonomous execution paths. ADR-006 Code Page dialog pattern applies.</rigor-reason>
+    <dependencies>[015, 018, 039]</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify the complete playbook dispatch pipeline end-to-end: User types natural language in SprkChat → PlaybookDispatcher matches intent → typed output determines behavior → for `dialog` output: `dialog_open` SSE event flows to frontend → SprkChat opens Code Page via `Xrm.Navigation.navigateTo` with pre-populated fields. Also test the autonomous (requiresConfirmation=false) execution path. Validate NFR-04 (&lt;2 seconds for dispatch matching).
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Natural language input "send this analysis by email to John" results in: PlaybookDispatcher matching the email playbook, extracting recipient "John", sending dialog_open SSE event with targetPage="sprk_emailcomposer" and prePopulateFields={recipient:"John"}, SprkChatPane opening the email composer Code Page with recipient pre-filled. Autonomous actions execute directly and show success toast. Full round-trip completes within 2 seconds.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-06, FR-07, FR-08 playbook dispatch and HITL/autonomous, NFR-04">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — PlaybookDispatcher architecture, dialog handoff pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF dispatcher — verify dispatch endpoint and output routing">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="Frontend action handler — dialog_open handler from R2-039">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+    <file purpose="ADR-006 — Code Page dialog via Xrm.Navigation.navigateTo">../.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    <file purpose="Dialog patterns — Xrm.Navigation.navigateTo with pre-populated data">../.claude/patterns/pcf/dialog-patterns.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-04">Playbook semantic matching MUST complete within 2 seconds (vector search + LLM refinement)</constraint>
+    <constraint source="ADR-006">Dialog output MUST open via Xrm.Navigation.navigateTo — not an inline iframe or custom modal</constraint>
+    <constraint source="spec FR-08">Autonomous actions (requiresConfirmation=false) MUST execute without dialog — verify they bypass the confirmation step</constraint>
+    <constraint source="spec">Parameter extraction MUST flow from PlaybookDispatcher through SSE event to Code Page via URL params — no separate API call from the Code Page to retrieve pre-populated values</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+    </files>
+    <patterns>
+      <pattern>Test scenario for dialog dispatch: user message "send this by email to john@example.com" → dispatcher matches email playbook → dialog_open SSE event with targetPage="sprk_emailcomposer", prePopulateFields={recipient:"john@example.com"}</pattern>
+      <pattern>Test scenario for autonomous dispatch: user message "summarize this for the matter notes" → dispatcher matches summarize playbook (requiresConfirmation=false) → BFF executes and returns text output → success toast in SprkChat</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      PlaybookDispatcher (R2-015) and the output handler (R2-018) were implemented in Phase 2 BFF. The frontend action handler for dialog_open was implemented in R2-039 (Phase 3). This integration task validates the complete path end-to-end with real data, fixes any gaps in event formats or parameter passing, and validates NFR-04 timing.
+
+      The email composer Code Page (sprk_emailcomposer) must exist or a stub must be available for testing the dialog open. If the Code Page does not yet exist, create a minimal stub (single HTML page that logs URL params) for integration testing purposes.
+    </background>
+    <dependencies>
+      Depends on R2-015 (PlaybookDispatcher), R2-018 (output handler), and R2-039 (HITL UX frontend). All must be complete before this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read PlaybookDispatcher service (from R2-015) to understand the dispatch flow, SSE event emission for dialog outputs, and parameter extraction</step>
+    <step order="1">Read useActionHandlers.ts (from R2-039) to understand how dialog_open SSE events are currently handled on the frontend</step>
+    <step order="2">Confirm at least one playbook exists in Dataverse with trigger phrases set (from R2-005 seed data) that will match a test phrase</step>
+    <step order="3">Test HITL dispatch path: type a natural language message matching the email playbook; verify confirmation dialog appears with pre-populated values; click Confirm; verify Code Page opens with correct URL params</step>
+    <step order="4">Measure dispatch timing: use browser DevTools to measure time from message send to dialog_open event receipt — must be under 2 seconds</step>
+    <step order="5">If email composer Code Page does not exist: create a stub sprk_emailcomposer web resource that renders URL params as a form — sufficient for integration testing</step>
+    <step order="6">Test autonomous dispatch path: type a message matching an autonomous playbook action; verify no dialog appears; verify success toast shows after BFF completes execution</step>
+    <step order="7">Fix any parameter format mismatches between BFF SSE event and frontend Xrm.Navigation.navigateTo data parameter encoding</step>
+    <step order="8">Verify prePopulateFields values appear correctly in the opened Code Page (read window.location.search params in the stub Code Page)</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-052 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to PlaybookDispatcher SSE event emission or parameter serialization</artifact>
+    <artifact type="code">Any fixes to useActionHandlers.ts dialog_open handling</artifact>
+    <artifact type="code">Stub sprk_emailcomposer web resource (if Code Page does not yet exist)</artifact>
+    <artifact type="docs">notes/052-dispatch-integration-findings.md — timing measurements, issues found, fixes applied</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Natural language message matching email playbook triggers confirmation dialog with AI-extracted recipient field pre-populated</criterion>
+    <criterion testable="true">Clicking Confirm opens the email composer Code Page via Xrm.Navigation.navigateTo</criterion>
+    <criterion testable="true">Email composer Code Page receives pre-populated fields as URL params</criterion>
+    <criterion testable="true">Autonomous playbook action (requiresConfirmation=false) executes without dialog and shows success toast</criterion>
+    <criterion testable="true">Full dispatch round-trip (submit → match → dialog_open event) completes within 2 seconds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-020" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>AnalysisChatContextResolver Real Implementation — Replace Stub with Live Dataverse Queries</title>
+    <status>pending</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, dataverse</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — replaces a stub with real Dataverse queries assembling the full chat session context; multiple entity types queried; Redis cache integration; FR-16 requirement; serial dependency on R2-001 and R2-019</rigor-reason>
+    <dependencies>[001, 019]</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the stub implementation in `AnalysisChatContextResolver.cs` with a real implementation
+    that queries Dataverse to assemble the full SprkChat session context.
+
+    **Current state**: `ResolveFromDataverseAsync()` is a stub returning all capabilities for every
+    analysis — no real Dataverse queries, no filtering, no actual context assembly.
+
+    **New implementation** (replace the stub body while keeping the public interface):
+
+    **Step 1 — Resolve analysis output and playbook**:
+    - Query `sprk_analysisoutput` by analysis ID → get `sprk_analysisplaybookid` (lookup)
+    - Query `sprk_analysisplaybook` by that ID → get `sprk_playbookcapabilities`, `sprk_recordType`,
+      `sprk_entityType`, `sprk_tags`
+
+    **Step 2 — Query matter/entity record for entity-specific context**:
+    - Use `ChatHostContext.EntityType` and `ChatHostContext.RecordId` to query the matter record
+    - Extract entity-specific context: e.g., for a matter, get `sprk_mattername`, `sprk_mattertype`
+    - This context is added to the session as "entity context" (not playbook context)
+
+    **Step 3 — Query scope capabilities and commands**:
+    - Call `DynamicCommandResolver.ResolveCommandsAsync(context)` to get the command catalog
+    - Read active scopes for this session to get `sprk_capabilities` and `sprk_searchGuidance`
+
+    **Step 4 — Assemble ChatAnalysisContext**:
+    ```csharp
+    return new ChatAnalysisContext(
+        Capabilities: playbook.Capabilities,       // from playbook
+        Commands: commandCatalog,                   // from DynamicCommandResolver
+        DocumentIds: session.DocumentIds,           // from session state
+        SearchGuidance: scope.SearchGuidance,       // from active scope
+        ScopeMetadata: scope.Metadata,              // scope name, description, focus area
+        EntityContext: entityContext);              // matter/entity specific data
+    ```
+
+    **Redis cache**: Cache the assembled `ChatAnalysisContext` per session for 30 minutes.
+    Cache key: `chat-context:{tenantId}:{sessionId}`
+    Invalidate on explicit session refresh or capability change.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `AnalysisChatContextResolver.ResolveFromDataverseAsync()` returns a real `ChatAnalysisContext`
+    assembled from live Dataverse queries. Different playbooks yield different tool sets (FR-16).
+    SprkChat sessions show only capabilities from the analysis's actual playbook + matched playbooks
+    + scopes — not all capabilities for every analysis.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-16 (real context resolver), NFR-03 (3s initialization with Redis)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — ChatHostContext, context resolver stub location, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="AnalysisChatContextResolver stub — current implementation to replace">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file purpose="DynamicCommandResolver from R2-019 — integration point for command catalog">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs</file>
+    <file purpose="Dataverse entity operations pattern">../.claude/patterns/dataverse/entity-operations.md</file>
+    <file purpose="Redis distributed cache pattern">../.claude/patterns/caching/distributed-cache.md</file>
+    <file purpose="Analysis scopes pattern — three-tier scope system">../.claude/patterns/ai/analysis-scopes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">MUST cache assembled ChatAnalysisContext in Redis with 30-min TTL per existing pattern — MUST NOT re-query Dataverse on every message</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext for entity-scoped queries — MUST NOT hardcode entity type names or record IDs</constraint>
+    <constraint source="ADR-014">Cache key MUST include tenantId: `chat-context:{tenantId}:{sessionId}` — MUST NOT use per-capability or per-user keys (context is session-scoped)</constraint>
+    <constraint source="ADR-015">MUST NOT log entity-specific field values (matter name, case details) — log only entity type, record ID, and cache hit/miss metadata</constraint>
+    <constraint source="spec NFR-03">Full context assembly MUST complete within 3 seconds with Redis cache hit; Dataverse query path on cache miss is allowed to take longer</constraint>
+    <constraint source="spec FR-16">MUST return ONLY the capabilities from the analysis's actual playbook + active scopes — MUST NOT return all capabilities for every session (replace stub behavior)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Lookup chain: analysisOutputId → sprk_analysisplaybookid → playbook capabilities; follow the existing Dataverse lookup expansion pattern used in other BFF services</pattern>
+      <pattern>Redis get-or-set with 30-min TTL: `chat-context:{tenantId}:{sessionId}` — same pattern as DynamicCommandResolver but session-scoped (not record-type-scoped)</pattern>
+      <pattern>ChatAnalysisContext assembly: combine results from all 4 query steps into a single immutable record; serialize to JSON for Redis storage</pattern>
+      <pattern>Scope query for active scopes: query scopes associated with the analysis or matter via the existing scope association relationship — check existing scope resolution code in PlaybookChatContextProvider</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The `AnalysisChatContextResolver` stub was created in R1 as a placeholder — it returns all
+      capabilities for every session regardless of the actual playbook or entity. This means every
+      SprkChat session gets the same tools, which is wrong. R2 replaces the stub with real queries
+      so that:
+      - An analysis using the "Legal Research" playbook gets legal research tools
+      - An analysis using the "Contract Drafting" playbook gets drafting tools
+      - Matter sessions get matter-scoped scope commands
+      - Project sessions get project-scoped scope commands
+
+      The resolver is the connective tissue that assembles the full chat context: capabilities
+      (what the AI can do), commands (what slash commands the user sees), documents (document IDs
+      in scope), search guidance (how web search is scoped), and entity context (matter/entity data
+      for grounding the AI's responses).
+
+      This task is sequential (not in a parallel group) because it depends on both `DynamicCommandResolver`
+      (R2-019) and the Dataverse schema changes (R2-001). Task R2-021 (ScopeCapabilitiesService) will
+      further integrate with this resolver.
+    </background>
+    <dependencies>
+      Depends on Task R2-001 (Dataverse schema — sprk_capabilities, sprk_searchGuidance, sprk_recordType fields)
+      and R2-019 (DynamicCommandResolver must exist for command catalog integration). Sequential — cannot
+      run in parallel with any task it depends on. Task R2-021 (ScopeCapabilities) depends on this task.
+      Own files: `AnalysisChatContextResolver.cs` only — no new files needed (stub replacement).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the full current `AnalysisChatContextResolver.cs` to understand what the stub returns and what the `ChatAnalysisContext` model looks like</step>
+    <step order="1">Read `PlaybookChatContextProvider.cs` to understand how analysis context is consumed and what fields are expected</step>
+    <step order="2">Read `.claude/patterns/dataverse/entity-operations.md` to confirm query patterns for related entity lookups</step>
+    <step order="3">Implement Step 1: query `sprk_analysisoutput` → `sprk_analysisplaybookid` → `sprk_analysisplaybook` capabilities using Dataverse lookup expansion ($expand)</step>
+    <step order="4">Implement Step 2: query the matter/entity record using `ChatHostContext.EntityType` and `ChatHostContext.RecordId` for entity-specific context fields</step>
+    <step order="5">Implement Step 3: call `DynamicCommandResolver.ResolveCommandsAsync(context)` to get the command catalog; query active scopes for `sprk_searchGuidance` and `sprk_capabilities`</step>
+    <step order="6">Implement Step 4: assemble the `ChatAnalysisContext` from all gathered data</step>
+    <step order="7">Implement Redis caching: serialize assembled context to JSON, store with key `chat-context:{tenantId}:{sessionId}` and 30-minute TTL</step>
+    <step order="8">Add cache-first check at method entry: return cached context if found</step>
+    <step order="9">Replace the stub body entirely — ensure the stub's "return all capabilities" behavior is removed</step>
+    <step order="10">Run `dotnet build` and verify no errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-020 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs — stub replaced with real Dataverse queries and Redis caching</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sessions using the "Legal Research" playbook return only legal research capabilities in the context (not all capabilities)</criterion>
+    <criterion testable="true">Sessions using the "Contract Drafting" playbook return only contract drafting capabilities</criterion>
+    <criterion testable="true">ChatAnalysisContext includes `SearchGuidance` from the active scope's `sprk_searchGuidance` field (not empty for scopes that have it configured)</criterion>
+    <criterion testable="true">Second call with same sessionId returns result from Redis (cache hit) within 100ms (NFR-03 with cache)</criterion>
+    <criterion testable="true">Redis key `chat-context:{tenantId}:{sessionId}` exists after first resolution with 30-minute TTL</criterion>
+    <criterion testable="true">Entity context includes matter-specific data (e.g., matter name) for matter-based sessions</criterion>
+    <criterion testable="true">No entity field values (matter names, case details) appear in logs at Info or higher (ADR-015)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `ChatAnalysisContext` model may need new fields if the stub model did not include
+    `SearchGuidance`, `ScopeMetadata`, or `EntityContext`. If model changes are needed, check
+    all callers of the resolver to ensure they handle the new fields gracefully (backward
+    compatibility via optional/nullable fields).
+
+    The Dataverse query for `sprk_analysisoutput` → playbook lookup may require understanding
+    the relationship structure. Check `ChatDataverseRepository.cs` (if it exists) or the existing
+    Dataverse query patterns in other BFF services for how lookup navigation is handled in OData
+    queries for this project.
+
+    If the scope association with analysis/matter is not yet established in the Dataverse schema,
+    query all active scopes for the tenant as a fallback. Document this assumption in the
+    `notes/020-context-resolver-queries.md` for the Dataverse architect to review.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Sequential — depends on R2-001 (Dataverse schema) and R2-019 (DynamicCommandResolver). MUST NOT run in parallel with dependent tasks. Task R2-021 depends on this task. Own file: AnalysisChatContextResolver.cs only.</protocol>
+  </execution>
+</task>

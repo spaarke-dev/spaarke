@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-043" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Multi-Document Selector in SprkChatContextSelector</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChatContextSelector.tsx to support multi-select document state. Frontend and fluent-ui tags, .tsx modification. The additionalDocumentIds prop already exists but the multi-select UI and add/remove operations are R2 work.</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend `SprkChatContextSelector` to allow selecting multiple documents from the AnalysisWorkspace file list for multi-document analysis. Use the existing `additionalDocumentIds` prop (already typed in R1) to hold the selected document IDs. Show a selected document count badge. Support adding and removing individual documents from the selection.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChatContextSelector shows a document count badge (e.g., "+3 docs") when multiple documents are selected. Clicking the badge opens a panel or popover listing selected documents with remove buttons. An "Add documents" button opens a document picker from the AnalysisWorkspace file list. The additionalDocumentIds prop is populated and passed to the BFF with each message for multi-document context injection.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-12 multi-document analysis, 5+ documents, shared 30K token budget">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — multi-document context architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Component to extend — context selector with additionalDocumentIds prop">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatContextSelector.tsx</file>
+    <file purpose="Main component — passes additionalDocumentIds to BFF">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="ADR-021 — Fluent v9 Badge, Popover, Panel patterns">../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="ADR-012 — shared component library, callback props pattern">../.claude/adr/ADR-012-shared-components.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-12">additionalDocumentIds MUST be sent to the BFF with each message for multi-document context injection — existing prop in R1 was never populated</constraint>
+    <constraint source="ADR-021">Document count badge MUST use Fluent v9 Badge or CounterBadge component — no custom badge implementations</criterion>
+    <constraint source="ADR-012">Document selection panel/popover MUST use callback-based props for document addition — SprkChatContextSelector does not directly query Dataverse</constraint>
+    <constraint source="spec">Token budget is shared across all selected documents (30K total, not 30K per document) — UI should communicate multi-document sharing but enforcement is BFF-side</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatContextSelector.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern>Fluent v9 CounterBadge: import CounterBadge from @fluentui/react-components — shows numeric count, color="brand", size="small"</pattern>
+      <pattern>Document picker integration: AnalysisWorkspace sends selected document IDs via SprkChatBridge or via a callback prop onAddDocuments(ids: string[]) — coordinate with BroadcastChannel events in task R2-051</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R1 typed the `additionalDocumentIds?: string[]` prop on SprkChatContextSelector but never populated it. The AnalysisWorkspace code page has a file list (list of documents in the analysis) that can source document IDs for multi-document analysis. R2 wires these together so users can select multiple documents from the AnalysisWorkspace file list and include them all in the AI context window.
+
+      The BFF document context injection service (R2-012) handles aggregating multiple documents within a shared 30K token budget. The frontend only needs to pass the selected IDs.
+    </background>
+    <dependencies>
+      Depends on R2-006 (Phase 1 deploy). Can run in parallel with R2-040, R2-041, R2-042, R2-044. Connects to BFF task R2-012 (multi-document aggregation) during Phase 4 integration.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChatContextSelector.tsx to understand the current context indicator layout, props interface, and how additionalDocumentIds is currently handled (or ignored)</step>
+    <step order="1">Confirm additionalDocumentIds prop is defined in ISprkChatContextSelectorProps — if not, add it as string[]</step>
+    <step order="2">Add selectedDocuments state to SprkChat.tsx: string[] array managed at the SprkChat level, passed as additionalDocumentIds to SprkChatContextSelector</step>
+    <step order="3">Add a Fluent v9 CounterBadge to SprkChatContextSelector showing the count of additionalDocumentIds when > 0</step>
+    <step order="4">Make the CounterBadge clickable: open a Fluent v9 Popover listing selected documents with filename and a remove (X) button for each</step>
+    <step order="5">Add "Add documents" button in the popover/panel: clicking opens a document picker. For now, implement as a Fluent v9 Dialog with a list of available documents from a passed prop (onRequestDocuments callback)</step>
+    <step order="6">Implement remove document: clicking X on a listed document calls onRemoveDocument(id) callback → SprkChat.tsx removes it from selectedDocuments state</step>
+    <step order="7">Ensure additionalDocumentIds is included in the chat message payload sent to the BFF — update the message send logic in SprkChat.tsx to include selectedDocuments</step>
+    <step order="8">Add a tooltip on the counter badge: "Multiple documents selected — 30K token budget shared" to communicate the shared budget</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-043 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SprkChatContextSelector.tsx — extended with CounterBadge, document list popover, add/remove document UX</artifact>
+    <artifact type="code">SprkChat.tsx — updated with selectedDocuments state management and inclusion in message payload</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When additionalDocumentIds has 3 items, a badge showing "3" appears on the context selector</criterion>
+    <criterion testable="true">Clicking the badge opens a popover listing selected documents with remove buttons</criterion>
+    <criterion testable="true">Clicking remove on a document removes it from the selected list and decrements the badge count</criterion>
+    <criterion testable="true">additionalDocumentIds is included in the BFF message payload when documents are selected</criterion>
+    <criterion testable="true">Badge uses Fluent v9 CounterBadge — not a custom div with a number</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-036" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SlashCommandMenu Category Grouping and Visual Distinction</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SlashCommandMenu.tsx with new category grouping, visual distinction, and keyboard navigation across categories. Frontend and fluent-ui tags. .tsx file modification. UX complexity warrants FULL rigor.</rigor-reason>
+    <dependencies>[035]</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance `SlashCommandMenu` with category-based grouping: System, Playbook, and Scope categories. Each category has a distinct visual indicator (icon and/or label color using Fluent v9 tokens). Show the command source (which playbook or scope contributed it) as a subtitle on each command item. Support full keyboard navigation across category groups (arrow keys, Enter, Escape).
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SlashCommandMenu groups commands into three visual sections: System (always available), Playbook (from current playbook), and Scope (from active scopes). Each group has a section header. Each command item optionally shows a source subtitle (e.g., "Email Playbook" or "Legal Research scope"). Keyboard navigation works within and across groups. All visual elements use Fluent v9 tokens.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-05 dynamic slash commands, FR-11 scope capability commands">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, ADR constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Component to modify — slash command menu implementation">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    <file purpose="Slash command types — extended with source in R2-035">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+    <file purpose="ADR-021 — Fluent v9 design system, dark mode">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Category section headers and grouping MUST use Fluent v9 MenuGroup and MenuGroupHeader components — no custom section headers</constraint>
+    <constraint source="ADR-021">Visual distinction between categories MUST use Fluent v9 semantic tokens — not hard-coded colors</constraint>
+    <constraint source="ADR-012">SlashCommandMenu MUST remain a self-contained shared component — no direct Dataverse or BFF calls inside the component</constraint>
+    <constraint source="spec">Source subtitle is optional — commands without a named source (system commands) do not show a subtitle</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern>Fluent v9 MenuGroup grouping pattern: wrap each category in MenuGroup with MenuGroupHeader for section label</pattern>
+      <pattern>Keyboard navigation across MenuGroups: Fluent v9 Menu component handles arrow key navigation across groups natively when items use MenuItem</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R1 SlashCommandMenu rendered all commands in a flat list. R2-035 adds a source discriminator to each command. This task uses that source to group commands visually and improve discoverability. Users need to quickly distinguish system utility commands (/clear, /help) from playbook-specific actions (/draft-email) and scope-specific capabilities (/search-legal-database).
+
+      The source subtitle (e.g., "Drafting Playbook") helps users understand why a command is available. Not all commands have a named source — system commands show no subtitle.
+    </background>
+    <dependencies>
+      Depends on R2-035 (source discriminator on SlashCommand type). Can run in parallel with R2-037, R2-038. Task R2-039 depends on R2-036.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SlashCommandMenu.tsx to understand current rendering, keyboard handling, and props structure</step>
+    <step order="1">Read slashCommandMenu.types.ts to confirm the source field and any sourceName/sourceLabel fields added or needed</step>
+    <step order="2">Group the incoming commands array by source: "system" → System group, "playbook" → Playbook group, "scope" → Scope group</step>
+    <step order="3">Render each non-empty group with a Fluent v9 MenuGroupHeader: "System Commands", "Playbook Commands", "Scope Commands"</step>
+    <step order="4">Add visual icon to section headers: Settings icon for System, BookTemplate icon for Playbook, Globe icon for Scope — all from @fluentui/react-icons</step>
+    <step order="5">Render each command item with optional subtitle line showing sourceName (e.g., "Email Playbook") in a smaller muted text style using colorNeutralForeground3 token</step>
+    <step order="6">Verify Fluent v9 Menu/MenuItem keyboard navigation works across groups — test arrow keys move through all items including across group boundaries</step>
+    <step order="7">Add section header styling: small uppercase label, lighter font weight, using Fluent v9 typography tokens</step>
+    <step order="8">Verify empty groups are hidden — if no playbook commands exist, the Playbook section header does not render</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-036 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SlashCommandMenu.tsx — updated with category grouping, section headers, source subtitles, keyboard navigation across groups</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Typing / in SprkChatInput shows grouped commands with section headers: System Commands, Playbook Commands, Scope Commands</criterion>
+    <criterion testable="true">Command items from playbooks show a subtitle with the playbook name</criterion>
+    <criterion testable="true">System commands show no subtitle</criterion>
+    <criterion testable="true">Arrow keys navigate through all commands including across group boundaries</criterion>
+    <criterion testable="true">Empty sections (no commands for that category) are hidden — no empty headers</criterion>
+    <criterion testable="true">All styles use Fluent v9 semantic tokens — no hard-coded colors</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>
