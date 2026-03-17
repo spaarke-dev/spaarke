@@ -283,7 +283,11 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
           (window as any)?.Xrm;
         const clientUrl =
           xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "";
-        const tenantId = await getTenantId();
+        // Read tenantId directly from the same Xrm context (same pattern as clientUrl).
+        // Falls back to authInit.getTenantId() (MSAL account or secondary frame-walk).
+        const xrmTenantId: string =
+          xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId ?? "";
+        const tenantId = xrmTenantId || (await getTenantId());
 
         const theme = getEffectiveDarkMode() ? "dark" : "light";
         const data = new URLSearchParams({
