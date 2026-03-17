@@ -1,10 +1,14 @@
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+// Note: PortalTokenValidator removed — external users now authenticate via Azure AD B2B (MSAL).
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
-/// DI registration for external access (Power Pages / Secure Project) services.
-/// Registers portal token validation and participation data services.
+/// DI registration for external access (Secure Project) services.
+/// Registers participation data and SPE membership services.
+///
+/// External user authentication uses Azure AD B2B guest accounts (MSAL in the SPA).
+/// JWT validation is handled by ASP.NET Core's standard authentication middleware.
 ///
 /// ADR-010: Concrete type registrations — no unnecessary interfaces.
 /// ADR-009: ExternalParticipationService uses Redis via IDistributedCache (60s TTL).
@@ -12,24 +16,11 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class ExternalAccessModule
 {
     /// <summary>
-    /// Adds external access services: portal token validation and participation data loading.
+    /// Adds external access services: participation data loading and SPE membership management.
     /// </summary>
     public static IServiceCollection AddExternalAccess(this IServiceCollection services)
     {
-        // Portal token validator — uses memory cache for public key (1-hour TTL)
-        // HttpClient registered as named client for the Power Pages portal endpoint
-        services.AddHttpClient<PortalTokenValidator>((sp, client) =>
-        {
-            var config = sp.GetRequiredService<IConfiguration>();
-            var portalUrl = config["PowerPages:BaseUrl"];
-            if (!string.IsNullOrEmpty(portalUrl))
-            {
-                client.BaseAddress = new Uri(portalUrl.TrimEnd('/') + "/");
-            }
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-
-        // Participation service — queries sprk_externalrecordaccess with Redis caching
+        // Participation service — queries contacts + sprk_externalrecordaccess with Redis caching
         // Uses its own HttpClient instance with app-only Dataverse authentication
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>
         {

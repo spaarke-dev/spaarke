@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// Maps all external access API endpoints.
 ///
 /// Two route groups:
-///   /api/v1/external        — portal user endpoints (Power Pages portal JWT auth via ExternalCallerAuthorizationFilter)
+///   /api/v1/external        — external user endpoints (Azure AD B2B guest JWT, RequireAuthorization + ExternalCallerAuthorizationFilter)
 ///   /api/v1/external-access — internal management endpoints (Azure AD JWT auth via RequireAuthorization)
 ///
 /// ADR-001: Minimal API — no controllers.
@@ -26,22 +26,25 @@ public static class ExternalAccessEndpoints
     }
 
     // =========================================================================
-    // External user endpoints — portal token authentication
+    // External user endpoints — Azure AD B2B guest authentication
     // =========================================================================
 
     private static void MapExternalUserEndpoints(WebApplication app)
     {
+        // RequireAuthorization: ASP.NET Core middleware validates the Azure AD JWT.
+        // ExternalCallerAuthorizationFilter: resolves Contact + participation data from claims.
         var externalGroup = app.MapGroup("/api/v1/external")
-            .WithTags("External Access");
+            .WithTags("External Access")
+            .RequireAuthorization();
 
-        // GET /api/v1/external/me — Returns portal user's project access context
+        // GET /api/v1/external/me — Returns external user's project access context
         externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
             .WithName("GetExternalUserContext")
-            .WithSummary("Get authenticated portal user's project access context")
+            .WithSummary("Get authenticated external user's project access context")
             .WithDescription(
                 "Returns the Contact's project access list with access levels. " +
                 "Called by the Power Pages SPA on startup to initialize navigation. " +
-                "Requires a valid Power Pages portal-issued JWT token.")
+                "Requires a valid Azure AD JWT from an authenticated B2B guest account.")
             .Produces<ExternalUserContextResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)

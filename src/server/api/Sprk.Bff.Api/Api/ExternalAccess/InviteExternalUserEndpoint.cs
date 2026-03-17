@@ -1,17 +1,24 @@
 using System.Text.Json.Serialization;
+using Microsoft.Graph.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
 /// <summary>
 /// POST /api/v1/external-access/invite
 ///
-/// Creates a Power Pages portal invitation for an external Contact by:
-///   1. Creating an adx_invitation record in Dataverse (type=Single, max 1 redemption).
-///   2. Associating the "Secure Project Participant" web role to the invitation (N:N).
-///   3. Returning the invitation code (adx_invitationcode) for delivery to the Contact.
+/// Invites an external user to a Secure Project by:
+///   1. Creating or resolving the Contact in Dataverse by email.
+///   2. Sending an Azure AD B2B guest invitation via Microsoft Graph.
+///   3. Returning the Contact ID and invitation redemption URL.
+///
+/// The caller should then call POST /grant to create the sprk_externalrecordaccess record.
+///
+/// Prerequisites:
+///   - The managed identity must have the "User.Invite.All" Microsoft Graph permission.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
@@ -19,9 +26,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// </summary>
 public static class InviteExternalUserEndpoint
 {
-    private const string InvitationEntitySet = "adx_invitations";
-    private const int InvitationTypeSingle = 756150000;
-    private const int DefaultExpiryDays = 30;
+    private const string ContactEntitySet = "contacts";
+    private const string RedirectUrl = "https://myapplications.microsoft.com";
 
     /// <summary>
     /// Registers the invite endpoint on the external-access group.
@@ -30,10 +36,11 @@ public static class InviteExternalUserEndpoint
     {
         group.MapPost("/invite", InviteExternalUserAsync)
             .WithName("InviteExternalUser")
-            .WithSummary("Send a Power Pages portal invitation to an external Contact")
+            .WithSummary("Invite an external user to a Secure Project via Azure AD B2B")
             .WithDescription(
-                "Creates an adx_invitation record and associates the 'Secure Project Participant' web role. " +
-                "Returns the invitation code for delivery to the Contact via email or other channel.")
+                "Creates or resolves a Dataverse Contact by email, then sends an Azure AD B2B guest invitation. " +
+                "Returns the Contact ID and invitation redemption URL. " +
+                "Call POST /grant separately to create the access record.")
             .Produces<InviteExternalUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -50,145 +57,139 @@ public static class InviteExternalUserEndpoint
     private static async Task<IResult> InviteExternalUserAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
+        IGraphClientFactory graphClientFactory,
         HttpContext httpContext,
         ILogger<Program> logger,
-        IConfiguration configuration,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
-        if (request.ContactId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ProblemDetailsHelper.ValidationError("Email is required.");
 
         if (request.ProjectId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
 
-        // Resolve the web role GUID from configuration
-        var webRoleIdStr = configuration["PowerPages:SecureProjectParticipantWebRoleId"];
-        if (string.IsNullOrEmpty(webRoleIdStr) || !Guid.TryParse(webRoleIdStr, out var webRoleId))
+        logger.LogInformation(
+            "[EXT-INVITE] Inviting external user {Email} to Project {ProjectId}",
+            request.Email, request.ProjectId);
+
+        // ── Step 1: Create or resolve Contact in Dataverse ────────────────────
+        var contactId = await ResolveOrCreateContactAsync(dataverseClient, request, logger, ct);
+        if (contactId == Guid.Empty)
         {
-            logger.LogError(
-                "[EXT-INVITE] PowerPages:SecureProjectParticipantWebRoleId is not configured or invalid");
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Configuration Error",
-                detail: "The 'Secure Project Participant' web role is not configured. Contact your administrator.",
+                title: "Internal Server Error",
+                detail: "Failed to create or resolve Contact record in Dataverse.",
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
+
+        // ── Step 2: Send Azure AD B2B invitation via Microsoft Graph ──────────
+        // Requires: User.Invite.All application permission on the managed identity.
+        var (inviteRedeemUrl, status) = await SendB2BInvitationAsync(
+            graphClientFactory, request.Email, request.FirstName, request.LastName, logger, ct);
 
         logger.LogInformation(
-            "[EXT-INVITE] Creating invitation for Contact {ContactId} / Project {ProjectId}",
-            request.ContactId, request.ProjectId);
+            "[EXT-INVITE] B2B invitation sent to {Email} — Status: {Status}, Contact: {ContactId}",
+            request.Email, status, contactId);
 
-        // ── Step 1: Determine expiry date ─────────────────────────────────────
-        var expiryDate = request.ExpiryDate
-            ?? DateOnly.FromDateTime(DateTime.UtcNow.AddDays(DefaultExpiryDays));
-
-        // ── Step 2: Create adx_invitation record ──────────────────────────────
-        Guid invitationId;
-        try
-        {
-            var invitationName = $"Secure Project Access - {request.ProjectId:N} - {DateTime.UtcNow:yyyyMMdd}";
-            var payload = BuildInvitationPayload(invitationName, request.ContactId, expiryDate);
-            invitationId = await dataverseClient.CreateAsync(InvitationEntitySet, payload, ct);
-
-            logger.LogInformation(
-                "[EXT-INVITE] Created invitation {InvitationId} for Contact {ContactId}",
-                invitationId, request.ContactId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "[EXT-INVITE] Failed to create invitation record for Contact {ContactId} / Project {ProjectId}",
-                request.ContactId, request.ProjectId);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "Failed to create invitation record in Dataverse.",
-                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
-        }
-
-        // ── Step 3: Associate web role to invitation (N:N) ────────────────────
-        try
-        {
-            // POST to the N:N navigation property: adx_invitation_mspp_webrole_powerpagecomponent/$ref
-            await dataverseClient.AssociateAsync(
-                $"{InvitationEntitySet}({invitationId})/adx_invitation_mspp_webrole_powerpagecomponent/$ref",
-                webRoleId,
-                "mspp_webroles",
-                ct);
-
-            logger.LogInformation(
-                "[EXT-INVITE] Associated web role {WebRoleId} to invitation {InvitationId}",
-                webRoleId, invitationId);
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal: invitation exists but web role association failed
-            // Log and continue — the invitation can still be used manually
-            logger.LogError(ex,
-                "[EXT-INVITE] Failed to associate web role {WebRoleId} to invitation {InvitationId}. " +
-                "Invitation exists but web role was not associated.",
-                webRoleId, invitationId);
-        }
-
-        // ── Step 4: Retrieve the invitation code ──────────────────────────────
-        string invitationCode;
-        try
-        {
-            var invitationRow = await dataverseClient.RetrieveAsync<InvitationRow>(
-                InvitationEntitySet,
-                invitationId,
-                select: "adx_invitationid,adx_invitationcode,adx_expirydate",
-                cancellationToken: ct);
-
-            invitationCode = invitationRow?.adx_invitationcode
-                ?? throw new InvalidOperationException("Invitation code was not returned by Dataverse");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "[EXT-INVITE] Failed to retrieve invitation code for invitation {InvitationId}",
-                invitationId);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "Invitation was created but the invitation code could not be retrieved.",
-                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
-        }
-
-        return TypedResults.Ok(new InviteExternalUserResponse(invitationId, invitationCode, expiryDate));
+        return TypedResults.Ok(new InviteExternalUserResponse(contactId, inviteRedeemUrl, status));
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
 
-    private static object BuildInvitationPayload(
-        string invitationName,
-        Guid contactId,
-        DateOnly expiryDate)
+    private static async Task<Guid> ResolveOrCreateContactAsync(
+        DataverseWebApiClient dataverseClient,
+        InviteExternalUserRequest request,
+        ILogger logger,
+        CancellationToken ct)
     {
-        return new Dictionary<string, object?>
+        try
         {
-            ["adx_name"] = invitationName,
-            ["adx_type"] = InvitationTypeSingle,
-            ["adx_invitecontact@odata.bind"] = $"/contacts({contactId})",
-            ["adx_expirydate"] = expiryDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).ToString("o"),
-            ["adx_maximumredemptions"] = 1
-        };
+            // Check if Contact already exists by email
+            var existing = await dataverseClient.QueryAsync<ContactRow>(
+                ContactEntitySet,
+                filter: $"emailaddress1 eq '{Uri.EscapeDataString(request.Email)}'",
+                select: "contactid",
+                top: 1,
+                cancellationToken: ct);
+
+            if (existing.Count > 0)
+            {
+                logger.LogDebug("[EXT-INVITE] Found existing Contact {ContactId} for email {Email}",
+                    existing[0].contactid, request.Email);
+                return existing[0].contactid;
+            }
+
+            // Create new Contact
+            var payload = new Dictionary<string, object?>
+            {
+                ["emailaddress1"] = request.Email,
+                ["firstname"] = request.FirstName ?? string.Empty,
+                ["lastname"] = request.LastName ?? request.Email.Split('@')[0]
+            };
+
+            var newContactId = await dataverseClient.CreateAsync(ContactEntitySet, payload, ct);
+            logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
+                newContactId, request.Email);
+
+            return newContactId;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[EXT-INVITE] Failed to resolve or create Contact for email {Email}", request.Email);
+            return Guid.Empty;
+        }
+    }
+
+    private static async Task<(string redeemUrl, string status)> SendB2BInvitationAsync(
+        IGraphClientFactory graphClientFactory,
+        string email,
+        string? firstName,
+        string? lastName,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var graphClient = graphClientFactory.ForApp();
+            var displayName = string.Join(" ", new[] { firstName, lastName }.Where(s => !string.IsNullOrEmpty(s)));
+
+            var invitation = await graphClient.Invitations.PostAsync(new Invitation
+            {
+                InvitedUserEmailAddress = email,
+                InviteRedirectUrl = RedirectUrl,
+                SendInvitationMessage = true,
+                InvitedUserDisplayName = string.IsNullOrEmpty(displayName) ? null : displayName,
+                InvitedUserMessageInfo = new InvitedUserMessageInfo
+                {
+                    CustomizedMessageBody =
+                        "You have been granted access to a Secure Project workspace. " +
+                        "Please accept this invitation to continue."
+                }
+            }, cancellationToken: ct);
+
+            return (
+                invitation?.InviteRedeemUrl ?? string.Empty,
+                invitation?.Status ?? "Unknown"
+            );
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: Contact was created, but invitation failed.
+            // Admin can resend manually. Return empty redeemUrl with error status.
+            logger.LogError(ex, "[EXT-INVITE] Failed to send B2B invitation to {Email}", email);
+            return (string.Empty, "Error");
+        }
     }
 
     // ── Dataverse row DTOs ───────────────────────────────────────────────────
 
-    private sealed class InvitationRow
+    private sealed class ContactRow
     {
-        [JsonPropertyName("adx_invitationid")]
-        public Guid adx_invitationid { get; set; }
-
-        [JsonPropertyName("adx_invitationcode")]
-        public string? adx_invitationcode { get; set; }
-
-        [JsonPropertyName("adx_expirydate")]
-        public DateTime? adx_expirydate { get; set; }
+        [JsonPropertyName("contactid")]
+        public Guid contactid { get; set; }
     }
 }

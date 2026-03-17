@@ -82,8 +82,8 @@ public class ExternalParticipationService
     }
 
     /// <summary>
-    /// Resolves a Contact GUID by querying adx_externalidentity using the portal token's sub claim (email/username).
-    /// Used when the portal token contains a sub (email) claim instead of a direct contactid GUID.
+    /// Resolves a Contact GUID by querying contacts.emailaddress1.
+    /// Used to map an Azure AD B2B guest's email claim to their Dataverse Contact record.
     /// </summary>
     public async Task<Guid?> ResolveContactByEmailAsync(string email, CancellationToken ct = default)
     {
@@ -93,7 +93,7 @@ public class ExternalParticipationService
             var apiUrl = GetDataverseApiUrl();
 
             var encodedEmail = Uri.EscapeDataString(email);
-            var query = $"{apiUrl}/adx_externalidentities?$filter=adx_username eq '{encodedEmail}'&$select=_adx_contactid_value&$top=1";
+            var query = $"{apiUrl}/contacts?$filter=emailaddress1 eq '{encodedEmail}'&$select=contactid&$top=1";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -109,8 +109,8 @@ public class ExternalParticipationService
                 return null;
             }
 
-            var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalIdentityRow>>(ct);
-            var contactId = result?.Value?.FirstOrDefault()?._adx_contactid_value;
+            var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ContactRow>>(ct);
+            var contactId = result?.Value?.FirstOrDefault()?.contactid;
 
             if (contactId.HasValue)
                 _logger.LogDebug("[EXT-ACCESS] Resolved email {Email} to Contact {ContactId}", email, contactId);
@@ -255,10 +255,10 @@ public class ExternalParticipationService
         public int? sprk_accesslevel { get; set; }
     }
 
-    private sealed class ExternalIdentityRow
+    private sealed class ContactRow
     {
-        [JsonPropertyName("_adx_contactid_value")]
-        public Guid? _adx_contactid_value { get; set; }
+        [JsonPropertyName("contactid")]
+        public Guid? contactid { get; set; }
     }
 
     private sealed class CachedParticipation

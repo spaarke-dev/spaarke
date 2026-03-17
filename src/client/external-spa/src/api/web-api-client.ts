@@ -1,33 +1,28 @@
 /**
- * Power Pages Web API Client — Secure Project Workspace SPA
+ * BFF Data Client — Secure Project Workspace SPA
  *
- * Provides a typed OData 4.0 client for querying and mutating Dataverse tables
- * through the Power Pages Web API proxy at `/_api/`.
+ * Provides typed wrappers for querying Dataverse data through the BFF API.
+ * All requests use `bffApiCall` from bff-client.ts which handles Azure AD B2B
+ * authentication (MSAL) and Bearer token injection.
  *
- * All requests use `portalApiCall` from portal-auth.ts which:
- *   - Injects `OData-Version: 4.0` and `OData-MaxVersion: 4.0` headers
- *   - Injects the anti-forgery (CSRF) token for write operations
- *   - Handles 401/403 by redirecting to the portal sign-in page
- *   - Throws ApiError on non-2xx responses
+ * BFF routes used (planned — require BFF implementation):
+ *   GET  /api/v1/external/projects                           → list accessible projects
+ *   GET  /api/v1/external/projects/{id}                     → single project
+ *   GET  /api/v1/external/projects/{id}/documents           → project documents
+ *   GET  /api/v1/external/projects/{id}/events              → project events
+ *   GET  /api/v1/external/projects/{id}/contacts            → project contacts
+ *   GET  /api/v1/external/projects/{id}/organizations       → project organizations
+ *   POST /api/v1/external/projects/{id}/events              → create event
+ *   PATCH /api/v1/external/events/{id}                      → update event
  *
- * Base URL: `/_api/` (proxied via Vite dev server to the Power Pages portal)
- *
- * Tables enabled via Power Pages site settings:
- *   - sprk_projects          (EntitySetName)
- *   - sprk_documents         (EntitySetName)
- *   - sprk_events            (EntitySetName)
- *   - contacts               (EntitySetName)
- *   - accounts               (EntitySetName)
- *
- * Relationship navigation properties used for project-scoped queries:
- *   - sprk_project_documents  (1:N, sprk_document → sprk_project)
- *   - sprk_project_events     (1:N, sprk_event → sprk_project)
- *   - sprk_project_contacts   (N:N or via junction, contacts → sprk_project)
- *
- * See: docs/architecture/power-pages-spa-guide.md — Power Pages Web API section
+ * See: docs/architecture/external-access-architecture.md
  */
 
-import { portalApiCall } from "../auth/portal-auth";
+// TODO: Data-read endpoints are pending BFF implementation.
+// These functions call planned BFF routes under /api/v1/external/*
+// that serve project data using managed-identity Dataverse access.
+// Once BFF GET endpoints are added, no changes are needed here.
+import { bffApiCall } from "../auth/bff-client";
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
@@ -229,81 +224,66 @@ function buildQueryString(options: ODataQueryOptions): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Make a GET request to the Power Pages Web API and return the collection value.
+ * Make a GET request to the BFF API and return the collection value.
  * Handles the standard `{ value: T[] }` envelope automatically.
  *
- * @param entitySet  OData EntitySet name (e.g. "sprk_projects")
- * @param options    OData query options ($select, $filter, etc.)
+ * @param bffPath  BFF API path (e.g. "/api/v1/external/projects")
+ * @param _options OData query options — reserved for future BFF support
  */
 async function getCollection<T>(
-  entitySet: string,
-  options: ODataQueryOptions = {}
+  bffPath: string,
+  _options: ODataQueryOptions = {}
 ): Promise<T[]> {
-  const qs = buildQueryString(options);
-  const url = `/_api/${entitySet}${qs}`;
-  const response = await portalApiCall<ODataCollectionResponse<T>>(url);
+  const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
   return response.value ?? [];
 }
 
 /**
- * Make a GET request to the Power Pages Web API for a single entity by ID.
+ * Make a GET request to the BFF API for a single entity by ID.
  *
- * @param entitySet  OData EntitySet name (e.g. "sprk_projects")
- * @param id         Record GUID
- * @param options    OData query options ($select, $expand)
+ * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/projects")
+ * @param id       Record GUID
+ * @param _options OData query options — reserved for future BFF support
  */
 async function getById<T>(
-  entitySet: string,
+  bffPath: string,
   id: string,
-  options: ODataQueryOptions = {}
+  _options: ODataQueryOptions = {}
 ): Promise<T> {
-  const qs = buildQueryString(options);
-  const url = `/_api/${entitySet}(${id})${qs}`;
-  return portalApiCall<T>(url);
+  return bffApiCall<T>(`${bffPath}/${id}`);
 }
 
 /**
- * Make a POST (create) request to the Power Pages Web API.
- * The anti-forgery token is injected automatically by `portalApiCall`.
+ * Make a POST (create) request to the BFF API.
  *
- * @param entitySet  OData EntitySet name (e.g. "sprk_events")
- * @param body       Record payload to create
- * @returns          The created record (OData returns it with 201 Created)
+ * @param bffPath  BFF API path (e.g. "/api/v1/external/projects/{id}/events")
+ * @param body     Record payload to create
+ * @returns        The created record
  */
 async function createRecord<TBody, TResult = TBody>(
-  entitySet: string,
+  bffPath: string,
   body: TBody
 ): Promise<TResult> {
-  const url = `/_api/${entitySet}`;
-  return portalApiCall<TResult>(url, {
+  return bffApiCall<TResult>(bffPath, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-    },
     body: JSON.stringify(body),
   });
 }
 
 /**
- * Make a PATCH (update) request to the Power Pages Web API.
- * The anti-forgery token is injected automatically by `portalApiCall`.
+ * Make a PATCH (update) request to the BFF API.
  *
- * @param entitySet  OData EntitySet name (e.g. "sprk_events")
- * @param id         Record GUID to update
- * @param body       Partial record payload with fields to update
+ * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/events")
+ * @param id       Record GUID to update
+ * @param body     Partial record payload with fields to update
  */
 async function updateRecord<TBody>(
-  entitySet: string,
+  bffPath: string,
   id: string,
   body: Partial<TBody>
 ): Promise<void> {
-  const url = `/_api/${entitySet}(${id})`;
-  await portalApiCall<void>(url, {
+  await bffApiCall<void>(`${bffPath}/${id}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(body),
   });
 }
@@ -331,7 +311,7 @@ export async function getProjects(
     $top: 100,
   };
 
-  return getCollection<ODataProject>("sprk_projects", { ...defaults, ...options });
+  return getCollection<ODataProject>("/api/v1/external/projects", { ...defaults, ...options });
 }
 
 /**
@@ -349,7 +329,7 @@ export async function getProjectById(
       "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon",
   };
 
-  return getById<ODataProject>("sprk_projects", projectId, { ...defaults, ...options });
+  return getById<ODataProject>("/api/v1/external/projects", projectId, { ...defaults, ...options });
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +365,7 @@ export async function getDocuments(
     merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
   }
 
-  return getCollection<ODataDocument>("sprk_documents", merged);
+  return getCollection<ODataDocument>(`/api/v1/external/projects/${projectId}/documents`, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +398,7 @@ export async function getEvents(
     merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
   }
 
-  return getCollection<ODataEvent>("sprk_events", merged);
+  return getCollection<ODataEvent>(`/api/v1/external/projects/${projectId}/events`, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +439,7 @@ export async function getContacts(
     merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
   }
 
-  return getCollection<ODataContact>("contacts", merged);
+  return getCollection<ODataContact>(`/api/v1/external/projects/${projectId}/contacts`, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +474,7 @@ export async function getOrganizations(
     merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
   }
 
-  return getCollection<ODataOrganization>("accounts", merged);
+  return getCollection<ODataOrganization>(`/api/v1/external/projects/${projectId}/organizations`, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +522,7 @@ export interface UpdateEventPayload {
  * Requires the authenticated user to have Create table permission on
  * sprk_event for their web role.
  *
- * The CSRF anti-forgery token is automatically included by `portalApiCall`.
+ * The Bearer token is automatically included by `bffApiCall`.
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param payload    Event fields to set on creation
@@ -558,14 +538,14 @@ export async function createEvent(
     "sprk_projectid@odata.bind": `sprk_projects(${projectId})`,
   };
 
-  return createRecord<CreateEventPayload, ODataEvent>("sprk_events", body);
+  return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
 }
 
 /**
  * Update an existing Event record in Dataverse via the Power Pages Web API.
  *
  * Uses PATCH semantics — only the fields included in `payload` are modified.
- * The CSRF anti-forgery token is automatically included by `portalApiCall`.
+ * The Bearer token is automatically included by `bffApiCall`.
  *
  * @param eventId  Dataverse GUID of the sprk_event record to update
  * @param payload  Partial event fields to update
@@ -574,7 +554,7 @@ export async function updateEvent(
   eventId: string,
   payload: UpdateEventPayload
 ): Promise<void> {
-  return updateRecord<UpdateEventPayload>("sprk_events", eventId, payload);
+  return updateRecord<UpdateEventPayload>("/api/v1/external/events", eventId, payload);
 }
 
 // ---------------------------------------------------------------------------

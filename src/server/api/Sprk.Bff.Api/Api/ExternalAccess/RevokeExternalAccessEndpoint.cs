@@ -63,7 +63,6 @@ public static class RevokeExternalAccessEndpoint
         IDistributedCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
-        IConfiguration configuration,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -136,42 +135,7 @@ public static class RevokeExternalAccessEndpoint
                 request.ContactId);
         }
 
-        // ── Step 3: Check remaining participations and optionally remove web role ──
-        var webRoleRemoved = false;
-        try
-        {
-            var remainingParticipations = await dataverseClient.QueryAsync<ActiveParticipationRow>(
-                AccessEntitySet,
-                filter: $"_sprk_contactid_value eq {request.ContactId} and statecode eq 0",
-                select: "sprk_externalrecordaccessid",
-                top: 1,
-                cancellationToken: ct);
-
-            if (remainingParticipations.Count == 0)
-            {
-                logger.LogInformation(
-                    "[EXT-REVOKE] Contact {ContactId} has no remaining active participations — removing web role",
-                    request.ContactId);
-
-                webRoleRemoved = await RemoveSecureProjectWebRoleAsync(
-                    dataverseClient, request.ContactId, configuration, logger, ct);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "[EXT-REVOKE] Contact {ContactId} still has active participations — web role retained",
-                    request.ContactId);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal: log and continue
-            logger.LogWarning(ex,
-                "[EXT-REVOKE] Error checking remaining participations or removing web role for Contact {ContactId}. Non-critical.",
-                request.ContactId);
-        }
-
-        // ── Step 4: Invalidate Redis cache ────────────────────────────────────
+        // ── Step 3: Invalidate Redis cache ────────────────────────────────────
         try
         {
             var cacheKey = $"{CacheKeyPrefix}{request.ContactId}";
@@ -185,7 +149,7 @@ public static class RevokeExternalAccessEndpoint
                 request.ContactId);
         }
 
-        return TypedResults.Ok(new RevokeAccessResponse(speRevoked, webRoleRemoved));
+        return TypedResults.Ok(new RevokeAccessResponse(speRevoked, WebRoleRemoved: false));
     }
 
     // =========================================================================
@@ -261,56 +225,4 @@ public static class RevokeExternalAccessEndpoint
         }
     }
 
-    private static async Task<bool> RemoveSecureProjectWebRoleAsync(
-        DataverseWebApiClient dataverseClient,
-        Guid contactId,
-        IConfiguration configuration,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        try
-        {
-            var webRoleIdStr = configuration["PowerPages:SecureProjectParticipantWebRoleId"];
-            if (string.IsNullOrEmpty(webRoleIdStr) || !Guid.TryParse(webRoleIdStr, out var webRoleId))
-            {
-                logger.LogWarning(
-                    "[EXT-REVOKE] PowerPages:SecureProjectParticipantWebRoleId not configured — cannot remove web role from Contact {ContactId}",
-                    contactId);
-                return false;
-            }
-
-            // DELETE the N:N association: contacts({contactId})/mspp_contact_mspp_webrole_powerpagecomponent/{webRoleId}/$ref
-            var disassociateUrl = $"contacts({contactId})/mspp_contact_mspp_webrole_powerpagecomponent/{webRoleId}/$ref";
-            await dataverseClient.DisassociateAsync(disassociateUrl, ct);
-
-            logger.LogInformation(
-                "[EXT-REVOKE] Removed web role {WebRoleId} from Contact {ContactId}",
-                webRoleId, contactId);
-
-            return true;
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            // 404 means the association doesn't exist — not an error
-            logger.LogInformation(
-                "[EXT-REVOKE] Web role was not associated with Contact {ContactId} — no action needed",
-                contactId);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-REVOKE] Failed to remove web role from Contact {ContactId}. Non-critical.",
-                contactId);
-            return false;
-        }
-    }
-
-    // ── Dataverse row DTOs ───────────────────────────────────────────────────
-
-    private sealed class ActiveParticipationRow
-    {
-        [JsonPropertyName("sprk_externalrecordaccessid")]
-        public Guid sprk_externalrecordaccessid { get; set; }
-    }
 }

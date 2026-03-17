@@ -4,16 +4,21 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 namespace Sprk.Bff.Api.Api.Filters;
 
 /// <summary>
-/// Endpoint filter that validates Power Pages portal-issued OAuth tokens and resolves
-/// the authenticated Contact's project participation data.
+/// Endpoint filter that resolves the authenticated Azure AD user's Contact record
+/// and validates that they have active project participation data.
+///
+/// External users authenticate via Azure AD B2B guest accounts (MSAL in the SPA).
+/// The Azure AD JWT is validated by ASP.NET Core's authentication middleware before
+/// this filter runs — the filter reads the validated claims and resolves participation.
 ///
 /// Enforces that:
-///   - The token is a valid portal-issued JWT (not an internal Azure AD token)
+///   - The caller has an authenticated Azure AD identity (validated by middleware)
+///   - The Contact exists in Dataverse (resolved by email claim)
 ///   - The Contact has at least one active sprk_externalrecordaccess record
 ///   - Access data is cached in Redis with 60-second TTL (ADR-009)
 ///
 /// On success: sets <see cref="ExternalCallerContext"/> on HttpContext.Items for downstream handlers.
-/// On failure: returns 401 (invalid/missing token) or 403 (no active participation records).
+/// On failure: returns 401 (unauthenticated) or 403 (no active participation records).
 ///
 /// ADR-008: Endpoint filter pattern — no global middleware.
 /// ADR-009: Redis-first access data caching with 60s TTL.
@@ -23,18 +28,17 @@ public static class ExternalCallerAuthorizationFilterExtensions
 {
     /// <summary>
     /// Adds external caller authorization to an endpoint.
-    /// Validates portal JWT token and resolves Contact participation data.
+    /// Resolves Contact and participation data from the authenticated Azure AD identity.
     /// </summary>
     public static TBuilder AddExternalCallerAuthorizationFilter<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var tokenValidator = context.HttpContext.RequestServices.GetRequiredService<PortalTokenValidator>();
             var participationService = context.HttpContext.RequestServices.GetRequiredService<ExternalParticipationService>();
             var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<ExternalCallerAuthorizationFilter>>();
 
-            var filter = new ExternalCallerAuthorizationFilter(tokenValidator, participationService, logger);
+            var filter = new ExternalCallerAuthorizationFilter(participationService, logger);
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -42,16 +46,13 @@ public static class ExternalCallerAuthorizationFilterExtensions
 
 public class ExternalCallerAuthorizationFilter : IEndpointFilter
 {
-    private readonly PortalTokenValidator _tokenValidator;
     private readonly ExternalParticipationService _participationService;
     private readonly ILogger<ExternalCallerAuthorizationFilter> _logger;
 
     public ExternalCallerAuthorizationFilter(
-        PortalTokenValidator tokenValidator,
         ExternalParticipationService participationService,
         ILogger<ExternalCallerAuthorizationFilter> logger)
     {
-        _tokenValidator = tokenValidator;
         _participationService = participationService;
         _logger = logger;
     }
@@ -60,92 +61,62 @@ public class ExternalCallerAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract Bearer token
-        var authHeader = httpContext.Request.Headers.Authorization.ToString();
-        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        // Step 1: Require authenticated Azure AD identity.
+        // JWT validation is performed by ASP.NET Core middleware (RequireAuthorization on route group).
+        if (httpContext.User?.Identity?.IsAuthenticated != true)
         {
-            _logger.LogDebug("[EXT-AUTH] Missing or invalid Authorization header");
+            _logger.LogDebug("[EXT-AUTH] Request is not authenticated");
             return Results.Problem(
                 statusCode: 401,
                 title: "Unauthorized",
-                detail: "Portal authentication token required",
+                detail: "Authentication required",
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        var rawToken = authHeader["Bearer ".Length..].Trim();
+        // Step 2: Extract email from Azure AD token claims.
+        // For B2B guests: 'email' claim = the external user's real email (not the #EXT# UPN).
+        var email = httpContext.User.FindFirst("email")?.Value
+            ?? httpContext.User.FindFirst("preferred_username")?.Value;
 
-        // Step 1: Validate portal token
-        var validationResult = await _tokenValidator.ValidateAsync(rawToken, httpContext.RequestAborted);
-
-        if (!validationResult.IsPortalToken)
+        if (string.IsNullOrEmpty(email))
         {
-            // Not a portal token — could be an internal caller hitting the wrong endpoint
-            _logger.LogWarning("[EXT-AUTH] Non-portal token presented to external endpoint");
+            _logger.LogWarning("[EXT-AUTH] Token missing email/preferred_username claim");
             return Results.Problem(
                 statusCode: 401,
                 title: "Unauthorized",
-                detail: "This endpoint requires a portal-issued authentication token",
+                detail: "Token is missing required email claim",
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        if (!validationResult.IsValid)
+        // Step 3: Resolve Contact by email (contacts.emailaddress1)
+        var contactId = await _participationService.ResolveContactByEmailAsync(email, httpContext.RequestAborted);
+        if (!contactId.HasValue)
         {
-            _logger.LogWarning("[EXT-AUTH] Portal token validation failed: {Error}", validationResult.Error);
-            return Results.Problem(
-                statusCode: 401,
-                title: "Unauthorized",
-                detail: "Portal token is invalid or expired",
-                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+            _logger.LogWarning("[EXT-AUTH] Cannot resolve Contact for email {Email}", email);
+            return ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found");
         }
 
-        // Step 2: Resolve Contact ID
-        Guid contactId;
-        if (validationResult.IsContactGuid)
-        {
-            contactId = validationResult.ContactId;
-        }
-        else
-        {
-            // Sub claim is an email — look up via adx_externalidentity
-            var resolved = await _participationService.ResolveContactByEmailAsync(
-                validationResult.Email ?? validationResult.ContactIdClaim!,
-                httpContext.RequestAborted);
-
-            if (!resolved.HasValue)
-            {
-                _logger.LogWarning("[EXT-AUTH] Cannot resolve Contact for email {Email}",
-                    validationResult.Email);
-                return ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found");
-            }
-
-            contactId = resolved.Value;
-        }
-
-        // Step 3: Load participation data (Redis cache → Dataverse fallback)
-        var participations = await _participationService.GetParticipationsAsync(
-            contactId, httpContext.RequestAborted);
-
+        // Step 4: Load participation data (Redis cache → Dataverse fallback)
+        var participations = await _participationService.GetParticipationsAsync(contactId.Value, httpContext.RequestAborted);
         if (participations.Count == 0)
         {
             _logger.LogWarning(
                 "[EXT-AUTH] Contact {ContactId} has no active participation records — access denied",
-                contactId);
+                contactId.Value);
             return ProblemDetailsHelper.Forbidden("sdap.access.deny.no_participation");
         }
 
-        // Step 4: Store ExternalCallerContext on HttpContext for downstream handlers
-        var callerContext = new ExternalCallerContext
+        // Step 5: Store ExternalCallerContext for downstream handlers
+        httpContext.Items[ExternalCallerContext.HttpContextItemsKey] = new ExternalCallerContext
         {
-            ContactId = contactId,
-            Email = validationResult.Email ?? string.Empty,
+            ContactId = contactId.Value,
+            Email = email,
             Participations = participations
         };
 
-        httpContext.Items[ExternalCallerContext.HttpContextItemsKey] = callerContext;
-
         _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated with {Count} active project participations",
-            contactId, participations.Count);
+            "[EXT-AUTH] Contact {ContactId} ({Email}) authenticated with {Count} active project participations",
+            contactId.Value, email, participations.Count);
 
         return await next(context);
     }

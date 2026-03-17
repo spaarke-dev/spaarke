@@ -1,16 +1,16 @@
 /**
  * BFF API client module for the Secure Project Workspace SPA.
  *
- * Acquires OAuth tokens via the Power Pages implicit grant flow and provides
+ * Acquires OAuth tokens via MSAL (Azure AD B2B guest authentication) and provides
  * typed wrappers for authenticated BFF API calls with Bearer token auth.
  *
- * Token caching: in-memory only (never localStorage) with expiry tracking.
- * Auto-refreshes when fewer than 5 minutes remain before expiry.
+ * Token caching is handled by MSAL internally (sessionStorage).
  *
- * See: docs/architecture/power-pages-spa-guide.md — Authentication section
+ * See: docs/architecture/external-access-architecture.md — Authentication section
  */
 
-import { BFF_API_URL, PORTAL_CLIENT_ID } from "../config";
+import { BFF_API_URL } from "../config";
+import { getBffToken } from "./msal-auth";
 import { ApiError } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -85,135 +85,7 @@ export interface ExternalUserContextResponse {
   }>;
 }
 
-// ---------------------------------------------------------------------------
-// Token cache — in-memory only, never persisted to localStorage
-// ---------------------------------------------------------------------------
-
-interface TokenCacheEntry {
-  /** Raw Bearer token string */
-  token: string;
-  /** Unix timestamp (ms) when the token expires */
-  expiresAt: number;
-}
-
-/** In-memory token cache. Intentionally module-scoped (not exported). */
-let tokenCache: TokenCacheEntry | null = null;
-
-/** Minimum remaining lifetime (ms) before we proactively refresh */
-const TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Returns true when the cached token is present and has more than
- * TOKEN_REFRESH_THRESHOLD_MS of lifetime remaining.
- */
-function isCachedTokenValid(): boolean {
-  if (tokenCache === null) return false;
-  return Date.now() < tokenCache.expiresAt - TOKEN_REFRESH_THRESHOLD_MS;
-}
-
-// ---------------------------------------------------------------------------
-// CSRF token helper (required by the Power Pages token endpoint)
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch the anti-forgery token from the portal's layout endpoint.
- * Required as a header on POST requests to `/_services/auth/token`.
- */
-async function getAntiForgeryToken(): Promise<string> {
-  const response = await fetch("/_layout/tokenhtml");
-  if (!response.ok) {
-    throw new ApiError(response.status, "Failed to fetch anti-forgery token");
-  }
-  const text = await response.text();
-  const doc = new DOMParser().parseFromString(text, "text/xml");
-  return doc.querySelector("input")?.getAttribute("value") ?? "";
-}
-
-// ---------------------------------------------------------------------------
-// Token acquisition
-// ---------------------------------------------------------------------------
-
-/**
- * Acquire (or return a cached) OAuth token via the Power Pages implicit grant
- * flow.
- *
- * Flow:
- *   1. POST to `/_services/auth/token` with client_id, response_type=token,
- *      nonce, state, and the CSRF anti-forgery token as a header.
- *   2. Portal validates the session and returns a short-lived Bearer token.
- *   3. Token is cached in memory with its expiry timestamp.
- *
- * Auto-refreshes when fewer than 5 minutes remain before expiry.
- *
- * @returns The raw Bearer token string to include in Authorization headers.
- * @throws ApiError when the portal token endpoint returns a non-OK response.
- */
-export async function getPortalToken(): Promise<string> {
-  if (isCachedTokenValid()) {
-    // Safe: isCachedTokenValid() guarantees tokenCache is non-null here
-    return tokenCache!.token;
-  }
-
-  const csrfToken = await getAntiForgeryToken();
-
-  const params = new URLSearchParams({
-    client_id: PORTAL_CLIENT_ID,
-    response_type: "token",
-    nonce: crypto.randomUUID().substring(0, 20),
-    state: crypto.randomUUID().substring(0, 20),
-  });
-
-  const response = await fetch("/_services/auth/token", {
-    method: "POST",
-    headers: {
-      "__RequestVerificationToken": csrfToken,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params,
-  });
-
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      `Portal token endpoint returned ${response.status}: ${await response.text()}`
-    );
-  }
-
-  const token = (await response.text()).trim();
-
-  // Power Pages tokens have a configurable expiry (default 15 min, max 60 min).
-  // We decode the JWT exp claim to set the cache expiry precisely.
-  // Fall back to 15 minutes if decoding fails for any reason.
-  const expiresAt = parseTokenExpiry(token) ?? Date.now() + 15 * 60 * 1000;
-
-  tokenCache = { token, expiresAt };
-  return token;
-}
-
-/**
- * Parse the `exp` claim from a JWT token string without a JWT library.
- * Returns the expiry as a Unix timestamp in milliseconds, or null on failure.
- */
-function parseTokenExpiry(token: string): number | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payload = JSON.parse(atob(parts[1])) as Record<string, unknown>;
-    const exp = payload["exp"];
-    if (typeof exp === "number") return exp * 1000;
-  } catch {
-    // Ignore — caller uses fallback
-  }
-  return null;
-}
-
-/**
- * Invalidate the token cache, forcing a fresh token on the next call.
- * Called automatically on 401 responses to trigger a single retry.
- */
-function clearTokenCache(): void {
-  tokenCache = null;
-}
+// Token acquisition is delegated to msal-auth.ts (getBffToken)
 
 // ---------------------------------------------------------------------------
 // Core fetch wrapper
@@ -235,13 +107,12 @@ export async function bffApiCall<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await getPortalToken();
+  const token = await getBffToken();
   const response = await executeFetch(path, options, token);
 
   // On 401, clear cache, get a fresh token, and retry once
   if (response.status === 401) {
-    clearTokenCache();
-    const freshToken = await getPortalToken();
+    const freshToken = await getBffToken();
     const retryResponse = await executeFetch(path, options, freshToken);
     return parseResponse<T>(retryResponse);
   }
@@ -338,14 +209,14 @@ export async function revokeAccess(
   });
 }
 
-/** Response returned after creating a portal invitation for an external user */
+/** Response returned after inviting an external user via Azure AD B2B */
 export interface InviteUserResponse {
-  /** The ID of the created adx_invitation record */
-  invitationId: string;
-  /** The invitation code the Contact uses to redeem access */
-  invitationCode: string;
-  /** ISO date string for the invitation expiry, if set */
-  expiryDate?: string;
+  /** The Dataverse Contact record ID for the invited user */
+  contactId: string;
+  /** The Azure AD B2B invitation redemption URL to share with the user */
+  inviteRedeemUrl: string;
+  /** Invitation status (e.g. "PendingAcceptance", "Completed") */
+  status: string;
 }
 
 /**
