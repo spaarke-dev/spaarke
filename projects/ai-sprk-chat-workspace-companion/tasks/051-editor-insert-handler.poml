@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement document_insert Handler in AnalysisWorkspace Editor</title>
     <phase>2D: Insert-to-Editor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>081</blocks>

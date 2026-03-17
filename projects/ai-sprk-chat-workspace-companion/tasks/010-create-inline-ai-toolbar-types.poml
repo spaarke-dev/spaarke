@@ -3,7 +3,7 @@
   <metadata>
     <title>Create InlineAiToolbar Types and Default Action Definitions</title>
     <phase>2B: Inline AI Toolbar — Library</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>011, 012</blocks>

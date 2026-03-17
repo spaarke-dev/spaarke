@@ -116,6 +116,7 @@ public static class EndpointMappingExtensions
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
         app.MapChatEndpoints();
+        app.MapAnalysisChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))

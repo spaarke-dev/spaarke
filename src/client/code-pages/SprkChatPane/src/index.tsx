@@ -53,6 +53,18 @@ const entityId = appParams.get('entityId') ?? '';
 const playbookId = appParams.get('playbookId') ?? '';
 const sessionId = appParams.get('sessionId') ?? '';
 
+// ---- Analysis launch context params (task 002) ----
+// Set by AnalysisWorkspace via openSprkChatPane() with a SprkChatLaunchContext.
+// Passed through to App → detectContext so the BFF can resolve the correct
+// playbook and knowledge sources for the analysis context.
+const analysisType = appParams.get('analysisType') ?? '';
+const matterType = appParams.get('matterType') ?? '';
+const practiceArea = appParams.get('practiceArea') ?? '';
+const analysisId = appParams.get('analysisId') ?? '';
+const sourceFileId = appParams.get('sourceFileId') ?? '';
+const sourceContainerId = appParams.get('sourceContainerId') ?? '';
+const mode = (appParams.get('mode') ?? '') as 'analysis' | 'general' | '';
+
 // ---------------------------------------------------------------------------
 // API configuration
 // ---------------------------------------------------------------------------
@@ -123,6 +135,13 @@ function renderApp(): void {
         playbookId={playbookId}
         sessionId={sessionId}
         apiBaseUrl={apiBaseUrl}
+        analysisType={analysisType}
+        matterType={matterType}
+        practiceArea={practiceArea}
+        analysisId={analysisId}
+        sourceFileId={sourceFileId}
+        sourceContainerId={sourceContainerId}
+        mode={mode}
       />
     </FluentProvider>
   );

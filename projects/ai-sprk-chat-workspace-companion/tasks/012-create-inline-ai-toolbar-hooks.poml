@@ -3,7 +3,7 @@
   <metadata>
     <title>Create useInlineAiToolbar and useInlineAiActions Hooks</title>
     <phase>2B: Inline AI Toolbar — Library</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>013</blocks>

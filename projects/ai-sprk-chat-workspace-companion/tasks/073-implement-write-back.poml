@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Write-Back to sprk_analysisoutput.sprk_workingdocument</title>
     <phase>2F: BFF Plan Preview + Write-Back</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>072</dependencies>
     <blocks>080</blocks>

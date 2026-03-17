@@ -3,7 +3,7 @@
   <metadata>
     <title>Update AnalysisWorkspace App.tsx to Launch SprkChat with Enriched Context</title>
     <phase>2A: Contextual Launch</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>030</blocks>

@@ -1,7 +1,9 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -28,15 +30,18 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 public sealed class SprkChatAgentFactory
 {
     private readonly IChatClient _chatClient;
+    private readonly IChatClient _rawChatClient;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
+        [FromKeyedServices("raw")] IChatClient rawChatClient,
         IServiceProvider serviceProvider,
         ILogger<SprkChatAgentFactory> logger)
     {
         _chatClient = chatClient;
+        _rawChatClient = rawChatClient;
         _serviceProvider = serviceProvider;
         _logger = logger;
     }
@@ -115,19 +120,33 @@ public sealed class SprkChatAgentFactory
         // each message to keep citation numbering scoped per assistant response.
         var citationContext = new CitationContext();
 
+        // Extract analysisId from AnalysisMetadata for WorkingDocumentTools write-back.
+        // This is the sprk_analysisoutput record GUID — populated when SprkChat is launched
+        // from the Analysis Workspace with full context (task 002, task 020).
+        var analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
+
         // Resolve registered AIFunction tools from DI, passing tenant ID, knowledge scope,
         // and playbook capabilities so tools are gated to only those the playbook declares.
         var tools = ResolveTools(
             scope.ServiceProvider, tenantId, context.KnowledgeScope, capabilities,
-            playbookId ?? Guid.Empty, documentId, httpContext, sseWriter, citationContext);
+            playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext);
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",
             playbookId, tools.Count, context.DocumentSummary != null);
 
         var agentLogger = scope.ServiceProvider.GetRequiredService<ILogger<SprkChatAgent>>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+        var intentLogger = loggerFactory.CreateLogger<CompoundIntentDetector>();
 
-        ISprkChatAgent agent = new SprkChatAgent(_chatClient, context, tools, citationContext, agentLogger);
+        ISprkChatAgent agent = new SprkChatAgent(
+            _chatClient,
+            _rawChatClient,
+            context,
+            tools,
+            citationContext,
+            new CompoundIntentDetector(intentLogger),
+            agentLogger);
 
         // === Middleware pipeline (AIPL-057) ===
         // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry (outermost).
@@ -198,6 +217,11 @@ public sealed class SprkChatAgentFactory
     /// </param>
     /// <param name="playbookId">The playbook ID — passed to AnalysisExecutionTools for re-analysis.</param>
     /// <param name="documentId">The active document ID — passed to AnalysisExecutionTools for re-analysis.</param>
+    /// <param name="analysisId">
+    /// Optional GUID string of the active <c>sprk_analysisoutput</c> record.
+    /// Passed to <see cref="WorkingDocumentTools"/> for write-back target resolution (spec FR-12).
+    /// Null when SprkChat is not launched from the Analysis Workspace.
+    /// </param>
     /// <param name="httpContext">HTTP context for OBO auth — passed to AnalysisExecutionTools for re-analysis.</param>
     /// <param name="sseWriter">SSE writer delegate — passed to AnalysisExecutionTools for progress/document_replace events.</param>
     /// <param name="citationContext">
@@ -212,6 +236,7 @@ public sealed class SprkChatAgentFactory
         IReadOnlySet<string> capabilities,
         Guid playbookId,
         string documentId,
+        string? analysisId,
         HttpContext? httpContext,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
         CitationContext? citationContext)
@@ -290,6 +315,44 @@ public sealed class SprkChatAgentFactory
                 textRefinementTools.GenerateSummaryAsync,
                 name: "GenerateSummary",
                 description: "Generate a concise summary of text in bullet, paragraph, or tldr format."));
+
+            // WorkingDocumentTools — gated behind "write_back" capability (task 073).
+            // Requires IAnalysisOrchestrationService + IWorkingDocumentService + IChatClient.
+            // Only available when the playbook declares the "write_back" capability, preventing
+            // document mutation tools from appearing in read-only playbooks.
+            //
+            // WriteBackToWorkingDocumentAsync is included here and is listed in
+            // CompoundIntentDetector.WriteBackToolNames, ensuring it always triggers the
+            // plan preview gate before execution (spec FR-11, FR-12).
+            //
+            // Note: The document stream SSE writer is stubbed as a no-op for this task (073).
+            // Streaming token delivery for EditWorkingDocument and AppendSection will be wired
+            // in a follow-up task when the SSE plumbing for DocumentStreamEvent is connected.
+            if (capabilities.Contains(PlaybookCapabilities.WriteBack) && analysisService != null)
+            {
+                var workingDocumentService = scopedProvider.GetService<IWorkingDocumentService>();
+                if (workingDocumentService != null)
+                {
+                    // No-op document stream SSE writer: streaming token delivery for
+                    // EditWorkingDocument/AppendSection is deferred to a follow-up task.
+                    // WriteBackToWorkingDocumentAsync does not stream tokens and works fully.
+                    Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task> noOpDocumentSSE =
+                        (_, _) => Task.CompletedTask;
+
+                    var workingDocumentTools = new WorkingDocumentTools(
+                        _chatClient,
+                        noOpDocumentSSE,
+                        analysisService,
+                        workingDocumentService,
+                        _logger,
+                        analysisId);
+                    tools.AddRange(workingDocumentTools.GetTools());
+                }
+                else
+                {
+                    _logger.LogWarning("IWorkingDocumentService not available; WorkingDocumentTools will not be registered");
+                }
+            }
 
             // AnalysisExecutionTools — gated behind "reanalyze" capability (task 079).
             // Requires IAnalysisOrchestrationService + IChatClient.

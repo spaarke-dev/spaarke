@@ -39,6 +39,7 @@ public class WorkingDocumentToolsTests
 
     private readonly IChatClient _chatClient;
     private readonly IAnalysisOrchestrationService _analysisService;
+    private readonly IWorkingDocumentService _workingDocumentService;
     private readonly ILogger _logger;
     private readonly List<DocumentStreamEvent> _capturedEvents;
     private readonly Func<DocumentStreamEvent, CancellationToken, Task> _writeSSE;
@@ -47,6 +48,7 @@ public class WorkingDocumentToolsTests
     {
         _chatClient = Substitute.For<IChatClient>();
         _analysisService = Substitute.For<IAnalysisOrchestrationService>();
+        _workingDocumentService = Substitute.For<IWorkingDocumentService>();
         _logger = Substitute.For<ILogger>();
         _capturedEvents = new List<DocumentStreamEvent>();
         _writeSSE = (evt, ct) =>
@@ -65,7 +67,7 @@ public class WorkingDocumentToolsTests
     {
         // Act
         var action = () => new WorkingDocumentTools(
-            null!, _writeSSE, _analysisService, _logger, TestAnalysisId);
+            null!, _writeSSE, _analysisService, _workingDocumentService, _logger, TestAnalysisId);
 
         // Assert
         action.Should().Throw<ArgumentNullException>().WithParameterName("chatClient");
@@ -76,7 +78,7 @@ public class WorkingDocumentToolsTests
     {
         // Act
         var action = () => new WorkingDocumentTools(
-            _chatClient, null!, _analysisService, _logger, TestAnalysisId);
+            _chatClient, null!, _analysisService, _workingDocumentService, _logger, TestAnalysisId);
 
         // Assert
         action.Should().Throw<ArgumentNullException>().WithParameterName("writeSSE");
@@ -87,10 +89,21 @@ public class WorkingDocumentToolsTests
     {
         // Act
         var action = () => new WorkingDocumentTools(
-            _chatClient, _writeSSE, null!, _logger, TestAnalysisId);
+            _chatClient, _writeSSE, null!, _workingDocumentService, _logger, TestAnalysisId);
 
         // Assert
         action.Should().Throw<ArgumentNullException>().WithParameterName("analysisService");
+    }
+
+    [Fact]
+    public void Constructor_ThrowsArgumentNullException_WhenWorkingDocumentServiceIsNull()
+    {
+        // Act
+        var action = () => new WorkingDocumentTools(
+            _chatClient, _writeSSE, _analysisService, null!, _logger, TestAnalysisId);
+
+        // Assert
+        action.Should().Throw<ArgumentNullException>().WithParameterName("workingDocumentService");
     }
 
     [Fact]
@@ -98,7 +111,7 @@ public class WorkingDocumentToolsTests
     {
         // Act
         var action = () => new WorkingDocumentTools(
-            _chatClient, _writeSSE, _analysisService, null!, TestAnalysisId);
+            _chatClient, _writeSSE, _analysisService, _workingDocumentService, null!, TestAnalysisId);
 
         // Assert
         action.Should().Throw<ArgumentNullException>().WithParameterName("logger");
@@ -109,7 +122,7 @@ public class WorkingDocumentToolsTests
     {
         // Act — analysisId is optional, null should not throw
         var action = () => new WorkingDocumentTools(
-            _chatClient, _writeSSE, _analysisService, _logger, analysisId: null);
+            _chatClient, _writeSSE, _analysisService, _workingDocumentService, _logger, analysisId: null);
 
         // Assert
         action.Should().NotThrow();
@@ -795,7 +808,7 @@ public class WorkingDocumentToolsTests
     // ====================================================================
 
     [Fact]
-    public void GetTools_ReturnsTwoFunctions()
+    public void GetTools_ReturnsThreeFunctions()
     {
         // Arrange
         var sut = CreateSut();
@@ -803,8 +816,8 @@ public class WorkingDocumentToolsTests
         // Act
         var tools = sut.GetTools().ToList();
 
-        // Assert
-        tools.Should().HaveCount(2);
+        // Assert — 3 tools: EditWorkingDocument + AppendSection + WriteBackToWorkingDocument (task 073)
+        tools.Should().HaveCount(3);
     }
 
     [Fact]
@@ -862,6 +875,136 @@ public class WorkingDocumentToolsTests
     }
 
     // ====================================================================
+    // WriteBackToWorkingDocumentAsync tests
+    // ====================================================================
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_CallsUpdateWorkingDocumentAsync_WithCorrectAnalysisIdAndContent()
+    {
+        // Arrange — spec FR-12: write-back routes ONLY through IWorkingDocumentService (Dataverse)
+        var content = "AI-generated working document content.";
+        var sut = CreateSut(TestAnalysisId);
+
+        // Act
+        var result = await sut.WriteBackToWorkingDocumentAsync(content);
+
+        // Assert — IWorkingDocumentService.UpdateWorkingDocumentAsync was called with correct args
+        await _workingDocumentService.Received(1).UpdateWorkingDocumentAsync(
+            Guid.Parse(TestAnalysisId),
+            content,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_DoesNotCallSpeFileStore_NorAnyChatClientWrite()
+    {
+        // Arrange — MANDATORY SPE safety assertion (spec FR-12).
+        // The write-back path MUST route through IWorkingDocumentService ONLY.
+        // No SpeFileStore, GraphServiceClient write methods, or SPE file uploads are permitted.
+        var content = "Write-back content — must go to Dataverse only.";
+        var sut = CreateSut(TestAnalysisId);
+
+        // Act
+        await sut.WriteBackToWorkingDocumentAsync(content);
+
+        // Assert — chatClient (LLM streaming) was NOT called during write-back
+        // (write-back is a direct Dataverse call, not an LLM operation)
+        // NSubstitute verification: DidNotReceive() is synchronous — no await needed.
+        _chatClient.DidNotReceive().GetStreamingResponseAsync(
+            Arg.Any<IEnumerable<Microsoft.Extensions.AI.ChatMessage>>(),
+            Arg.Any<ChatOptions?>(),
+            Arg.Any<CancellationToken>());
+
+        // Assert — IWorkingDocumentService.UpdateWorkingDocumentAsync IS called (Dataverse path)
+        await _workingDocumentService.Received(1).UpdateWorkingDocumentAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_ReturnsSummaryString()
+    {
+        // Arrange
+        var content = "Final document content.";
+        var sut = CreateSut(TestAnalysisId);
+
+        // Act
+        var result = await sut.WriteBackToWorkingDocumentAsync(content);
+
+        // Assert — returns a summary string (not null/empty)
+        result.Should().NotBeNullOrWhiteSpace("write-back must return a summary for the AI tool result");
+    }
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_WithNoAnalysisId_ReturnsErrorAndDoesNotCallDataverse()
+    {
+        // Arrange — no analysis context (analysisId is null)
+        var sut = CreateSut(analysisId: null);
+
+        // Act
+        var result = await sut.WriteBackToWorkingDocumentAsync("Some content");
+
+        // Assert — cannot write back without an analysis ID
+        result.Should().NotBeNullOrWhiteSpace("must return an error message when no analysisId is set");
+
+        // Assert — IWorkingDocumentService was NOT called (no valid ID to write to)
+        await _workingDocumentService.DidNotReceive().UpdateWorkingDocumentAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_WithInvalidAnalysisId_ReturnsErrorAndDoesNotCallDataverse()
+    {
+        // Arrange — analysisId that is not a valid GUID
+        var sut = CreateSut(analysisId: "not-a-valid-guid");
+
+        // Act
+        var result = await sut.WriteBackToWorkingDocumentAsync("Some content");
+
+        // Assert — returns an error message
+        result.Should().NotBeNullOrWhiteSpace();
+
+        // Assert — IWorkingDocumentService was NOT called (invalid GUID cannot be parsed)
+        await _workingDocumentService.DidNotReceive().UpdateWorkingDocumentAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WriteBackToWorkingDocumentAsync_WhenServiceFails_ReturnsErrorAndDoesNotPropagate()
+    {
+        // Arrange — IWorkingDocumentService throws
+        _workingDocumentService
+            .UpdateWorkingDocumentAsync(Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("Dataverse write failed"));
+        var sut = CreateSut(TestAnalysisId);
+
+        // Act — must NOT throw; error is captured and returned as a message
+        var action = async () => await sut.WriteBackToWorkingDocumentAsync("Content");
+
+        // Assert
+        await action.Should().NotThrowAsync("write-back failures must not propagate exceptions to the caller");
+    }
+
+    [Fact]
+    public void GetTools_ReturnsWriteBackToWorkingDocumentFunction()
+    {
+        // Arrange
+        var sut = CreateSut();
+
+        // Act
+        var tools = sut.GetTools().ToList();
+
+        // Assert — WriteBackToWorkingDocument is registered as an AI tool
+        tools.Should().Contain(t => t.Name == "WriteBackToWorkingDocument",
+            "spec FR-12: write-back tool must be registered so the LLM can call it");
+    }
+
+    // ====================================================================
     // Private helpers
     // ====================================================================
 
@@ -871,6 +1014,7 @@ public class WorkingDocumentToolsTests
             _chatClient,
             _writeSSE,
             _analysisService,
+            _workingDocumentService,
             _logger,
             analysisId);
     }

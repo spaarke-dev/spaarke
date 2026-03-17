@@ -73,4 +73,15 @@ public sealed class AgentTelemetryMiddleware : ISprkChatAgent
             sw.ElapsedMilliseconds,
             history.Count);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Pass-through to the inner agent. Telemetry for detect calls is logged at the
+    /// <see cref="SprkChatAgent"/> level since this is a pre-execution inspection step.
+    /// </remarks>
+    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
+        string message,
+        IReadOnlyList<AiChatMessage> history,
+        CancellationToken cancellationToken)
+        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
 }

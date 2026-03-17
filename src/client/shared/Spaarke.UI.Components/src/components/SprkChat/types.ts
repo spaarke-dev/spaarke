@@ -16,6 +16,78 @@
 /** Role of a chat message, matching the server-side ChatMessageRole enum. */
 export type ChatMessageRole = 'User' | 'Assistant' | 'System';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Message Metadata Types (Phase 2E / 2F structured response wiring)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A plan step as received in a plan_preview message's metadata.
+ * Mirrors PlanStep from PlanPreviewCard but is defined here to avoid
+ * circular imports between types.ts and PlanPreviewCard.tsx.
+ */
+export interface IChatMessagePlanStep {
+  /** Stable unique identifier for this step. */
+  id: string;
+  /** Human-readable description of what this step does. */
+  description: string;
+  /** Current execution status; defaults to 'pending' before execution begins. */
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  /** Optional partial result text shown below the step description. */
+  result?: string;
+}
+
+/**
+ * Optional metadata on a chat message carrying structured response data.
+ *
+ * When `responseType` is present the message is rendered by SprkChatMessageRenderer
+ * or PlanPreviewCard rather than as plain text.
+ *
+ * - 'markdown'            → SprkChatMessageRenderer (default plain-text card)
+ * - 'citations'           → SprkChatMessageRenderer citations layout
+ * - 'diff'                → SprkChatMessageRenderer diff card
+ * - 'entity_card'         → SprkChatMessageRenderer entity card
+ * - 'action_confirmation' → SprkChatMessageRenderer action confirmation card
+ * - 'plan_preview'        → PlanPreviewCard (plan gate — task 2F)
+ */
+export interface IChatMessageMetadata {
+  /**
+   * Discriminates the card renderer to use.
+   * When absent or 'markdown', the message renders as plain text (legacy behaviour).
+   */
+  responseType?:
+    | 'markdown'
+    | 'citations'
+    | 'diff'
+    | 'entity_card'
+    | 'action_confirmation'
+    | 'plan_preview'
+    | string;
+
+  /**
+   * Structured response data passed to SprkChatMessageRenderer.
+   * Shape depends on responseType:
+   *   markdown:            { text: string }
+   *   citations:           { text: string; citations: ICitationRef[] }
+   *   diff:                { summary: string; proposedText: string }
+   *   entity_card:         { entityName, entityType, entityId, fields? }
+   *   action_confirmation: { actionName, status, summary }
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data?: Record<string, any>;
+
+  /**
+   * Plan title shown in PlanPreviewCard header.
+   * Only meaningful when responseType === 'plan_preview'.
+   */
+  planTitle?: string;
+
+  /**
+   * Ordered plan steps for PlanPreviewCard.
+   * Only meaningful when responseType === 'plan_preview'.
+   */
+  plan?: IChatMessagePlanStep[];
+}
+
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */
 export interface IChatMessage {
   /** Message role */
@@ -24,6 +96,12 @@ export interface IChatMessage {
   content: string;
   /** UTC timestamp when the message was created */
   timestamp: string;
+  /**
+   * Optional structured response metadata (Phase 2E / 2F).
+   * When present and responseType is not 'markdown', the message is rendered
+   * by SprkChatMessageRenderer or PlanPreviewCard instead of plain text.
+   */
+  metadata?: IChatMessageMetadata;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,8 +120,23 @@ export interface IChatSession {
 // SSE Event Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** SSE event types emitted by the streaming endpoints. */
-export type ChatSseEventType = 'token' | 'done' | 'error' | 'suggestions' | 'citations';
+/**
+ * SSE event types emitted by the streaming endpoints.
+ *
+ * Phase 2F additions (task 072):
+ * - 'plan_preview'       — emitted by /messages when compound intent is detected
+ * - 'plan_step_start'    — emitted by /plan/approve before each step begins
+ * - 'plan_step_complete' — emitted by /plan/approve after each step finishes
+ */
+export type ChatSseEventType =
+  | 'token'
+  | 'done'
+  | 'error'
+  | 'suggestions'
+  | 'citations'
+  | 'plan_preview'
+  | 'plan_step_start'
+  | 'plan_step_complete';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -61,12 +154,56 @@ export interface IChatSseEvent {
  * Structured data payload carried by rich SSE event types.
  * For "citations" events, contains the ordered citations array.
  * For "suggestions" events, contains the suggestions string array.
+ * For "plan_preview" events, contains the plan preview payload (Phase 2F).
+ * For "plan_step_start" events, contains the step ID and index (Phase 2F).
+ * For "plan_step_complete" events, contains the step result or error (Phase 2F).
  */
 export interface IChatSseEventData {
   /** Citation items from a "citations" event. */
   citations?: ICitationSseItem[];
   /** Follow-up suggestion strings from a "suggestions" event (1-3 items, each max 80 chars). */
   suggestions?: string[];
+
+  // ── plan_preview fields (task 071, Phase 2F) ────────────────────────────────
+  /** Unique plan ID echoed back on POST /plan/approve. Only in 'plan_preview' events. */
+  planId?: string;
+  /** Display title for the PlanPreviewCard header. Only in 'plan_preview' events. */
+  planTitle?: string;
+  /** Ordered steps for PlanPreviewCard. Only in 'plan_preview' events. */
+  steps?: IPlanPreviewStep[];
+  /** Optional analysis record ID for write-back plans. Only in 'plan_preview' events. */
+  analysisId?: string;
+  /** Canonical field path for write-back steps. Only in 'plan_preview' events. */
+  writeBackTarget?: string;
+
+  // ── plan_step_start fields (task 072, Phase 2F) ─────────────────────────────
+  /** Step identifier. In 'plan_step_start' and 'plan_step_complete' events. */
+  stepId?: string;
+  /** 0-based step index. Only in 'plan_step_start' events. */
+  stepIndex?: number;
+
+  // ── plan_step_complete fields (task 072, Phase 2F) ──────────────────────────
+  /** Execution status: "completed" or "failed". Only in 'plan_step_complete' events. */
+  status?: 'completed' | 'failed';
+  /** Brief result snippet shown on success. Only in 'plan_step_complete' events. */
+  result?: string | null;
+  /** Machine-readable error code on failure. Only in 'plan_step_complete' events. */
+  errorCode?: string | null;
+  /** Human-readable error message on failure. Only in 'plan_step_complete' events. */
+  errorMessage?: string | null;
+}
+
+/**
+ * A single step as received in the 'plan_preview' SSE event data.
+ * Maps to ChatSsePlanStep on the backend.
+ */
+export interface IPlanPreviewStep {
+  /** Step identifier (e.g., "step-1"). */
+  id: string;
+  /** Human-readable description shown in PlanPreviewCard. */
+  description: string;
+  /** Initial status: always "pending" at plan_preview time. */
+  status: 'pending' | 'running' | 'completed' | 'failed';
 }
 
 /**
@@ -149,6 +286,14 @@ export interface ISprkChatProps {
   /** Document ID for the chat context */
   documentId?: string;
   /**
+   * Analysis record ID (sprk_analysisoutput GUID without braces).
+   * When provided, SprkChat fetches analysis-scoped context mapping from
+   * GET /api/ai/chat/context-mappings/analysis/{analysisId} and populates
+   * QuickActionChips with the returned inline actions.
+   * Omit for non-analysis contexts (generic chat mode).
+   */
+  analysisId?: string;
+  /**
    * Playbook ID (GUID string) governing the agent's behavior.
    * When undefined/omitted, the session is created without a playbook
    * (generic conversational mode) and the playbook selector is hidden.
@@ -216,6 +361,14 @@ export interface ISprkChatInputProps {
   maxCharCount?: number;
   /** Placeholder text */
   placeholder?: string;
+  /**
+   * Optional dynamic slash commands appended to the static DEFAULT_SLASH_COMMANDS.
+   * Use to inject playbook-capability commands resolved from the context mapping
+   * endpoint at runtime.
+   *
+   * When omitted, only DEFAULT_SLASH_COMMANDS are shown in the menu.
+   */
+  dynamicSlashCommands?: import('../SlashCommandMenu/slashCommandMenu.types').SlashCommand[];
 }
 
 /** Props for SprkChatContextSelector sub-component. */
@@ -377,6 +530,42 @@ export interface ISprkChatCitationPopoverProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Document Insert Event Types (Phase 2D: Insert-to-Editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * BroadcastChannel event dispatched when the user clicks the "Insert" button
+ * on an AI response message in SprkChat.
+ *
+ * The AnalysisWorkspace Lexical editor subscribes to the `sprk-document-insert`
+ * channel and handles this event in task 051 (Insert-at-Cursor handler).
+ *
+ * @see ADR-012 - Shared Component Library; no Xrm/PCF imports
+ * @see ADR-015 - Auth tokens MUST NOT be transmitted via BroadcastChannel
+ * @see spec-2D - Insert-to-Editor phase requirements
+ */
+export interface IDocumentInsertEvent {
+  /** Discriminator — always 'document_insert'. */
+  type: 'document_insert';
+  /** The content to insert into the editor. */
+  content: string;
+  /**
+   * Content format.
+   * - 'text' — plain text; editor inserts as-is at cursor/selection
+   * - 'html' — HTML string; editor parses and inserts as rich content
+   */
+  contentType: 'text' | 'html';
+  /**
+   * Where to insert the content.
+   * - 'cursor' — insert at current cursor position
+   * - 'selection' — replace current selection with content
+   */
+  insertAt: 'cursor' | 'selection';
+  /** Unix timestamp (Date.now()) when the event was dispatched. */
+  timestamp: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cross-Pane Selection Types (SprkChatBridge → SprkChat)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -407,6 +596,41 @@ export interface ICrossPaneSelection {
 export const CROSS_PANE_SELECTION_MAX_PREVIEW = 5000;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Document Stream Event Types (Phase 2D: Streaming Insert bridge events)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Discriminated union for document stream SSE events used by useStreamingInsert.
+ * These mirror the bridge event payload shapes from SprkChatBridge.
+ */
+export type IDocumentStreamEvent =
+  | {
+      type: 'document_stream_start';
+      operationId: string;
+      targetPosition?: string;
+    }
+  | {
+      type: 'document_stream_token';
+      operationId: string;
+      token: string;
+    }
+  | {
+      type: 'document_stream_end';
+      operationId: string;
+      cancelled?: boolean;
+    }
+  | {
+      type: 'document_replace';
+      operationId: string;
+      content: string;
+    }
+  | {
+      type: 'progress';
+      operationId: string;
+      message?: string;
+    };
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hook Return Types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -424,6 +648,20 @@ export interface IUseSseStreamResult {
   suggestions: string[];
   /** Citation metadata received from the citations SSE event, keyed by citation ID for fast lookup */
   citations: ICitation[];
+  /**
+   * Plan ID received from a 'plan_preview' SSE event (Phase 2F).
+   * Set when the last stream response included a plan_preview event.
+   * Used by SprkChat.tsx to call POST /plan/approve with the correct planId.
+   * Reset to null at the start of each new stream.
+   */
+  pendingPlanId: string | null;
+  /**
+   * Full plan_preview event data (Phase 2F).
+   * Contains planTitle, steps, analysisId, writeBackTarget alongside planId.
+   * Used by SprkChat.tsx to populate message metadata for PlanPreviewCard rendering.
+   * Reset to null at the start of each new stream.
+   */
+  pendingPlanData: IChatSseEventData | null;
   /** Start a new SSE stream */
   startStream: (url: string, body: Record<string, unknown>, token: string) => void;
   /** Cancel the active stream */
@@ -431,6 +669,69 @@ export interface IUseSseStreamResult {
   /** Clear stored suggestions (called when user sends a new message) */
   clearSuggestions: () => void;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Action Menu Types (SprkChatActionMenu — Phase 2E)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Category that groups actions in the SprkChatActionMenu.
+ * Maps to CATEGORY_CONFIG keys in SprkChatActionMenu.tsx.
+ */
+export type ChatActionCategory = 'playbooks' | 'actions' | 'search' | 'settings';
+
+/**
+ * A single action item rendered in the SprkChatActionMenu.
+ * Returned by GET /api/ai/chat/sessions/{id}/actions.
+ */
+export interface IChatAction {
+  /** Unique action identifier (e.g., "reanalyze", "summarize", a playbookId GUID). */
+  id: string;
+  /** Display label shown in the menu. */
+  label: string;
+  /** Category grouping for the action. */
+  category: ChatActionCategory;
+  /** Optional description shown as secondary text. */
+  description?: string;
+  /** Optional keyboard shortcut hint (e.g., "⌘K"). */
+  shortcut?: string;
+  /** Whether this action is currently disabled. */
+  disabled?: boolean;
+}
+
+/** Imperative handle exposed by SprkChatActionMenu via forwardRef. */
+export interface ISprkChatActionMenuHandle {
+  /** Navigate to the previous action in the menu. */
+  navigateUp(): void;
+  /** Navigate to the next action in the menu. */
+  navigateDown(): void;
+  /** Select the currently active action. */
+  selectActive(): void;
+  /** Focus the menu element. */
+  focus(): void;
+}
+
+/** Props for the SprkChatActionMenu component. */
+export interface ISprkChatActionMenuProps {
+  /** Available actions to display. */
+  actions: IChatAction[];
+  /** Whether the menu is open/visible. */
+  isOpen: boolean;
+  /** Callback fired when an action is selected. */
+  onSelect: (action: IChatAction) => void;
+  /** Callback fired when the menu should close (Escape, click-outside). */
+  onDismiss: () => void;
+  /** Current filter text (from the input). */
+  filterText?: string;
+  /** Ref to the anchor element (e.g., the input) for click-outside detection. */
+  anchorRef?: React.RefObject<HTMLElement | null>;
+  /** Whether actions are being loaded. */
+  isLoading?: boolean;
+  /** Error message to display instead of actions. */
+  errorMessage?: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Return type for the useChatSession hook. */
 export interface IUseChatSessionResult {
@@ -459,4 +760,24 @@ export interface IUseChatSessionResult {
   addMessage: (message: IChatMessage) => void;
   /** Update the last message content (used during streaming) */
   updateLastMessage: (content: string) => void;
+  /**
+   * Update the metadata of the last message in history.
+   * Used by Phase 2F (task 072) to set plan_preview metadata after a plan_preview SSE event
+   * and to update plan step statuses during plan execution streaming.
+   */
+  updateLastMessageMetadata: (metadata: IChatMessageMetadata) => void;
+  /**
+   * Update a specific message's metadata by index (Phase 2F — task 072).
+   * Used to update plan step statuses during plan execution streaming when the plan
+   * preview card is not the last message.
+   *
+   * Accepts either a plain metadata object (merged with the existing metadata) or a
+   * function updater `(current) => newMetadata` for safe updates that read current state.
+   */
+  updateMessageMetadataAt: (
+    index: number,
+    metadataOrUpdater:
+      | IChatMessageMetadata
+      | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
+  ) => void;
 }

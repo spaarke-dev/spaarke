@@ -3,7 +3,7 @@
   <metadata>
     <title>Integration Tests: BFF Endpoints + Manual E2E Verification</title>
     <phase>2G: Testing and Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>072, 073, 060, 062</dependencies>
     <blocks>081</blocks>

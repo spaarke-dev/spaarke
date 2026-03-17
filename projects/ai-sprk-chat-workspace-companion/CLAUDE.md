@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Planning
+- **Phase**: Complete
 - **Last Updated**: 2026-03-16
-- **Current Task**: Not started
-- **Next Action**: Execute tasks from TASK-INDEX.md starting with task 001
+- **Current Task**: none
+- **Next Action**: Run `/merge-to-master` to merge `work/ai-sprk-chat-workspace-companion` → master
 
 ---
 
@@ -171,13 +171,27 @@ This project is decomposed for maximum parallel execution across Claude Code tas
 
 ## Unresolved Questions
 
-- [ ] **Plan preview session state** — How does BFF maintain "pending plan" state between `plan_preview` SSE emission and user approval? Investigate `ChatSessionManager` and `AiToolService` session model before starting Phase 2F tasks (task 070+). Blocks: plan approval endpoint design.
+*(none — all questions resolved)*
 
 ---
 
 ## Decisions Made
 
 *2026-03-16*: Use static dictionary in BFF to map `sprk_playbookcapabilities` integer values to `InlineAiAction` definitions — confirmed field format is multi-select option set with 7 known values (100000000–100000006). No Dataverse schema change needed.
+
+*2026-03-16* (task 070): **Pending plan state stored in Redis with separate key** `plan:pending:{tenantId}:{sessionId}`, 30-minute absolute TTL. Do NOT add `PendingPlan` field to `ChatSession` record (avoids inflating every session cache read). `PlanId` is a generated GUID stored in the Redis value and sent to the frontend in the `plan_preview` SSE event; the frontend echoes it back on `POST /plan/approve`. Atomic get-and-delete on approval prevents double-execution. Write-back target is `sprk_analysisoutput.sprk_workingdocument` via `IWorkingDocumentService` — no SPE writes. Full design at `notes/plan-preview-session-design.md`.
+
+---
+
+## Implementation Notes (Key Learnings)
+
+- **Parallel execution was highly effective**: 11 parallel groups reduced wall-clock time dramatically. Tasks in different modules (BFF vs. shared library vs. code pages) ran safely in parallel with zero file conflicts.
+- **`mousedown` not `click` on toolbar buttons**: Toolbar action buttons MUST use `onMouseDown` (not `onClick`) to prevent the browser's `selectionchange` event from collapsing the text selection before the action fires. This is the critical pattern for all inline toolbar interactions.
+- **Plan preview Redis design**: Pending plan state is stored in Redis under a separate key (`plan:pending:{tenantId}:{sessionId}`) — NOT as a field on `ChatSession`. This avoids inflating every session cache read with plan payload data. Atomic get-and-delete prevents double-execution.
+- **SPE safety constraint**: After every task involving Dataverse write-back, grep `WorkingDocumentTools.cs` for `UploadContent|PutContent|UpdateFile` — must return zero matches. This is an integration test assertion AND a manual grep check.
+- **BroadcastChannel name verification**: The `inline_action` BroadcastChannel subscriber in SprkChatPane uses channel name `'sprk-inline-action'`. The publisher in `useInlineAiActions.ts` MUST use the same string. Verified in task 012.
+- **Route 404 in deployed environment**: Both `plan/approve` and `context-mappings/analysis` endpoints are registered unconditionally in `EndpointMappingExtensions.cs` (lines 118-119). If 404 occurs after deployment, it is a stale deployment artifact — not a code registration bug. Restart the App Service and verify the new build is active.
+- **`AnalysisChatContextEndpoints` creates a second `MapGroup("/api/ai/chat")`**: This is valid in ASP.NET Core Minimal API — multiple groups with the same prefix are additive. There is no route shadowing or silent failure.
 
 ---
 

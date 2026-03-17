@@ -3,7 +3,7 @@
   <metadata>
     <title>Investigate ChatSessionManager and Design plan_preview Session State</title>
     <phase>2F: BFF Plan Preview + Write-Back</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>062</dependencies>
     <blocks>071, 072</blocks>

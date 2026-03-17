@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-03-16
 >
-> **Status**: In Progress
+> **Status**: Complete
 
 ## Overview
 
@@ -21,8 +21,9 @@ Repositions SprkChat from a generic global chat widget into a contextual AI comp
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Planning → Ready for Development |
-| **Progress** | 0% |
+| **Phase** | Complete |
+| **Progress** | 100% |
+| **Completed Date** | 2026-03-16 |
 | **Owner** | Spaarke Dev Team |
 
 ## Problem Statement
@@ -37,18 +38,18 @@ Phase 2A removes SprkChat's global auto-injection from non-AI pages and extends 
 
 The project is **complete** when:
 
-- [ ] SprkChat does NOT auto-register on EventsPage or SpeAdminApp
-- [ ] Analysis Workspace launches SprkChat with all 7 context parameters (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode)
-- [ ] Inline AI toolbar appears within 200ms of stable text selection in editor and routes actions through chat session
-- [ ] Diff-mode inline actions (Simplify, Expand) open existing `DiffReviewPanel`
-- [ ] `GET /api/ai/chat/context-mappings/analysis/{analysisId}` endpoint resolves and returns defaultPlaybook + inlineActions + knowledgeSources
-- [ ] Quick-action chips appear above chat input and update when playbook changes
-- [ ] Slash command menu opens on `/` keystroke with type-ahead and keyboard navigation
-- [ ] Plan preview card renders before any 2+ tool chain or Dataverse write-back
-- [ ] Write-back targets `sprk_analysisoutput.sprk_workingdocument` ONLY — SPE source file unchanged
-- [ ] All AI responses stream via SSE — no synchronously returned AI content
-- [ ] All new UI components support dark mode (ADR-021 tokens only)
-- [ ] Context mapping endpoint uses Redis caching with 30-min TTL (ADR-009)
+- [x] SprkChat does NOT auto-register on EventsPage or SpeAdminApp
+- [x] Analysis Workspace launches SprkChat with all 7 context parameters (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode)
+- [x] Inline AI toolbar appears within 200ms of stable text selection in editor and routes actions through chat session
+- [x] Diff-mode inline actions (Simplify, Expand) open existing `DiffReviewPanel`
+- [x] `GET /api/ai/chat/context-mappings/analysis/{analysisId}` endpoint resolves and returns defaultPlaybook + inlineActions + knowledgeSources
+- [x] Quick-action chips appear above chat input and update when playbook changes
+- [x] Slash command menu opens on `/` keystroke with type-ahead and keyboard navigation
+- [x] Plan preview card renders before any 2+ tool chain or Dataverse write-back
+- [x] Write-back targets `sprk_analysisoutput.sprk_workingdocument` ONLY — SPE source file unchanged
+- [x] All AI responses stream via SSE — no synchronously returned AI content
+- [x] All new UI components support dark mode (ADR-021 tokens only)
+- [x] Context mapping endpoint uses Redis caching with 30-min TTL (ADR-009)
 
 ## Scope
 
@@ -132,3 +133,4 @@ The project is **complete** when:
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-03-16 | 1.0 | Initial project setup |
+| 2026-03-16 | 2.0 | Implementation complete: 29 tasks across 11 parallel groups |

@@ -410,6 +410,9 @@ export const SprkChatActionMenu = React.forwardRef<ISprkChatActionMenuHandle, IS
             onSelect(selectedAction);
           }
         },
+        focus: () => {
+          menuRef.current?.focus();
+        },
       }),
       [findNextEnabledIndex, flatList, activeIndex, onSelect]
     );

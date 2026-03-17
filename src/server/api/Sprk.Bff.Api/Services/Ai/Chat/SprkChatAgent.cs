@@ -18,6 +18,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// - System prompt injection from the playbook's Action record (via <see cref="ChatContext"/>)
 /// - Tool registration via <see cref="AIFunction"/> / <see cref="AIFunctionFactory"/>
 /// - Streaming responses via <see cref="IChatClient.GetStreamingResponseAsync"/>
+/// - Compound intent detection via <see cref="DetectToolCallsAsync"/> (task 071, Phase 2F)
 ///
 /// Lifetime: Transient per chat session — created by <see cref="SprkChatAgentFactory"/>
 /// on session creation and on context switch (new document or playbook).
@@ -27,13 +28,20 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// - System prompt MUST originate from the playbook's Action (ACT-*) record
 /// - Agent supports context switching without creating a new session
 ///   (caller replaces context via factory.CreateAgentAsync and attaches existing history)
+///
+/// Phase 2F (task 071) additions:
+/// - <see cref="DetectToolCallsAsync"/>: uses the raw (pre-function-invocation) client to get
+///   the LLM's intended tool calls without executing them. Callers use this to check for
+///   compound intent before deciding whether to gate execution behind plan_preview.
 /// </summary>
 public sealed class SprkChatAgent : ISprkChatAgent
 {
     private readonly IChatClient _chatClient;
+    private readonly IChatClient _rawChatClient;
     private readonly ChatContext _context;
     private readonly IReadOnlyList<AIFunction> _tools;
     private readonly CitationContext? _citationContext;
+    private readonly CompoundIntentDetector _intentDetector;
     private readonly ILogger<SprkChatAgent> _logger;
 
     /// <summary>
@@ -52,7 +60,13 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// <summary>
     /// Creates a new SprkChatAgent.  Called exclusively by <see cref="SprkChatAgentFactory"/>.
     /// </summary>
-    /// <param name="chatClient">Azure OpenAI IChatClient (singleton from DI).</param>
+    /// <param name="chatClient">Azure OpenAI IChatClient with UseFunctionInvocation (singleton from DI).</param>
+    /// <param name="rawChatClient">
+    /// Raw Azure OpenAI IChatClient WITHOUT UseFunctionInvocation.
+    /// Used by <see cref="DetectToolCallsAsync"/> to inspect tool call intentions
+    /// without executing them (task 071, Phase 2F compound intent detection).
+    /// Registered in DI as keyed service "raw" (see AiModule.cs).
+    /// </param>
     /// <param name="context">
     /// Context composed from the playbook's Action record (system prompt, document summary,
     /// analysis metadata, playbook ID).
@@ -63,18 +77,26 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// Reset before each message to keep citation numbering per-response.
     /// May be null when no search tools are available.
     /// </param>
+    /// <param name="intentDetector">
+    /// Compound intent detector (task 071). Analyzes tool call lists to determine if
+    /// plan_preview gating is required before execution.
+    /// </param>
     /// <param name="logger">Logger.</param>
     public SprkChatAgent(
         IChatClient chatClient,
+        IChatClient rawChatClient,
         ChatContext context,
         IReadOnlyList<AIFunction> tools,
         CitationContext? citationContext,
+        CompoundIntentDetector intentDetector,
         ILogger<SprkChatAgent> logger)
     {
         _chatClient = chatClient;
+        _rawChatClient = rawChatClient;
         _context = context;
         _tools = tools;
         _citationContext = citationContext;
+        _intentDetector = intentDetector;
         _logger = logger;
     }
 
@@ -84,6 +106,10 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// The method prepends the system prompt from <see cref="ChatContext.SystemPrompt"/> and
     /// optionally appends a document context block from <see cref="ChatContext.DocumentSummary"/>
     /// before forwarding the full conversation history to <see cref="IChatClient.GetStreamingResponseAsync"/>.
+    ///
+    /// Uses the function-invocation-enabled client so tool calls are automatically executed.
+    /// Call <see cref="DetectToolCallsAsync"/> BEFORE this method when compound intent
+    /// detection is required (i.e., when the caller must check for plan_preview gating).
     /// </summary>
     /// <param name="message">The user's chat message.</param>
     /// <param name="history">
@@ -120,6 +146,80 @@ public sealed class SprkChatAgent : ISprkChatAgent
         {
             yield return update;
         }
+    }
+
+    /// <summary>
+    /// Performs a single LLM call using the raw (pre-function-invocation) client to determine
+    /// what tools the model intends to call, WITHOUT executing them.
+    ///
+    /// This is the compound intent detection step (task 071, Phase 2F).
+    /// Uses <see cref="_rawChatClient"/> which does NOT have UseFunctionInvocation, so
+    /// tool calls are returned as <see cref="FunctionCallContent"/> items in the response
+    /// without being automatically executed.
+    ///
+    /// The caller (<c>ChatEndpoints.SendMessageAsync</c>) uses the returned list to:
+    ///   1. Check for compound intent via <see cref="CompoundIntentDetector.IsCompoundIntent"/>.
+    ///   2. If compound intent: build + store a <see cref="Models.Ai.Chat.PendingPlan"/>,
+    ///      emit a <c>plan_preview</c> SSE event, and halt execution.
+    ///   3. If not compound intent: call <see cref="SendMessageAsync"/> normally.
+    ///
+    /// Performance note: This makes an additional LLM round-trip before the main streaming call.
+    /// It only runs when tools are registered (returns empty list immediately when no tools).
+    /// The extra latency (~200-400ms) is acceptable for the plan_preview gate.
+    /// </summary>
+    /// <param name="message">The user's chat message.</param>
+    /// <param name="history">Prior messages in the session (user + assistant turns).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The list of <see cref="FunctionCallContent"/> items the LLM intends to call,
+    /// or an empty list if the model does not intend to call any tools.
+    /// </returns>
+    public async Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
+        string message,
+        IReadOnlyList<AiChatMessage> history,
+        CancellationToken cancellationToken)
+    {
+        // Early exit: if no tools are registered, there can be no tool calls
+        if (_tools.Count == 0)
+        {
+            _logger.LogDebug(
+                "DetectToolCallsAsync: no tools registered for playbook={PlaybookId}; skipping detection",
+                _context.PlaybookId);
+            return [];
+        }
+
+        _logger.LogDebug(
+            "DetectToolCallsAsync: inspecting tool intent — playbook={PlaybookId}, historyCount={HistoryCount}",
+            _context.PlaybookId, history.Count);
+
+        var messages = BuildMessages(message, history);
+        var options = BuildOptions();
+
+        // Use the raw client (no function invocation) to get the LLM's tool call intentions.
+        // The response will contain FunctionCallContent items for each tool call requested,
+        // without executing any of them.
+        var response = await _rawChatClient.GetResponseAsync(messages, options, cancellationToken);
+
+        var toolCalls = new List<FunctionCallContent>();
+
+        // ChatResponse.Messages contains all messages in the response (typically one assistant message).
+        // Iterate over all messages and their content items to collect FunctionCallContent items.
+        foreach (var msg in response.Messages)
+        {
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionCallContent toolCall)
+                {
+                    toolCalls.Add(toolCall);
+                }
+            }
+        }
+
+        _logger.LogInformation(
+            "DetectToolCallsAsync: detected {ToolCallCount} tool call(s) for playbook={PlaybookId}",
+            toolCalls.Count, _context.PlaybookId);
+
+        return toolCalls;
     }
 
     // === Private helpers ===

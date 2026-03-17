@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend SprkChatLaunchContext Interface in openSprkChatPane.ts</title>
     <phase>2A: Contextual Launch</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002</blocks>

@@ -10,16 +10,28 @@ using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
+// ──────────────────────────────────────────────────────────────────────────────
+// CRITICAL SAFETY CONSTRAINT (spec FR-12, ADR-013):
+//   Write-back targets sprk_analysisoutput.sprk_workingdocument ONLY.
+//   This class MUST NEVER call SpeFileStore, GraphServiceClient write methods,
+//   UploadContent, PutContent, UpdateFile, or any SharePoint Embedded write operation.
+//   All mutations route through IWorkingDocumentService → IGenericEntityService (Dataverse).
+// ──────────────────────────────────────────────────────────────────────────────
+
 /// <summary>
 /// AI tool class providing working-document editing capabilities for the SprkChatAgent.
 ///
-/// Exposes two document-mutation methods that perform inner LLM calls and stream tokens
-/// as <see cref="DocumentStreamEvent"/> SSE events to the frontend:
+/// Exposes three document-mutation methods:
 ///   - <see cref="EditWorkingDocumentAsync"/> — applies targeted edits to the current
-///     working document based on the user's instruction.
-///   - <see cref="AppendSectionAsync"/> — adds a new section to the end of the working document.
+///     working document based on the user's instruction (streams tokens via SSE).
+///   - <see cref="AppendSectionAsync"/> — adds a new section to the end of the working
+///     document (streams tokens via SSE).
+///   - <see cref="WriteBackToWorkingDocumentAsync"/> — persists AI-generated content to
+///     <c>sprk_analysisoutput.sprk_workingdocument</c> in Dataverse. This tool is
+///     plan-preview-gated (MUST only execute from an approved plan — spec FR-11) and
+///     MUST NEVER write to SPE/SharePoint source files (spec FR-12).
 ///
-/// Each method emits the full SSE event sequence:
+/// Each streaming method emits the full SSE event sequence:
 ///   1. <see cref="DocumentStreamStartEvent"/> — signals operation start
 ///   2. N x <see cref="DocumentStreamTokenEvent"/> — streamed content tokens
 ///   3. <see cref="DocumentStreamEndEvent"/> — signals operation end (success, cancel, or error)
@@ -47,6 +59,7 @@ public sealed class WorkingDocumentTools
     private readonly IChatClient _chatClient;
     private readonly Func<DocumentStreamEvent, CancellationToken, Task> _writeSSE;
     private readonly IAnalysisOrchestrationService _analysisService;
+    private readonly IWorkingDocumentService _workingDocumentService;
     private readonly ILogger _logger;
     private readonly string? _analysisId;
 
@@ -65,22 +78,29 @@ public sealed class WorkingDocumentTools
     /// Orchestration service used to fetch the current working document content
     /// for the active analysis session.
     /// </param>
+    /// <param name="workingDocumentService">
+    /// Persistence service for writing back content to <c>sprk_analysisoutput.sprk_workingdocument</c>.
+    /// Routes through Dataverse only — no SPE/SharePoint writes (spec FR-12).
+    /// </param>
     /// <param name="logger">Logger for operation metadata (ADR-015: no document content).</param>
     /// <param name="analysisId">
     /// The active analysis ID from the chat session context. When provided, the tool
-    /// fetches the current working document before constructing the edit prompt.
+    /// fetches the current working document before constructing the edit prompt, and
+    /// uses this ID as the write-back target for <see cref="WriteBackToWorkingDocumentAsync"/>.
     /// May be null if no analysis context is available.
     /// </param>
     public WorkingDocumentTools(
         IChatClient chatClient,
         Func<DocumentStreamEvent, CancellationToken, Task> writeSSE,
         IAnalysisOrchestrationService analysisService,
+        IWorkingDocumentService workingDocumentService,
         ILogger logger,
         string? analysisId = null)
     {
         _chatClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
         _writeSSE = writeSSE ?? throw new ArgumentNullException(nameof(writeSSE));
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+        _workingDocumentService = workingDocumentService ?? throw new ArgumentNullException(nameof(workingDocumentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _analysisId = analysisId;
     }
@@ -335,10 +355,89 @@ public sealed class WorkingDocumentTools
     }
 
     /// <summary>
+    /// Writes AI-generated content back to <c>sprk_analysisoutput.sprk_workingdocument</c>
+    /// in Dataverse.
+    ///
+    /// SAFETY CONSTRAINT (spec FR-12): This method MUST ONLY write to the Dataverse field
+    /// <c>sprk_analysisoutput.sprk_workingdocument</c>. It MUST NEVER call SpeFileStore,
+    /// GraphServiceClient write methods, or any SharePoint Embedded write operation.
+    ///
+    /// PLAN GATE (spec FR-11): This tool is listed in <see cref="CompoundIntentDetector.WriteBackToolNames"/>
+    /// and therefore ALWAYS triggers a plan preview gate before execution. It should only be
+    /// called from an approved plan execution (POST /api/ai/chat/sessions/{sessionId}/plan/approve).
+    ///
+    /// When <c>_analysisId</c> is null (no analysis context available), the method returns
+    /// an informative error string so the agent can surface a helpful message to the user.
+    /// </summary>
+    /// <param name="content">The complete AI-generated content to persist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A summary of the write-back operation for the agent's conversation context.</returns>
+    [Description("Write AI-generated content back to the analysis working document in Dataverse (sprk_analysisoutput.sprk_workingdocument). " +
+                 "PLAN-PREVIEW-GATED: this tool always requires user approval before execution. " +
+                 "SAFETY: writes ONLY to Dataverse — never modifies the SharePoint source file.")]
+    public async Task<string> WriteBackToWorkingDocumentAsync(
+        [Description("The complete content to write back to sprk_analysisoutput.sprk_workingdocument")]
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(content, nameof(content));
+
+        // ADR-015: Log content length only — never the content itself
+        _logger.LogInformation(
+            "WriteBackToWorkingDocument starting — analysisId={AnalysisId}, contentLen={ContentLen}",
+            _analysisId, content.Length);
+
+        // Guard: require a valid analysis ID in the session context
+        if (string.IsNullOrWhiteSpace(_analysisId) || !Guid.TryParse(_analysisId, out var analysisGuid))
+        {
+            _logger.LogWarning(
+                "WriteBackToWorkingDocument: no valid analysisId in session context — cannot write back. analysisId={AnalysisId}",
+                _analysisId);
+
+            return "Write-back failed: no analysis context is available for this chat session. " +
+                   "The user must open SprkChat from within an active analysis to enable write-back.";
+        }
+
+        try
+        {
+            // SAFETY: This is the ONLY write operation in this method.
+            // It routes through IWorkingDocumentService → IGenericEntityService (Dataverse SDK).
+            // It targets sprk_analysisoutput.sprk_workingdocument ONLY.
+            // No SpeFileStore, GraphServiceClient, or SPE write calls are made here.
+            await _workingDocumentService.UpdateWorkingDocumentAsync(
+                analysisGuid,
+                content,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "WriteBackToWorkingDocument completed — analysisId={AnalysisId}, contentLen={ContentLen}",
+                _analysisId, content.Length);
+
+            return $"Working document written back to Dataverse successfully. " +
+                   $"Target: sprk_analysisoutput.sprk_workingdocument (analysisId={_analysisId}). " +
+                   $"Content length: {content.Length} characters.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "WriteBackToWorkingDocument failed — analysisId={AnalysisId}, errorType={ErrorType}",
+                _analysisId, ex.GetType().Name);
+
+            return $"Write-back failed for analysisId={_analysisId}. " +
+                   $"Error: {ex.GetType().Name}. The working document was not updated in Dataverse. " +
+                   "Please retry or contact support if the issue persists.";
+        }
+    }
+
+    /// <summary>
     /// Returns <see cref="AIFunction"/> instances for all tool methods in this class.
     ///
     /// Called by <see cref="SprkChatAgentFactory.ResolveTools"/> to register document-editing
     /// tools into the agent's tool set. Uses <see cref="AIFunctionFactory.Create"/> per ADR-013.
+    ///
+    /// WriteBackToWorkingDocument is included in the returned tools and is registered in
+    /// <see cref="CompoundIntentDetector.WriteBackToolNames"/>, ensuring it always triggers
+    /// the plan preview gate before execution (spec FR-11).
     /// </summary>
     /// <returns>An enumerable of <see cref="AIFunction"/> objects wrapping the tool methods.</returns>
     public IEnumerable<AIFunction> GetTools()
@@ -352,6 +451,14 @@ public sealed class WorkingDocumentTools
             AppendSectionAsync,
             name: "AppendSection",
             description: "Add a new section to the end of the working document with generated content.");
+
+        yield return AIFunctionFactory.Create(
+            WriteBackToWorkingDocumentAsync,
+            name: "WriteBackToWorkingDocument",
+            description: "Write AI-generated content back to the analysis working document in Dataverse " +
+                         "(sprk_analysisoutput.sprk_workingdocument). " +
+                         "PLAN-PREVIEW-GATED: always requires user approval. " +
+                         "SAFETY: writes ONLY to Dataverse, never to the SharePoint source file.");
     }
 
     // === Private helpers ===

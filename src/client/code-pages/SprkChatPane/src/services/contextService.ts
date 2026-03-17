@@ -60,6 +60,21 @@ export interface DetectedContext {
   playbookId: string;
   /** Detected page type using native Dataverse values (entityrecord, entitylist, dashboard, webresource, custom, or unknown). */
   pageType: PageType;
+  // ---- Analysis launch context (task 002) ----
+  /** Analysis type identifier (e.g. 'patent-claims', 'contract-review'). Empty if not set. */
+  analysisType: string;
+  /** Matter type from the related matter record. Empty if not set. */
+  matterType: string;
+  /** Practice area from the analysis or matter. Empty if not set. */
+  practiceArea: string;
+  /** sprk_analysisoutput record ID (GUID without braces). Empty if not set. */
+  analysisId: string;
+  /** Source SPE file ID associated with the analysis. Empty if not set. */
+  sourceFileId: string;
+  /** SPE container ID for the source document. Empty if not set. */
+  sourceContainerId: string;
+  /** Interaction mode: 'analysis' for contextual workspace, 'general' for generic chat. Empty if not set. */
+  mode: 'analysis' | 'general' | '';
 }
 
 /**
@@ -387,26 +402,39 @@ export function detectContext(params: URLSearchParams): DetectedContext {
   // Detect page type once (shared across all return paths)
   const pageType = detectPageType();
 
+  // ---- Parse analysis launch context params (task 002) ----
+  // Present on all return paths when launched from AnalysisWorkspace.
+  // Uses empty string as the absent sentinel (consistent with entityType/entityId).
+  const analysisLaunchContext = {
+    analysisType: params.get('analysisType') ?? '',
+    matterType: params.get('matterType') ?? '',
+    practiceArea: params.get('practiceArea') ?? '',
+    analysisId: params.get('analysisId') ?? '',
+    sourceFileId: params.get('sourceFileId') ?? '',
+    sourceContainerId: params.get('sourceContainerId') ?? '',
+    mode: (params.get('mode') ?? '') as 'analysis' | 'general' | '',
+  };
+
   // Priority 1: URL parameters
   const urlContext = detectContextFromUrl(params);
   if (urlContext) {
     const playbookFromUrl = params.get('playbookId') ?? '';
     console.info(`${LOG_PREFIX} Context from URL params:`, urlContext.entityType, urlContext.entityId, `[${pageType}]`);
-    return { ...urlContext, playbookId: playbookFromUrl, pageType };
+    return { ...urlContext, playbookId: playbookFromUrl, pageType, ...analysisLaunchContext };
   }
 
   // Priority 2: Xrm.Page.data.entity
   const xrmPageContext = detectContextFromXrmPage();
   if (xrmPageContext) {
     console.info(`${LOG_PREFIX} Context from Xrm.Page:`, xrmPageContext.entityType, xrmPageContext.entityId, `[${pageType}]`);
-    return { ...xrmPageContext, playbookId: '', pageType };
+    return { ...xrmPageContext, playbookId: '', pageType, ...analysisLaunchContext };
   }
 
   // Priority 3: Xrm.Utility.getPageContext()
   const pageContext = detectContextFromPageContext();
   if (pageContext) {
     console.info(`${LOG_PREFIX} Context from getPageContext():`, pageContext.entityType, pageContext.entityId, `[${pageType}]`);
-    return { ...pageContext, playbookId: '', pageType };
+    return { ...pageContext, playbookId: '', pageType, ...analysisLaunchContext };
   }
 
   // Priority 4: Empty fallback (pane opened without entity context)
@@ -416,6 +444,7 @@ export function detectContext(params: URLSearchParams): DetectedContext {
     entityId: '',
     playbookId: '',
     pageType,
+    ...analysisLaunchContext,
   };
 }
 
@@ -538,17 +567,30 @@ export function startContextChangeDetection(
     if (hasChanged && !notified) {
       notified = true;
       const currentPageType = detectPageType();
+      // Analysis launch context fields are empty on navigation-triggered context changes
+      // (those fields are set only when launched explicitly from AnalysisWorkspace via openSprkChatPane)
+      const emptyAnalysisCtx = {
+        analysisType: '',
+        matterType: '',
+        practiceArea: '',
+        analysisId: '',
+        sourceFileId: '',
+        sourceContainerId: '',
+        mode: '' as const,
+      };
       const newContext: DetectedContext = {
         entityType: newEntityType,
         entityId: newEntityId,
         playbookId: '', // Resolved async via resolveContextMapping() by caller
         pageType: currentPageType,
+        ...emptyAnalysisCtx,
       };
       const previousContext: DetectedContext = {
         entityType: lastEntityType,
         entityId: lastEntityId,
         playbookId: '', // Previous playbook no longer relevant during switch
         pageType: currentPageType,
+        ...emptyAnalysisCtx,
       };
 
       console.info(

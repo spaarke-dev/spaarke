@@ -3,7 +3,7 @@
   <metadata>
     <title>Create QuickActionChips Component</title>
     <phase>2E: Enhanced SprkChat Pane — Components</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>060</blocks>

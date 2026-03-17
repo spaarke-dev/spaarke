@@ -39,10 +39,20 @@ import { LinkNode } from '@lexical/link';
 
 // Lexical utilities
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html';
-import { $getRoot, $insertNodes, EditorState, LexicalEditor } from 'lexical';
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  $getSelection,
+  $insertNodes,
+  $isRangeSelection,
+  EditorState,
+  LexicalEditor,
+} from 'lexical';
 
 // Local components
 import { ToolbarPlugin } from './plugins/ToolbarPlugin';
+import type { StreamingInsertHandle } from './plugins/StreamingInsertPlugin';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -76,6 +86,52 @@ export interface RichTextEditorRef {
   setHtml: (html: string) => void;
   /** Clear all content */
   clear: () => void;
+  /**
+   * Insert content at the current cursor position or replace the current selection.
+   *
+   * For plain text (`contentType='text'`): inserts as a Lexical TextNode.
+   * For HTML (`contentType='html'`): parses via DOMParser and inserts using $generateNodesFromDOM.
+   *
+   * Uses `discrete: true` in editor.update() so the insert is a separate undo history entry
+   * that can be undone independently with Ctrl+Z.
+   *
+   * Behaviour:
+   * - If the editor has a collapsed (cursor-only) selection: inserts at cursor position.
+   * - If the editor has a non-collapsed (range) selection: replaces the selection with
+   *   the new content (Lexical's insertNodes / insertText handles this automatically when
+   *   a RangeSelection is active).
+   * - If no selection exists: appends to end of document.
+   *
+   * @param content - The text or HTML string to insert.
+   * @param contentType - 'text' for plain text, 'html' for HTML markup.
+   *
+   * @see spec-2D - Insert-to-Editor phase requirements
+   * @see IDocumentInsertEvent - The BroadcastChannel event shape that drives this method
+   */
+  insertAtCursor: (content: string, contentType: 'text' | 'html') => void;
+  /**
+   * Begin a streaming insertion operation at the given position.
+   * Returns a StreamingInsertHandle for token delivery.
+   *
+   * @param position - 'cursor' to insert at current cursor, 'end' to append at end
+   * @returns A handle for controlling the streaming operation
+   */
+  beginStreamingInsert: (position: 'cursor' | 'end') => StreamingInsertHandle;
+  /**
+   * Append a single token to the active streaming operation.
+   *
+   * @param handle - The handle returned by beginStreamingInsert
+   * @param token - The text token to append
+   */
+  appendStreamToken: (handle: StreamingInsertHandle, token: string) => void;
+  /**
+   * End the streaming insertion operation.
+   * Restores the editor to its normal editable state.
+   *
+   * @param handle - The handle returned by beginStreamingInsert
+   * @param cancelled - If true, removes all inserted content (default false)
+   */
+  endStreamingInsert: (handle: StreamingInsertHandle, cancelled?: boolean) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,6 +385,79 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
             root.clear();
           });
         }
+      },
+      insertAtCursor: (content: string, contentType: 'text' | 'html') => {
+        if (!editorRef.current) {
+          return;
+        }
+
+        editorRef.current.update(
+          () => {
+            if (contentType === 'html') {
+              // Parse HTML and insert the resulting Lexical nodes.
+              // $insertNodes handles selection: if a RangeSelection is active
+              // and non-collapsed, it replaces the selection; if collapsed
+              // (cursor only) it inserts at the cursor position.
+              const parser = new DOMParser();
+              const dom = parser.parseFromString(content, 'text/html');
+              const nodes = $generateNodesFromDOM(editorRef.current!, dom);
+              if (nodes.length > 0) {
+                const selection = $getSelection();
+                if ($isRangeSelection(selection)) {
+                  // Insert at/replace current selection
+                  selection.insertNodes(nodes);
+                } else {
+                  // No selection — append to document root
+                  const root = $getRoot();
+                  const paragraph = $createParagraphNode();
+                  root.append(paragraph);
+                  $insertNodes(nodes);
+                }
+              }
+            } else {
+              // Plain text insertion
+              const selection = $getSelection();
+              if ($isRangeSelection(selection)) {
+                // insertText replaces any non-collapsed selection and inserts
+                // at cursor for collapsed selections — single Lexical API handles both.
+                selection.insertText(content);
+              } else {
+                // No selection — append a new paragraph with the text
+                const root = $getRoot();
+                const paragraph = $createParagraphNode();
+                const textNode = $createTextNode(content);
+                paragraph.append(textNode);
+                root.append(paragraph);
+              }
+            }
+          },
+          // discrete: true creates a separate undo history entry so the user
+          // can Ctrl+Z to remove only this insert, independent of prior edits.
+          { discrete: true }
+        );
+      },
+      beginStreamingInsert: (position: 'cursor' | 'end'): StreamingInsertHandle => {
+        // Returns a stub handle; the real streaming is managed by StreamingInsertPlugin.
+        // The RichTextEditor does not embed StreamingInsertPlugin by default —
+        // consumers that need streaming should use StreamingInsertPlugin directly.
+        // This method exists so useDocumentStreamConsumer can type-check against RichTextEditorRef.
+        console.warn(
+          '[RichTextEditor] beginStreamingInsert called on base editor without StreamingInsertPlugin. ' +
+          `Position: ${position}. Use StreamingInsertPlugin for streaming support.`
+        );
+        return {
+          startStream: () => { /* no-op stub */ },
+          insertToken: () => { /* no-op stub */ },
+          endStream: () => { /* no-op stub */ },
+        };
+      },
+      appendStreamToken: (_handle: StreamingInsertHandle, _token: string): void => {
+        // Delegated to the StreamingInsertHandle returned by beginStreamingInsert.
+        // This method is a pass-through; real token insertion is handled by StreamingInsertPlugin.
+        _handle.insertToken(_token);
+      },
+      endStreamingInsert: (handle: StreamingInsertHandle, cancelled?: boolean): void => {
+        handle.endStream(cancelled);
       },
     }),
     []

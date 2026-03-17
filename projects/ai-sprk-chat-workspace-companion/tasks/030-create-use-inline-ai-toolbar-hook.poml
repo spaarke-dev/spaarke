@@ -3,7 +3,7 @@
   <metadata>
     <title>Create useInlineAiToolbar Hook in AnalysisWorkspace</title>
     <phase>2B-Wiring: EditorPanel Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>013, 002</dependencies>
     <blocks>031</blocks>

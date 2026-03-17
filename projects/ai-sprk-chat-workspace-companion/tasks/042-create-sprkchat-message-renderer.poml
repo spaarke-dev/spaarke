@@ -3,7 +3,7 @@
   <metadata>
     <title>Create SprkChatMessageRenderer for Structured Response Cards</title>
     <phase>2E: Enhanced SprkChat Pane — Components</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>062</blocks>

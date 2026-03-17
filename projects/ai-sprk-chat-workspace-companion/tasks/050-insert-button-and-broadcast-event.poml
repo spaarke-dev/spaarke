@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Insert Button to SprkChat Messages and document_insert Event</title>
     <phase>2D: Insert-to-Editor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>051</blocks>

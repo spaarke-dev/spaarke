@@ -374,7 +374,7 @@ const DomainGrid: React.FC<IDomainGridProps> = ({
                   onClick={e => {
                     e.stopPropagation();
                     setPreviewDocId(item.id);
-                    setPreviewDocName(item.name ?? item.id);
+                    setPreviewDocName((item.name as string | undefined) ?? item.id ?? '');
                     setPreviewOpen(true);
                   }}
                 />

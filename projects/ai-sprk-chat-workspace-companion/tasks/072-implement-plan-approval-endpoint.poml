@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement POST /plan/approve Endpoint and Session Approval Flow</title>
     <phase>2F: BFF Plan Preview + Write-Back</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>071</dependencies>
     <blocks>073, 080</blocks>

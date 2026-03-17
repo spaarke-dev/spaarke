@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement plan_preview SSE Event and Compound Intent Detection in BFF</title>
     <phase>2F: BFF Plan Preview + Write-Back</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>070</dependencies>
     <blocks>072</blocks>

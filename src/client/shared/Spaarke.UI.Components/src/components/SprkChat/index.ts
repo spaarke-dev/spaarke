@@ -9,12 +9,35 @@
 // Main component
 export { SprkChat } from './SprkChat';
 export { SprkChatMessage } from './SprkChatMessage';
+export type { ISprkChatMessageExtendedProps } from './SprkChatMessage';
+
+// SprkChatMessageRenderer - Structured response card renderer (Phase 2E)
+export { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
+export type {
+  ISprkChatMessageRendererProps,
+  StructuredResponseData,
+  IMarkdownResponse,
+  ICitationsResponse,
+  ICitationRef,
+  IDiffResponse,
+  IEntityCardResponse,
+  IEntityCardField,
+  IActionConfirmationResponse,
+} from './SprkChatMessageRenderer';
+
+// PlanPreviewCard - Plan execution gate with step progress (Phase 2F)
+export { PlanPreviewCard } from './PlanPreviewCard';
+export type { PlanPreviewCardProps, PlanStep, PlanStepStatus } from './PlanPreviewCard';
 export { SprkChatInput } from './SprkChatInput';
 export { SprkChatContextSelector } from './SprkChatContextSelector';
 export { SprkChatPredefinedPrompts } from './SprkChatPredefinedPrompts';
 export { SprkChatHighlightRefine } from './SprkChatHighlightRefine';
 export { SprkChatSuggestions } from './SprkChatSuggestions';
 export { SprkChatCitationPopover, CitationMarker } from './SprkChatCitationPopover';
+export { QuickActionChips } from './QuickActionChips';
+
+// QuickActionChips types
+export type { IQuickActionChipsProps } from './QuickActionChips';
 
 // Hooks
 export { useSseStream } from './hooks/useSseStream';
@@ -28,6 +51,8 @@ export { useSelectionListener } from './hooks/useSelectionListener';
 export type {
   ISprkChatProps,
   IChatMessage,
+  IChatMessageMetadata,
+  IChatMessagePlanStep,
   IChatSession,
   IChatSseEvent,
   ISprkChatMessageProps,
@@ -52,7 +77,19 @@ export type {
   ICitationSseItem,
   IQuickAction,
   IRefineRequest,
+  IDocumentInsertEvent,
 } from './types';
 export { CROSS_PANE_SELECTION_MAX_PREVIEW, DEFAULT_QUICK_ACTIONS } from './types';
 export type { IUseChatPlaybooksResult } from './hooks/useChatPlaybooks';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './hooks/useSelectionListener';
+
+// Analysis context mapping hook (active when SprkChat opened from AnalysisWorkspace)
+export { useChatContextMapping } from './hooks/useChatContextMapping';
+export type {
+  IUseChatContextMappingResult,
+  IAnalysisChatContextResponse,
+  IInlineActionInfo,
+  IAnalysisPlaybookInfo,
+  IAnalysisKnowledgeSourceInfo,
+  IAnalysisContextInfo,
+} from './hooks/useChatContextMapping';

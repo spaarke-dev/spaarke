@@ -200,7 +200,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
     [showNew, showDelete, showRefresh, canCreate, canDelete, hasSelection, selectedIds, onNew, onDelete, onRefresh]
   );
 
-  useKeyboardShortcuts(shortcuts);
+  useKeyboardShortcuts(shortcuts as unknown as Parameters<typeof useKeyboardShortcuts>[0]);
 
   // Handle search
   const handleSearchChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {

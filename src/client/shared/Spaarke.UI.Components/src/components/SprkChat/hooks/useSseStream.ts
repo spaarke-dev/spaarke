@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { IChatSseEvent, ICitation, IUseSseStreamResult } from '../types';
+import { IChatSseEvent, IChatSseEventData, ICitation, IUseSseStreamResult } from '../types';
 
 /**
  * Parse a single SSE data line into a ChatSseEvent.
@@ -84,6 +84,10 @@ export function useSseStream(): IUseSseStreamResult {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [citations, setCitations] = useState<ICitation[]>([]);
+  // Phase 2F: stores planId from plan_preview SSE event so SprkChat can call /plan/approve
+  const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
+  // Phase 2F: full plan_preview data (planTitle, steps) used to set message metadata
+  const [pendingPlanData, setPendingPlanData] = useState<IChatSseEventData | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -126,6 +130,8 @@ export function useSseStream(): IUseSseStreamResult {
     setIsStreaming(true);
     setSuggestions([]);
     setCitations([]);
+    setPendingPlanId(null);
+    setPendingPlanData(null);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -190,12 +196,21 @@ export function useSseStream(): IUseSseStreamResult {
                 }
               } else if (event.type === 'citations' && event.data?.citations) {
                 setCitations(mapSseCitations(event.data.citations));
+              } else if (event.type === 'plan_preview' && event.data?.planId) {
+                // Phase 2F: store planId and full plan data so SprkChat can:
+                // 1. Set message metadata (responseType, planTitle, plan steps)
+                // 2. Call /plan/approve on "Proceed" with the correct planId
+                setPendingPlanId(event.data.planId);
+                setPendingPlanData(event.data);
               } else if (event.type === 'done') {
                 setIsDone(true);
                 setIsStreaming(false);
               } else if (event.type === 'error') {
                 throw new Error(event.content || 'Stream error');
               }
+              // plan_step_start / plan_step_complete: no state update needed here —
+              // these events are emitted by the /plan/approve endpoint and handled via
+              // the dedicated approval stream in handlePlanProceed (SprkChat.tsx).
             }
           }
         }
@@ -218,6 +233,9 @@ export function useSseStream(): IUseSseStreamResult {
               }
             } else if (event.type === 'citations' && event.data?.citations) {
               setCitations(mapSseCitations(event.data.citations));
+            } else if (event.type === 'plan_preview' && event.data?.planId) {
+              setPendingPlanId(event.data.planId);
+              setPendingPlanData(event.data);
             } else if (event.type === 'done') {
               setIsDone(true);
             } else if (event.type === 'error') {
@@ -250,6 +268,8 @@ export function useSseStream(): IUseSseStreamResult {
     isStreaming,
     suggestions,
     citations,
+    pendingPlanId,
+    pendingPlanData,
     startStream,
     cancelStream,
     clearSuggestions,

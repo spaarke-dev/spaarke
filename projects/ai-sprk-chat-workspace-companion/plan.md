@@ -1,7 +1,7 @@
 # Project Plan: SprkChat Analysis Workspace Companion
 
 > **Last Updated**: 2026-03-16
-> **Status**: Ready for Tasks
+> **Status**: Complete
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -154,12 +154,12 @@ Group E (after Group D):
 2. Enrich Analysis Workspace launch with full analysis context
 
 **Deliverables:**
-- [ ] `SprkChatLaunchContext` interface added to `openSprkChatPane.ts` (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode)
-- [ ] `buildDataParams()` updated to include all 7 context fields
-- [ ] `AnalysisWorkspace/App.tsx` updated to pass enriched context after record loads
-- [ ] `SprkChatPane/src/services/contextService.ts` updated to consume new URL params
-- [ ] SidePaneManager injection snippet removed from `EventsPage/index.html`
-- [ ] SidePaneManager injection snippet removed from `SpeAdminApp/index.html`
+- [x] `SprkChatLaunchContext` interface added to `openSprkChatPane.ts` (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode)
+- [x] `buildDataParams()` updated to include all 7 context fields
+- [x] `AnalysisWorkspace/App.tsx` updated to pass enriched context after record loads
+- [x] `SprkChatPane/src/services/contextService.ts` updated to consume new URL params
+- [x] SidePaneManager injection snippet removed from `EventsPage/index.html`
+- [x] SidePaneManager injection snippet removed from `SpeAdminApp/index.html`
 
 **Inputs**: `openSprkChatPane.ts`, `App.tsx`, `contextService.ts`, `EventsPage/index.html`, `SpeAdminApp/index.html`
 
@@ -176,13 +176,13 @@ Group E (after Group D):
 2. Define 5 default inline actions with BroadcastChannel dispatch
 
 **Deliverables:**
-- [ ] `InlineAiToolbar/inlineAiToolbar.types.ts` — Types + 5 default action definitions (summarize, simplify, expand, fact-check, ask)
-- [ ] `InlineAiToolbar/InlineAiToolbar.tsx` — Floating toolbar positioned above selection
-- [ ] `InlineAiToolbar/InlineAiActions.tsx` — Action button list with mousedown handler
-- [ ] `InlineAiToolbar/useInlineAiToolbar.ts` — Position + visibility hook (200ms debounce)
-- [ ] `InlineAiToolbar/useInlineAiActions.ts` — BroadcastChannel `inline_action` dispatch
-- [ ] `@spaarke/ui-components` barrel exports updated
-- [ ] Unit tests for hook and component
+- [x] `InlineAiToolbar/inlineAiToolbar.types.ts` — Types + 5 default action definitions (summarize, simplify, expand, fact-check, ask)
+- [x] `InlineAiToolbar/InlineAiToolbar.tsx` — Floating toolbar positioned above selection
+- [x] `InlineAiToolbar/InlineAiActions.tsx` — Action button list with mousedown handler
+- [x] `InlineAiToolbar/useInlineAiToolbar.ts` — Position + visibility hook (200ms debounce)
+- [x] `InlineAiToolbar/useInlineAiActions.ts` — BroadcastChannel `inline_action` dispatch
+- [x] `@spaarke/ui-components` barrel exports updated
+- [x] Unit tests for hook and component
 
 **Inputs**: `SprkChat/types.ts` (BroadcastChannel event types), Fluent v9 components
 
@@ -199,9 +199,9 @@ Group E (after Group D):
 1. Wire InlineAiToolbar into AnalysisWorkspace EditorPanel
 
 **Deliverables:**
-- [ ] `AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts` — Coordinates selection position, toolbar visibility, and bridge dispatch
-- [ ] `EditorPanel.tsx` updated to mount `InlineAiToolbar` as overlay
-- [ ] SprkChat `SprkChat.tsx` updated to subscribe to `inline_action` BroadcastChannel event
+- [x] `AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts` — Coordinates selection position, toolbar visibility, and bridge dispatch
+- [x] `EditorPanel.tsx` updated to mount `InlineAiToolbar` as overlay
+- [x] SprkChat `SprkChat.tsx` updated to subscribe to `inline_action` BroadcastChannel event
 
 **Inputs**: InlineAiToolbar components (Phase 2B), `EditorPanel.tsx`, `SprkChat.tsx`
 
@@ -218,13 +218,13 @@ Group E (after Group D):
 2. Map `sprk_playbookcapabilities` values to inline action and slash command definitions
 
 **Deliverables:**
-- [ ] `AnalysisChatContextResolver.cs` — Service resolving analysis record + related matter + source document
-- [ ] New route registered: `GET /api/ai/chat/context-mappings/analysis/{analysisId}` with endpoint filter
-- [ ] Capability-to-InlineAction static mapping (options 100000000–100000006)
-- [ ] Response model: `defaultPlaybook`, `availablePlaybooks`, `inlineActions`, `knowledgeSources`, `analysisContext`
-- [ ] Redis caching with 30-min TTL
-- [ ] Unit tests for resolver
-- [ ] Seed data: patent-claims playbook with populated `sprk_playbookcapabilities`
+- [x] `AnalysisChatContextResolver.cs` — Service resolving analysis record + related matter + source document
+- [x] New route registered: `GET /api/ai/chat/context-mappings/analysis/{analysisId}` with endpoint filter
+- [x] Capability-to-InlineAction static mapping (options 100000000–100000006)
+- [x] Response model: `defaultPlaybook`, `availablePlaybooks`, `inlineActions`, `knowledgeSources`, `analysisContext`
+- [x] Redis caching with 30-min TTL
+- [x] Unit tests for resolver
+- [x] Seed data: patent-claims playbook with populated `sprk_playbookcapabilities`
 
 **Inputs**: `ChatContextMappingService.cs` (extend), `ADR-008` (endpoint filter), `ADR-009` (Redis caching)
 
@@ -242,11 +242,11 @@ Group E (after Group D):
 2. Implement `document_insert` BroadcastChannel event with undo support
 
 **Deliverables:**
-- [ ] "Insert" button added to `SprkChatMessage.tsx` on AI responses
-- [ ] `document_insert` BroadcastChannel event type added to bridge
-- [ ] Editor hook in AnalysisWorkspace that listens for `document_insert` and inserts at cursor or replaces selection
-- [ ] Undo support via Lexical editor undo stack
-- [ ] Supports plain text and formatted HTML
+- [x] "Insert" button added to `SprkChatMessage.tsx` on AI responses
+- [x] `document_insert` BroadcastChannel event type added to bridge
+- [x] Editor hook in AnalysisWorkspace that listens for `document_insert` and inserts at cursor or replaces selection
+- [x] Undo support via Lexical editor undo stack
+- [x] Supports plain text and formatted HTML
 
 **Inputs**: `SprkChatMessage.tsx`, `useDocumentStreaming.ts` (bridge pattern), `EditorPanel.tsx`
 
@@ -265,13 +265,13 @@ Group E (after Group D):
 4. Create PlanPreviewCard with approve/edit/cancel controls
 
 **Deliverables:**
-- [ ] `SlashCommandMenu/slashCommand.types.ts` — Types for command registry
-- [ ] `SlashCommandMenu/useSlashCommands.ts` — Registry + type-ahead filtering
-- [ ] `SlashCommandMenu/SlashCommandMenu.tsx` — Fluent Popover, keyboard-navigable
-- [ ] `SprkChat/QuickActionChips.tsx` — Up to 4 chips, hidden when pane < 350px
-- [ ] `SprkChatMessageRenderer.tsx` — Renders 5 card types: markdown, citations, diffs, entity cards, action confirmations
-- [ ] `PlanPreviewCard.tsx` — Plan preview card with Proceed/Edit Plan/Cancel and per-step progress
-- [ ] Unit tests for SlashCommandMenu and SprkChatMessageRenderer
+- [x] `SlashCommandMenu/slashCommand.types.ts` — Types for command registry
+- [x] `SlashCommandMenu/useSlashCommands.ts` — Registry + type-ahead filtering
+- [x] `SlashCommandMenu/SlashCommandMenu.tsx` — Fluent Popover, keyboard-navigable
+- [x] `SprkChat/QuickActionChips.tsx` — Up to 4 chips, hidden when pane < 350px
+- [x] `SprkChatMessageRenderer.tsx` — Renders 5 card types: markdown, citations, diffs, entity cards, action confirmations
+- [x] `PlanPreviewCard.tsx` — Plan preview card with Proceed/Edit Plan/Cancel and per-step progress
+- [x] Unit tests for SlashCommandMenu and SprkChatMessageRenderer
 
 **Inputs**: Phase 2C endpoint (for chips data), Fluent v9 Popover component
 
@@ -289,9 +289,9 @@ Group E (after Group D):
 2. Wire PlanPreviewCard into message rendering pipeline
 
 **Deliverables:**
-- [ ] `SprkChat.tsx` updated: mount `QuickActionChips` (above input), mount `SlashCommandMenu`, handle `inline_action` event subscription
-- [ ] `SprkChatInput.tsx` updated: add `[/]` button, intercept `/` keystroke to open slash menu
-- [ ] Message rendering pipeline uses `SprkChatMessageRenderer` based on `metadata.responseType`
+- [x] `SprkChat.tsx` updated: mount `QuickActionChips` (above input), mount `SlashCommandMenu`, handle `inline_action` event subscription
+- [x] `SprkChatInput.tsx` updated: add `[/]` button, intercept `/` keystroke to open slash menu
+- [x] Message rendering pipeline uses `SprkChatMessageRenderer` based on `metadata.responseType`
 
 **Inputs**: Phase 2E components, existing `SprkChat.tsx` and `SprkChatInput.tsx`
 
@@ -309,13 +309,13 @@ Group E (after Group D):
 3. Implement write-back to `sprk_analysisoutput.sprk_workingdocument`
 
 **Deliverables:**
-- [ ] `plan_preview` SSE event type added to BFF SSE pipeline
-- [ ] BFF compound intent detection (2+ tool chain, write-back, external action)
-- [ ] Plan approval endpoint: `POST /api/ai/chat/sessions/{sessionId}/plan/approve`
-- [ ] Session state: "pending plan" tracked between `plan_preview` emit and user approval
-- [ ] Conversational plan editing support ("skip step 2", "also include the deadline")
-- [ ] Write-back implementation: Dataverse update to `sprk_analysisoutput.sprk_workingdocument`
-- [ ] PlanPreviewCard per-step progress via SSE
+- [x] `plan_preview` SSE event type added to BFF SSE pipeline
+- [x] BFF compound intent detection (2+ tool chain, write-back, external action)
+- [x] Plan approval endpoint: `POST /api/ai/chat/sessions/{sessionId}/plan/approve`
+- [x] Session state: "pending plan" tracked between `plan_preview` emit and user approval
+- [x] Conversational plan editing support ("skip step 2", "also include the deadline")
+- [x] Write-back implementation: Dataverse update to `sprk_analysisoutput.sprk_workingdocument`
+- [x] PlanPreviewCard per-step progress via SSE
 
 **Inputs**: `ChatSessionManager.cs` (session model), `AiToolEndpoints.cs` (SSE pattern), PlanPreviewCard component
 
@@ -334,9 +334,9 @@ Group E (after Group D):
 2. E2E manual verification checklist from spec success criteria
 
 **Deliverables:**
-- [ ] Integration test: `GET /api/ai/chat/context-mappings/analysis/{analysisId}` returns correct response
-- [ ] Integration test: Plan approval endpoint flow
-- [ ] Manual E2E: all 14 success criteria from spec verified
+- [x] Integration test: `GET /api/ai/chat/context-mappings/analysis/{analysisId}` returns correct response
+- [x] Integration test: Plan approval endpoint flow
+- [x] Manual E2E: all 14 success criteria from spec verified
 
 ---
 
@@ -347,9 +347,9 @@ Group E (after Group D):
 2. Deploy updated BFF API
 
 **Deliverables:**
-- [ ] AnalysisWorkspace web resource deployed via `code-page-deploy` skill
-- [ ] SprkChatPane web resource deployed via `code-page-deploy` skill
-- [ ] `Sprk.Bff.Api` deployed via `bff-deploy` skill
+- [x] AnalysisWorkspace web resource deployed via `code-page-deploy` skill
+- [x] SprkChatPane web resource deployed via `code-page-deploy` skill
+- [x] `Sprk.Bff.Api` deployed via `bff-deploy` skill
 
 ---
 
@@ -400,37 +400,37 @@ Group E (after Group D):
 ### Technical Acceptance
 
 **Phase 2A:**
-- [ ] EventsPage loads without creating SprkChat side pane
-- [ ] SpeAdminApp loads without creating SprkChat side pane
-- [ ] Analysis Workspace URL params contain all 7 context fields after record load
+- [x] EventsPage loads without creating SprkChat side pane
+- [x] SpeAdminApp loads without creating SprkChat side pane
+- [x] Analysis Workspace URL params contain all 7 context fields after record load
 
 **Phase 2B:**
-- [ ] InlineAiToolbar visible within 200ms of stable selection; absent when selection collapsed
-- [ ] All inline actions appear in SprkChat chat history pane
+- [x] InlineAiToolbar visible within 200ms of stable selection; absent when selection collapsed
+- [x] All inline actions appear in SprkChat chat history pane
 
 **Phase 2C:**
-- [ ] Endpoint returns defaultPlaybook, availablePlaybooks, inlineActions, knowledgeSources, analysisContext
-- [ ] Redis cache hit on second request (TTL 30 min)
-- [ ] Patent-claims playbook shows extract-claims and prior-art-search inline actions
+- [x] Endpoint returns defaultPlaybook, availablePlaybooks, inlineActions, knowledgeSources, analysisContext
+- [x] Redis cache hit on second request (TTL 30 min)
+- [x] Patent-claims playbook shows extract-claims and prior-art-search inline actions
 
 **Phase 2D:**
-- [ ] Selected text replaced or content inserted at cursor after "Insert" click
-- [ ] Undo works (Lexical undo stack)
+- [x] Selected text replaced or content inserted at cursor after "Insert" click
+- [x] Undo works (Lexical undo stack)
 
 **Phase 2E:**
-- [ ] Slash menu opens on `/` keystroke; type-ahead filters; Esc dismisses
-- [ ] Quick-action chips update when playbook changes
-- [ ] All 5 structured response card types render correctly
+- [x] Slash menu opens on `/` keystroke; type-ahead filters; Esc dismisses
+- [x] Quick-action chips update when playbook changes
+- [x] All 5 structured response card types render correctly
 
 **Phase 2F:**
-- [ ] Plan preview appears before any 2+ tool chain execution
-- [ ] No Dataverse write-back executes without user Proceed confirmation
-- [ ] `sprk_analysisoutput.sprk_workingdocument` updated after approve
-- [ ] SPE source file unchanged
+- [x] Plan preview appears before any 2+ tool chain execution
+- [x] No Dataverse write-back executes without user Proceed confirmation
+- [x] `sprk_analysisoutput.sprk_workingdocument` updated after approve
+- [x] SPE source file unchanged
 
 ### Business Acceptance
-- [ ] SprkChat feels context-aware in Analysis Workspace (suggestions relevant to analysis type)
-- [ ] Inline toolbar enables without breaking existing editor selection behavior
+- [x] SprkChat feels context-aware in Analysis Workspace (suggestions relevant to analysis type)
+- [x] Inline toolbar enables without breaking existing editor selection behavior
 
 ---
 
@@ -454,7 +454,7 @@ Group E (after Group D):
 
 ---
 
-**Status**: Ready for Tasks
+**Status**: Complete — 29 tasks implemented, deployed, and wrapped up. Run `/merge-to-master` to merge `work/ai-sprk-chat-workspace-companion` → master.
 **Next Action**: Execute tasks starting with Group A in parallel
 
 ---

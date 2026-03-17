@@ -61,9 +61,7 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalM,
     height: '32px',
     backgroundColor: tokens.colorNeutralBackground1,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke1,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
   },
   loadingText: {
@@ -235,12 +233,13 @@ export const ViewSelector: React.FC<IViewSelectorProps> = ({
       return (
         <>
           {(['savedquery', 'custom', 'userquery'] as ViewType[]).map(type => {
-            const typeViews = groupedViews[type];
+            const typedGroupedViews = groupedViews as Partial<Record<ViewType, IViewDefinition[]>>;
+            const typeViews = typedGroupedViews[type];
             if (!typeViews || typeViews.length === 0) return null;
 
             return (
               <OptionGroup key={type} label={VIEW_TYPE_LABELS[type]}>
-                {typeViews.map(view => (
+                {typeViews.map((view: IViewDefinition) => (
                   <Option key={view.id} value={view.id}>
                     {view.name}
                   </Option>

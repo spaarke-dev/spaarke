@@ -3,7 +3,7 @@
   <metadata>
     <title>Create PlanPreviewCard Component</title>
     <phase>2E: Enhanced SprkChat Pane — Components</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>060, 070</blocks>

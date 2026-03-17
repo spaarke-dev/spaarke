@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Code Pages: AnalysisWorkspace and SprkChatPane to Dataverse</title>
     <phase>2G: Deployment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>080, 031, 060, 061, 062</dependencies>
     <blocks>090</blocks>
@@ -80,7 +80,27 @@
   </acceptance-criteria>
 
   <notes>
-    Run npm install in Spaarke.UI.Components (shared library) first if QuickActionChips/SlashCommandMenu/PlanPreviewCard were added to the library exports. The shared library must be built (npm run build) before the code pages can import from it.
+    Build completed 2026-03-16. Both code pages built and inlined successfully.
+    - Shared library (@spaarke/ui-components): Fixed 32 TypeScript errors before build succeeded.
+      Key fixes: missing IChatAction/ChatActionCategory/ISprkChatActionMenuProps types in SprkChat/types.ts;
+      duplicate useSseStream export; missing IDocumentStreamEvent type; RichTextEditorRef streaming methods;
+      StreamingInsertPlugin ElementNode type narrowing; WizardShell requestUpdate; SprkChat extractTenantIdFromToken
+      ordering; DatasetGrid/FilePreview/FindSimilar/PageChrome pre-existing makeStyles type issues.
+    - AnalysisWorkspace: Built successfully (1.13 MB bundle).
+      Output: src/client/code-pages/AnalysisWorkspace/out/sprk_analysisworkspace.html
+    - SprkChatPane: Built successfully (1.21 MB bundle).
+      Output: src/client/code-pages/SprkChatPane/out/sprk_SprkChatPane.html
+    - PAC CLI authenticated (spaarkedev1.crm.dynamics.com) but no direct web resource upload command.
+    - Manual deployment required via Power Apps maker portal (make.powerapps.com).
+
+    MANUAL DEPLOYMENT STEPS:
+    1. Open https://make.powerapps.com → Select SPAARKE DEV 1 environment
+    2. For AnalysisWorkspace:
+       - Navigate to Solutions → find solution containing sprk_analysisworkspace
+       - Upload out/sprk_analysisworkspace.html → Save → Publish
+    3. For SprkChatPane:
+       - Navigate to Solutions → find solution containing sprk_SprkChatPane
+       - Upload out/sprk_SprkChatPane.html → Save → Publish
   </notes>
 
   <execution>

@@ -19,6 +19,10 @@
  * Task 062: Toolbar functionality (Save, Export, Copy, Undo/Redo) via
  * useAutoSave, useExportAnalysis, useDocumentHistory, and AnalysisToolbar.
  *
+ * Task 002: openSprkChatPane is now called with a SprkChatLaunchContext (analysisId, mode,
+ * sourceFileId) so the BFF resolves the correct playbook and knowledge sources. Fires once
+ * per analysisId load via a useEffect with [analysisId] dependency array.
+ *
  * Task 063: SprkChatBridge document streaming integration via DocumentStreamBridge.
  * The DocumentStreamBridge component wires SprkChatBridge events (document_stream_start,
  * document_stream_token, document_stream_end, document_replaced) to the RichTextEditor's
@@ -89,6 +93,35 @@ import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverla
 import { DiffReviewPanel } from './components/DiffReviewPanel';
 import { usePanelResize } from './hooks/usePanelResize';
 import { markdownToHtml } from './utils/markdownToHtml';
+
+// ---------------------------------------------------------------------------
+// SprkChat Launch Context (task 002)
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional analysis context passed when launching SprkChatPane from AnalysisWorkspace.
+ * Mirrors the SprkChatLaunchContext interface in SprkChatPane/launcher/openSprkChatPane.ts.
+ * Defined locally to avoid cross-project rootDir violations (each Code Page is self-contained).
+ *
+ * Consumed by SprkChatPane/src via URLSearchParams; used by the BFF to resolve
+ * the correct playbook and knowledge sources for the analysis context.
+ */
+interface SprkChatLaunchContext {
+  /** Analysis type identifier (e.g. 'patent-claims', 'contract-review') */
+  analysisType?: string;
+  /** Matter type from the related matter record */
+  matterType?: string;
+  /** Practice area from the analysis or matter */
+  practiceArea?: string;
+  /** sprk_analysisoutput record ID (GUID without braces) */
+  analysisId?: string;
+  /** Source SPE file ID associated with the analysis */
+  sourceFileId?: string;
+  /** SPE container ID for the source document */
+  sourceContainerId?: string;
+  /** Interaction mode: 'analysis' for contextual workspace, 'general' for generic chat */
+  mode?: 'analysis' | 'general';
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -380,9 +413,35 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     pushUndoVersion: pushVersion,
   });
 
-  // ---- Task 063: Auto-load SprkChat side pane ----
+  // ---- Task 063 / Task 002: Auto-load SprkChat side pane with analysis context ----
+  // Fires once per analysis record load (deps: analysisId only — not the full analysis
+  // object — to prevent re-running on every field update after initial load).
+  // Builds enriched URL params (SprkChatLaunchContext) so the BFF can resolve the
+  // correct playbook and knowledge sources for the analysis context.
   useEffect(() => {
-    if (!analysisId || !resolvedDocumentId) return;
+    if (!analysisId || !analysis) return;
+
+    const launchContext: SprkChatLaunchContext = {
+      analysisId,
+      mode: 'analysis',
+      // sourceDocumentId from the analysis record maps to the source SPE file
+      sourceFileId: analysis.sourceDocumentId || undefined,
+    };
+
+    // Build URL params including the analysis context fields.
+    // Mirrors buildDataParams() in openSprkChatPane.ts, extended with SprkChatLaunchContext.
+    const params = new URLSearchParams();
+    if (launchContext.analysisType) params.set('analysisType', launchContext.analysisType);
+    if (launchContext.matterType) params.set('matterType', launchContext.matterType);
+    if (launchContext.practiceArea) params.set('practiceArea', launchContext.practiceArea);
+    if (launchContext.analysisId) params.set('analysisId', launchContext.analysisId);
+    if (launchContext.sourceFileId) params.set('sourceFileId', launchContext.sourceFileId);
+    if (launchContext.sourceContainerId) params.set('sourceContainerId', launchContext.sourceContainerId);
+    if (launchContext.mode) params.set('mode', launchContext.mode);
+    if (analysis.playbookId) params.set('playbookId', analysis.playbookId);
+    const dataParams = params.toString();
+
+    console.log('[AnalysisWorkspace] Opening SprkChat side pane with analysis context:', launchContext);
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -392,31 +451,46 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         return;
       }
 
-      xrm.App.sidePanes
-        .createPane({
-          title: 'SprkChat',
-          paneId: 'sprkchat-analysis',
-          canClose: true,
-          width: 400,
-        })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .then((pane: any) => {
-          pane.navigate({
+      const existingPane = xrm.App.sidePanes.getPane('sprkchat-analysis');
+      if (existingPane) {
+        // Re-navigate existing pane with updated analysis context
+        existingPane
+          .navigate({
             pageType: 'webresource',
             webresourceName: 'sprk_SprkChatPane',
-            data: new URLSearchParams({
-              analysisId,
-              documentId: resolvedDocumentId,
-            }).toString(),
+            data: dataParams,
+          })
+          .then(() => existingPane.select())
+          .catch((err: unknown) => {
+            console.warn('[AnalysisWorkspace] SprkChat pane navigate failed:', err);
           });
-        })
-        .catch((err: unknown) => {
-          console.warn('[AnalysisWorkspace] SprkChat side pane failed to create:', err);
-        });
+      } else {
+        xrm.App.sidePanes
+          .createPane({
+            paneId: 'sprkchat-analysis',
+            title: 'SprkChat',
+            canClose: true,
+            width: 400,
+            isSelected: true,
+          })
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .then((pane: any) => {
+            pane.navigate({
+              pageType: 'webresource',
+              webresourceName: 'sprk_SprkChatPane',
+              data: dataParams,
+            });
+          })
+          .catch((err: unknown) => {
+            console.warn('[AnalysisWorkspace] SprkChat side pane failed to create:', err);
+          });
+      }
     } catch (err) {
       console.warn('[AnalysisWorkspace] SprkChat side pane unavailable:', err);
     }
-  }, [analysisId, resolvedDocumentId]);
+    // Only re-run when the analysis record identity changes (not on every field update)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId]);
 
   // ---- Task 065: Populate editor with loaded analysis content ----
   // Content in sprk_workingdocument may be markdown (from BFF streaming)
@@ -589,6 +663,20 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
               canUndo={canUndo}
               canRedo={canRedo}
               historyLength={historyLength}
+              // Task 031: Inline AI Toolbar props
+              analysisId={analysisId}
+              onDiffAction={(selectedText: string) => {
+                // Diff-type inline actions (Simplify, Expand) are handled by the
+                // existing bridge-based diff review flow in useDiffReview. SprkChat
+                // receives the [Label] {selectedText} message via BroadcastChannel,
+                // processes it, and emits document_stream_start(operationType="diff")
+                // back through the bridge. useDiffReview then buffers tokens and opens
+                // DiffReviewPanel when the stream completes (task 103 pattern).
+                //
+                // This callback exists so App.tsx can show an optimistic loading state
+                // or log the initiation of a diff operation for diagnostics.
+                console.debug('[AnalysisWorkspace] Diff inline action initiated for selection length:', selectedText.length);
+              }}
             />
           )}
           {/* AI analysis progress stepper (new analysis only — hide once streaming begins) */}

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -146,6 +147,27 @@ public static class ChatEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401);
 
+        // POST /api/ai/chat/sessions/{sessionId}/plan/approve — approve and execute a pending plan
+        group.MapPost("/sessions/{sessionId}/plan/approve", ApprovePlanAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("ApprovePlan")
+            .WithSummary("Approve a pending plan and execute it via SSE stream")
+            .WithDescription(
+                "Atomically retrieves and deletes the pending plan from Redis, then executes each step " +
+                "in order while streaming progress as Server-Sent Events. " +
+                "Events: plan_step_start, token (per step), plan_step_complete, done. " +
+                "Returns 404 if the plan does not exist (expired or never created). " +
+                "Returns 409 if the plan was already approved (double-click protection).")
+            .Produces(200, contentType: "text/event-stream")
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
         return app;
     }
 
@@ -194,6 +216,11 @@ public static class ChatEndpoints
     /// <summary>
     /// Send a user message and receive SSE-streamed agent response.
     /// POST /api/ai/chat/sessions/{sessionId}/messages
+    ///
+    /// Phase 2F (task 071): Before streaming the agent response, this endpoint performs compound
+    /// intent detection via <see cref="ISprkChatAgent.DetectToolCallsAsync"/>. If compound intent is
+    /// detected (2+ tools, write-back, or external action), a <c>plan_preview</c> SSE event is emitted
+    /// and execution halts until the user approves via POST /plan/approve (task 072).
     /// </summary>
     private static async Task SendMessageAsync(
         string sessionId,
@@ -201,6 +228,7 @@ public static class ChatEndpoints
         ChatSessionManager sessionManager,
         ChatHistoryManager historyManager,
         SprkChatAgentFactory agentFactory,
+        PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
@@ -255,6 +283,69 @@ public static class ChatEndpoints
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
+
+            // === Phase 2F: Compound Intent Detection (task 071) ===
+            // Perform a pre-execution tool call inspection to detect compound intent before
+            // any tools run. If compound intent is detected, emit a plan_preview SSE event
+            // and halt execution — the user must approve via POST /plan/approve (task 072).
+            //
+            // Compound intent triggers:
+            //   - 2 or more tool calls in the proposed plan
+            //   - Any write-back tool (EditWorkingDocument, AppendSection, etc.)
+            //   - Any external action tool (SendEmail, CreateTask, etc.)
+            //
+            // This satisfies spec constraint FR-11: "No write-back executes without user Proceed."
+            var toolCalls = await agent.DetectToolCallsAsync(request.Message, history, cancellationToken);
+            var intentDetector = new CompoundIntentDetector(logger);
+
+            if (intentDetector.IsCompoundIntent(toolCalls))
+            {
+                // Build the pending plan from the detected tool calls
+                var pendingPlan = intentDetector.BuildPlan(
+                    toolCalls,
+                    sessionId,
+                    tenantId,
+                    agent.Context);
+
+                // Store in Redis — 30-minute TTL per task 070 design
+                await pendingPlanManager.StoreAsync(pendingPlan, cancellationToken);
+
+                // Emit plan_preview SSE event with the plan steps
+                var planPreviewData = new ChatSsePlanPreviewData(
+                    PlanId: pendingPlan.PlanId,
+                    PlanTitle: pendingPlan.PlanTitle,
+                    Steps: pendingPlan.Steps.Select(s => new ChatSsePlanStep(s.Id, s.Description, "pending")).ToArray(),
+                    AnalysisId: pendingPlan.AnalysisId,
+                    WriteBackTarget: pendingPlan.WriteBackTarget);
+
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("plan_preview", null, planPreviewData),
+                    cancellationToken);
+
+                // Emit done event to close the SSE stream
+                await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
+
+                logger.LogInformation(
+                    "Compound intent detected — plan_preview emitted and execution halted: session={SessionId}, planId={PlanId}, steps={StepCount}",
+                    sessionId, pendingPlan.PlanId, pendingPlan.Steps.Length);
+
+                // Persist the user message to history so the conversation record is intact.
+                // The assistant message will be stored when the plan is approved/executed (task 072).
+                var seqBaseForPlan = session.Messages.Count;
+                var planUserMessage = new DvChatMessage(
+                    MessageId: Guid.NewGuid().ToString("N"),
+                    SessionId: sessionId,
+                    Role: ChatMessageRole.User,
+                    Content: request.Message,
+                    TokenCount: 0,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    SequenceNumber: seqBaseForPlan + 1);
+                await historyManager.AddMessageAsync(session, planUserMessage, CancellationToken.None);
+
+                return;
+            }
+            // === End Phase 2F ===
 
             // Stream the agent response via IAsyncEnumerable<ChatResponseUpdate>
             await foreach (var update in agent.SendMessageAsync(request.Message, history, cancellationToken))
@@ -559,6 +650,347 @@ public static class ChatEndpoints
 
         logger.LogInformation("Session deleted: {SessionId}", sessionId);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Approve a pending plan and execute it as an SSE stream.
+    /// POST /api/ai/chat/sessions/{sessionId}/plan/approve
+    ///
+    /// Phase 2F (task 072): Called when the user clicks "Proceed" on a PlanPreviewCard.
+    ///
+    /// Protocol (task 070 design doc, Section 4):
+    ///   1. Atomically get-and-delete the pending plan from Redis.
+    ///      - Returns 404 if the plan was not found (expired or never created).
+    ///      - Returns 409 if the plan was already deleted (concurrent approval / double-click).
+    ///   2. Validates the <see cref="PlanApprovalRequest.PlanId"/> matches the stored plan.
+    ///   3. Opens an SSE stream and executes each step in order, emitting per-step events.
+    ///   4. Step execution uses <see cref="SprkChatAgentFactory"/> to build an agent with the
+    ///      session context, then calls <see cref="ISprkChatAgent.SendMessageAsync"/> per step
+    ///      using a synthetic step-execution message derived from the step's ToolName and ParametersJson.
+    ///   5. After all steps complete, emits "done".
+    ///
+    /// SSE event sequence:
+    ///   plan_step_start → token (streaming output) → plan_step_complete → ... → done
+    ///   On step failure: plan_step_complete (status:"failed") → error → (stream ends)
+    ///
+    /// Idempotency: The get-and-delete on the Redis key ensures only one concurrent approval
+    /// can proceed. The second request finds no key and receives 409 Conflict.
+    /// </summary>
+    private static async Task ApprovePlanAsync(
+        string sessionId,
+        PlanApprovalRequest request,
+        ChatSessionManager sessionManager,
+        ChatHistoryManager historyManager,
+        SprkChatAgentFactory agentFactory,
+        PendingPlanManager pendingPlanManager,
+        HttpContext httpContext,
+        ILogger<SprkChatAgentFactory> logger)
+    {
+        var cancellationToken = httpContext.RequestAborted;
+        var response = httpContext.Response;
+        var tenantId = ExtractTenantId(httpContext);
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
+            return;
+        }
+
+        // Validate request body
+        if (string.IsNullOrWhiteSpace(request.PlanId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(new { error = "PlanId is required." }, cancellationToken);
+            return;
+        }
+
+        // Verify session exists (tenant-scoped authorization per ADR-014)
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            response.StatusCode = StatusCodes.Status404NotFound;
+            await response.WriteAsJsonAsync(new { error = $"Session {sessionId} not found." }, cancellationToken);
+            return;
+        }
+
+        // Atomic get-and-delete: prevents double-execution (task 070 design doc, Risk 2)
+        // First approval: finds the key, deletes it, returns the plan → proceed
+        // Second approval: key already gone → returns null → 409 Conflict
+        var pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+
+        if (pendingPlan is null)
+        {
+            // Plan expired (30-min TTL) or was already approved/cancelled
+            response.StatusCode = StatusCodes.Status409Conflict;
+            await response.WriteAsJsonAsync(new
+            {
+                error = "Plan no longer available. It may have been approved already or expired. Please resend your request."
+            }, cancellationToken);
+            return;
+        }
+
+        // Validate planId matches — defence-in-depth against replay or mismatch
+        if (!string.Equals(pendingPlan.PlanId, request.PlanId, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "ApprovePlan: planId mismatch — expected={ExpectedPlanId}, received={ReceivedPlanId}, session={SessionId}",
+                pendingPlan.PlanId, request.PlanId, sessionId);
+
+            response.StatusCode = StatusCodes.Status409Conflict;
+            await response.WriteAsJsonAsync(new { error = "Plan ID does not match the pending plan. Please resend your request." }, cancellationToken);
+            return;
+        }
+
+        // All validation passed — open SSE stream (matches pattern from SendMessageAsync)
+        response.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+        response.Headers.Connection = "keep-alive";
+
+        logger.LogInformation(
+            "ApprovePlan: executing plan — planId={PlanId}, session={SessionId}, tenant={TenantId}, steps={StepCount}",
+            pendingPlan.PlanId, sessionId, tenantId, pendingPlan.Steps.Length);
+
+        var sseWriter = CreateSseWriter(response);
+        var stepResultsSb = new System.Text.StringBuilder();
+
+        try
+        {
+            // Build agent for this session (same factory call as SendMessageAsync)
+            var agent = await agentFactory.CreateAgentAsync(
+                sessionId,
+                session.DocumentId ?? string.Empty,
+                session.PlaybookId,
+                tenantId,
+                session.HostContext,
+                session.AdditionalDocumentIds,
+                httpContext,
+                sseWriter,
+                cancellationToken);
+
+            var history = BuildAiHistory(session.Messages);
+
+            for (int stepIndex = 0; stepIndex < pendingPlan.Steps.Length; stepIndex++)
+            {
+                var step = pendingPlan.Steps[stepIndex];
+
+                // Emit plan_step_start
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("plan_step_start", null, new ChatSsePlanStepStartData(step.Id, stepIndex)),
+                    cancellationToken);
+
+                logger.LogInformation(
+                    "ApprovePlan: starting step {StepIndex}/{StepCount} — stepId={StepId}, tool={ToolName}, session={SessionId}",
+                    stepIndex + 1, pendingPlan.Steps.Length, step.Id, step.ToolName, sessionId);
+
+                // Build step execution message from the stored tool name and parameters
+                // This synthetic message tells the agent what to execute for this step.
+                // The agent will re-route it through the tool pipeline with its tools registered.
+                var stepMessage = BuildStepExecutionMessage(step);
+
+                var stepResponseSb = new System.Text.StringBuilder();
+                var stepFailed = false;
+                string? stepError = null;
+
+                try
+                {
+                    // Stream this step's agent response
+                    await foreach (var update in agent.SendMessageAsync(stepMessage, history, cancellationToken))
+                    {
+                        var content = update.Text;
+                        if (!string.IsNullOrEmpty(content))
+                        {
+                            stepResponseSb.Append(content);
+                            await WriteChatSSEAsync(response, new ChatSseEvent("token", content), cancellationToken);
+                        }
+                    }
+                }
+                catch (Exception stepEx) when (stepEx is not OperationCanceledException)
+                {
+                    stepFailed = true;
+                    stepError = stepEx.Message;
+                    logger.LogError(stepEx,
+                        "ApprovePlan: step {StepIndex} failed — stepId={StepId}, session={SessionId}",
+                        stepIndex + 1, step.Id, sessionId);
+                }
+
+                var stepResult = stepFailed
+                    ? null
+                    : (stepResponseSb.Length > 0 ? stepResponseSb.ToString() : "Step completed.");
+
+                // Emit plan_step_complete
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("plan_step_complete", null, new ChatSsePlanStepCompleteData(
+                        StepId: step.Id,
+                        Status: stepFailed ? "failed" : "completed",
+                        Result: stepResult,
+                        ErrorCode: stepFailed ? "TOOL_EXECUTION_FAILED" : null,
+                        ErrorMessage: stepError)),
+                    cancellationToken);
+
+                if (stepFailed)
+                {
+                    // Halt on first step failure (partial writes left in place — task 070 design doc, Risk 3)
+                    await WriteChatSSEAsync(
+                        response,
+                        new ChatSseEvent("error", $"Plan execution halted at step {stepIndex + 1}: {stepError}"),
+                        CancellationToken.None);
+
+                    logger.LogWarning(
+                        "ApprovePlan: execution halted at step {StepIndex} — planId={PlanId}, session={SessionId}",
+                        stepIndex + 1, pendingPlan.PlanId, sessionId);
+
+                    // Persist assistant message recording the partial execution
+                    var partialResultMessage = new DvChatMessage(
+                        MessageId: Guid.NewGuid().ToString("N"),
+                        SessionId: sessionId,
+                        Role: ChatMessageRole.Assistant,
+                        Content: $"Plan execution halted at step {stepIndex + 1}: {step.Description}. Error: {stepError}",
+                        TokenCount: 0,
+                        CreatedAt: DateTimeOffset.UtcNow,
+                        SequenceNumber: session.Messages.Count + 1);
+
+                    await historyManager.AddMessageAsync(session, partialResultMessage, CancellationToken.None);
+                    return;
+                }
+
+                stepResultsSb.AppendLine(stepResult);
+
+                // Update history with step result so subsequent steps have context
+                // (agent builds history fresh from session on each call; appending is sufficient)
+                var stepAssistantMsg = new DvChatMessage(
+                    MessageId: Guid.NewGuid().ToString("N"),
+                    SessionId: sessionId,
+                    Role: ChatMessageRole.Assistant,
+                    Content: stepResult ?? string.Empty,
+                    TokenCount: 0,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    SequenceNumber: session.Messages.Count + stepIndex + 1);
+
+                session = await historyManager.AddMessageAsync(session, stepAssistantMsg, CancellationToken.None);
+            }
+
+            // All steps completed successfully.
+            // If this plan has a write-back target, persist the accumulated step results to
+            // sprk_analysisoutput.sprk_workingdocument in Dataverse.
+            //
+            // SAFETY CONSTRAINT (spec FR-12, ADR-013):
+            //   - ONLY writes to sprk_analysisoutput.sprk_workingdocument via IWorkingDocumentService.
+            //   - MUST NOT call SpeFileStore, GraphServiceClient write methods, or any SPE write.
+            //   - WriteBackTarget == "sprk_analysisoutput.sprk_workingdocument" guards this path.
+            //
+            // IWorkingDocumentService is resolved via RequestServices because it is conditionally
+            // registered (requires Analysis:Enabled + DocumentIntelligence:Enabled). When not
+            // available (e.g., dev environments with analysis disabled), write-back is skipped
+            // with a warning log — steps already executed and SSE done event follows regardless.
+            if (!string.IsNullOrWhiteSpace(pendingPlan.WriteBackTarget) &&
+                pendingPlan.WriteBackTarget == "sprk_analysisoutput.sprk_workingdocument" &&
+                !string.IsNullOrWhiteSpace(pendingPlan.AnalysisId) &&
+                Guid.TryParse(pendingPlan.AnalysisId, out var analysisGuid))
+            {
+                var accumulatedContent = stepResultsSb.ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(accumulatedContent))
+                {
+                    // Resolve IWorkingDocumentService from the scoped request services.
+                    // GetService<T> returns null when not registered (safe optional resolution).
+                    var workingDocumentService = httpContext.RequestServices
+                        .GetService<IWorkingDocumentService>();
+
+                    if (workingDocumentService != null)
+                    {
+                        logger.LogInformation(
+                            "ApprovePlan: writing back to sprk_analysisoutput.sprk_workingdocument — " +
+                            "analysisId={AnalysisId}, contentLen={ContentLen}, planId={PlanId}, session={SessionId}",
+                            pendingPlan.AnalysisId, accumulatedContent.Length, pendingPlan.PlanId, sessionId);
+
+                        try
+                        {
+                            // SAFETY: IWorkingDocumentService.UpdateWorkingDocumentAsync writes ONLY to
+                            // Dataverse (sprk_analysisoutput.sprk_workingdocument via IGenericEntityService).
+                            // No SPE/SharePoint Embedded write operations are performed here.
+                            await workingDocumentService.UpdateWorkingDocumentAsync(
+                                analysisGuid,
+                                accumulatedContent,
+                                CancellationToken.None); // Use None to ensure write completes even if client disconnects
+
+                            logger.LogInformation(
+                                "ApprovePlan: write-back completed — analysisId={AnalysisId}, planId={PlanId}",
+                                pendingPlan.AnalysisId, pendingPlan.PlanId);
+                        }
+                        catch (Exception writeEx)
+                        {
+                            // Write-back failure is logged but does NOT prevent the done event from being emitted.
+                            // The plan steps already executed successfully; the write-back is a best-effort persistence.
+                            // The next plan execution or manual refresh will reflect the correct state.
+                            logger.LogError(writeEx,
+                                "ApprovePlan: write-back to sprk_analysisoutput.sprk_workingdocument failed — " +
+                                "analysisId={AnalysisId}, planId={PlanId}, session={SessionId}",
+                                pendingPlan.AnalysisId, pendingPlan.PlanId, sessionId);
+                        }
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "ApprovePlan: IWorkingDocumentService not available — write-back skipped. " +
+                            "analysisId={AnalysisId}, planId={PlanId}",
+                            pendingPlan.AnalysisId, pendingPlan.PlanId);
+                    }
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "ApprovePlan: write-back target set but no accumulated content to write — " +
+                        "analysisId={AnalysisId}, planId={PlanId}",
+                        pendingPlan.AnalysisId, pendingPlan.PlanId);
+                }
+            }
+
+            await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
+
+            logger.LogInformation(
+                "ApprovePlan: all steps completed — planId={PlanId}, session={SessionId}, steps={StepCount}",
+                pendingPlan.PlanId, sessionId, pendingPlan.Steps.Length);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation(
+                "Client disconnected during ApprovePlan: session={SessionId}, planId={PlanId}",
+                sessionId, pendingPlan.PlanId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Error during ApprovePlan: session={SessionId}, planId={PlanId}",
+                sessionId, pendingPlan.PlanId);
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("error", ex.Message), CancellationToken.None);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a step-execution message from a <see cref="PendingPlanStep"/>.
+    ///
+    /// The message text is a synthetic instruction sent to the agent to execute the step's
+    /// tool with the stored parameters. The agent sees this as a user turn and uses its
+    /// registered tools to fulfill it — the LLM then invokes the correct tool based on
+    /// the instruction.
+    ///
+    /// Format: "[Execute step: {ToolName}] {ParametersJson}"
+    ///   - The bracketed prefix identifies this as a plan execution step (not a user query).
+    ///   - The parameters JSON provides the tool call arguments.
+    /// </summary>
+    private static string BuildStepExecutionMessage(PendingPlanStep step)
+    {
+        if (string.IsNullOrWhiteSpace(step.ParametersJson) || step.ParametersJson == "{}")
+        {
+            return $"[Execute step: {step.ToolName}] {step.Description}";
+        }
+        return $"[Execute step: {step.ToolName}] Parameters: {step.ParametersJson}. {step.Description}";
     }
 
     /// <summary>
@@ -1021,6 +1453,119 @@ public record ChatSseSuggestionsData(string[] Suggestions);
 /// <summary>Response body for GET /playbooks — playbook discovery.</summary>
 /// <param name="Playbooks">Available playbooks (user-owned + public, deduplicated).</param>
 public record ChatPlaybookListResponse(ChatPlaybookInfo[] Playbooks);
+
+// =============================================================================
+// Plan Preview SSE Records (task 071, Phase 2F)
+// =============================================================================
+
+/// <summary>
+/// A single step in a plan_preview SSE event.
+/// Maps to the <see cref="PendingPlanStep"/> model but with a simplified shape for the frontend.
+/// </summary>
+/// <param name="Id">Step identifier (e.g., "step-1").</param>
+/// <param name="Description">Human-readable description shown in the PlanPreviewCard step list.</param>
+/// <param name="Status">Initial status: always "pending" at plan_preview time.</param>
+public record ChatSsePlanStep(string Id, string Description, string Status);
+
+/// <summary>
+/// Data payload for "plan_preview" SSE events (task 071, Phase 2F).
+///
+/// Emitted when compound intent is detected (2+ tools, write-back, or external action)
+/// to present the plan to the user for approval before execution.
+///
+/// The frontend renders this as a <c>PlanPreviewCard</c> with step list and Proceed/Cancel buttons.
+/// On "Proceed": frontend calls POST /api/ai/chat/sessions/{sessionId}/plan/approve with { planId }.
+/// On "Cancel": plan expires naturally (30-min Redis TTL) or user sends a new message.
+///
+/// Shape (matches task 070 design doc):
+/// <code>
+/// {
+///   "type": "plan_preview",
+///   "content": null,
+///   "data": {
+///     "planId": "a1b2c3d4...",
+///     "planTitle": "Analyze and save findings",
+///     "steps": [{ "id": "step-1", "description": "...", "status": "pending" }],
+///     "analysisId": "uuid",
+///     "writeBackTarget": "sprk_analysisoutput.sprk_workingdocument"
+///   }
+/// }
+/// </code>
+/// </summary>
+/// <param name="PlanId">
+/// Unique ID for this pending plan. Frontend echoes this back on POST /plan/approve
+/// to prevent double-execution.
+/// </param>
+/// <param name="PlanTitle">Display title for the PlanPreviewCard header.</param>
+/// <param name="Steps">Ordered list of plan steps shown to the user.</param>
+/// <param name="AnalysisId">
+/// Optional GUID of the <c>sprk_analysisoutput</c> record. Present for write-back plans.
+/// </param>
+/// <param name="WriteBackTarget">
+/// Optional canonical field path for write-back steps (e.g., "sprk_analysisoutput.sprk_workingdocument").
+/// </param>
+public record ChatSsePlanPreviewData(
+    string PlanId,
+    string PlanTitle,
+    ChatSsePlanStep[] Steps,
+    string? AnalysisId,
+    string? WriteBackTarget);
+
+// =============================================================================
+// Plan Approval Execution SSE Records (task 072, Phase 2F)
+// =============================================================================
+
+/// <summary>
+/// Data payload for "plan_step_start" SSE events emitted during plan execution.
+///
+/// Emitted by POST /api/ai/chat/sessions/{sessionId}/plan/approve immediately
+/// before each step begins. The frontend uses this to update the corresponding
+/// step's status indicator in the PlanPreviewCard to "running".
+///
+/// Shape:
+/// <code>
+/// { "type": "plan_step_start", "content": null, "data": { "stepId": "step-1", "stepIndex": 0 } }
+/// </code>
+/// </summary>
+/// <param name="StepId">The step identifier matching a step in the plan_preview data.</param>
+/// <param name="StepIndex">0-based index of this step in the plan's step list.</param>
+public record ChatSsePlanStepStartData(string StepId, int StepIndex);
+
+/// <summary>
+/// Data payload for "plan_step_complete" SSE events emitted after each step finishes.
+///
+/// Emitted by POST /api/ai/chat/sessions/{sessionId}/plan/approve after each step completes
+/// (either successfully or with an error). The frontend uses this to update the step's
+/// status and optionally show a result snippet below the step description.
+///
+/// Shape (success):
+/// <code>
+/// { "type": "plan_step_complete", "content": null,
+///   "data": { "stepId": "step-1", "status": "completed", "result": "Analysis complete: 3 risks identified" } }
+/// </code>
+///
+/// Shape (failure):
+/// <code>
+/// { "type": "plan_step_complete", "content": null,
+///   "data": { "stepId": "step-1", "status": "failed",
+///              "errorCode": "TOOL_EXECUTION_FAILED",
+///              "errorMessage": "Analysis action timed out" } }
+/// </code>
+/// </summary>
+/// <param name="StepId">The step identifier matching a step in the plan_preview data.</param>
+/// <param name="Status">Execution status: "completed" or "failed".</param>
+/// <param name="Result">
+/// Optional brief result snippet (max 500 chars) shown below the step description on success.
+/// Null on failure.
+/// </param>
+/// <param name="ErrorCode">Machine-readable error code on failure (e.g., "TOOL_EXECUTION_FAILED"). Null on success.</param>
+/// <param name="ErrorMessage">Human-readable error message on failure. Null on success.</param>
+public record ChatSsePlanStepCompleteData(
+    string StepId,
+    string Status,
+    string? Result = null,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
 
 /// <summary>
 /// Playbook summary for the SprkChat playbook selector UI.
