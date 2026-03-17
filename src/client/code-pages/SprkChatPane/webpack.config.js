@@ -8,7 +8,7 @@ function loadEnvFile() {
   const envFile = path.resolve(__dirname, '.env.production');
   const vars = {};
   if (fs.existsSync(envFile)) {
-    fs.readFileSync(envFile, 'utf-8').split('\n').forEach(line => {
+    fs.readFileSync(envFile, 'utf-8').split(/\r?\n/).forEach(line => {
       const match = line.match(/^(\w+)=(.*)$/);
       if (match) vars[match[1]] = match[2].trim();
     });
