@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Revoke External Access Endpoint</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — cascading revocation across multiple systems</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create the POST /api/external-access/revoke endpoint that revokes external access across all three UAC planes: deactivates the sprk_externalrecordaccess record, removes the Contact from the SPE container, and removes the web role if the Contact has no other active participation records.</prompt>
+  <role>You are a .NET API engineer implementing the revoke-access endpoint that cleanly tears down access across all three UAC planes.</role>
+  <goal>A single API call revokes an external Contact's access to a project, cascading the revocation across Dataverse, SPE, and Power Pages web roles.</goal>
+  <context>
+    <background>Revocation must be thorough — a partially revoked access grant is a security risk. The endpoint must deactivate the Dataverse record, remove the Contact from the SPE container, and check whether the Contact has any remaining active participation records before removing the web role (since the web role controls all project access, not just one project).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessService.cs (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-007">All SPE operations through SpeFileStore facade</constraint>
+    <constraint source="ADR-008">Apply authorization via endpoint filter</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define POST /api/external-access/revoke endpoint with request model (participationRecordId or contactId+projectId)</step>
+    <step order="2">Add RevokeAccessAsync method to ExternalAccessService</step>
+    <step order="3">Deactivate sprk_externalrecordaccess record (set statecode=Inactive)</step>
+    <step order="4">Remove Contact from SPE container via SpeFileStore</step>
+    <step order="5">Query for other active sprk_externalrecordaccess records for this Contact</step>
+    <step order="6">If no other active records exist, remove "Secure Project Participant" web role from Contact</step>
+    <step order="7">Deactivate any pending adx_invitation records for this Contact+Project combination</step>
+    <step order="8">Return success confirmation or ProblemDetails on failure</step>
+    <step order="9">Add endpoint filter for internal-user-only authorization</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Revocation deactivates the sprk_externalrecordaccess record</criterion>
+    <criterion>Contact removed from SPE container</criterion>
+    <criterion>Web role removed only when Contact has no other active participation records</criterion>
+    <criterion>Pending invitations deactivated</criterion>
+    <criterion>Revocation cascades across all three UAC planes</criterion>
+  </acceptance-criteria>
+</task>

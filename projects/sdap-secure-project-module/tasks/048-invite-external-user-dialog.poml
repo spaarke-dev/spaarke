@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Invite External User Dialog</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — invitation dialog with access-level gating</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build the InviteUserDialog component that allows Full Access users to invite new external users to a project. The dialog includes email input, access level selection, and calls the BFF invitation endpoint. Show confirmation or error after submission.</prompt>
+  <role>You are a React frontend engineer building the invitation dialog that enables peer-to-peer external user invitations.</role>
+  <goal>Full Access users can invite new external users to a project from within the SPA, with email validation, access level selection, and clear confirmation/error feedback.</goal>
+  <context>
+    <background>One of the unique features of the Secure Project module is that Full Access external users can invite other external users — they don't need to go through an internal administrator. This dialog provides that capability. It is only visible to Full Access users and calls the BFF invitation endpoint to handle the actual invitation process.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/InviteUserDialog.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Dialog component</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create InviteUserDialog.tsx component using Fluent v9 Dialog</step>
+    <step order="2">Add email input with validation (valid email format)</step>
+    <step order="3">Add access level selection dropdown (View Only, Collaborate, Full Access)</step>
+    <step order="4">Add optional fields: first name, last name</step>
+    <step order="5">Submit invitation via BFF API POST /api/external-access/invite</step>
+    <step order="6">Show success confirmation with invitation details</step>
+    <step order="7">Show error state with retry option on failure</step>
+    <step order="8">Dialog only visible/accessible for Full Access users</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Dialog renders with email input and access level selection</criterion>
+    <criterion>Email validation prevents invalid submissions</criterion>
+    <criterion>Invitation submitted to BFF API on confirm</criterion>
+    <criterion>Success/error feedback shown after submission</criterion>
+    <criterion>Dialog only accessible for Full Access users</criterion>
+  </acceptance-criteria>
+</task>

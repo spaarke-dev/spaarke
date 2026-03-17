@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement External User Context Endpoint</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>040</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — foundational endpoint consumed by the SPA home page</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create a GET /api/external-access/context endpoint that returns the authenticated Contact's profile, list of accessible projects (from active sprk_externalrecordaccess records), and the access level for each project. This is the primary data source for the SPA workspace home page.</prompt>
+  <role>You are a .NET API engineer implementing the context endpoint that provides the external user's personalized workspace data.</role>
+  <goal>The SPA can retrieve all information needed to render the workspace home page in a single API call — user profile, accessible projects, and per-project access levels.</goal>
+  <context>
+    <background>When an external user loads the SPA, the first API call is to the context endpoint. This returns everything the SPA needs to render the home page: the user's profile (name, email, organization), a list of projects they can access, and the access level for each project. This avoids multiple round-trips and provides a clean separation between the auth layer and the UI.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-008">Apply ExternalCallerAuthorizationFilter via endpoint filter</constraint>
+    <constraint source="ADR-009">Redis-first caching for access data</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define GET /api/external-access/context endpoint with ExternalCallerAuthorizationFilter</step>
+    <step order="2">Create response model: ExternalUserContext { Profile, Projects[] }</step>
+    <step order="3">Profile includes: contactId, fullName, email, organizationName</step>
+    <step order="4">Projects[] includes: projectId, projectName, referenceNumber, accessLevel, grantedDate</step>
+    <step order="5">Query active sprk_externalrecordaccess records for the authenticated Contact (from cached access data)</step>
+    <step order="6">Enrich with project metadata (name, ref number) from sprk_project</step>
+    <step order="7">Return ExternalUserContext as JSON</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Endpoint returns correct projects and access levels for the authenticated Contact</criterion>
+    <criterion>Profile data includes name, email, organization</criterion>
+    <criterion>Only active participation records are included</criterion>
+    <criterion>Response is cacheable and fast (leverages Redis-cached access data)</criterion>
+  </acceptance-criteria>
+</task>

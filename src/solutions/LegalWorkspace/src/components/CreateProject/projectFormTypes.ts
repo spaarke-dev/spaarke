@@ -36,6 +36,14 @@ export interface ICreateProjectFormState {
   assignedOutsideCounselName: string;
   /** Description — free text, multi-line (optional). Maps to sprk_projectdescription. */
   description: string;
+  /**
+   * Secure Project flag — maps to sprk_issecure on the sprk_project record.
+   *
+   * When true the project will have a dedicated SharePoint Embedded container,
+   * a Dataverse Business Unit, and an external access portal provisioned.
+   * This designation is IRREVERSIBLE after project creation.
+   */
+  isSecure: boolean;
 }
 
 /** Empty default for initializing useReducer or useState. */
@@ -52,4 +60,5 @@ export const EMPTY_PROJECT_FORM: ICreateProjectFormState = {
   assignedOutsideCounselId: '',
   assignedOutsideCounselName: '',
   description: '',
+  isSecure: false,
 };

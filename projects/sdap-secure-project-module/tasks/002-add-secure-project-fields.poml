@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="sdap-secure-project-module">
+  <metadata>
+    <title>Add Secure Project Fields to sprk_project Table</title>
+    <phase>1: Data Model &amp; Dataverse Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dataverse schema modification — adding fields to core project table</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add three new fields to the sprk_project table: sprk_issecure (boolean), sprk_securitybuid (lookup to BusinessUnit), and sprk_externalaccountid (lookup to Account). The sprk_issecure field must be immutable after the record is first saved.</prompt>
+  <role>You are a Dataverse solution architect extending the project table to support secure project designation.</role>
+  <goal>The sprk_project table has three new fields that identify a project as secure, link it to its security Business Unit, and reference the external-facing Account.</goal>
+  <context>
+    <background>Secure Projects are distinguished from regular projects by the sprk_issecure flag. Once set during creation, this flag cannot be changed — it drives the entire UAC model including BU isolation, SPE container provisioning, and external access grants. The security BU and external Account are created during the wizard flow and stored here for reference.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/ (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">No plugins for orchestration — thin validation only</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+      <file>docs/architecture/power-pages-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add sprk_issecure boolean field to sprk_project (default: false, display name: "Is Secure Project")</step>
+    <step order="2">Add sprk_securitybuid lookup field pointing to BusinessUnit table</step>
+    <step order="3">Add sprk_externalaccountid lookup field pointing to Account table</step>
+    <step order="4">Configure sprk_issecure as read-only after creation using a business rule or form JS (field locked on existing records)</step>
+    <step order="5">Add fields to the sprk_project main form in an appropriate section</step>
+    <step order="6">Export solution and verify fields are present and immutability works</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Fields sprk_issecure, sprk_securitybuid, and sprk_externalaccountid exist on sprk_project</criterion>
+    <criterion>sprk_issecure is read-only after the record is first saved (immutable)</criterion>
+    <criterion>Lookups point to correct target tables</criterion>
+    <criterion>Solution exports cleanly</criterion>
+  </acceptance-criteria>
+</task>

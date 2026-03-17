@@ -69,6 +69,10 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["AzureAd:ClientId"] = "test-app-id",
                 ["AzureAd:Audience"] = "api://test-app-id",
 
+                // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient)
+                // A fake URI is sufficient; SecretClient is replaced by test doubles before any calls.
+                ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
+
                 // Graph options (GraphOptions validator)
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
@@ -82,6 +86,11 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["Dataverse:ClientId"] = "test-client-id",
                 ["Dataverse:ClientSecret"] = "test-client-secret",
                 ["Dataverse:TenantId"] = "test-tenant-id",
+
+                // DataverseWebApiClient requires ManagedIdentity:ClientId
+                // A test value avoids ArgumentNullException during singleton construction.
+                // No actual Managed Identity calls are made during unit/integration tests.
+                ["ManagedIdentity:ClientId"] = "00000000-0000-0000-0000-000000000001",
 
                 // ServiceBus options (ServiceBusOptions validator)
                 ["ServiceBus:ConnectionString"] = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement BFF API Client Module</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>frontend, auth, power-pages</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Auth code — OAuth token acquisition and BFF API authentication</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create the BFF API client module that acquires OAuth tokens via the Power Pages implicit grant flow and provides a typed wrapper for authenticated BFF API calls with Bearer token authentication.</prompt>
+  <role>You are a frontend engineer implementing the client-side BFF API integration with OAuth token management.</role>
+  <goal>The SPA can make authenticated API calls to the BFF API using portal-issued OAuth tokens, with automatic token refresh and error handling.</goal>
+  <context>
+    <background>The SPA needs to call the BFF API for operations that go beyond the Power Pages Web API — SPE file operations, AI features, and external access management. The BFF API requires a Bearer token issued by the Power Pages OAuth implicit grant flow. This module manages token acquisition, caching, and refresh.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/auth/bff-client.ts (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="auth">OAuth tokens must be acquired via implicit grant flow, not stored in localStorage</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create src/client/external-spa/src/auth/bff-client.ts</step>
+    <step order="2">Implement getPortalToken() — acquire OAuth token via Power Pages implicit grant flow</step>
+    <step order="3">Implement token caching in memory (not localStorage) with expiry tracking</step>
+    <step order="4">Implement bffApiCall() — typed fetch wrapper with Bearer token in Authorization header</step>
+    <step order="5">Configure VITE_BFF_API_URL environment variable for BFF API base URL</step>
+    <step order="6">Configure VITE_PORTAL_CLIENT_ID environment variable for OAuth client ID</step>
+    <step order="7">Handle token expiry — auto-refresh before API call if token is near expiry</step>
+    <step order="8">Export all functions and types for use by other modules</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>getPortalToken() acquires OAuth token via implicit grant flow</criterion>
+    <criterion>bffApiCall() includes Bearer token in Authorization header</criterion>
+    <criterion>Token cached in memory with expiry tracking (not localStorage)</criterion>
+    <criterion>Environment variables VITE_BFF_API_URL and VITE_PORTAL_CLIENT_ID configured</criterion>
+    <criterion>Auto-refresh works when token is near expiry</criterion>
+  </acceptance-criteria>
+</task>

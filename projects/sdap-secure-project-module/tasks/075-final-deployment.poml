@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="sdap-secure-project-module">
+  <metadata>
+    <title>Final Deployment — All Components to Dev</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>070, 071, 072, 073, 074</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, azure, dataverse, power-pages</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — final deployment of all components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Perform the final deployment of all components to the dev environment: BFF API to Azure, Dataverse solution import, SPA to Power Pages. Run the full test suite and verify all endpoints and flows work correctly.</prompt>
+  <notes>
+    Completed 2026-03-16. Output: comprehensive deployment and validation runbook at
+    projects/sdap-secure-project-module/notes/phase7-task075-final-deployment-validation.md.
+    The guide consolidates all phase deployment steps (Phase 1 Dataverse, Phase 2 BFF API,
+    Phase 3 Power Pages config, Phases 4-5 SPA, Phase 6 internal tools) into a single ordered
+    runbook with a 52-item final validation checklist covering all acceptance criteria.
+  </notes>
+  <role>You are a DevOps engineer performing the final deployment of the complete Secure Project module.</role>
+  <goal>All components (BFF API, Dataverse solution, Power Pages SPA) deployed to dev with all tests passing and all flows verified.</goal>
+  <context>
+    <background>This is the final deployment that brings together all components. Previous deployments were incremental (Phase 2 API, Phase 5 SPA). This deployment ensures the final versions of all components are deployed together and work as a cohesive system.</background>
+    <relevant-files>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="deploy">All tests must pass before deployment is considered complete</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Deploy final BFF API to Azure App Service</step>
+    <step order="2">Verify BFF API health check and external access endpoints</step>
+    <step order="3">Deploy final Dataverse solution (SpaarkeCore with all Phase 1 changes)</step>
+    <step order="4">Verify Dataverse tables, fields, views, and subgrids</step>
+    <step order="5">Deploy final SPA to Power Pages via pac pages upload-code-site</step>
+    <step order="6">Verify SPA loads and authenticates correctly</step>
+    <step order="7">Run full unit test suite: dotnet test</step>
+    <step order="8">Run integration tests</step>
+    <step order="9">Run Test-SdapBffApi.ps1 for endpoint validation</step>
+    <step order="10">Perform manual smoke test: create secure project → invite user → login as external user → verify workspace</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All components deployed successfully</criterion>
+    <criterion>All unit tests pass</criterion>
+    <criterion>All integration tests pass</criterion>
+    <criterion>Manual smoke test passes</criterion>
+    <criterion>All endpoints respond correctly</criterion>
+  </acceptance-criteria>
+</task>

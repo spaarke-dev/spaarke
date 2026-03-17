@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="sdap-secure-project-module">
+  <metadata>
+    <title>E2E Test — Access Revocation Across UAC Planes</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>075</blocks>
+    <tags>testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — E2E verification of revocation cascade</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Test the revocation cascade across all three UAC planes: deactivate participation record → verify Dataverse record invisible to user → verify SPE access removed → verify AI Search excludes project documents from user's results.</prompt>
+  <role>You are a QA engineer writing end-to-end tests for access revocation across all three UAC planes.</role>
+  <goal>Verified that revoking access completely removes the user's ability to see or interact with project data across Dataverse, SPE, and AI Search.</goal>
+  <context>
+    <background>Revocation must be thorough — a partially revoked access is a security vulnerability. This test verifies that after revocation, the user cannot access project data through any of the three planes: Dataverse table permissions block Web API access, SPE container membership is removed blocking document access, and AI Search results no longer include project documents.</background>
+    <relevant-files>
+      <file>tests/e2e/ (create test files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Must verify all three UAC planes</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create E2E test for access revocation</step>
+    <step order="2">Setup: Grant access to a test user, verify they can see project data</step>
+    <step order="3">Action: Revoke access via BFF API (POST /api/external-access/revoke)</step>
+    <step order="4">Verify Dataverse plane: sprk_externalrecordaccess record deactivated, Web API returns no project data</step>
+    <step order="5">Verify SPE plane: user cannot access SPE container documents</step>
+    <step order="6">Verify AI Search plane: search results exclude revoked project's documents</step>
+    <step order="7">Verify web role removal when last access record is revoked</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Revocation cascades across all three UAC planes</criterion>
+    <criterion>Dataverse record invisible after revocation</criterion>
+    <criterion>SPE container access removed</criterion>
+    <criterion>AI Search excludes project documents</criterion>
+    <criterion>Web role removed when no active access records remain</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="sdap-secure-project-module">
+  <metadata>
+    <title>Configure Entra External ID Identity Provider</title>
+    <phase>3: Power Pages Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>019</dependencies>
+    <blocks>021</blocks>
+    <tags>auth, config, power-pages</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task — may require code for claim mapping</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Configure Entra External ID (B2C tenant) as an identity provider in Power Pages. Map authentication claims to Contact fields (email, first name, last name) and verify adx_externalidentity mapping works correctly.</prompt>
+  <role>You are an identity and access management engineer configuring external authentication for the Power Pages portal.</role>
+  <goal>External users can authenticate via Entra External ID, and their identity is correctly mapped to a Contact record in Dataverse.</goal>
+  <context>
+    <background>External users must authenticate through Entra External ID (formerly Azure AD B2C) before accessing the Power Pages SPA. Power Pages supports this as an identity provider — when configured, users authenticate against the B2C tenant and Power Pages creates/links an adx_externalidentity record to the Contact. This is the authentication foundation for all external access.</background>
+    <relevant-files>
+      <file>Power Pages site configuration (Portal Management app)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="auth">Entra External ID must be the sole identity provider for external users</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+      <file>docs/architecture/power-pages-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Configure Entra External ID (B2C) tenant as identity provider in Power Pages admin</step>
+    <step order="2">Set up OpenID Connect configuration (authority, client ID, client secret, redirect URI)</step>
+    <step order="3">Map claims to Contact fields: email → emailaddress1, given_name → firstname, family_name → lastname</step>
+    <step order="4">Verify adx_externalidentity record is created and linked to Contact on first login</step>
+    <step order="5">Test authentication flow: sign up → sign in → Contact record created/linked</step>
+    <step order="6">Configure sign-up/sign-in user flows in B2C tenant if not already present</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>External user can authenticate via Entra External ID</criterion>
+    <criterion>Contact record created with correct email, first name, last name</criterion>
+    <criterion>adx_externalidentity record links B2C identity to Contact</criterion>
+    <criterion>Returning users are recognized (no duplicate Contact creation)</criterion>
+  </acceptance-criteria>
+</task>

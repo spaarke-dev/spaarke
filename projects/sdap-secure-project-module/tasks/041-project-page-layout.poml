@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Project Page Layout</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>033, 034, 035</dependencies>
+    <blocks>042, 043, 044, 045</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — foundation page for all project feature components</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build the ProjectPage layout with project metadata header, participants list, and a tabbed content area for Documents, Events, Tasks, and Contacts. Read projectId from URL parameters and fetch project data from the Web API.</prompt>
+  <role>You are a React frontend engineer building the project detail page — the central hub for all project-related features.</role>
+  <goal>A project page with metadata header, participant list, and tabbed sections that serve as containers for feature components (Documents, Events, Tasks, Contacts).</goal>
+  <context>
+    <background>The project page is where external users do most of their work. It shows project metadata at the top, a list of participants, and tabbed sections for different data types. Each tab will be populated by a feature component (built in tasks 042-045). This task creates the page structure and tab layout — the feature components plug into the tabs.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/pages/ProjectPage.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 TabList for tab navigation</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create ProjectPage.tsx — read projectId from URL params</step>
+    <step order="2">Fetch project metadata from Web API (name, reference number, description, status)</step>
+    <step order="3">Build project metadata header section with key fields</step>
+    <step order="4">Build participants list showing contacts with access levels</step>
+    <step order="5">Create Fluent v9 TabList with tabs: Documents, Events, Tasks, Contacts</step>
+    <step order="6">Create placeholder content for each tab (to be replaced by feature components)</step>
+    <step order="7">Add loading state while project data is being fetched</step>
+    <step order="8">Handle project not found (404) and access denied (403) gracefully</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Project page loads with correct metadata from URL parameter</criterion>
+    <criterion>Participants list displays contacts with access levels</criterion>
+    <criterion>Tab navigation works between Documents, Events, Tasks, Contacts</criterion>
+    <criterion>Loading, not-found, and access-denied states render correctly</criterion>
+  </acceptance-criteria>
+</task>

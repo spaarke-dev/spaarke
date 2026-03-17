@@ -1,0 +1,32 @@
+{
+  "name": "@spaarke/secure-project-workspace",
+  "version": "1.0.0",
+  "description": "Secure Project Workspace — Power Pages Code Page SPA for external user access to secure projects",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^3.27.0",
+    "@azure/msal-react": "^2.1.1",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "scheduler": "^0.23.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}

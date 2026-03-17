@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="sdap-secure-project-module">
+  <metadata>
+    <title>Configure Vite Dev Server with Portal Proxy</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task — dev server proxy setup</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Configure the Vite development server to proxy Power Pages API routes (/_api, /_layout, /_services) to the actual Power Pages site, enabling local development with hot reload while authenticating against the real portal.</prompt>
+  <role>You are a frontend engineer configuring the local development environment for the Power Pages SPA.</role>
+  <goal>Developers can run the SPA locally with hot reload, and all Power Pages API calls are transparently proxied to the real portal site.</goal>
+  <context>
+    <background>During local development, the SPA runs on localhost via Vite dev server. However, it needs to make API calls to the Power Pages site (for Web API, user context, CSRF tokens). The Vite proxy forwards these requests to the Power Pages site while serving the local SPA files with hot module replacement.</background>
+    <relevant-files>
+      <file>src/client/external-spa/vite.config.ts (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="dev-workflow">Proxy must preserve cookies for authentication to work</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Configure Vite proxy for /_api → Power Pages site URL</step>
+    <step order="2">Configure Vite proxy for /_layout → Power Pages site URL</step>
+    <step order="3">Configure Vite proxy for /_services → Power Pages site URL</step>
+    <step order="4">Enable cookie forwarding in proxy configuration (changeOrigin: true)</step>
+    <step order="5">Set up hot module replacement configuration</step>
+    <step order="6">Document local dev workflow in a README section</step>
+    <step order="7">Verify local dev server starts, proxies correctly, and hot reload works</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Vite dev server proxies /_api, /_layout, /_services to Power Pages site</criterion>
+    <criterion>Authentication works through the proxy (cookies forwarded)</criterion>
+    <criterion>Hot module replacement works for local file changes</criterion>
+    <criterion>Local dev workflow documented</criterion>
+  </acceptance-criteria>
+</task>

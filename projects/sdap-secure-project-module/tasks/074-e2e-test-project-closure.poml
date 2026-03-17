@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="sdap-secure-project-module">
+  <metadata>
+    <title>E2E Test — Project Closure Cascading</title>
+    <phase>7: Testing, Deployment &amp; Wrap-Up</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>075</blocks>
+    <tags>testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — E2E verification of closure cascade</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Test the project closure cascade: set project inactive → all participation records deactivated → all SPE membership removed → SPE container preserved (not deleted) → AI Search excludes project documents.</prompt>
+  <role>You are a QA engineer writing end-to-end tests for the project closure cascade.</role>
+  <goal>Verified that closing a project correctly revokes all external access while preserving the SPE container for archival retention.</goal>
+  <context>
+    <background>Project closure is the bulk version of revocation — it affects all participants at once. The critical distinction from individual revocation is that the SPE container must be preserved (not deleted) for legal retention and compliance. This test verifies both the bulk revocation and the container preservation.</background>
+    <relevant-files>
+      <file>tests/e2e/ (create test files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Must verify container preservation</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create E2E test for project closure</step>
+    <step order="2">Setup: Create secure project with multiple participants at different access levels</step>
+    <step order="3">Action: Close project via BFF API (POST /api/external-access/close-project)</step>
+    <step order="4">Verify: All sprk_externalrecordaccess records deactivated</step>
+    <step order="5">Verify: All external contacts removed from SPE container membership</step>
+    <step order="6">Verify: SPE container still exists (preserved for archival)</step>
+    <step order="7">Verify: AI Search excludes project documents for all previously-authorized users</step>
+    <step order="8">Verify: Web roles removed for contacts with no other active access</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All participation records deactivated on closure</criterion>
+    <criterion>All SPE membership removed</criterion>
+    <criterion>SPE container preserved (not deleted)</criterion>
+    <criterion>AI Search excludes project documents</criterion>
+    <criterion>Closure cascades correctly for multiple participants</criterion>
+  </acceptance-criteria>
+</task>

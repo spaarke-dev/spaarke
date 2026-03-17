@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement External User Invitation Endpoint</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — invitation flow with email integration and Contact creation</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create the POST /api/external-access/invite endpoint that creates an adx_invitation record for Power Pages, sends an invitation email via the sprk_communication module, and handles new Contact creation if the email address is not already in the system.</prompt>
+  <role>You are a .NET API engineer implementing the invitation flow that onboards external users into the Secure Project platform.</role>
+  <goal>Internal users can invite external contacts by email, automatically provisioning the invitation, sending the email, and creating a Contact record if needed.</goal>
+  <context>
+    <background>The invitation flow is the entry point for new external users. Power Pages uses adx_invitation records to control portal access — when a user redeems an invitation, they are automatically assigned the configured web role. The email is sent via the existing sprk_communication module. If the invited email does not correspond to an existing Contact, a new Contact record is created first.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ExternalAccess/InvitationService.cs (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/architecture/power-pages-access-control.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define POST /api/external-access/invite endpoint with request model (email, projectId, accessLevel, optional: firstName, lastName)</step>
+    <step order="2">Create InvitationService.cs with InviteAsync method</step>
+    <step order="3">Check if Contact exists for the given email address</step>
+    <step order="4">If no Contact exists, create a new Contact record with email, firstName, lastName</step>
+    <step order="5">Create adx_invitation record: single-use, expiry (7 days default), assign "Secure Project Participant" web role on redemption</step>
+    <step order="6">Send invitation email via sprk_communication module with redemption link and project details</step>
+    <step order="7">Return invitation ID and status (sent/pending) or ProblemDetails on failure</step>
+    <step order="8">Handle duplicate invitation detection — if active invitation exists for same Contact+Project, return existing</step>
+    <step order="9">Register InvitationService in DI</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Invitation endpoint creates adx_invitation record with correct web role assignment</criterion>
+    <criterion>Email sent via sprk_communication module</criterion>
+    <criterion>New Contact created if email not in system</criterion>
+    <criterion>Duplicate invitations handled gracefully</criterion>
+    <criterion>Returns invitation ID and status</criterion>
+  </acceptance-criteria>
+</task>

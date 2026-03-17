@@ -286,6 +286,13 @@ export class ProjectService {
       entity['sprk_projectdescription'] = formValues.description.trim();
     }
 
+    // Set sprk_issecure when the user has designated this as a Secure Project.
+    // This flag is intentionally only set to true — once a project is secure,
+    // the designation is irreversible (enforced by domain logic in the BFF).
+    if (formValues.isSecure === true) {
+      entity['sprk_issecure'] = true;
+    }
+
     // Add lookup bindings — match by referenced entity name (robust).
     // columnHint disambiguates when multiple lookups point to the same entity (e.g. contact).
     const lookups: Array<{ referencedEntity: string; entitySet: string; guid: string; label: string; columnHint?: string }> = [];
