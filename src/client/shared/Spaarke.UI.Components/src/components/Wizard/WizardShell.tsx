@@ -343,11 +343,14 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
           stepId,
         });
       },
+      requestUpdate() {
+        forceRender();
+      },
       get state() {
         return shellState;
       },
     }),
-    [shellState]
+    [shellState, forceRender]
   );
 
   // ── Shared inner content (used by both dialog and embedded modes) ─────

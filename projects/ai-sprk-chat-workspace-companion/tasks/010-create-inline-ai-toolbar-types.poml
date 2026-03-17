@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create InlineAiToolbar Types and Default Action Definitions</title>
+    <phase>2B: Inline AI Toolbar — Library</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 012</blocks>
+    <tags>frontend, typescript, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .ts file in shared library; establishes type contract used by all Phase 2B tasks; will modify .tsx code files downstream</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts` with the `InlineAiAction` interface, `InlineAiActionType` union type ('chat' | 'diff'), default 5 action definitions (summarize, simplify, expand, fact-check, ask), and the `InlineAiToolbarProps` and `InlineAiActionsProps` component props interfaces.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript and shared UI library architecture. No Xrm or Dataverse imports allowed in this file.
+  </role>
+
+  <goal>
+    A single types file exists at the InlineAiToolbar path, exporting all types and default action definitions needed by the toolbar components and hooks. No external service dependencies.
+  </goal>
+
+  <context>
+    <background>
+      The InlineAiToolbar is a floating toolbar that appears over text selections in the Lexical editor. It dispatches inline actions via BroadcastChannel to the SprkChat pane. The types file establishes the contract: InlineAiAction has id, label, icon, actionType ('chat' fires to chat session; 'diff' opens DiffReviewPanel), and optional description. The DEFAULT_INLINE_ACTIONS array defines the 5 base actions always shown.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">MUST NOT import Xrm, ComponentFramework, or any Dataverse SDK in shared library files</constraint>
+    <constraint source="ADR-012">MUST use callback-based props — no direct service calls</constraint>
+    <constraint source="ADR-021">Icon should be typed as React.ReactElement or Fluent icon component reference (not string icon names)</constraint>
+    <constraint source="spec-NFR-03">InlineAiToolbar MUST NOT depend on Xrm — no PCF/Dataverse SDK imports</constraint>
+    <constraint source="spec-2B">5 default actions: summarize (chat), simplify (diff), expand (diff), fact-check (chat), ask (chat)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared library types pattern" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts">
+        Read types.ts to understand the BroadcastChannel event types and message shapes already defined. The InlineAiToolbar will dispatch inline_action events via the same channel.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts to understand existing event types</step>
+    <step order="2">Create directory: src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/</step>
+    <step order="3">Create inlineAiToolbar.types.ts with InlineAiActionType = 'chat' | 'diff'</step>
+    <step order="4">Define InlineAiAction interface: id: string, label: string, icon: React.ReactElement (Fluent icon), actionType: InlineAiActionType, description?: string</step>
+    <step order="5">Define InlineAiToolbarProps: actions: InlineAiAction[], position: {top: number, left: number}, visible: boolean, onAction: (action: InlineAiAction, selectedText: string) => void</step>
+    <step order="6">Define InlineAiActionsProps: actions: InlineAiAction[], onAction: (action: InlineAiAction, selectedText: string) => void</step>
+    <step order="7">Define DEFAULT_INLINE_ACTIONS array with 5 actions using Fluent icons: SparkleRegular (summarize, chat), TextEditStyleRegular (simplify, diff), TextAddSpaceAfterRegular (expand, diff), DocumentCheckmarkRegular (fact-check, chat), ChatRegular (ask, chat)</step>
+    <step order="8">Export all types and DEFAULT_INLINE_ACTIONS</step>
+    <step order="9">Run tsc --noEmit to verify no type errors</step>
+    <step order="10">Update TASK-INDEX.md: change task 010 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run type checking</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given inlineAiToolbar.types.ts, when imported in another TypeScript file, then compiles without errors.</criterion>
+    <criterion testable="true">Given DEFAULT_INLINE_ACTIONS, when accessed, then array has exactly 5 entries with correct actionType values (summarize=chat, simplify=diff, expand=diff, fact-check=chat, ask=chat).</criterion>
+    <criterion testable="true">Given InlineAiAction interface, when checked, then no Xrm or ComponentFramework imports present.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Import React for React.ReactElement type. Use Fluent icons from @fluentui/react-icons. The icon property should store the React element (e.g., `React.createElement(SparkleRegular, {})`) or just the component reference — check how other shared components handle icons. The BroadcastChannel event for inline_action should reference the existing event shape in SprkChat/types.ts if it exists, or define a new InlineActionBroadcastEvent type here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, read SprkChat/types.ts to understand existing event types. No dependencies — can start immediately.</protocol>
+  </execution>
+</task>

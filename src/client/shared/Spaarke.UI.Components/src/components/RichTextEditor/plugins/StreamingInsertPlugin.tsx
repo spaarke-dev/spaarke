@@ -25,7 +25,9 @@ import {
   $getNodeByKey,
   $createParagraphNode,
   $getRoot,
+  $isElementNode,
   TextNode,
+  ElementNode,
   COMMAND_PRIORITY_CRITICAL,
   KEY_DOWN_COMMAND,
 } from 'lexical';
@@ -268,8 +270,8 @@ export const StreamingInsertPlugin = forwardRef<StreamingInsertHandle, Streaming
       const lastChild = root.getLastChild();
       const textNode = $createTextNode(text);
 
-      if (lastChild) {
-        lastChild.append(textNode);
+      if (lastChild && $isElementNode(lastChild)) {
+        (lastChild as ElementNode).append(textNode);
       } else {
         const paragraph = $createParagraphNode();
         paragraph.append(textNode);
@@ -361,7 +363,11 @@ export const StreamingInsertPlugin = forwardRef<StreamingInsertHandle, Streaming
                 } else {
                   // For element nodes, create a new text node as a child
                   const textNode = $createTextNode('');
-                  targetNode.append(textNode);
+                  if ($isElementNode(targetNode)) {
+                    (targetNode as ElementNode).append(textNode);
+                  } else {
+                    targetNode.insertAfter(textNode);
+                  }
                   state.activeNodeKey = textNode.getKey();
                 }
               } else {
@@ -493,17 +499,23 @@ export const StreamingInsertPlugin = forwardRef<StreamingInsertHandle, Streaming
     function initializeAtEnd(state: StreamingState): void {
       const root = $getRoot();
       const lastChild = root.getLastChild();
-      if (lastChild) {
-        const lastTextNode = lastChild.getLastChild();
+      if (lastChild && $isElementNode(lastChild)) {
+        const lastElementChild = lastChild as ElementNode;
+        const lastTextNode = lastElementChild.getLastChild();
         if (lastTextNode instanceof TextNode) {
           const insertNode = $createTextNode('');
           lastTextNode.insertAfter(insertNode);
           state.activeNodeKey = insertNode.getKey();
         } else {
           const insertNode = $createTextNode('');
-          lastChild.append(insertNode);
+          lastElementChild.append(insertNode);
           state.activeNodeKey = insertNode.getKey();
         }
+      } else if (lastChild) {
+        // lastChild is a LexicalNode but not an ElementNode — insert after it
+        const insertNode = $createTextNode('');
+        lastChild.insertAfter(insertNode);
+        state.activeNodeKey = insertNode.getKey();
       } else {
         const paragraph = $createParagraphNode();
         const textNode = $createTextNode('');

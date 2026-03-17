@@ -84,7 +84,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -158,7 +158,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -205,7 +205,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -258,7 +258,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -303,7 +303,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act — should NOT throw OperationCanceledException
         var action = async () => await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -334,7 +334,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -369,7 +369,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -414,7 +414,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -448,7 +448,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -482,7 +482,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act — should NOT throw
         var action = async () => await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -513,7 +513,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.AppendSectionAsync(TestSectionTitle, TestSectionInstruction);
@@ -571,7 +571,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.AppendSectionAsync(TestSectionTitle, TestSectionInstruction);
@@ -605,7 +605,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.AppendSectionAsync(TestSectionTitle, TestSectionInstruction);
@@ -638,7 +638,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, analysisId: null);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, analysisId: null);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -674,7 +674,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var result = await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -701,7 +701,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, analysisId: "not-a-guid");
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, analysisId: "not-a-guid");
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -729,7 +729,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -754,7 +754,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, analysisId: null);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, analysisId: null);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -773,24 +773,25 @@ public class StreamingWriteIntegrationTests
     // ====================================================================
 
     [Fact]
-    public void CapabilityGating_GetTools_ReturnsTwoFunctions_WhenToolsInstantiated()
+    public void CapabilityGating_GetTools_ReturnsThreeFunctions_WhenToolsInstantiated()
     {
         // Arrange — when WorkingDocumentTools IS instantiated (write_back capability present),
-        // GetTools should return exactly 2 functions
+        // GetTools should return exactly 3 functions (EditWorkingDocument, AppendSection, WriteBackToWorkingDocument)
         var chatClient = Substitute.For<IChatClient>();
         var analysisService = Substitute.For<IAnalysisOrchestrationService>();
         var logger = Substitute.For<ILogger>();
         Func<DocumentStreamEvent, CancellationToken, Task> writeSSE = (_, _) => Task.CompletedTask;
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var tools = sut.GetTools().ToList();
 
         // Assert
-        tools.Should().HaveCount(2);
+        tools.Should().HaveCount(3);
         tools.Should().Contain(t => t.Name == "EditWorkingDocument");
         tools.Should().Contain(t => t.Name == "AppendSection");
+        tools.Should().Contain(t => t.Name == "WriteBackToWorkingDocument");
     }
 
     [Fact]
@@ -802,7 +803,7 @@ public class StreamingWriteIntegrationTests
         var logger = Substitute.For<ILogger>();
         Func<DocumentStreamEvent, CancellationToken, Task> writeSSE = (_, _) => Task.CompletedTask;
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var tools = sut.GetTools().ToList();
@@ -821,7 +822,7 @@ public class StreamingWriteIntegrationTests
         var logger = Substitute.For<ILogger>();
         Func<DocumentStreamEvent, CancellationToken, Task> writeSSE = (_, _) => Task.CompletedTask;
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         var tools = sut.GetTools().ToList();
@@ -848,6 +849,7 @@ public class StreamingWriteIntegrationTests
             Substitute.For<IChatClient>(),
             null!,
             Substitute.For<IAnalysisOrchestrationService>(),
+            Substitute.For<IWorkingDocumentService>(),
             Substitute.For<ILogger>(),
             TestAnalysisId);
 
@@ -886,20 +888,20 @@ public class StreamingWriteIntegrationTests
             case "happy":
                 SetupAnalysisService(analysisService, TestDocumentContent);
                 SetupChatClientTokens(chatClient, "A", "B");
-                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
                 break;
             case "cancelled":
                 SetupAnalysisService(analysisService, TestDocumentContent);
                 SetupChatClientTokensThenCancel(chatClient, "A");
-                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
                 break;
             case "error":
                 SetupAnalysisService(analysisService, TestDocumentContent);
                 SetupChatClientTokensThenFail(chatClient, "A", new Exception("Fail"));
-                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
                 break;
             case "no-document":
-                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, analysisId: null);
+                sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, analysisId: null);
                 break;
             default:
                 throw new ArgumentException($"Unknown scenario: {scenario}");
@@ -935,7 +937,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.EditWorkingDocumentAsync(TestEditInstruction);
@@ -968,7 +970,7 @@ public class StreamingWriteIntegrationTests
             return Task.CompletedTask;
         };
 
-        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, logger, TestAnalysisId);
+        var sut = new WorkingDocumentTools(chatClient, writeSSE, analysisService, Substitute.For<IWorkingDocumentService>(), logger, TestAnalysisId);
 
         // Act
         await sut.AppendSectionAsync(TestSectionTitle, TestSectionInstruction);

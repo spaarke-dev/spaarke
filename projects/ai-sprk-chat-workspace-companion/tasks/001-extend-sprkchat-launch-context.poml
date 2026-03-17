@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Extend SprkChatLaunchContext Interface in openSprkChatPane.ts</title>
+    <phase>2A: Contextual Launch</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002</blocks>
+    <tags>frontend, typescript, sprkchat, launcher</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .ts code file; will modify existing service with new interface and function signature</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `openSprkChatPane.ts` with a `SprkChatLaunchContext` interface carrying 7 analysis context fields (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode), update `buildDataParams()` to include all 7 fields, and change the `openSprkChatPane` function signature to accept an optional `SprkChatLaunchContext`. Update the pane ID constant to `sprkchat-analysis` for singleton scoping to the Analysis Workspace.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript and Dataverse side pane APIs. Follow existing file patterns strictly — preserve all existing functionality.
+  </role>
+
+  <goal>
+    `openSprkChatPane.ts` exports a `SprkChatLaunchContext` interface and accepts it as an optional parameter; `buildDataParams()` serializes all 7 context fields into URL search params; pane ID is `sprkchat-analysis`.
+  </goal>
+
+  <context>
+    <background>
+      SprkChat currently passes only entityType, entityId, playbookId, sessionId to the pane. The Analysis Workspace needs to pass a richer context (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode) so the BFF can resolve the correct playbook and knowledge sources. The pane ID must be unique to Analysis Workspace to prevent conflict with the generic ribbon button pane.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</file>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST export SprkChatLaunchContext interface for use by AnalysisWorkspace/App.tsx (task 002)</constraint>
+    <constraint source="project">MUST NOT break existing openSprkChatPane() call signature — SprkChatLaunchContext is an optional 4th parameter after sessionId</constraint>
+    <constraint source="project">Pane ID constant should be changed to 'sprkchat-analysis' for Analysis Workspace scoping (spec success criterion 9)</constraint>
+    <constraint source="project">All 7 fields: analysisType (string), matterType (string), practiceArea (string), analysisId (string), sourceFileId (string), sourceContainerId (string), mode ('analysis' | 'general')</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing launcher pattern" location="src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts">
+        Read the entire file first. The buildDataParams function appends URLSearchParams. Add new fields there. SprkChatLaunchContext should be exported at the top of the type declarations section.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts in full</step>
+    <step order="2">Add SprkChatLaunchContext interface after SidePanePageInput interface with all 7 optional fields</step>
+    <step order="3">Update buildDataParams() to accept optional SprkChatLaunchContext and serialize all 7 fields as URL params (only set if non-empty)</step>
+    <step order="4">Update openSprkChatPane() signature: add optional 4th parameter `context?: SprkChatLaunchContext`</step>
+    <step order="5">Pass context to buildDataParams() call inside openSprkChatPane()</step>
+    <step order="6">Update SPRK_CHAT_PANE_ID constant to 'sprkchat-analysis'</step>
+    <step order="7">Update SPRK_CHAT_PANE_TITLE constant to 'SprkChat' (keep same)</step>
+    <step order="8">Ensure SprkChatLaunchContext is exported at module level (for import by App.tsx)</step>
+    <step order="9">Verify TypeScript compiles: cd src/client/code-pages/SprkChatPane &amp;&amp; npm run build (or tsc --noEmit)</step>
+    <step order="10">Update TASK-INDEX.md: change task 001 status to ✅ completed</step>
+    <step order="11">Note any deviations in projects/ai-sprk-chat-workspace-companion/notes/ if needed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and type-check TypeScript</tool>
+    <tool name="terminal">Run tsc --noEmit for type checking</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SprkChatLaunchContext is imported in another file, when compiling, then TypeScript compiles without errors.</criterion>
+    <criterion testable="true">Given analysisId="test-id" in SprkChatLaunchContext, when buildDataParams is called, then the returned string contains "analysisId=test-id".</criterion>
+    <criterion testable="true">Given no SprkChatLaunchContext is passed, when openSprkChatPane() is called, then existing entityType/entityId/playbookId/sessionId params still work (no regression).</criterion>
+    <criterion testable="true">Given SPRK_CHAT_PANE_ID constant, when read, then its value is 'sprkchat-analysis'.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The spec says analysisId, sourceFileId, sourceContainerId are the key identifiers the BFF uses to resolve context. The mode field supports future non-analysis use cases ('general' is a fallback). Keep all fields optional to maintain backward compatibility with the generic ribbon button invocation. The pane ID change ensures that if the generic ribbon button opens 'sprk-chat' and Analysis Workspace opens 'sprkchat-analysis', they coexist without conflict.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load files listed in knowledge/files. Follow task-execute skill for mandatory pre-execution checklist and checkpointing protocol.</protocol>
+  </execution>
+</task>

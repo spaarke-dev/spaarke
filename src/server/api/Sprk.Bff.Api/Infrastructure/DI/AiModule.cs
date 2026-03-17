@@ -26,9 +26,12 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///  11. AddScoped&lt;ChatSessionManager&gt;                    — ADR-010 (AIPL-052) — Scoped: session lifecycle (Redis + Dataverse)
 ///  12. AddScoped&lt;ChatHistoryManager&gt;                    — ADR-010 (AIPL-052) — Scoped: message history + summarisation
 ///  13. AddScoped&lt;ChatContextMappingService&gt;             — ADR-010 (AIPL-053) — Scoped: context mapping resolution (Redis + Dataverse)
+///  14. AddScoped&lt;AnalysisChatContextResolver&gt;          — ADR-010 (task 020) — Scoped: analysis context resolution (Redis + Dataverse)
+///  15. AddKeyedSingleton&lt;IChatClient&gt;("raw")            — ADR-010 (task 071) — Raw Azure OpenAI client (pre-function-invocation) for compound intent detection
+///  16. AddScoped&lt;PendingPlanManager&gt;                    — ADR-010 (task 071) — Scoped: pending plan Redis storage (30-min TTL, plan:pending key)
 /// Plus 1 framework registration: AddHttpClient&lt;LlamaParseClient&gt; (not counted per ADR-010)
 ///
-/// DI count after: 101 (ChatContextMappingService added in AIPL-053; see ADR-010 and NFR-10).
+/// DI count after: 104 (AnalysisChatContextResolver added in task 020; raw IChatClient + PendingPlanManager added in task 071).
 ///
 /// Prerequisites (must already be registered before calling AddAiModule):
 /// - <c>ITextExtractor</c> — registered in Program.cs when <c>DocumentIntelligence:Enabled = true</c>
@@ -74,6 +77,13 @@ public static class AiModule
                     new Uri(azureOpenAiEndpoint), new DefaultAzureCredential())
                 .GetChatClient(azureOpenAiChatModel)
                 .AsIChatClient();
+
+            // Register the raw (pre-function-invocation) client under a keyed name.
+            // Used by SprkChatAgentFactory for compound intent detection (task 071):
+            // the factory uses this client to inspect what tools the LLM wants to call
+            // BEFORE function invocation executes them, enabling plan_preview gating.
+            // Key: "raw" — resolved via IServiceProvider.GetKeyedService<IChatClient>("raw").
+            services.AddKeyedSingleton<IChatClient>("raw", innerClient);
 
             // UseFunctionInvocation enables automatic tool-call execution:
             // when the LLM requests a tool call, the pipeline executes the AIFunction,
@@ -181,6 +191,21 @@ public static class AiModule
         // sprk_aichatcontextmapping entity. Redis-first with 30-min sliding TTL (ADR-009).
         // Scoped: depends on IGenericEntityService (singleton); scoping limits per-request visibility.
         services.AddScoped<ChatContextMappingService>();
+
+        // AnalysisChatContextResolver — scoped per ADR-010 (Phase 2C, task 020).
+        // Resolves analysis-scoped SprkChat context (playbooks, inline actions, knowledge sources)
+        // for a given analysisId. Redis-first with 30-min absolute TTL (ADR-009).
+        // Cache key pattern: "analysis-context:{analysisId}".
+        // Scoped: aligns with ChatContextMappingService lifetime; depends on IDistributedCache (singleton).
+        services.AddScoped<AnalysisChatContextResolver>();
+
+        // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F).
+        // Stores pending plans in Redis at "plan:pending:{tenantId}:{sessionId}" with 30-min TTL.
+        // Used by CompoundIntentDetector flow in ChatEndpoints.SendMessageAsync to gate
+        // multi-tool chains and write-back operations behind user approval.
+        // ADR-009: Redis via IDistributedCache; no in-memory fallback.
+        // ADR-010: Concrete type, no interface (single implementation).
+        services.AddScoped<PendingPlanManager>();
 
         return services;
     }

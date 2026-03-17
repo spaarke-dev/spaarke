@@ -64,6 +64,12 @@ public class AgentMiddlewareTests
             }
             await Task.CompletedTask; // Ensure async IAsyncEnumerable
         }
+
+        public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
+            string message,
+            IReadOnlyList<AiChatMessage> history,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<FunctionCallContent>>(Array.Empty<FunctionCallContent>());
     }
 
     // =========================================================================
@@ -477,6 +483,12 @@ public class AgentMiddlewareTests
             }
             await Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
+            string message,
+            IReadOnlyList<AiChatMessage> history,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<FunctionCallContent>>(Array.Empty<FunctionCallContent>());
     }
 
     // =========================================================================

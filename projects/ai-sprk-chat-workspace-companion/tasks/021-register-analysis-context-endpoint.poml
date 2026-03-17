@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Register GET /api/ai/chat/context-mappings/analysis/{analysisId} BFF Endpoint</title>
+    <phase>2C: Context-Driven Actions — BFF</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022, 040, 041</blocks>
+    <tags>bff-api, api, minimal-api, endpoints, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new BFF endpoint; requires endpoint filter per ADR-008; tags include bff-api and auth</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Register a new Minimal API endpoint `GET /api/ai/chat/context-mappings/analysis/{analysisId}` in the BFF that calls `AnalysisChatContextResolver.ResolveAsync()` and returns the full context response. The endpoint must use an endpoint filter for authorization (ADR-008) and return `ProblemDetails` on errors (ADR-019).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal API endpoint registration and authorization filters. Follow ADR-001 and ADR-008 strictly.
+  </role>
+
+  <goal>
+    The endpoint `GET /api/ai/chat/context-mappings/analysis/{analysisId}` is registered, protected by authorization endpoint filter, calls the resolver, and returns 200 with AnalysisChatContextResponse or appropriate ProblemDetails on error.
+  </goal>
+
+  <context>
+    <background>
+      The BFF has existing chat context mapping endpoints in `ChatContextMappingEndpoints.cs` (or similar). This new endpoint is analysis-specific: it accepts an analysisId path parameter, resolves full context via AnalysisChatContextResolver, and returns the response for the client to populate QuickActionChips and SlashCommandMenu. Must follow the existing endpoint registration pattern in the codebase.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API (app.MapGet) — no MVC controllers</constraint>
+    <constraint source="ADR-008">MUST add endpoint filter for resource authorization on this endpoint</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails on errors (404 if analysisId not found, 403 if unauthorized)</constraint>
+    <constraint source="ADR-013">MUST call .RequireAuthorization() on the route group</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find the existing ChatContextMappingEndpoints.cs (or equivalent) in src/server/api/Sprk.Bff.Api/Api/Ai/ and read it</step>
+    <step order="2">Add new endpoint in the appropriate endpoints file (extend ChatContextMappingEndpoints.cs or create AnalysisChatContextEndpoints.cs)</step>
+    <step order="3">Register: group.MapGet("/analysis/{analysisId}", async (string analysisId, AnalysisChatContextResolver resolver, CancellationToken ct) => ...)</step>
+    <step order="4">Call resolver.ResolveAsync(analysisId, ct), return Results.Ok(response) on success</step>
+    <step order="5">Handle null/not-found: return Results.Problem("Analysis not found", statusCode: 404)</step>
+    <step order="6">Add .AddEndpointFilter&lt;AnalysisAuthorizationFilter&gt;() (create minimal filter if one doesn't exist for analysis context)</step>
+    <step order="7">Register endpoint in Program.cs or the existing route builder if needed</step>
+    <step order="8">Build: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="9">Update TASK-INDEX.md: change task 021 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisChatContextEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the BFF project builds, when dotnet build runs, then 0 errors.</criterion>
+    <criterion testable="true">Given the endpoint is registered, when GET /api/ai/chat/context-mappings/analysis/test-id is called without auth, then 401 is returned.</criterion>
+    <criterion testable="true">Given analysisId not found, when endpoint is called, then ProblemDetails with status 404 is returned.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Check if there's already an authorization filter for analysis records (AnalysisAuthorizationFilter) in the codebase. If so, reuse it. If not, create a minimal one that checks if the user has access to the specified analysisId. Follow the exact same authorization filter pattern as DocumentAuthorizationFilter. The endpoint should be in the same route group as other context mapping endpoints (e.g., /api/ai/chat/context-mappings/).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 020. Read existing endpoint files FIRST to follow established patterns.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create PlanPreviewCard Component</title>
+    <phase>2E: Enhanced SprkChat Pane — Components</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>060, 070</blocks>
+    <tags>frontend, typescript, react, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .tsx component; complex interactive card with step progress; Fluent v9 tokens; dark mode required; critical for Phase 2F gate</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `PlanPreviewCard.tsx` in `@spaarke/ui-components/SprkChat/` — a message card that renders a proposed multi-step plan with Proceed/Edit Plan/Cancel controls and per-step progress indicators. Steps show status (pending/running/completed/failed) and partial results as they stream in.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and streaming progress UX. No Xrm imports.
+  </role>
+
+  <goal>
+    `PlanPreviewCard.tsx` renders a plan with ordered steps, status indicators, and 3 action buttons. Proceed/Cancel call their respective callbacks; Edit Plan enters an editable text mode. Step status updates via props as execution progresses.
+  </goal>
+
+  <context>
+    <background>
+      When the BFF detects a compound intent (Phase 2F), it emits a plan_preview SSE event before executing. The client renders PlanPreviewCard with the proposed plan. The user can Proceed (executes), Edit Plan (sends a message to modify), or Cancel (aborts). As steps execute, progress is streamed via SSE and the card updates step statuses in real-time (pending→running→completed).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-2E">MUST have Proceed/Edit Plan/Cancel controls</constraint>
+    <constraint source="spec-2E">MUST show per-step progress indicators</constraint>
+    <constraint source="spec-NFR-05">Plan preview execution shows per-step progress with partial results visible as steps complete</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 tokens; dark mode required</constraint>
+    <constraint source="ADR-012">MUST NOT import Xrm — onProceed/onCancel are callbacks</constraint>
+    <constraint source="spec-2F">No execution before user clicks Proceed — card is the gate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define PlanStep type: id, description, status ('pending' | 'running' | 'completed' | 'failed'), result?: string (partial result text when running/completed)</step>
+    <step order="2">Define PlanPreviewCardProps: planTitle: string, steps: PlanStep[], isExecuting: boolean, onProceed: () => void, onCancel: () => void, onEditPlan: (editMessage: string) => void</step>
+    <step order="3">Create PlanPreviewCard.tsx: render plan title and step list</step>
+    <step order="4">Each step: render Fluent Spinner (running), CheckmarkCircle icon (completed), DismissCircle icon (failed), or numbered circle (pending)</step>
+    <step order="5">Each completed/running step: show result text below step description (collapsible if long)</step>
+    <step order="6">Render 3 Fluent Buttons at bottom: Proceed (primary, disabled when isExecuting), Edit Plan (secondary), Cancel (subtle)</step>
+    <step order="7">Edit Plan button: toggle to show a text input field where user types their edit message; Submit button sends via onEditPlan callback</step>
+    <step order="8">Add to index.ts exports; build shared library</step>
+    <step order="9">Unit test: Proceed disabled when isExecuting=true; Edit Plan shows input; Cancel calls onCancel</step>
+    <step order="10">Update TASK-INDEX.md: change task 043 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given isExecuting=false, when Proceed button is rendered, then it is not disabled.</criterion>
+    <criterion testable="true">Given isExecuting=true, when Proceed button is rendered, then it is disabled.</criterion>
+    <criterion testable="true">Given step with status='running', when rendered, then Spinner is visible.</criterion>
+    <criterion testable="true">Given Edit Plan is clicked, when input appears and user types 'skip step 2', then onEditPlan is called with 'skip step 2'.</criterion>
+    <criterion testable="true">Shared library builds without errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The card should use Fluent v9 Card component as the outer container. The step list is an ordered list visually. For the "running" step, show a Spinner inline with the step description. Partial results (result field) should appear as a muted text block below the step when present. The Edit Plan flow: click Edit Plan → input appears with placeholder "How would you like to change this plan?" → Submit button → calls onEditPlan(input value) → parent handles sending to chat.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies on 2B or 2C. Can run in parallel with Group B. No Xrm imports.</protocol>
+  </execution>
+</task>

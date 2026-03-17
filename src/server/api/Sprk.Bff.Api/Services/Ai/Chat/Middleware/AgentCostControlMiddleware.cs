@@ -101,4 +101,16 @@ public sealed class AgentCostControlMiddleware : ISprkChatAgent
             "ChatAgent cost control: added ~{EstimatedTokens} tokens, sessionTotal={SessionTokenCount}/{MaxTokenBudget}",
             estimatedTokens, _sessionTokenCount, _maxTokenBudget);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Pass-through to the inner agent. Detection calls are not counted against the token budget
+    /// because they use the raw client (not function-invocation-enabled) and are used for
+    /// plan gating, not content generation.
+    /// </remarks>
+    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
+        string message,
+        IReadOnlyList<AiChatMessage> history,
+        CancellationToken cancellationToken)
+        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
 }

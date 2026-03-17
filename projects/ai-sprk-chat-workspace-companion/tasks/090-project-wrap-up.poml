@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Project Wrap-Up: Quality Gates, Cleanup, and Completion</title>
+    <phase>2G: Wrap-Up</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>081, 082</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Mandatory wrap-up: code-review + adr-check + repo-cleanup + documentation updates; 6+ steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run final quality gates (code-review, adr-check), clean up ephemeral files, update project documentation to Complete status, document lessons learned, and prepare the branch for merge to master.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Running final quality gates and project completion procedure.
+  </role>
+
+  <goal>
+    Project is marked Complete. All quality gates pass. README, plan.md, CLAUDE.md, and TASK-INDEX.md are updated. Ephemeral notes cleaned. Branch is ready for merge to master via /merge-to-master.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for the ai-sprk-chat-workspace-companion project. It covers: (1) quality gate validation, (2) repository cleanup, (3) documentation update, (4) lessons learned, and (5) final status verification.
+    </background>
+    <relevant-files>
+      <file>projects/ai-sprk-chat-workspace-companion/README.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/plan.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All graduation criteria from README.md must be checked before marking Complete</constraint>
+    <constraint source="skill">MUST run /code-review and /adr-check before marking complete</constraint>
+    <constraint source="skill">MUST run /repo-cleanup to audit ephemeral files</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code — identify and fix any critical issues</step>
+    <step order="2">Run /adr-check on all modified files — verify ADR compliance (especially ADR-012 no-Xrm, ADR-021 Fluent v9, ADR-013 write-back constraint)</step>
+    <step order="3">Fix any critical issues from steps 1-2 before proceeding</step>
+    <step order="4">Run /repo-cleanup projects/ai-sprk-chat-workspace-companion — audit and clean ephemeral files (notes/debug/, notes/spikes/, notes/drafts/)</step>
+    <step order="5">Update README.md: Status → "Complete", Last Updated → today, Progress → 100%, Completed Date → today, check all Graduation Criteria boxes, add Changelog entry</step>
+    <step order="6">Update plan.md: Status → "Complete", all milestone statuses → ✅</step>
+    <step order="7">Update CLAUDE.md: Phase → "Complete", Current Task → "none", Implementation Notes with key learnings</step>
+    <step order="8">Create notes/lessons-learned.md with: parallel execution worked well (9 groups), plan_preview SSE design decision, mousedown vs click insight, SPE safety constraint</step>
+    <step order="9">Verify all 29 tasks in TASK-INDEX.md are marked ✅ completed</step>
+    <step order="10">Run final dotnet test and npm build to confirm no regressions</step>
+    <step order="11">Notify user: project complete, ready to run /merge-to-master to merge work/ai-sprk-chat-workspace-companion → master</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Final build and test verification</tool>
+    <tool name="npm">Final shared library build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/README.md (updated to Complete)</output>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/plan.md (updated to Complete)</output>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given /code-review run, when critical issues are checked, then none are blocking merge.</criterion>
+    <criterion testable="true">Given /adr-check run on modified files, when ADR-012 no-Xrm constraint is checked, then all shared library components pass.</criterion>
+    <criterion testable="true">Given README.md, when Status field is read, then value is "Complete".</criterion>
+    <criterion testable="true">Given TASK-INDEX.md, when all task statuses are read, then all 29 tasks show ✅ completed.</criterion>
+    <criterion testable="true">dotnet test and npm build both pass with no errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Key ADR checks to run manually: (1) Grep shared library for 'Xrm' — must return zero matches. (2) Grep WorkingDocumentTools.cs for SPE/Graph write calls — must return zero matches. (3) Verify all Fluent UI token usage in new components (no hard-coded hex colors).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Final task. Depends on 081 and 082. Run /code-review and /adr-check before updating documentation. The SPE safety grep is mandatory before marking complete.</protocol>
+  </execution>
+</task>

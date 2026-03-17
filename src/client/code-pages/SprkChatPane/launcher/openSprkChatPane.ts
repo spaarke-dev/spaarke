@@ -70,6 +70,30 @@ interface SidePanePageInput {
 }
 
 /**
+ * Optional analysis context passed from the Analysis Workspace to SprkChatPane.
+ * All fields are optional so the generic ribbon button invocation is unaffected.
+ *
+ * Consumed by SprkChatPane/src via URLSearchParams; used by the BFF to resolve
+ * the correct playbook and knowledge sources for the analysis context.
+ */
+export interface SprkChatLaunchContext {
+  /** Analysis type identifier (e.g. 'patent-claims', 'contract-review') */
+  analysisType?: string;
+  /** Matter type from the related matter record */
+  matterType?: string;
+  /** Practice area from the analysis or matter */
+  practiceArea?: string;
+  /** sprk_analysisoutput record ID (GUID without braces) */
+  analysisId?: string;
+  /** Source SPE file ID associated with the analysis */
+  sourceFileId?: string;
+  /** SPE container ID for the source document */
+  sourceContainerId?: string;
+  /** Interaction mode: 'analysis' for contextual workspace, 'general' for generic chat */
+  mode?: 'analysis' | 'general';
+}
+
+/**
  * Xrm.App.sidePanes API
  */
 interface AppSidePanes {
@@ -84,8 +108,8 @@ interface AppSidePanes {
 // Constants
 // ============================================================================
 
-/** Deterministic pane ID for singleton behavior */
-const SPRK_CHAT_PANE_ID = 'sprk-chat';
+/** Deterministic pane ID for singleton behavior — scoped to Analysis Workspace */
+const SPRK_CHAT_PANE_ID = 'sprkchat-analysis';
 
 /** Title displayed in the side pane header */
 const SPRK_CHAT_PANE_TITLE = 'SprkChat';
@@ -216,15 +240,32 @@ function getFormContext(primaryControl?: any): {
  * @param entityId - Record GUID (clean, no braces)
  * @param playbookId - Optional playbook ID for guided interactions
  * @param sessionId - Optional existing session ID to resume
+ * @param context - Optional analysis context for enriched BFF resolution
  * @returns URL-encoded query string
  */
-function buildDataParams(entityType: string, entityId: string, playbookId?: string, sessionId?: string): string {
+function buildDataParams(
+  entityType: string,
+  entityId: string,
+  playbookId?: string,
+  sessionId?: string,
+  context?: SprkChatLaunchContext
+): string {
   const params = new URLSearchParams();
 
   if (entityType) params.set('entityType', entityType);
   if (entityId) params.set('entityId', entityId);
   if (playbookId) params.set('playbookId', playbookId);
   if (sessionId) params.set('sessionId', sessionId);
+
+  if (context) {
+    if (context.analysisType) params.set('analysisType', context.analysisType);
+    if (context.matterType) params.set('matterType', context.matterType);
+    if (context.practiceArea) params.set('practiceArea', context.practiceArea);
+    if (context.analysisId) params.set('analysisId', context.analysisId);
+    if (context.sourceFileId) params.set('sourceFileId', context.sourceFileId);
+    if (context.sourceContainerId) params.set('sourceContainerId', context.sourceContainerId);
+    if (context.mode) params.set('mode', context.mode);
+  }
 
   return params.toString();
 }
@@ -245,6 +286,9 @@ function buildDataParams(entityType: string, entityId: string, playbookId?: stri
  *   so the form context is passed automatically.
  * @param playbookId - Optional playbook ID to start a guided interaction
  * @param sessionId - Optional session ID to resume an existing chat
+ * @param context - Optional analysis context (analysisType, matterType, practiceArea,
+ *   analysisId, sourceFileId, sourceContainerId, mode) for enriched BFF resolution.
+ *   Passed by AnalysisWorkspace after record loads. Leave undefined for generic invocations.
  *
  * @example
  * // Ribbon button invocation (global namespace):
@@ -252,8 +296,20 @@ function buildDataParams(entityType: string, entityId: string, playbookId?: stri
  *
  * // Programmatic with optional params:
  * Spaarke.SprkChat.openPane(primaryControl, "playbook-guid", "session-guid");
+ *
+ * // Analysis Workspace with full context:
+ * Spaarke.SprkChat.openPane(primaryControl, undefined, undefined, {
+ *   analysisType: 'patent-claims',
+ *   analysisId: 'record-guid',
+ *   mode: 'analysis',
+ * });
  */
-async function openSprkChatPane(primaryControl?: any, playbookId?: string, sessionId?: string): Promise<void> {
+async function openSprkChatPane(
+  primaryControl?: any,
+  playbookId?: string,
+  sessionId?: string,
+  context?: SprkChatLaunchContext
+): Promise<void> {
   console.log(LOG_PREFIX, '========================================');
   console.log(LOG_PREFIX, 'openSprkChatPane: Starting v1.0.0');
   console.log(LOG_PREFIX, '========================================');
@@ -288,7 +344,7 @@ async function openSprkChatPane(primaryControl?: any, playbookId?: string, sessi
   // Step 2: Get current form context
   // -------------------------------------------------------------------------
   const { entityType, entityId } = getFormContext(primaryControl);
-  const dataParams = buildDataParams(entityType, entityId, playbookId, sessionId);
+  const dataParams = buildDataParams(entityType, entityId, playbookId, sessionId, context);
 
   console.log(LOG_PREFIX, 'entityType:', entityType);
   console.log(LOG_PREFIX, 'entityId:', entityId);
@@ -470,4 +526,5 @@ _window.Spaarke.SprkChat.show = showSprkChatPane;
 _window.Spaarke.SprkChat.autoInit = autoInitSidePane;
 
 // Also export for module-based consumption (if imported by other TypeScript)
+// SprkChatLaunchContext is already exported at its declaration site (export interface)
 export { openSprkChatPane, enableSprkChatPane, showSprkChatPane, autoInitSidePane };

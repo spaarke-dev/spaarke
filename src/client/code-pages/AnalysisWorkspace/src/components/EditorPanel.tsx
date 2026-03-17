@@ -8,17 +8,21 @@
  * Task 062: Toolbar with Save, Export, Copy, Undo/Redo (replaces PH-061-A).
  * Task 064: Selection broadcast via SprkChatBridge (useSelectionBroadcast).
  * Task 065: Analysis loading and content population from BFF API.
+ * Task 031: InlineAiToolbar overlay — appears on text selection; dispatches inline
+ *           actions to SprkChat (chat type) or DiffReviewPanel (diff type).
  *
  * @see ADR-012 - Shared component library (import from @spaarke/ui-components)
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { forwardRef } from 'react';
+import { forwardRef, useCallback, useRef, type RefObject } from 'react';
 import { makeStyles, Spinner, Text, tokens } from '@fluentui/react-components';
-import { RichTextEditor } from '@spaarke/ui-components';
-import type { RichTextEditorRef } from '@spaarke/ui-components';
+import { RichTextEditor, InlineAiToolbar } from '@spaarke/ui-components';
+import type { RichTextEditorRef, InlineAiAction } from '@spaarke/ui-components';
 import { AnalysisToolbar } from './AnalysisToolbar';
 import type { SaveState, ExportState, ExportFormat } from '../types';
+import { useInlineAiToolbarState } from '../hooks/useInlineAiToolbar';
+import { useDocumentInsert } from '../hooks/useDocumentInsert';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -61,6 +65,26 @@ export interface EditorPanelProps {
   canRedo?: boolean;
   /** History stack length */
   historyLength?: number;
+
+  // ---- Inline AI Toolbar props (task 031) ----
+  /**
+   * Analysis session ID — passed to useInlineAiToolbarState so dispatched
+   * inline actions carry analysis context (used by SprkChatPane to correlate
+   * actions with the active session). Optional; toolbar works without it.
+   */
+  analysisId?: string;
+  /**
+   * Callback invoked when a diff-type inline action is triggered (Simplify, Expand).
+   * EditorPanel calls this so the parent (App.tsx) can open the DiffReviewPanel
+   * via its useDiffReview hook. The selected text is passed as the initial content
+   * for the diff operation.
+   *
+   * NOTE: Diff actions are also broadcast to SprkChat via BroadcastChannel (so
+   * they appear in chat history). This callback is in ADDITION to that dispatch.
+   *
+   * spec-FR-05: Diff-type inline actions MUST open the existing DiffReviewPanel.
+   */
+  onDiffAction?: (selectedText: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +126,10 @@ const useStyles = makeStyles({
     flex: 1,
     overflow: 'auto',
     padding: tokens.spacingHorizontalM,
+    // MUST be position:relative so the absolutely-positioned InlineAiToolbar
+    // overlay resolves its top/left coordinates relative to this container.
+    // (spec-2B, InlineAiToolbar component requirement)
+    position: 'relative',
   },
   loadingContainer: {
     display: 'flex',
@@ -149,6 +177,9 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
     canUndo = false,
     canRedo = false,
     historyLength = 0,
+    // Inline AI Toolbar props (task 031)
+    analysisId,
+    onDiffAction,
   },
   ref
 ): JSX.Element {
@@ -166,6 +197,71 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
     }
     return value;
   };
+
+  // ── Task 031: Inline AI Toolbar ─────────────────────────────────────
+  //
+  // Ref scoping: editorContainerRef is attached to the scrollable div that
+  // wraps the RichTextEditor. The InlineAiToolbar is rendered as a sibling
+  // child inside this div, and uses absolute positioning relative to it
+  // (the div has position:relative via makeStyles). The shared hook
+  // useInlineAiToolbarState listens for selectionchange events scoped to
+  // this container and returns top/left pixel offsets relative to the same
+  // container, so the toolbar floats directly above the selection.
+  //
+  // CRITICAL: onMouseDown (NOT onClick) is used by InlineAiActions to prevent
+  // the text selection from collapsing before the action fires.
+  // DO NOT change to onClick — this would lose the selection.
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  const {
+    visible: toolbarVisible,
+    position: toolbarPosition,
+    selectedText,
+    actions: toolbarActions,
+    onAction: dispatchInlineAction,
+  } = useInlineAiToolbarState({ editorContainerRef, analysisId });
+
+  // ── Task 051: document_insert BroadcastChannel handler ──────────────
+  //
+  // Subscribes to 'sprk-document-insert' BroadcastChannel events dispatched
+  // by SprkChat when the user clicks the "Insert" button on an AI response.
+  // Disabled when the editor is in read-only mode (loading/streaming) to
+  // prevent inserts conflicting with active streaming operations.
+  //
+  // The `ref` here is the public RichTextEditorRef forwarded from the parent
+  // (App.tsx) via useRef<RichTextEditorRef>(null). useDocumentInsert calls
+  // ref.current.insertAtCursor() which delegates to the Lexical update API
+  // with discrete:true — ensuring full undo support via Ctrl+Z.
+  useDocumentInsert({
+    editorRef: ref as RefObject<RichTextEditorRef | null>,
+    enabled: !readOnly && !isStreaming,
+  });
+
+  /**
+   * Handle inline AI action from the toolbar.
+   *
+   * For 'diff' actions (Simplify, Expand): notify the parent to open
+   * DiffReviewPanel AND dispatch to SprkChat via BroadcastChannel so the
+   * action appears in chat history (spec-FR-04, spec-FR-05).
+   *
+   * For 'chat' actions (Summarize, Fact-Check, Ask): dispatch to SprkChat
+   * only via BroadcastChannel.
+   */
+  const handleInlineAction = useCallback(
+    (action: InlineAiAction, text: string): void => {
+      if (action.actionType === 'diff' && onDiffAction) {
+        // Open DiffReviewPanel with the selected text as the initial content.
+        // The AI will propose a revised version when SprkChat processes the action.
+        onDiffAction(text);
+      }
+
+      // Always dispatch to SprkChat via BroadcastChannel (spec-FR-04).
+      // For diff actions this causes the action to appear in chat history;
+      // for chat actions this triggers the streaming response.
+      dispatchInlineAction(action, text);
+    },
+    [onDiffAction, dispatchInlineAction]
+  );
 
   return (
     <div className={styles.root}>
@@ -207,14 +303,34 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
               <Text size={200}>{streamingMessage || 'Running analysis...'}</Text>
             </div>
           )}
-          {/* Editor area */}
-          <div className={styles.editorContainer}>
+          {/*
+           * Editor area — position:relative (via makeStyles) so that the
+           * absolutely-positioned InlineAiToolbar overlay resolves its
+           * top/left coordinates correctly (spec-2B).
+           */}
+          <div ref={editorContainerRef} className={styles.editorContainer}>
             <RichTextEditor
               ref={ref}
               value={value}
               onChange={onChange}
               readOnly={readOnly || isStreaming}
               placeholder={placeholder}
+            />
+            {/*
+             * InlineAiToolbar stays mounted (display:none when hidden) to
+             * avoid layout thrash on every selection change. It is rendered
+             * INSIDE the position:relative container so absolute positioning
+             * is relative to the editor scroll area.
+             *
+             * CRITICAL: InlineAiActions uses onMouseDown + preventDefault()
+             * to fire actions WITHOUT collapsing the text selection. Do NOT
+             * move this outside the container or change to onClick.
+             */}
+            <InlineAiToolbar
+              visible={toolbarVisible}
+              position={toolbarPosition}
+              actions={toolbarActions}
+              onAction={(action) => handleInlineAction(action, selectedText)}
             />
           </div>
         </>

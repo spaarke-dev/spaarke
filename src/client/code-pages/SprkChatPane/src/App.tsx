@@ -75,6 +75,24 @@ const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
  */
 const DEFAULT_PANE_ID = 'sprkchat';
 
+/**
+ * Empty analysis launch context fields (task 002).
+ * Used when constructing a DetectedContext that has no analysis workspace context
+ * (navigation-triggered context changes, dialog resets, bridge events, etc.).
+ */
+const EMPTY_ANALYSIS_CONTEXT = {
+  analysisType: '',
+  matterType: '',
+  practiceArea: '',
+  analysisId: '',
+  sourceFileId: '',
+  sourceContainerId: '',
+  mode: '' as const,
+} satisfies Pick<
+  import('./services/contextService').DetectedContext,
+  'analysisType' | 'matterType' | 'practiceArea' | 'analysisId' | 'sourceFileId' | 'sourceContainerId' | 'mode'
+>;
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -90,6 +108,21 @@ export interface AppProps {
   sessionId: string;
   /** BFF API base URL */
   apiBaseUrl: string;
+  // ---- Analysis launch context (task 002) ----
+  /** Analysis type identifier (e.g. 'patent-claims', 'contract-review') */
+  analysisType?: string;
+  /** Matter type from the related matter record */
+  matterType?: string;
+  /** Practice area from the analysis or matter */
+  practiceArea?: string;
+  /** sprk_analysisoutput record ID (GUID without braces) */
+  analysisId?: string;
+  /** Source SPE file ID associated with the analysis */
+  sourceFileId?: string;
+  /** SPE container ID for the source document */
+  sourceContainerId?: string;
+  /** Interaction mode: 'analysis' for contextual workspace, 'general' for generic chat */
+  mode?: 'analysis' | 'general' | '';
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +218,13 @@ export const App: React.FC<AppProps> = ({
   playbookId: propPlaybookId,
   sessionId: propSessionId,
   apiBaseUrl,
+  analysisType: propAnalysisType = '',
+  matterType: propMatterType = '',
+  practiceArea: propPracticeArea = '',
+  analysisId: propAnalysisId = '',
+  sourceFileId: propSourceFileId = '',
+  sourceContainerId: propSourceContainerId = '',
+  mode: propMode = '',
 }) => {
   const styles = useStyles();
 
@@ -195,8 +235,27 @@ export const App: React.FC<AppProps> = ({
     if (propEntityType) params.set('entityType', propEntityType);
     if (propEntityId) params.set('entityId', propEntityId);
     if (propPlaybookId) params.set('playbookId', propPlaybookId);
+    // Analysis launch context params (task 002)
+    if (propAnalysisType) params.set('analysisType', propAnalysisType);
+    if (propMatterType) params.set('matterType', propMatterType);
+    if (propPracticeArea) params.set('practiceArea', propPracticeArea);
+    if (propAnalysisId) params.set('analysisId', propAnalysisId);
+    if (propSourceFileId) params.set('sourceFileId', propSourceFileId);
+    if (propSourceContainerId) params.set('sourceContainerId', propSourceContainerId);
+    if (propMode) params.set('mode', propMode);
     return params;
-  }, [propEntityType, propEntityId, propPlaybookId]);
+  }, [
+    propEntityType,
+    propEntityId,
+    propPlaybookId,
+    propAnalysisType,
+    propMatterType,
+    propPracticeArea,
+    propAnalysisId,
+    propSourceFileId,
+    propSourceContainerId,
+    propMode,
+  ]);
 
   // Resolve initial context: restore session > detect from URL/Xrm > fallback
   const [activeContext, setActiveContext] = useState<DetectedContext>(() => {
@@ -209,6 +268,8 @@ export const App: React.FC<AppProps> = ({
         entityId: restored.entityId,
         playbookId: restored.playbookId,
         pageType: detectPageType(),
+        // Analysis launch context is not persisted in sessionStorage (it comes from the URL on each pane open)
+        ...EMPTY_ANALYSIS_CONTEXT,
       };
     }
     // Detect fresh context from URL params or Xrm APIs
@@ -228,7 +289,7 @@ export const App: React.FC<AppProps> = ({
   // ── Context-switch dialog state ─────────────────────────────────────
   const [contextSwitch, setContextSwitch] = useState<ContextSwitchState>({
     open: false,
-    newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
+    newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const, ...EMPTY_ANALYSIS_CONTEXT },
   });
 
   // ── Auth state ──────────────────────────────────────────────────────
@@ -391,6 +452,7 @@ export const App: React.FC<AppProps> = ({
           entityId: payload.entityId,
           playbookId: payload.playbookId || activeContext.playbookId,
           pageType: detectPageType(),
+          ...EMPTY_ANALYSIS_CONTEXT,
         });
       }
     });
@@ -432,7 +494,7 @@ export const App: React.FC<AppProps> = ({
   const handleContextSwitch = useCallback((newContext: DetectedContext) => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
+      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const, ...EMPTY_ANALYSIS_CONTEXT },
     });
 
     // Emit context_changed event via SprkChatBridge so other panes are notified
@@ -465,7 +527,7 @@ export const App: React.FC<AppProps> = ({
   const handleContextKeep = useCallback(() => {
     setContextSwitch({
       open: false,
-      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const },
+      newContext: { entityType: '', entityId: '', playbookId: '', pageType: 'unknown' as const, ...EMPTY_ANALYSIS_CONTEXT },
     });
     console.debug('[SprkChatPane] User chose to keep current context');
   }, []);
@@ -555,6 +617,7 @@ export const App: React.FC<AppProps> = ({
           sessionId={activeSessionId || undefined}
           playbookId={activeContext.playbookId || undefined}
           documentId={undefined}
+          analysisId={activeContext.analysisId || undefined}
           apiBaseUrl={apiBaseUrl}
           accessToken={authState.token}
           hostContext={hostContext}

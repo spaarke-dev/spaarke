@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Seed Patent-Claims Playbook Data and Unit Test Resolver</title>
+    <phase>2C: Context-Driven Actions — BFF</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 021</dependencies>
+    <blocks>080</blocks>
+    <tags>dataverse, testing, bff-api, seed-data</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates test files and seed data; has explicit constraints; does not implement new features</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write unit tests for `AnalysisChatContextResolver` verifying the capability-to-action mapping, and create a seed data script or Dataverse import file that sets up a patent-claims `sprk_analysisplaybook` record with `sprk_playbookcapabilities` containing values 100000000 (search), 100000001 (analyze), 100000004 (selection_revise) so the extract-claims and prior-art-search inline actions appear.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and Dataverse data management.
+  </role>
+
+  <goal>
+    Unit tests for AnalysisChatContextResolver pass; seed data creates/documents the patent-claims playbook with correct capability values for manual setup or automated import.
+  </goal>
+
+  <context>
+    <background>
+      The spec success criterion 6 requires: patent-claims playbook shows extract-claims and prior-art-search actions. The capability values 100000000 (search → prior-art-search inline action) and 100000001 (analyze → extract-claims inline action) need to be populated on the `sprk_analysisplaybook` record. For unit tests, mock the Dataverse repository and verify resolver behavior including cache logic.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Seed data must document the Dataverse record structure (playbook name, capability field values) clearly for manual setup if automated import is not available</constraint>
+    <constraint source="spec-FR-06">Patent-claims playbook MUST show extract-claims and prior-art-search inline actions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing unit test files in tests/unit/Sprk.Bff.Api.Tests/ to understand test patterns and mocking approach</step>
+    <step order="2">Create AnalysisChatContextResolverTests.cs in appropriate test project folder</step>
+    <step order="3">Write test: capability 100000004 (selection_revise) → InlineActionInfo with actionType='diff'</step>
+    <step order="4">Write test: capability 100000002 (write_back) → InlineActionInfo with plan-preview-gated flag</step>
+    <step order="5">Write test: Redis cache hit → Dataverse repository NOT called (mock IDistributedCache)</step>
+    <step order="6">Write test: valid analysisId resolves to non-null AnalysisChatContextResponse</step>
+    <step order="7">Run tests: dotnet test tests/unit/Sprk.Bff.Api.Tests/</step>
+    <step order="8">Create notes/seed-data-patent-claims-playbook.md documenting the Dataverse record to create: entity=sprk_analysisplaybook, name='Patent Claims Analysis', sprk_playbookcapabilities=[100000000, 100000001, 100000004]</step>
+    <step order="9">If a seed data import format exists (JSON, CSV, or PAC CLI data), create the seed file in notes/spikes/</step>
+    <step order="10">Update TASK-INDEX.md: change task 022 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run unit tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/AnalysisChatContextResolverTests.cs</output>
+    <output type="docs">projects/ai-sprk-chat-workspace-companion/notes/seed-data-patent-claims-playbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all unit tests for AnalysisChatContextResolver, when dotnet test runs, then all pass.</criterion>
+    <criterion testable="true">Given seed data documentation, when read, then it contains entity name, record name, and sprk_playbookcapabilities values.</criterion>
+    <criterion testable="true">Given capability 100000004, when CapabilityToActionMap is queried, then result has actionType indicating diff (DiffReviewPanel).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    For the seed data, document what values to set rather than automating the import (automation depends on PAC CLI access which may not be available in all environments). The patent-claims playbook needs capabilities: search (100000000) → maps to prior-art-search action, analyze (100000001) → maps to extract-claims action, selection_revise (100000004) → diff inline action for editing claims text. These map to the inline actions shown in the spec FR-06 example.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 020 and 021. Check existing test patterns before writing new tests.</protocol>
+  </execution>
+</task>

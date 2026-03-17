@@ -91,7 +91,7 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXS,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: 'transparent',
-    borderWidth: '0',
+    border: '0',
     fontFamily: 'inherit',
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
@@ -186,9 +186,8 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
                 onClick={onEditFilters}
                 className={styles.actionButton}
                 aria-label="Edit filters"
-                size={compact ? 'small' : 'medium'}
               >
-                {!compact && 'Edit filters'}
+                {!compact ? 'Edit filters' : undefined}
               </ToolbarButton>
             </Tooltip>
           )}
@@ -202,9 +201,8 @@ export const ViewToolbar: React.FC<IViewToolbarProps> = ({
                 onClick={onEditColumns}
                 className={styles.actionButton}
                 aria-label="Edit columns"
-                size={compact ? 'small' : 'medium'}
               >
-                {!compact && 'Edit columns'}
+                {!compact ? 'Edit columns' : undefined}
               </ToolbarButton>
             </Tooltip>
           )}

@@ -9,7 +9,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { IChatSession, IChatMessage, IUseChatSessionResult, IHostContext } from '../types';
+import { IChatSession, IChatMessage, IChatMessageMetadata, IUseChatSessionResult, IHostContext } from '../types';
 
 interface UseChatSessionOptions {
   /** Base URL for the BFF API */
@@ -272,6 +272,64 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     });
   }, []);
 
+  /**
+   * Update the metadata of the last message in history (Phase 2F).
+   * Used to set plan_preview metadata after a plan_preview SSE event and to update
+   * plan step statuses during plan execution streaming.
+   */
+  const updateLastMessageMetadata = useCallback((metadata: IChatMessageMetadata) => {
+    setMessages(prev => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      const updated = [...prev];
+      updated[updated.length - 1] = {
+        ...updated[updated.length - 1],
+        metadata: {
+          ...updated[updated.length - 1].metadata,
+          ...metadata,
+        },
+      };
+      return updated;
+    });
+  }, []);
+
+  /**
+   * Update a specific message's metadata by index (Phase 2F).
+   * Used to update plan step statuses during plan execution streaming when the plan
+   * preview card is not the last message.
+   *
+   * Accepts either a plain metadata object (merged with the existing metadata) or
+   * a function updater `(currentMetadata: IChatMessageMetadata | undefined) => IChatMessageMetadata`
+   * for safe updates that depend on current state (avoids stale closure issues).
+   */
+  const updateMessageMetadataAt = useCallback(
+    (
+      index: number,
+      metadataOrUpdater:
+        | IChatMessageMetadata
+        | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
+    ) => {
+      setMessages(prev => {
+        if (index < 0 || index >= prev.length) {
+          return prev;
+        }
+        const updated = [...prev];
+        const currentMetadata = updated[index].metadata;
+        const newMetadata =
+          typeof metadataOrUpdater === 'function'
+            ? metadataOrUpdater(currentMetadata)
+            : { ...currentMetadata, ...metadataOrUpdater };
+        updated[index] = {
+          ...updated[index],
+          metadata: newMetadata,
+        };
+        return updated;
+      });
+    },
+    []
+  );
+
   return {
     session,
     messages,
@@ -283,5 +341,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     deleteSession,
     addMessage,
     updateLastMessage,
+    updateLastMessageMetadata,
+    updateMessageMetadataAt,
   };
 }

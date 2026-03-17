@@ -22,6 +22,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 public class SprkChatAgentTests
 {
     private readonly Mock<IChatClient> _chatClientMock;
+    private readonly Mock<IChatClient> _rawChatClientMock;
     private readonly Mock<ILogger<SprkChatAgent>> _loggerMock;
 
     private static readonly Guid TestPlaybookId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -29,6 +30,7 @@ public class SprkChatAgentTests
     public SprkChatAgentTests()
     {
         _chatClientMock = new Mock<IChatClient>();
+        _rawChatClientMock = new Mock<IChatClient>();
         _loggerMock = new Mock<ILogger<SprkChatAgent>>();
     }
 
@@ -261,7 +263,7 @@ public class SprkChatAgentTests
         // Arrange
         var context = CreateContext("System prompt.");
         // No tools — empty list
-        var agent = new SprkChatAgent(_chatClientMock.Object, context, [], citationContext: null, _loggerMock.Object);
+        var agent = new SprkChatAgent(_chatClientMock.Object, _rawChatClientMock.Object, context, [], citationContext: null, new CompoundIntentDetector(_loggerMock.Object), _loggerMock.Object);
 
         ChatOptions? capturedOptions = null;
 
@@ -287,7 +289,7 @@ public class SprkChatAgentTests
         // Arrange
         var context = CreateContext("System prompt.");
         var mockTool = AIFunctionFactory.Create(() => "tool result", "TestTool", "A test tool");
-        var agent = new SprkChatAgent(_chatClientMock.Object, context, [mockTool], citationContext: null, _loggerMock.Object);
+        var agent = new SprkChatAgent(_chatClientMock.Object, _rawChatClientMock.Object, context, [mockTool], citationContext: null, new CompoundIntentDetector(_loggerMock.Object), _loggerMock.Object);
 
         ChatOptions? capturedOptions = null;
 
@@ -345,7 +347,7 @@ public class SprkChatAgentTests
     #region Private helpers
 
     private SprkChatAgent CreateAgent(ChatContext context, IReadOnlyList<AIFunction>? tools = null, CitationContext? citationContext = null)
-        => new SprkChatAgent(_chatClientMock.Object, context, tools ?? [], citationContext, _loggerMock.Object);
+        => new SprkChatAgent(_chatClientMock.Object, _rawChatClientMock.Object, context, tools ?? [], citationContext, new CompoundIntentDetector(_loggerMock.Object), _loggerMock.Object);
 
     private static ChatContext CreateContext(
         string systemPrompt,

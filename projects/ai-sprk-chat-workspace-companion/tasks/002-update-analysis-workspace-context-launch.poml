@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Update AnalysisWorkspace App.tsx to Launch SprkChat with Enriched Context</title>
+    <phase>2A: Contextual Launch</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>030</blocks>
+    <tags>frontend, typescript, react, code-page, analysis-workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx code file; implements new feature in React 19 Code Page; 6+ steps</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update `AnalysisWorkspace/src/App.tsx` to (1) call `openSprkChatPane()` with a populated `SprkChatLaunchContext` after the analysis record fully loads, and (2) update `SprkChatPane/src/services/contextService.ts` to parse and expose the 7 new URL context parameters.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 19, TypeScript, and the Analysis Workspace architecture. Read and understand App.tsx data loading pattern before modifying.
+  </role>
+
+  <goal>
+    After the analysis record loads in App.tsx, `openSprkChatPane()` is called with analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId all populated from the loaded record. `contextService.ts` parses these from URL params and exposes them for downstream consumption.
+  </goal>
+
+  <context>
+    <background>
+      AnalysisWorkspace/App.tsx loads a `sprk_analysisoutput` (or similar) record via `useAnalysisLoader` hook. Once the record is available, the Analysis Workspace should auto-launch the SprkChat side pane with full context so the AI companion immediately knows the analysis domain. This happens once on load — not on every render. The contextService.ts in SprkChatPane needs to expose the new fields to the SprkChat component.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisLoader.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/hostContext.ts</file>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+      <file>src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-02">Analysis Workspace MUST launch SprkChat with analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId — all 6 fields populated after record load</constraint>
+    <constraint source="ADR-022">AnalysisWorkspace uses React 19 createRoot — do NOT use any React 16/17 APIs</constraint>
+    <constraint source="project">SprkChat launch must happen ONCE after record load, not on every re-render — use useEffect with proper dependency array</constraint>
+    <constraint source="project">analysisId comes from the analysis record ID; matterType/practiceArea from related matter record if available</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>projects/ai-sprk-chat-workspace-companion/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="Analysis loader pattern" location="src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisLoader.ts">
+        Read useAnalysisLoader to understand what fields are available on the loaded record. Map those fields to SprkChatLaunchContext fields.
+      </pattern>
+      <pattern name="hostContext pattern" location="src/client/code-pages/AnalysisWorkspace/src/services/hostContext.ts">
+        Read hostContext.ts to understand how record identity is obtained from URL params in the AnalysisWorkspace.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read App.tsx, useAnalysisLoader.ts, hostContext.ts, and contextService.ts in full</step>
+    <step order="2">Understand what fields are available from the loaded analysis record (type, matterType, practiceArea, sourceFileId, sourceContainerId)</step>
+    <step order="3">Import SprkChatLaunchContext from openSprkChatPane.ts in App.tsx</step>
+    <step order="4">Add useEffect in App.tsx that fires when analysis record fully loads (not null/loading): construct SprkChatLaunchContext from record fields and call openSprkChatPane() with mode='analysis'</step>
+    <step order="5">Ensure useEffect dependency array contains the analysis record ID only (not the full object) to prevent duplicate calls</step>
+    <step order="6">In contextService.ts (SprkChatPane): extend the context parsing to read the 7 new URL params (analysisType, matterType, practiceArea, analysisId, sourceFileId, sourceContainerId, mode)</step>
+    <step order="7">Update the AnalysisContext type/interface in contextService.ts to include the 7 new fields</step>
+    <step order="8">Build AnalysisWorkspace: cd src/client/code-pages/AnalysisWorkspace &amp;&amp; npm run build</step>
+    <step order="9">Build SprkChatPane: cd src/client/code-pages/SprkChatPane &amp;&amp; npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change task 002 status to ✅ completed</step>
+    <step order="11">Document any field mapping decisions in projects/ai-sprk-chat-workspace-companion/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and type-check TypeScript</tool>
+    <tool name="terminal">Run builds and type checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+    <output type="code">src/client/code-pages/SprkChatPane/src/services/contextService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given analysis record loads with all fields, when App.tsx renders, then openSprkChatPane is called exactly once with all 7 context fields populated.</criterion>
+    <criterion testable="true">Given the SprkChatPane URL contains analysisId=abc123, when contextService.ts parses it, then getContext().analysisId returns 'abc123'.</criterion>
+    <criterion testable="true">Given App.tsx useEffect, when it fires, then it does NOT fire again on subsequent re-renders (dependency array correct).</criterion>
+    <criterion testable="true">Both AnalysisWorkspace and SprkChatPane build without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Fields mapping guidance: analysisId = record ID, analysisType = sprk_analysistype field value, matterType = related matter's type, practiceArea = related matter's practice area, sourceFileId = sprk_sourcefileid, sourceContainerId = sprk_sourcecontainerid. If matter fields are not directly on the record, use the existing data loading hooks to access them. The mode should always be 'analysis' when launched from Analysis Workspace.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files AND read all relevant-files. This task depends on task 001 being complete (SprkChatLaunchContext must exist).</protocol>
+  </execution>
+</task>

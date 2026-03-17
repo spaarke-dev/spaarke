@@ -4,14 +4,28 @@
  * Renders user messages (right-aligned, accent) and assistant messages (left-aligned, subtle).
  * Shows a typing indicator during streaming.
  *
+ * For assistant messages that carry structured metadata, delegates to:
+ *   - SprkChatMessageRenderer for responseType: markdown, citations, diff, entity_card, action_confirmation
+ *   - PlanPreviewCard for responseType: plan_preview
+ *
+ * BroadcastChannel events dispatched by callbacks (ADR-012 — shared library MUST NOT call Xrm):
+ *   - onNavigate  → broadcasts 'navigate_entity' on channel 'sprkchat-navigation'
+ *   - onOpenDiff  → broadcasts 'open_diff'      on channel 'sprkchat-navigation'
+ *   - onInsert    → broadcasts 'document_insert' on channel 'sprk-document-insert'
+ *
  * @see ADR-021 - Fluent UI v9; makeStyles; design tokens; dark mode
  * @see ADR-022 - React 16 APIs only
+ * @see ADR-012 - Shared Component Library; no Xrm/ComponentFramework imports
  */
 
 import * as React from 'react';
-import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner, Button } from '@fluentui/react-components';
+import { ArrowExportRegular } from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
+import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
+import { PlanPreviewCard } from './PlanPreviewCard';
+import type { PlanStep } from './PlanPreviewCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -37,6 +51,13 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground1,
   },
+  /** Structured cards use the full available width within the message list. */
+  structuredContainer: {
+    alignSelf: 'stretch',
+    maxWidth: '100%',
+    backgroundColor: 'transparent',
+    ...shorthands.padding('0'),
+  },
   messageContent: {
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
@@ -56,6 +77,16 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     marginTop: '4px',
+  },
+  /**
+   * Action row below AI message content (Insert button + future Copy, etc.).
+   * Only rendered on completed (non-streaming) assistant messages.
+   */
+  messageActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    marginTop: tokens.spacingVerticalXS,
   },
 });
 
@@ -160,30 +191,265 @@ function renderContentWithCitations(text: string, citations: ICitation[] | undef
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BroadcastChannel helpers (ADR-012: shared lib MUST NOT call Xrm directly)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * BroadcastChannel name used for navigation events from SprkChat to host layer.
+ * AnalysisWorkspace / SprkChatPane listen on this channel and call
+ * Xrm.Navigation on behalf of the shared library.
+ */
+const SPRKCHAT_NAVIGATION_CHANNEL = 'sprkchat-navigation';
+
+/**
+ * Dispatch a navigate_entity event via BroadcastChannel so the host layer
+ * (AnalysisWorkspace or SprkChatPane Code Page) can call Xrm.Navigation.
+ *
+ * Falls back to console.warn when BroadcastChannel is unavailable (e.g. unit tests).
+ */
+function dispatchNavigateEntity(entityType: string, entityId: string): void {
+  try {
+    const channel = new BroadcastChannel(SPRKCHAT_NAVIGATION_CHANNEL);
+    channel.postMessage({ type: 'navigate_entity', entityType, entityId });
+    channel.close();
+  } catch (err) {
+    console.warn('[SprkChatMessage] BroadcastChannel unavailable for navigate_entity:', err);
+  }
+}
+
+/**
+ * Dispatch an open_diff event via BroadcastChannel so the host layer can open
+ * DiffReviewPanel with the proposed text.
+ *
+ * Falls back to console.warn when BroadcastChannel is unavailable.
+ */
+function dispatchOpenDiff(proposedText: string): void {
+  try {
+    const channel = new BroadcastChannel(SPRKCHAT_NAVIGATION_CHANNEL);
+    channel.postMessage({ type: 'open_diff', proposedText });
+    channel.close();
+  } catch (err) {
+    console.warn('[SprkChatMessage] BroadcastChannel unavailable for open_diff:', err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extended props for plan_preview integration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extended props for SprkChatMessage.
+ *
+ * The optional `onProceed`, `onCancel`, and `onEditPlan` callbacks are only
+ * used when the message carries `metadata.responseType === 'plan_preview'`.
+ *
+ * `onProceed` is wired to the BFF plan approval endpoint in task 072.
+ * For now (task 062) a stub is passed from SprkChat.tsx.
+ *
+ * `onInsert` (Phase 2D) is called when the user clicks the Insert button on an
+ * AI response message. SprkChat.tsx wires this to a BroadcastChannel dispatch
+ * that sends a `document_insert` event to the AnalysisWorkspace editor.
+ */
+export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
+  /**
+   * Called when the user clicks Proceed on a PlanPreviewCard.
+   * MUST be implemented in SprkChat.tsx (task 072 wires the BFF endpoint).
+   */
+  onProceed?: () => void;
+  /**
+   * Called when the user clicks Cancel on a PlanPreviewCard.
+   * Typically removes or dismisses the plan message from the list.
+   */
+  onCancel?: () => void;
+  /**
+   * Called when the user submits an edit message from within a PlanPreviewCard.
+   * SprkChat routes this to handleSend() so the BFF receives it as a new message
+   * and can regenerate the plan.
+   * @param editMessage - Free-text modification request from the user.
+   */
+  onEditPlan?: (editMessage: string) => void;
+  /**
+   * Called when the user clicks the "Insert" button on an AI response message.
+   * Receives the text content to insert. SprkChat.tsx dispatches this as a
+   * `document_insert` BroadcastChannel event for the AnalysisWorkspace editor
+   * (task 051 adds the Lexical handler on the receiving end).
+   *
+   * Only rendered on completed (non-streaming) assistant messages.
+   *
+   * @param content - The message text content to insert into the editor.
+   * @see IDocumentInsertEvent in types.ts
+   */
+  onInsert?: (content: string) => void;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * SprkChatMessage - Renders a single chat message with role-appropriate styling.
  *
+ * For plain assistant messages (no metadata.responseType) the existing
+ * text bubble is rendered unchanged — no regression.
+ *
+ * For structured assistant messages, delegates to SprkChatMessageRenderer
+ * (citations, diff, entity_card, action_confirmation) or PlanPreviewCard
+ * (plan_preview).
+ *
  * @example
  * ```tsx
+ * // Plain text message (unchanged behaviour)
  * <SprkChatMessage
- *   message={{ role: "User", content: "Hello!", timestamp: "2026-01-01T00:00:00Z" }}
+ *   message={{ role: "Assistant", content: "Hello!", timestamp: "..." }}
  * />
+ *
+ * // Structured citations card
  * <SprkChatMessage
- *   message={{ role: "Assistant", content: "Hi there!", timestamp: "2026-01-01T00:00:01Z" }}
- *   isStreaming={true}
+ *   message={{
+ *     role: "Assistant",
+ *     content: "",
+ *     timestamp: "...",
+ *     metadata: {
+ *       responseType: "citations",
+ *       data: { text: "See [1]...", citations: [...] }
+ *     }
+ *   }}
+ * />
+ *
+ * // Plan preview gate
+ * <SprkChatMessage
+ *   message={{
+ *     role: "Assistant",
+ *     content: "",
+ *     timestamp: "...",
+ *     metadata: {
+ *       responseType: "plan_preview",
+ *       planTitle: "Analyze Contract Risk",
+ *       plan: [{ id: "s1", description: "...", status: "pending" }]
+ *     }
+ *   }}
+ *   onProceed={() => triggerPlanApproval()}
+ *   onCancel={() => dismissPlanMessage()}
  * />
  * ```
  */
-export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({ message, isStreaming = false, citations }) => {
+export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
+  message,
+  isStreaming = false,
+  citations,
+  onProceed,
+  onCancel,
+  onEditPlan,
+  onInsert,
+}) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
   const isAssistant = message.role === 'Assistant';
 
-  const containerClass = mergeClasses(styles.container, isUser ? styles.userContainer : styles.assistantContainer);
+  // ── Structured response rendering ──────────────────────────────────────────
 
+  const responseType = message.metadata?.responseType;
+  const isStructured = isAssistant && responseType != null && responseType !== '';
+
+  // PlanPreviewCard gate — only when not currently streaming the plan
+  if (isStructured && responseType === 'plan_preview' && !isStreaming) {
+    const planSteps: PlanStep[] = (message.metadata?.plan ?? []).map(s => ({
+      id: s.id,
+      description: s.description,
+      status: s.status,
+      result: s.result,
+    }));
+
+    return (
+      <div
+        className={styles.structuredContainer}
+        role="listitem"
+        aria-label="AI plan preview"
+      >
+        <PlanPreviewCard
+          planTitle={message.metadata?.planTitle ?? 'Proposed Plan'}
+          steps={planSteps}
+          isExecuting={false}
+          onProceed={onProceed ?? (() => {
+            // TRACKED: task 072 wires BFF plan approval endpoint
+            console.log('[SprkChatMessage] onProceed stub — wired in task 072');
+          })}
+          onCancel={onCancel ?? (() => {
+            console.log('[SprkChatMessage] onCancel stub');
+          })}
+          onEditPlan={onEditPlan ?? ((editMessage) => {
+            // Edit plan sends a new user message — parent (SprkChat) handles via normal send
+            console.log('[SprkChatMessage] onEditPlan stub — edit message:', editMessage);
+          })}
+        />
+        {onInsert && message.content && (
+          <div className={styles.messageActions}>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={React.createElement(ArrowExportRegular)}
+              onClick={() => onInsert(message.content)}
+              title="Insert into editor"
+            >
+              Insert
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // SprkChatMessageRenderer for all other structured types (including 'markdown')
+  if (isStructured && responseType !== 'plan_preview' && !isStreaming) {
+    const structuredData = message.metadata?.data ?? { text: message.content };
+
+    // Derive insertable content from structured data.
+    // For text-based types (markdown, citations, diff summary) extract the 'text'
+    // or 'summary' field. For entity_card and action_confirmation, use message.content
+    // as the fallback — these card types rarely carry a free-text body to insert.
+    const structuredInsertContent =
+      (structuredData as { text?: string }).text ??
+      (structuredData as { summary?: string }).summary ??
+      message.content;
+
+    return (
+      <div
+        className={styles.structuredContainer}
+        role="listitem"
+        aria-label={`Assistant structured response: ${responseType}`}
+      >
+        <SprkChatMessageRenderer
+          responseType={responseType}
+          data={structuredData as Parameters<typeof SprkChatMessageRenderer>[0]['data']}
+          onNavigate={(entityType, entityId) => {
+            // ADR-012: MUST NOT call Xrm directly — dispatch BroadcastChannel event
+            dispatchNavigateEntity(entityType, entityId);
+          }}
+          onOpenDiff={(proposedText) => {
+            // Dispatch open_diff event so host layer opens DiffReviewPanel
+            dispatchOpenDiff(proposedText);
+          }}
+        />
+        {onInsert && structuredInsertContent && (
+          <div className={styles.messageActions}>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={React.createElement(ArrowExportRegular)}
+              onClick={() => onInsert(structuredInsertContent)}
+              title="Insert into editor"
+            >
+              Insert
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Plain text rendering (legacy behaviour — no regression) ────────────────
+
+  const containerClass = mergeClasses(styles.container, isUser ? styles.userContainer : styles.assistantContainer);
   const timestampClass = mergeClasses(styles.timestamp, isUser ? styles.userTimestamp : undefined);
 
   // For assistant messages with citations, parse [N] markers and render
@@ -194,6 +460,11 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({ message, isSt
     }
     return message.content;
   }, [message.content, citations, isAssistant, isStreaming]);
+
+  // Insert button: only for completed (non-streaming) assistant messages with content.
+  // The button is NOT rendered for user messages (spec-2D: "Insert button MUST only
+  // appear on AI response messages, not user messages").
+  const showInsertButton = isAssistant && !isStreaming && !!message.content && !!onInsert;
 
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
@@ -208,6 +479,20 @@ export const SprkChatMessage: React.FC<ISprkChatMessageProps> = ({ message, isSt
 
       {message.timestamp && !isStreaming && (
         <span className={timestampClass}>{formatTimestamp(message.timestamp)}</span>
+      )}
+
+      {showInsertButton && (
+        <div className={styles.messageActions}>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={React.createElement(ArrowExportRegular)}
+            onClick={() => onInsert!(message.content)}
+            title="Insert into editor"
+          >
+            Insert
+          </Button>
+        </div>
       )}
     </div>
   );

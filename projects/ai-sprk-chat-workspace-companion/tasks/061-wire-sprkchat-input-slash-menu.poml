@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Wire [/] Button and Slash Key Interception in SprkChatInput</title>
+    <phase>2E-Wiring: Enhanced Pane Integration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040, 031</dependencies>
+    <blocks>081</blocks>
+    <tags>frontend, typescript, react, shared-library, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChatInput.tsx with new [/] button and keystroke interception; keyboard UX is tricky</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update `SprkChatInput.tsx` to: (1) add a `[/]` button in the input toolbar that opens the slash command menu, and (2) intercept the `/` keystroke when it's the first character typed to automatically open the slash command menu and enable type-ahead filtering as the user continues typing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in keyboard event handling in React and Fluent UI input components.
+  </role>
+
+  <goal>
+    SprkChatInput has a `[/]` button that opens SlashCommandMenu; typing `/` as the first character also opens the menu with type-ahead as subsequent characters are typed; Esc closes the menu; selecting a command executes it and clears the input.
+  </goal>
+
+  <context>
+    <background>
+      SprkChatInput.tsx manages the text input area for SprkChat. The slash command trigger must detect '/' as the first character typed. Type-ahead means as the user types '/sum', the menu filters to commands containing 'sum'. When a command is selected, the input is cleared and the command is executed via the onCommand callback.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-09">MUST open on '/' keystroke (first character) or '[/]' button click</constraint>
+    <constraint source="spec-FR-09">Type-ahead MUST filter commands; Esc MUST dismiss</constraint>
+    <constraint source="ADR-021">MUST NOT break existing dark mode behavior</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatInput.tsx to understand current input handling, value management, and submit flow</step>
+    <step order="2">Add slashMenuOpen state and slashFilter state to SprkChatInput (or lift to SprkChat.tsx props)</step>
+    <step order="3">In onKeyDown or onChange handler: if input value starts with '/' and has no prior text, set slashMenuOpen=true and update slashFilter to text after '/'</step>
+    <step order="4">Add '[/]' Button (appearance="subtle") to input toolbar — on click, set slashMenuOpen=true, clear input, focus input</step>
+    <step order="5">Pass slashMenuOpen, slashFilter, onSlashClose, onSlashCommand props to SlashCommandMenu (or compose in parent SprkChat.tsx)</step>
+    <step order="6">On command selected: close menu, clear input, call onCommand(selectedCommand, args)</step>
+    <step order="7">On Esc: close menu, restore input to empty or user's text before '/'</step>
+    <step order="8">Build shared library; verify no type errors</step>
+    <step order="9">Update TASK-INDEX.md: change task 061 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given user types '/' in empty input, when keydown fires, then SlashCommandMenu opens.</criterion>
+    <criterion testable="true">Given user types '/sum', when filtering occurs, then only commands containing 'sum' are shown.</criterion>
+    <criterion testable="true">Given menu is open and Esc is pressed, when handler fires, then menu closes and input is cleared.</criterion>
+    <criterion testable="true">Given '[/]' button is clicked, when handler fires, then SlashCommandMenu opens.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The slash interception should only trigger when '/' is the very first character (input value was empty or just whitespace before the keystroke). If the user is mid-sentence and types '/', it should NOT open the menu. Manage the slashFilter by tracking the substring after the '/' character. When the menu is open, continue updating slashFilter as user types (input value changes propagate to filter). When a command is selected, clear the input and call appropriate send handler.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 040 and 031. Read SprkChatInput.tsx FIRST — understand value management before adding slash interception.</protocol>
+  </execution>
+</task>

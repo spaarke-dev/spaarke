@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create QuickActionChips Component</title>
+    <phase>2E: Enhanced SprkChat Pane — Components</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>060</blocks>
+    <tags>frontend, typescript, react, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .tsx component in shared library; Fluent v9 tokens; dark mode required; responsive width constraint</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `QuickActionChips.tsx` in `@spaarke/ui-components/SprkChat/` — a row of up to 4 Fluent v9 chip/badge buttons displayed above the SprkChat input bar, populated from the context mapping response's inline actions. Hidden when the containing pane is narrower than 350px.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and responsive layout with tokens.
+  </role>
+
+  <goal>
+    `QuickActionChips.tsx` renders up to 4 chip buttons; hides when pane width &lt; 350px via ResizeObserver; calls onChipClick(action) callback; uses Fluent v9 tokens exclusively.
+  </goal>
+
+  <context>
+    <background>
+      Quick-action chips provide one-tap shortcuts to common actions for the current analysis context. They appear above the chat input bar and update when the playbook changes. Per NFR-04, they hide when the pane is narrow (&lt; 350px) to save space — the natural language input and slash menu remain available. The chips are populated from the context mapping endpoint's inlineActions array (up to 4 shown).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-NFR-04">Chips MUST be hidden when SprkChat pane width &lt; 350px</constraint>
+    <constraint source="spec">MUST show up to 4 chips maximum</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 tokens — no hard-coded colors</constraint>
+    <constraint source="ADR-012">MUST NOT import Xrm or Dataverse SDK</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatInput.tsx to understand existing input layout and where chips will be inserted above it</step>
+    <step order="2">Create QuickActionChips.tsx in SprkChat/ component folder</step>
+    <step order="3">Define props: actions: InlineActionInfo[] (max 4), onChipClick: (action: InlineActionInfo) => void, containerRef: RefObject&lt;HTMLElement&gt; (for width detection)</step>
+    <step order="4">Implement ResizeObserver in useEffect to watch containerRef width; set visible state to false when width &lt; 350px</step>
+    <step order="5">Render up to 4 actions as Fluent v9 Button (appearance="outline", size="small") in a horizontal flex row</step>
+    <step order="6">Apply tokens for colors and spacing; add a divider/border-bottom above the chip row</step>
+    <step order="7">When visible=false, return null (no DOM element)</step>
+    <step order="8">Add to index.ts exports</step>
+    <step order="9">Build shared library to verify</step>
+    <step order="10">Update TASK-INDEX.md: change task 041 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given pane width &lt; 350px, when ResizeObserver fires, then chips are hidden (returns null).</criterion>
+    <criterion testable="true">Given 6 actions in props, when rendering, then only 4 chips are shown.</criterion>
+    <criterion testable="true">Given chip is clicked, when onChipClick fires, then it receives the correct InlineActionInfo.</criterion>
+    <criterion testable="true">Shared library builds without errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the Fluent v9 `Button` component for chips — there's no dedicated Chip component in v9, but Button with appearance="outline" and size="small" gives chip-like appearance. Add icon to each button using the action's icon field. The ResizeObserver should be cleaned up in useEffect return. Import InlineActionInfo type from inlineAiToolbar.types.ts or define a minimal type here if cross-component imports are an issue.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 021 (InlineActionInfo type shape). Check the existing SprkChat component structure before creating QuickActionChips.</protocol>
+  </execution>
+</task>

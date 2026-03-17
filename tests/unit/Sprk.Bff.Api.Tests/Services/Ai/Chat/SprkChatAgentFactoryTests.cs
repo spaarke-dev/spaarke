@@ -133,9 +133,13 @@ public class SprkChatAgentFactoryTests
     {
         var services = new ServiceCollection();
 
-        // Register IChatClient mock
+        // Register IChatClient mock (standard chat client)
         var chatClientMock = new Mock<IChatClient>();
         services.AddSingleton(chatClientMock.Object);
+
+        // Register raw IChatClient as keyed service "raw" (task 071 — compound intent detection)
+        var rawChatClientMock = new Mock<IChatClient>();
+        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
 
         // Register IChatContextProvider (scoped — factory will resolve from scope)
         services.AddScoped(_ => contextProvider);

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Remove Global SprkChat Auto-Injection from EventsPage and SpeAdminApp</title>
+    <phase>2A: Contextual Launch</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, html, cleanup, events-page, spe-admin</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Simple removal task in HTML files; no logic complexity; but modifies files and should be verified</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove the SidePaneManager / SprkChat auto-injection snippet from `EventsPage/index.html` and `SpeAdminApp/index.html` so SprkChat does not auto-register on pages that don't need it.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Careful with HTML file edits — do not remove other script tags or modify unrelated sections.
+  </role>
+
+  <goal>
+    Both `EventsPage/index.html` and `SpeAdminApp/index.html` no longer include the SprkChat/SidePaneManager auto-injection script reference or inline snippet. The pages load and function correctly without SprkChat.
+  </goal>
+
+  <context>
+    <background>
+      SprkChat currently auto-registers on all Dataverse pages by including an injection script in multiple HTML web resource files. EventsPage and SpeAdminApp are not AI-enabled pages — they don't need SprkChat and having it appear there competes with M365 Copilot. The spec FR-01 requires these pages to load without creating a SprkChat side pane.
+    </background>
+    <relevant-files>
+      <file>src/solutions/EventsPage/index.html</file>
+      <file>src/solutions/SpeAdminApp/index.html</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-01">SprkChat MUST NOT auto-register on EventsPage or SpeAdminApp</constraint>
+    <constraint source="project">MUST NOT remove any other script tags or functionality from the HTML files</constraint>
+    <constraint source="project">MUST NOT modify the HTML structure beyond removing the SprkChat injection snippet</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read src/solutions/EventsPage/index.html in full</step>
+    <step order="2">Read src/solutions/SpeAdminApp/index.html in full</step>
+    <step order="3">Identify the SprkChat/SidePaneManager injection snippet in EventsPage/index.html (look for script tags referencing openSprkChatPane or SidePaneManager)</step>
+    <step order="4">Remove the injection snippet from EventsPage/index.html, preserving all other content</step>
+    <step order="5">Identify the SprkChat/SidePaneManager injection snippet in SpeAdminApp/index.html</step>
+    <step order="6">Remove the injection snippet from SpeAdminApp/index.html, preserving all other content</step>
+    <step order="7">Verify the HTML files are still valid (no broken script blocks, no unclosed tags)</step>
+    <step order="8">Update TASK-INDEX.md: change task 003 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Read and validate HTML files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/EventsPage/index.html</output>
+    <output type="code">src/solutions/SpeAdminApp/index.html</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given EventsPage/index.html, when searched for 'SprkChat' or 'SidePaneManager' or 'openSprkChatPane', then no matches found.</criterion>
+    <criterion testable="true">Given SpeAdminApp/index.html, when searched for 'SprkChat' or 'SidePaneManager' or 'openSprkChatPane', then no matches found.</criterion>
+    <criterion testable="true">Given EventsPage/index.html, when parsed as HTML, then it is valid (no syntax errors).</criterion>
+    <criterion testable="true">Given SpeAdminApp/index.html, when parsed as HTML, then it is valid (no syntax errors).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a small cleanup task. If the injection is done via a separate script file reference, remove the script tag referencing that file. If it is inline JavaScript, remove the inline block. Be careful not to remove the main application script tags. After completing this task, the deployment (task 081) will push the updated HTML files as web resources.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, read both HTML files completely. This is a MINIMAL/STANDARD task — use appropriate rigor level.</protocol>
+  </execution>
+</task>

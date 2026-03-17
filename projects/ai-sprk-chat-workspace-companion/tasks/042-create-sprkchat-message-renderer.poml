@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create SprkChatMessageRenderer for Structured Response Cards</title>
+    <phase>2E: Enhanced SprkChat Pane — Components</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, typescript, react, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .tsx component with 5 card type renderers; complex rendering logic; Fluent v9 tokens; dark mode required; 6+ steps</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `SprkChatMessageRenderer.tsx` in `@spaarke/ui-components/SprkChat/` that renders structured response cards based on `metadata.responseType` from SSE messages. Support 5 card types: `markdown` (default), `citations` (with clickable citation references), `diff` (summary with open-diff action), `entity_card` (Dataverse record link), and `action_confirmation` (completed action summary). All use Fluent v9 tokens and support dark mode.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React rendering patterns and Fluent UI v9 card layouts.
+  </role>
+
+  <goal>
+    `SprkChatMessageRenderer.tsx` selects the appropriate card renderer based on `props.responseType` and renders the structured response data. All 5 card types render without errors in both light and dark mode.
+  </goal>
+
+  <context>
+    <background>
+      Currently SprkChat renders all AI responses as plain text or markdown. The enhanced pane needs structured cards: citations show source references with superscript links; diff cards summarize a proposed revision with an "Open Diff" button; entity cards link to Dataverse records (navigation handled by parent via onNavigate callback); action_confirmation shows a summary of a completed action. The responseType comes in the SSE message's metadata field.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 tokens for all styling — no hard-coded colors</constraint>
+    <constraint source="ADR-021">MUST support dark mode</constraint>
+    <constraint source="ADR-012">MUST NOT use Xrm navigation directly — entity card navigation via onNavigate callback prop</constraint>
+    <constraint source="spec">All 5 response types MUST be rendered if not excessively complex (per spec owner clarification)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing SprkChatMessage" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx">
+        Read to understand current message rendering. SprkChatMessageRenderer should be called from here based on message metadata.responseType.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SprkChatMessage.tsx and types.ts to understand existing message data shape and how metadata is attached</step>
+    <step order="2">Define StructuredResponseData type: union of MarkdownResponse, CitationsResponse, DiffResponse, EntityCardResponse, ActionConfirmationResponse</step>
+    <step order="3">Create SprkChatMessageRenderer.tsx with props: responseType: string, data: StructuredResponseData, onNavigate?: (entityType: string, entityId: string) => void, onOpenDiff?: (proposedText: string) => void</step>
+    <step order="4">Implement renderMarkdown: render data.text with basic markdown support (use existing pattern or simple dangerouslySetInnerHTML with sanitization)</step>
+    <step order="5">Implement renderCitations: render data.text with citation references as superscript Fluent Link components; below text, render sources list with document names and links</step>
+    <step order="6">Implement renderDiff: render data.summary text + "Open in Diff Viewer" Fluent Button that calls onOpenDiff(data.proposedText)</step>
+    <step order="7">Implement renderEntityCard: render entity name, type badge, key fields, and "View Record" button that calls onNavigate(entityType, entityId)</step>
+    <step order="8">Implement renderActionConfirmation: render action name, status badge (success/failure), summary text</step>
+    <step order="9">Add switch on responseType to select renderer; default to renderMarkdown</step>
+    <step order="10">Add to index.ts exports; build shared library</step>
+    <step order="11">Update TASK-INDEX.md: change task 042 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given responseType='citations', when rendered, then citation superscripts are visible.</criterion>
+    <criterion testable="true">Given responseType='diff', when "Open in Diff Viewer" clicked, then onOpenDiff is called with proposedText.</criterion>
+    <criterion testable="true">Given responseType='entity_card', when "View Record" clicked, then onNavigate is called with correct entityType and entityId.</criterion>
+    <criterion testable="true">Given responseType='unknown', when rendered, then fallback to markdown renderer without error.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Keep each renderer simple — structural, not pixel-perfect. Use Fluent v9 Card component for citation and entity card layouts. For markdown, if the existing SprkChatMessage already uses a markdown renderer, reuse it. The onNavigate callback for entity cards must NOT call Xrm.Navigation directly (that belongs in the Code Page layer, not the shared library). Citations response: data.citations is an array of {index: number, title: string, documentId: string}.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies on Phase 2B or 2C — can start in parallel with Group B. Read SprkChatMessage.tsx FIRST.</protocol>
+  </execution>
+</task>

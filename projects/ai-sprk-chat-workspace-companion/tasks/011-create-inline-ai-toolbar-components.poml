@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Create InlineAiToolbar and InlineAiActions Components</title>
+    <phase>2B: Inline AI Toolbar — Library</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013</blocks>
+    <tags>frontend, typescript, react, fluent-ui, shared-library</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new .tsx React component files in shared library; Fluent UI v9 tokens required; dark mode required per ADR-021</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `InlineAiToolbar.tsx` (floating toolbar positioned above text selection using absolute positioning) and `InlineAiActions.tsx` (action button list using Fluent UI v9 `Button` components with `mousedown` handlers to prevent selection loss) in the shared library.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React, Fluent UI v9, and accessibility. Follow ADR-021 strictly — Fluent tokens only, dark mode via FluentProvider. No Xrm imports.
+  </role>
+
+  <goal>
+    Two component files exist in InlineAiToolbar/ — InlineAiToolbar.tsx renders a floating positioned toolbar; InlineAiActions.tsx renders the action buttons with mousedown handlers. Both use Fluent v9 exclusively, support dark mode, and compile without errors.
+  </goal>
+
+  <context>
+    <background>
+      The InlineAiToolbar renders as an absolutely-positioned overlay above the text selection in the Lexical editor. Its position (top, left) is computed by the useInlineAiToolbar hook (task 012). The key constraint is using `onMouseDown` (not `onClick`) to prevent the browser from moving focus and collapsing the text selection before the action fires. The toolbar is rendered inside the editor container as a portal or direct overlay.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiToolbar.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiActions.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/inlineAiToolbar.types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 tokens for all colors, spacing — no hard-coded values</constraint>
+    <constraint source="ADR-021">MUST support dark mode — wrap in FluentProvider or use tokens that adapt</constraint>
+    <constraint source="ADR-012">MUST NOT import Xrm or ComponentFramework</constraint>
+    <constraint source="spec-NFR-01">Selection debounce ≤ 200ms — handled in hook (task 012); component just receives visible prop</constraint>
+    <constraint source="spec-2B">MUST use mousedown (not click) on toolbar buttons to prevent selection loss</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Button with tokens" location=".claude/adr/ADR-021-fluent-design-system.md">
+        Use makeStyles with tokens for styling. Button appearance="subtle" for toolbar buttons. Wrap in a styled div with position:absolute.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read inlineAiToolbar.types.ts to understand props interfaces</step>
+    <step order="2">Create InlineAiToolbar.tsx: accepts InlineAiToolbarProps, renders a div with position:absolute at {top, left} using makeStyles/tokens</step>
+    <step order="3">In InlineAiToolbar.tsx: apply visibility based on props.visible (display:none when not visible to keep in DOM); add a subtle shadow/border using tokens for visual separation</step>
+    <step order="4">In InlineAiToolbar.tsx: render InlineAiActions component as child, passing actions and onAction</step>
+    <step order="5">Create InlineAiActions.tsx: accepts InlineAiActionsProps, renders a horizontal row of Fluent v9 Button (appearance="subtle") for each action</step>
+    <step order="6">In InlineAiActions.tsx: use onMouseDown (NOT onClick) handler on each button — call e.preventDefault() then call props.onAction(action, getSelectedText())</step>
+    <step order="7">In InlineAiActions.tsx: show action label and icon; add Fluent Tooltip with action.description on hover</step>
+    <step order="8">Use makeStyles in both files with tokens.colorNeutralBackground1, tokens.colorNeutralForeground1, tokens.shadowMedium for the toolbar backdrop</step>
+    <step order="9">Build shared library to verify TypeScript compiles: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build (or tsc --noEmit)</step>
+    <step order="10">Update TASK-INDEX.md: change task 011 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/InlineAiActions.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given visible=false, when InlineAiToolbar renders, then toolbar is hidden (display:none or opacity:0).</criterion>
+    <criterion testable="true">Given visible=true and position={top:100, left:50}, when InlineAiToolbar renders, then it has absolute positioning at top:100px left:50px.</criterion>
+    <criterion testable="true">Given user clicks an action button, when inspecting the event handler, then it uses onMouseDown not onClick.</criterion>
+    <criterion testable="true">Given DEFAULT_INLINE_ACTIONS passed as actions, when InlineAiActions renders, then 5 buttons are visible.</criterion>
+    <criterion testable="true">Shared library builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The toolbar should sit at z-index above the editor content (tokens don't cover z-index — use makeStyles({ zIndex: 1000 })). The getSelectedText() helper in InlineAiActions can call window.getSelection()?.toString() ?? '' at the moment of mousedown. Consider adding a subtle background blur or shadow so the toolbar is readable over highlighted text. The toolbar width should be auto (fits content), not full width.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on task 010. Load inlineAiToolbar.types.ts before creating components.</protocol>
+  </execution>
+</task>

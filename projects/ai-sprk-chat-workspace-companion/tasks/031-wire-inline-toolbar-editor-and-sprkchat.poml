@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-sprk-chat-workspace-companion">
+  <metadata>
+    <title>Mount InlineAiToolbar in EditorPanel and Subscribe in SprkChat</title>
+    <phase>2B-Wiring: EditorPanel Integration</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030, 013</dependencies>
+    <blocks>050, 060</blocks>
+    <tags>frontend, typescript, react, code-page, shared-library, analysis-workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies multiple .tsx files; wires toolbar overlay into editor; adds BroadcastChannel subscription to SprkChat; 6+ steps</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    (1) Update `EditorPanel.tsx` to use `useInlineAiToolbar` and render `InlineAiToolbar` as a positioned overlay inside the editor container. (2) Update `SprkChat.tsx` in the shared library to subscribe to `inline_action` BroadcastChannel events and route them to the active chat session as messages.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 19, Fluent UI, and BroadcastChannel communication patterns.
+  </role>
+
+  <goal>
+    EditorPanel renders InlineAiToolbar on text selection; SprkChat.tsx receives inline_action events and appends them to the chat session as user messages (triggering AI response).
+  </goal>
+
+  <context>
+    <background>
+      EditorPanel.tsx is the rich text editor component in AnalysisWorkspace. It needs a ref on the editor container div, which is passed to useInlineAiToolbar. The InlineAiToolbar renders as an absolutely-positioned child inside the editor container. SprkChat.tsx in the shared library needs a new useEffect that listens on the BroadcastChannel for inline_action events and calls the existing chat session's sendMessage() handler with the action payload.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-04">Inline actions MUST appear in chat history — SprkChat must receive and display inline actions as messages</constraint>
+    <constraint source="spec-2B">EditorPanel container div must have position:relative so toolbar absolute positioning works correctly</constraint>
+    <constraint source="ADR-012">SprkChat.tsx changes MUST NOT add Xrm dependency — inline_action handling is purely BroadcastChannel based</constraint>
+    <constraint source="spec-FR-05">Diff-type actions (simplify, expand) MUST open existing DiffReviewPanel — route via existing useDiffReview hook from EditorPanel</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-workspace-companion/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkChat chat session" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts">
+        Read to understand how messages are sent. The inline_action handler should call the same sendMessage function.
+      </pattern>
+      <pattern name="DiffReview routing" location="src/client/code-pages/AnalysisWorkspace/src/hooks/useDiffReview.ts">
+        Read to understand how diff actions should open DiffReviewPanel. For diff-type inline actions, EditorPanel should call useDiffReview's openDiff with the selected text.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EditorPanel.tsx, SprkChat.tsx, useChatSession.ts, and useDiffReview.ts in full</step>
+    <step order="2">In EditorPanel.tsx: add useRef for editor container div; ensure the container div has position:relative</step>
+    <step order="3">In EditorPanel.tsx: call useInlineAiToolbar(editorContainerRef) to get {visible, position, selectedText, onAction, actions}</step>
+    <step order="4">In EditorPanel.tsx: render &lt;InlineAiToolbar visible={visible} position={position} actions={actions} onAction={onAction} /&gt; inside the editor container div</step>
+    <step order="5">In EditorPanel.tsx: handle diff-type actions in onAction — if action.actionType === 'diff', call useDiffReview's openDiff with selectedText (intercept before BroadcastChannel dispatch)</step>
+    <step order="6">In SprkChat.tsx: add useEffect that creates a BroadcastChannel listener for 'inline_action' events</step>
+    <step order="7">In SprkChat.tsx: on inline_action event received, format the message as a user message (e.g., "[action: {actionLabel}] {selectedText}") and call sendMessage</step>
+    <step order="8">In SprkChat.tsx: clean up BroadcastChannel listener in useEffect cleanup</step>
+    <step order="9">Build AnalysisWorkspace and shared library</step>
+    <step order="10">Update TASK-INDEX.md: change task 031 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given text is selected in EditorPanel, when toolbar becomes visible and user clicks an action, then SprkChat receives the message and displays it in chat history.</criterion>
+    <criterion testable="true">Given a diff-type inline action (Simplify), when clicked, then DiffReviewPanel opens with the selected text.</criterion>
+    <criterion testable="true">Both AnalysisWorkspace and shared library build without errors.</criterion>
+    <criterion testable="true">Given SprkChat.tsx, when its useEffect cleanup runs, then BroadcastChannel is properly closed (no memory leak).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    For the diff-type routing: the EditorPanel onAction callback should check action.actionType. If 'diff', it calls useDiffReview to open the panel AND also sends to chat (so the diff appears in chat history). If 'chat', it only sends to chat via BroadcastChannel. The message format for inline actions in chat: prefix with the action context, e.g. "[Summarize] {selectedText}" so the AI knows what to do with it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Depends on tasks 030 and 013. Read useChatSession.ts FIRST to understand how to call sendMessage.</protocol>
+  </execution>
+</task>

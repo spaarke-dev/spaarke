@@ -66,3 +66,9 @@ export * from './AiFieldTag';
 
 // AiProgressStepper - Multi-step progress indicator for AI analysis operations
 export * from './AiProgressStepper';
+
+// InlineAiToolbar - Floating AI action toolbar that appears on text selection
+export * from './InlineAiToolbar';
+
+// SlashCommandMenu - Floating command palette triggered by '/' in SprkChat input
+export * from './SlashCommandMenu';
