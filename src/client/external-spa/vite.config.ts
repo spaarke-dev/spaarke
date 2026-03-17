@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { viteSingleFile } from "vite-plugin-singlefile";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -83,7 +82,6 @@ export default defineConfig({
         ),
       ],
     }),
-    viteSingleFile(),
   ],
   resolve: {
     alias: {
@@ -106,13 +104,12 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
-    // Inline all assets into the single HTML file
-    assetsInlineLimit: 100000000,
     minify: true,
     rollupOptions: {
       output: {
-        // No manual chunks — viteSingleFile inlines everything into index.html
-        manualChunks: undefined,
+        entryFileNames: "assets/main.js",
+        chunkFileNames: "assets/chunk-[name].js",
+        assetFileNames: "assets/[name][extname]",
       },
     },
   },
@@ -148,5 +145,5 @@ export default defineConfig({
       },
     },
   },
-  base: "./",
+  base: "/",
 });
