@@ -2,7 +2,7 @@
 <task id="R2-004" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Shared renderMarkdown() Utility in @spaarke/ui-components</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>frontend, fluent-ui, shared-library, foundation</tags>
     <estimated-effort>medium</estimated-effort>

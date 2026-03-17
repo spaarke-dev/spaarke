@@ -1,7 +1,7 @@
 # Task Index — SprkChat Platform Enhancement R2
 
 > **Total Tasks**: 50
-> **Status**: 0/50 complete
+> **Status**: 7/50 complete
 > **Last Updated**: 2026-03-17
 
 ## Status Legend
@@ -16,12 +16,12 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 001 | Dataverse schema extensions | 🔲 | — | — | STANDARD |
-| 002 | JPS schema extensions | 🔲 | — | — | FULL |
-| 003 | Playbook embeddings AI Search index | 🔲 | — | — | FULL |
-| 004 | Shared renderMarkdown() utility | 🔲 | — | — | FULL |
-| 005 | Seed playbook trigger metadata | 🔲 | — | 001 | STANDARD |
-| 006 | Deploy Phase 1 | 🔲 | — | 001-005 | STANDARD |
+| 001 | Dataverse schema extensions | ✅ | — | — | STANDARD |
+| 002 | JPS schema extensions | ✅ | — | — | FULL |
+| 003 | Playbook embeddings AI Search index | ✅ | — | — | FULL |
+| 004 | Shared renderMarkdown() utility | ✅ | — | — | FULL |
+| 005 | Seed playbook trigger metadata | ✅ | — | 001 | STANDARD |
+| 006 | Deploy Phase 1 | ✅ | — | 001-005 | STANDARD |
 
 > **Phase 1 parallelism**: Tasks 001, 002, 003, 004 can run concurrently (no shared files). Task 005 waits for 001.
 
@@ -33,7 +33,7 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 010 | SSE streaming enhancement | 🔲 | A | 006 | FULL |
+| 010 | SSE streaming enhancement | ✅ | A | 006 | FULL |
 | 011 | Document context injection service | 🔲 | A | 006 | FULL |
 | 012 | Multi-document context aggregation | 🔲 | A | 011 | FULL |
 | 013 | Document upload endpoint | 🔲 | A | 011 | FULL |

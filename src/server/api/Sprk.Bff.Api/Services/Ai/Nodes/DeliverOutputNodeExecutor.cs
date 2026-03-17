@@ -365,6 +365,12 @@ internal sealed record DeliveryNodeConfig
     public string? DeliveryType { get; init; }
     public string? Template { get; init; }
     public DeliveryOutputFormat? OutputFormat { get; init; }
+
+    // R2: Typed output dispatch fields
+    public string? OutputType { get; init; }
+    public string? TargetPage { get; init; }
+    public Dictionary<string, string>? PrePopulateFields { get; init; }
+    public bool? RequiresConfirmation { get; init; }
 }
 
 /// <summary>

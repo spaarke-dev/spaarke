@@ -49,6 +49,8 @@ export type {
   INavPropEntry,
   IResolverFieldValues,
 } from './PolymorphicResolverService';
+export { renderMarkdown, SPRK_MARKDOWN_CSS } from './renderMarkdown';
+export type { RenderMarkdownOptions } from './renderMarkdown';
 export { SprkChatBridge } from './SprkChatBridge';
 export type {
   SprkChatBridgeEventMap,

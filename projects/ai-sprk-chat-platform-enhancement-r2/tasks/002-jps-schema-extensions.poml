@@ -2,7 +2,7 @@
 <task id="R2-002" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>JPS Schema Extensions — Output Node Type, requiresConfirmation Flag, Trigger Metadata</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>jps, schema, ai, foundation</tags>
     <estimated-effort>medium</estimated-effort>

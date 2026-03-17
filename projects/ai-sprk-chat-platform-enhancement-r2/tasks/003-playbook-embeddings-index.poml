@@ -2,7 +2,7 @@
 <task id="R2-003" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Create playbook-embeddings AI Search Index and BFF Embedding Generation Utility</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>ai, azure-ai, search, foundation, bff-api</tags>
     <estimated-effort>medium</estimated-effort>

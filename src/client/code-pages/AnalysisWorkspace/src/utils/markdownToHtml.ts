@@ -14,10 +14,23 @@
  *   - - item      → <ul><li>
  *   - [status]    → <span> (dimmed progress messages)
  *   - Paragraphs  → <p> (double newline separated)
+ *
+ * @deprecated Use `renderMarkdown` from `@spaarke/ui-components` instead.
+ * The shared utility provides full markdown support (tables, code blocks,
+ * blockquotes), DOMPurify sanitization, and Fluent v9 semantic token styling
+ * with automatic dark mode support. This file will be removed when
+ * AnalysisWorkspace is migrated in Phase 3.
+ *
+ * ```typescript
+ * import { renderMarkdown } from "@spaarke/ui-components";
+ * const html = renderMarkdown(markdownText);
+ * ```
  */
 
 /**
  * Convert markdown text to HTML for the RichTextEditor.
+ *
+ * @deprecated Use `renderMarkdown` from `@spaarke/ui-components` instead.
  */
 export function markdownToHtml(markdown: string): string {
   if (!markdown) return '';

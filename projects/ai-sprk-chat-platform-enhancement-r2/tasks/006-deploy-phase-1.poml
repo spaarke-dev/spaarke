@@ -2,7 +2,7 @@
 <task id="R2-006" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Deploy Phase 1 — Dataverse Schema, AI Search Index, Shared Library Build Verification</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>deploy, dataverse, azure-ai, foundation</tags>
     <estimated-effort>small</estimated-effort>
