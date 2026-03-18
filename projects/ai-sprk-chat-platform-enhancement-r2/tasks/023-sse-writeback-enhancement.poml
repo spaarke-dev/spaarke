@@ -2,7 +2,7 @@
 <task id="R2-023" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>SSE Write-Back Enhancement — Stream Write-Back Content as document_stream Events</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai, streaming</tags>
     <estimated-effort>medium</estimated-effort>

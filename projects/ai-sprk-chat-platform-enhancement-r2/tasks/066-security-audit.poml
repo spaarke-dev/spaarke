@@ -2,7 +2,7 @@
 <task id="R2-066" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Security Audit — DOMPurify, Token Budget, Session Cleanup, Data Governance</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>5</phase>
     <tags>testing, security</tags>
     <estimated-effort>medium</estimated-effort>

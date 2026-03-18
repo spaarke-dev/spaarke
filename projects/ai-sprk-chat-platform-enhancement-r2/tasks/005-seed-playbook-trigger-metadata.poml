@@ -2,7 +2,7 @@
 <task id="R2-005" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Seed Playbook Trigger Metadata — Populate Existing Playbooks with triggerPhrases, recordType, entityType, tags</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>dataverse, ai, foundation</tags>
     <estimated-effort>medium</estimated-effort>

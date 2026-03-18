@@ -2,7 +2,7 @@
 <task id="R2-058" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Deploy Phase 4 — Full Stack BFF API and Frontend Web Resources</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>4</phase>
     <tags>deploy, azure, dataverse</tags>
     <estimated-effort>medium</estimated-effort>

@@ -2,7 +2,7 @@
 <task id="R2-020" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>AnalysisChatContextResolver Real Implementation — Replace Stub with Live Dataverse Queries</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai, dataverse</tags>
     <estimated-effort>large</estimated-effort>

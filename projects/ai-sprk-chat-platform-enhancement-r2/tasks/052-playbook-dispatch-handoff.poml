@@ -2,7 +2,7 @@
 <task id="R2-052" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Playbook Dispatch End-to-End — Natural Language to Dialog Handoff</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>4</phase>
     <tags>frontend, bff-api, integration</tags>
     <estimated-effort>large</estimated-effort>

@@ -105,6 +105,7 @@ public static class EndpointMappingExtensions
         {
             app.MapAnalysisEndpoints();
             app.MapPlaybookEndpoints();
+            app.MapPlaybookEmbeddingEndpoints();
             app.MapAiPlaybookBuilderEndpoints();
             app.MapScopeEndpoints();
             app.MapNodeEndpoints();
@@ -116,6 +117,8 @@ public static class EndpointMappingExtensions
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
         app.MapChatEndpoints();
+        app.MapChatDocumentEndpoints();
+        app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

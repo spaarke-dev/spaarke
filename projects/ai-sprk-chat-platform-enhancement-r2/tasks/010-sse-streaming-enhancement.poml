@@ -2,7 +2,7 @@
 <task id="R2-010" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>SSE Streaming Enhancement — Token-by-Token Chat Response Streaming with Typing Indicators</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, api, ai, streaming</tags>
     <estimated-effort>medium</estimated-effort>

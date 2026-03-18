@@ -2,7 +2,7 @@
 <task id="R2-035" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Dynamic Slash Command Resolution at Session Initialization</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>frontend</tags>
     <estimated-effort>medium</estimated-effort>

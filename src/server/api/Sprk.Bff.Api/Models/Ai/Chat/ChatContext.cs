@@ -34,7 +34,8 @@ public record ChatKnowledgeScope(
     string? ActiveDocumentId,
     string? ParentEntityType = null,
     string? ParentEntityId = null,
-    IReadOnlyList<string>? AdditionalDocumentIds = null)
+    IReadOnlyList<string>? AdditionalDocumentIds = null,
+    string? ScopeSearchGuidance = null)
 {
     /// <summary>
     /// Maximum number of additional documents that can be pinned to a conversation.

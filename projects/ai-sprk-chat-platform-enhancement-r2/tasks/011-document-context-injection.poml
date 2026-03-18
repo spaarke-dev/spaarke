@@ -2,7 +2,7 @@
 <task id="R2-011" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Document Context Injection Service — Conversation-Aware Semantic Chunking with 30K Token Budget</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai, document-intelligence</tags>
     <estimated-effort>large</estimated-effort>

@@ -475,7 +475,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = MockChatClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
             });
 
             services.AddSingleton(MockChatClient.Object);
@@ -752,7 +752,7 @@ public class ReAnalysisFlowErrorFixture : ReAnalysisFlowTestFixture
             {
                 var chatClient = errorMockClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
             });
         });
     }

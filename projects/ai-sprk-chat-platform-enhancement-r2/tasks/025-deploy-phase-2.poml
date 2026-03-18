@@ -2,7 +2,7 @@
 <task id="R2-025" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Deploy Phase 2 — BFF API Build, Test, and Deployment to Dev Environment</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>deploy, azure, bff-api</tags>
     <estimated-effort>medium</estimated-effort>

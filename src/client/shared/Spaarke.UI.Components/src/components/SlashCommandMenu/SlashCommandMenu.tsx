@@ -3,7 +3,15 @@
  *
  * Opens above the SprkChat input bar when the user types '/' to trigger the
  * slash command mode. Renders a filtered, keyboard-navigable list of SprkChat
- * commands (system + playbook capabilities).
+ * commands grouped by source category: System, Playbook, and Scope.
+ *
+ * Category grouping:
+ * - System Commands   → Built-in commands always available (neutral icon)
+ * - Playbook Commands → Dynamic commands from the active playbook (brand/purple accent)
+ * - Scope Commands    → Dynamic commands from analysis scopes (teal/secondary accent)
+ *
+ * Each non-system command item optionally shows a source subtitle indicating
+ * which playbook or scope contributed the command (e.g., "From: Legal Research").
  *
  * Positioning: The popover is anchored to `anchorRef` using an absolutely-
  * positioned container rendered in the same stacking context as the anchor.
@@ -11,15 +19,18 @@
  * (typically the chat input container).
  *
  * Keyboard navigation:
- * - ArrowDown / ArrowUp → move focused item
+ * - ArrowDown / ArrowUp → move focused item (across category boundaries)
  * - Enter               → select focused item
  * - Escape              → dismiss menu (fires onDismiss)
+ *
+ * Category headers are visual-only (not selectable, skipped by keyboard nav).
  *
  * Accessibility:
  * - role="listbox" on the list container
  * - role="option" on each item
  * - aria-selected on the focused item
  * - aria-activedescendant on the listbox
+ * - Category headers use role="presentation" and aria-hidden
  *
  * @see slashCommandMenu.types.ts - Type definitions and DEFAULT_SLASH_COMMANDS
  * @see useSlashCommands.ts       - Hook for managing state and filtering
@@ -34,7 +45,51 @@ import {
   tokens,
   Text,
 } from '@fluentui/react-components';
-import { type SlashCommandMenuProps, type SlashCommand } from './slashCommandMenu.types';
+import {
+  SettingsRegular,
+  BookTemplateRegular,
+  GlobeRegular,
+} from '@fluentui/react-icons';
+import { type SlashCommandMenuProps, type SlashCommand, type SlashCommandSource } from './slashCommandMenu.types';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Category configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CategoryConfig {
+  key: SlashCommandSource;
+  label: string;
+  icon: React.ReactElement;
+  /** Semantic token for the category header icon color accent. */
+  accentColor: string;
+}
+
+/**
+ * Ordered category definitions. Only categories with matching commands are rendered.
+ * - System: neutral icon (SettingsRegular), neutral foreground
+ * - Playbook: BookTemplateRegular with brand/purple accent
+ * - Scope: GlobeRegular with compound brand (teal/secondary) accent
+ */
+const CATEGORY_CONFIG: CategoryConfig[] = [
+  {
+    key: 'system',
+    label: 'System Commands',
+    icon: React.createElement(SettingsRegular),
+    accentColor: tokens.colorNeutralForeground2,
+  },
+  {
+    key: 'playbook',
+    label: 'Playbook Commands',
+    icon: React.createElement(BookTemplateRegular),
+    accentColor: tokens.colorBrandForeground1,
+  },
+  {
+    key: 'scope',
+    label: 'Scope Commands',
+    icon: React.createElement(GlobeRegular),
+    accentColor: tokens.colorCompoundBrandForeground1,
+  },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -115,6 +170,12 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
+  itemSourceSubtitle: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    lineHeight: tokens.lineHeightBase100,
+    fontStyle: 'italic',
+  },
   highlightMatch: {
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightBold,
@@ -130,6 +191,9 @@ const useStyles = makeStyles({
     textAlign: 'center',
   },
   categoryHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalM}`,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
@@ -138,11 +202,62 @@ const useStyles = makeStyles({
     letterSpacing: '0.04em',
     backgroundColor: tokens.colorNeutralBackground2,
   },
+  categoryIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '12px',
+  },
+  /** Brand/purple accent for playbook category header icon. */
+  categoryIconPlaybook: {
+    color: tokens.colorBrandForeground1,
+  },
+  /** Compound brand (teal) accent for scope category header icon. */
+  categoryIconScope: {
+    color: tokens.colorCompoundBrandForeground1,
+  },
+  /** Neutral accent for system category header icon. */
+  categoryIconSystem: {
+    color: tokens.colorNeutralForeground2,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Groups commands by their `source` field, preserving the category order
+ * defined in CATEGORY_CONFIG. Only returns non-empty groups.
+ */
+function groupCommandsBySource(commands: SlashCommand[]): Array<{
+  config: CategoryConfig;
+  commands: SlashCommand[];
+}> {
+  const groups: Array<{ config: CategoryConfig; commands: SlashCommand[] }> = [];
+
+  for (const config of CATEGORY_CONFIG) {
+    const matching = commands.filter(c => (c.source ?? 'system') === config.key);
+    if (matching.length > 0) {
+      groups.push({ config, commands: matching });
+    }
+  }
+
+  return groups;
+}
+
+/**
+ * Builds a flat ordered list of commands from the grouped categories.
+ * This ensures keyboard navigation indices stay consistent with visual order.
+ */
+function buildFlatCommandList(
+  groups: Array<{ config: CategoryConfig; commands: SlashCommand[] }>,
+): SlashCommand[] {
+  const flat: SlashCommand[] = [];
+  for (const group of groups) {
+    flat.push(...group.commands);
+  }
+  return flat;
+}
 
 /**
  * Renders a label with the matched portion highlighted.
@@ -190,8 +305,9 @@ function HighlightedLabel({
 
 /**
  * SlashCommandMenu renders a floating command palette above the SprkChat input
- * bar. Supports keyboard navigation, type-ahead filtering, and dark mode via
- * Fluent v9 design tokens.
+ * bar. Commands are grouped by source category (System, Playbook, Scope) with
+ * distinct visual headers and optional source subtitles. Supports keyboard
+ * navigation across category boundaries and dark mode via Fluent v9 design tokens.
  *
  * @example
  * ```tsx
@@ -227,6 +343,13 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
   const [focusedIndex, setFocusedIndex] = React.useState(0);
   const listRef = React.useRef<HTMLUListElement>(null);
 
+  // Group commands by source category and build a flat list for keyboard nav
+  const groups = React.useMemo(() => groupCommandsBySource(commands), [commands]);
+  const flatCommands = React.useMemo(() => buildFlatCommandList(groups), [groups]);
+
+  // Whether to show category headers (only when there are 2+ categories)
+  const showCategoryHeaders = groups.length > 1;
+
   // Reset focused index when the command list or visibility changes
   React.useEffect(() => {
     setFocusedIndex(0);
@@ -242,13 +365,13 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
     }
   }, [focusedIndex, visible]);
 
-  // Keyboard navigation handler — registered on the list container
+  // Keyboard navigation handler — uses flatCommands for cross-category navigation
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLUListElement>) => {
       switch (event.key) {
         case 'ArrowDown': {
           event.preventDefault();
-          setFocusedIndex(prev => Math.min(prev + 1, commands.length - 1));
+          setFocusedIndex(prev => Math.min(prev + 1, flatCommands.length - 1));
           break;
         }
         case 'ArrowUp': {
@@ -258,8 +381,8 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
         }
         case 'Enter': {
           event.preventDefault();
-          if (commands.length > 0) {
-            onSelect(commands[focusedIndex]);
+          if (flatCommands.length > 0) {
+            onSelect(flatCommands[focusedIndex]);
           }
           break;
         }
@@ -272,7 +395,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
           break;
       }
     },
-    [commands, focusedIndex, onSelect, onDismiss],
+    [flatCommands, focusedIndex, onSelect, onDismiss],
   );
 
   const handleItemClick = React.useCallback(
@@ -291,11 +414,21 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 
   // Derive the active descendant id for aria
   const activeDescendantId =
-    commands.length > 0 ? `slash-cmd-item-${commands[focusedIndex]?.id}` : undefined;
+    flatCommands.length > 0 ? `slash-cmd-item-${flatCommands[focusedIndex]?.id}` : undefined;
 
-  // Group commands by category for section headers
-  const systemCommands = commands.filter(c => c.category === 'system');
-  const playbookCommands = commands.filter(c => c.category === 'playbook');
+  /**
+   * Returns the style class for a category header icon based on source type.
+   */
+  const getCategoryIconClass = (source: SlashCommandSource): string => {
+    switch (source) {
+      case 'playbook':
+        return styles.categoryIconPlaybook;
+      case 'scope':
+        return styles.categoryIconScope;
+      default:
+        return styles.categoryIconSystem;
+    }
+  };
 
   const renderItem = (command: SlashCommand, absoluteIndex: number): React.ReactElement => (
     <li
@@ -333,9 +466,17 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
         <Text className={styles.itemDescription} as="span" title={command.description}>
           {command.description}
         </Text>
+        {command.sourceName && (
+          <Text className={styles.itemSourceSubtitle} as="span">
+            From: {command.sourceName}
+          </Text>
+        )}
       </span>
     </li>
   );
+
+  // Track the running absolute index across groups for keyboard navigation
+  let absoluteIndex = 0;
 
   return (
     <div
@@ -345,7 +486,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
       aria-hidden={!visible}
       data-testid="slash-command-menu"
     >
-      {commands.length === 0 ? (
+      {flatCommands.length === 0 ? (
         <div className={styles.emptyState} role="status">
           No commands match &ldquo;/{filterText}&rdquo;
         </div>
@@ -361,21 +502,37 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
           // the parent wires up focus management
           tabIndex={-1}
         >
-          {systemCommands.length > 0 && playbookCommands.length > 0 && (
-            <li role="presentation" className={styles.categoryHeader} aria-hidden="true">
-              System
-            </li>
-          )}
-          {systemCommands.map((cmd, idx) => renderItem(cmd, idx))}
+          {groups.map(group => {
+            const startIndex = absoluteIndex;
+            absoluteIndex += group.commands.length;
 
-          {playbookCommands.length > 0 && (
-            <li role="presentation" className={styles.categoryHeader} aria-hidden="true">
-              Playbook
-            </li>
-          )}
-          {playbookCommands.map((cmd, idx) =>
-            renderItem(cmd, systemCommands.length + idx),
-          )}
+            return (
+              <React.Fragment key={group.config.key}>
+                {showCategoryHeaders && (
+                  <li
+                    role="presentation"
+                    className={styles.categoryHeader}
+                    aria-hidden="true"
+                    data-testid={`slash-cmd-category-${group.config.key}`}
+                  >
+                    <span
+                      className={mergeClasses(
+                        styles.categoryIcon,
+                        getCategoryIconClass(group.config.key),
+                      )}
+                      aria-hidden="true"
+                    >
+                      {group.config.icon}
+                    </span>
+                    {group.config.label}
+                  </li>
+                )}
+                {group.commands.map((cmd, idx) =>
+                  renderItem(cmd, startIndex + idx),
+                )}
+              </React.Fragment>
+            );
+          })}
         </ul>
       )}
     </div>

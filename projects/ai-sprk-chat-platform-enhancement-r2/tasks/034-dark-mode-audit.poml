@@ -2,7 +2,7 @@
 <task id="R2-034" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Dark Mode Compliance Audit — All Phase 3 Group C Components</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>frontend, fluent-ui, e2e-test</tags>
     <estimated-effort>medium</estimated-effort>

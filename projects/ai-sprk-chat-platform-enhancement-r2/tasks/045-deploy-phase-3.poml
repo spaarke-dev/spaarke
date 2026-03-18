@@ -2,7 +2,7 @@
 <task id="R2-045" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Deploy Phase 3 — SprkChatPane and AnalysisWorkspace Web Resources</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>deploy, dataverse</tags>
     <estimated-effort>medium</estimated-effort>

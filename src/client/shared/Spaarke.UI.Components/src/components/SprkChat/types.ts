@@ -61,6 +61,7 @@ export interface IChatMessageMetadata {
     | 'entity_card'
     | 'action_confirmation'
     | 'plan_preview'
+    | 'document_status'
     | string;
 
   /**
@@ -134,9 +135,22 @@ export type ChatSseEventType =
   | 'error'
   | 'suggestions'
   | 'citations'
+  | 'typing_start'
+  | 'typing_end'
   | 'plan_preview'
   | 'plan_step_start'
-  | 'plan_step_complete';
+  | 'plan_step_complete'
+  | 'document_processing_start'
+  | 'document_processing_complete'
+  | 'document_processing_error'
+  | 'action_confirmation'
+  | 'action_success'
+  | 'action_error'
+  | 'dialog_open'
+  | 'navigate'
+  | 'document_stream_start'
+  | 'document_stream_token'
+  | 'document_stream_end';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -191,6 +205,38 @@ export interface IChatSseEventData {
   errorCode?: string | null;
   /** Human-readable error message on failure. Only in 'plan_step_complete' events. */
   errorMessage?: string | null;
+
+  // ── action_confirmation fields (task R2-039) ─────────────────────────────────
+  /** Action identifier. In 'action_confirmation', 'action_success', 'action_error' events. */
+  actionId?: string;
+  /** Human-readable action name. In 'action_confirmation' events. */
+  actionName?: string;
+  /** Action summary. In 'action_confirmation' events. */
+  summary?: string;
+  /** Extracted parameters. In 'action_confirmation' events. */
+  parameters?: Record<string, string>;
+  /** Human-readable message. In 'action_success' and 'action_error' events. */
+  message?: string;
+
+  // ── dialog_open fields (task R2-039) ─────────────────────────────────────────
+  /** Code Page web resource name. In 'dialog_open' events. */
+  targetPage?: string;
+  /** Pre-populated field values for the dialog. In 'dialog_open' events. */
+  prePopulateFields?: Record<string, string>;
+  /** Optional dialog width percentage. In 'dialog_open' events. */
+  width?: number;
+  /** Optional dialog height percentage. In 'dialog_open' events. */
+  height?: number;
+
+  // ── navigate fields (task R2-052) ───────────────────────────────────────────
+  /** Fully constructed navigation URL. In 'navigate' events. */
+  url?: string;
+  // targetPage is reused from dialog_open fields above for navigate events.
+  // parameters is reused from action_confirmation fields above for navigate events.
+  /** Playbook ID that triggered the navigation. In 'navigate' events. */
+  playbookId?: string;
+  /** Playbook display name. In 'dialog_open' and 'navigate' events. */
+  playbookName?: string;
 }
 
 /**
@@ -219,8 +265,19 @@ export interface ICitationSseItem {
   page?: number | null;
   /** Short excerpt from the matched content. */
   excerpt: string;
-  /** Chunk ID from the search index for traceability. */
-  chunkId: string;
+  /** Chunk ID from the search index for traceability. Optional for web citations. */
+  chunkId?: string;
+  /**
+   * Citation source type.
+   * - 'document' (default) — internal SPE document/knowledge article
+   * - 'web' — external web search result
+   * When absent, defaults to 'document' for backward compatibility.
+   */
+  sourceType?: CitationSourceType;
+  /** Full URL of the web search result. Present when sourceType is 'web'. */
+  url?: string;
+  /** Short text snippet from the web search result. Present when sourceType is 'web'. */
+  snippet?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,22 +547,44 @@ export interface ISprkChatSuggestionsProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Discriminates between internal document citations and external web search citations.
+ * - 'document' — internal SPE file reference (default; omit for backward compatibility)
+ * - 'web'      — external web search result with URL
+ */
+export type CitationSourceType = 'document' | 'web';
+
+/**
  * A citation reference from the AI response, linking back to a
  * source document, page, and text excerpt.
+ *
+ * When `sourceType` is 'web', the citation represents an external web search
+ * result and MUST include `url` and `snippet`. The `chunkId` field is optional
+ * for web citations. Web citations display an "[External Source]" badge per ADR-015.
  */
 export interface ICitation {
   /** Numeric citation ID displayed as superscript [N]. */
   id: number;
   /** Display name of the source document or resource. */
   source: string;
-  /** Page number within the source (optional). */
+  /** Page number within the source (optional; typically absent for web citations). */
   page?: number;
   /** Text excerpt from the source that supports the citation. */
   excerpt: string;
-  /** Chunk identifier from the RAG pipeline (for traceability). */
-  chunkId: string;
-  /** URL to open the source document directly (optional). */
+  /** Chunk identifier from the RAG pipeline (for traceability). Optional for web citations. */
+  chunkId?: string;
+  /** URL to open the source document directly (optional for document citations). */
   sourceUrl?: string;
+  /**
+   * Citation source type discriminator.
+   * - 'document' (default) — internal SPE document reference
+   * - 'web' — external web search result
+   * When absent, defaults to 'document' for backward compatibility.
+   */
+  sourceType?: CitationSourceType;
+  /** Full URL of the web search result. Required when sourceType is 'web'. */
+  url?: string;
+  /** Short text snippet from the web search result. Required when sourceType is 'web'. */
+  snippet?: string;
 }
 
 /** Props for the CitationMarker inline component. */
@@ -631,6 +710,139 @@ export type IDocumentStreamEvent =
     };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Document Stream SSE Event (Task R2-051: BFF SSE → SprkChatBridge forwarding)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A document stream SSE event received from the BFF on the /messages endpoint.
+ * useSseStream stores these in pendingDocumentStreamEvent state; SprkChat.tsx
+ * watches via useEffect and forwards each to SprkChatBridge.emit().
+ *
+ * Matches the DocumentStreamEvent hierarchy in DocumentStreamEvent.cs:
+ * - document_stream_start: { operationId, targetPosition, operationType }
+ * - document_stream_token: { operationId, token, index }
+ * - document_stream_end:   { operationId, cancelled, totalTokens }
+ *
+ * SECURITY (ADR-015): Only content tokens and structural metadata.
+ * Auth tokens and user PII are NEVER included.
+ */
+export type IDocumentStreamSseEvent =
+  | {
+      type: 'document_stream_start';
+      operationId: string;
+      targetPosition: string;
+      operationType: 'insert' | 'replace' | 'diff';
+    }
+  | {
+      type: 'document_stream_token';
+      operationId: string;
+      token: string;
+      index: number;
+    }
+  | {
+      type: 'document_stream_end';
+      operationId: string;
+      cancelled: boolean;
+      totalTokens: number;
+    };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Action Confirmation Types (Task R2-039: HITL vs Autonomous Execution)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pending action awaiting user confirmation (HITL — requiresConfirmation=true).
+ * Shown in the ActionConfirmationDialog. On Confirm, the action is dispatched
+ * to the BFF; on Cancel, the pending action is cleared without side effects.
+ *
+ * @see spec-FR-07 — HITL confirmation dialog
+ * @see ADR-021 — Fluent v9 Dialog component
+ */
+export interface IPendingAction {
+  /** Unique action identifier from the playbook dispatcher. */
+  actionId: string;
+  /** Human-readable action name (e.g., "Send Email", "Create Record"). */
+  actionName: string;
+  /** Brief description of what the action will do. */
+  summary: string;
+  /** Extracted parameters shown as key-value pairs in the dialog (e.g., "Recipient: john@example.com"). */
+  parameters: Record<string, string>;
+  /** The session ID to dispatch the confirmed action to. */
+  sessionId: string;
+}
+
+/**
+ * Payload for the `dialog_open` SSE event.
+ * Instructs the frontend to open a Code Page dialog via Xrm.Navigation.navigateTo.
+ *
+ * @see spec-FR-08 — Dialog open event
+ * @see ADR-006 — Code Page dialogs via Xrm.Navigation.navigateTo
+ */
+export interface IDialogOpenPayload {
+  /** Web resource name of the Code Page to open (e.g., "sprk_emailcomposer"). */
+  targetPage: string;
+  /** Pre-populated field values to pass as URL query params in the navigateTo data attribute. */
+  prePopulateFields: Record<string, string>;
+  /** Optional dialog width percentage (default 85). */
+  width?: number;
+  /** Optional dialog height percentage (default 85). */
+  height?: number;
+}
+
+/**
+ * Payload for the `action_confirmation` SSE event (requiresConfirmation=true).
+ * The BFF sends this when a playbook action requires user confirmation before execution.
+ */
+export interface IActionConfirmationPayload {
+  /** Unique action identifier. */
+  actionId: string;
+  /** Human-readable action name. */
+  actionName: string;
+  /** Brief summary of the proposed action. */
+  summary: string;
+  /** Extracted parameters as key-value pairs. */
+  parameters: Record<string, string>;
+}
+
+/**
+ * Payload for `action_success` SSE event (requiresConfirmation=false — autonomous execution).
+ */
+export interface IActionSuccessPayload {
+  /** Action identifier that completed. */
+  actionId: string;
+  /** Human-readable success message. */
+  message: string;
+}
+
+/**
+ * Payload for `action_error` SSE event (action execution failed).
+ */
+export interface IActionErrorPayload {
+  /** Action identifier that failed. */
+  actionId: string;
+  /** Human-readable error message. */
+  message: string;
+}
+
+/**
+ * Payload for the `navigate` SSE event (Task R2-052).
+ * Instructs the frontend to navigate to a Dataverse record, external URL,
+ * or Code Page via Xrm.Navigation.navigateTo or Xrm.Navigation.openUrl.
+ *
+ * @see ADR-006 — Code Page dialogs via Xrm.Navigation.navigateTo
+ */
+export interface INavigatePayload {
+  /** Fully constructed navigation URL (e.g., Dataverse record URL). Null when targetPage is provided. */
+  url?: string;
+  /** Code Page web resource name for internal navigation. Null when url is provided. */
+  targetPage?: string;
+  /** Extracted parameters for the navigation target (e.g., matterId, entityId). */
+  parameters: Record<string, string>;
+  /** Playbook ID that triggered the navigation. */
+  playbookId?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hook Return Types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -644,6 +856,12 @@ export interface IUseSseStreamResult {
   error: Error | null;
   /** Whether a stream is currently active */
   isStreaming: boolean;
+  /**
+   * Whether the AI is processing the request (typing indicator should be shown).
+   * True between `typing_start` and either the first `token` event or `typing_end`.
+   * Used to display the animated typing indicator before content arrives.
+   */
+  isTyping: boolean;
   /** Follow-up suggestions received from the suggestions SSE event (1-3 strings) */
   suggestions: string[];
   /** Citation metadata received from the citations SSE event, keyed by citation ID for fast lookup */
@@ -662,13 +880,141 @@ export interface IUseSseStreamResult {
    * Reset to null at the start of each new stream.
    */
   pendingPlanData: IChatSseEventData | null;
+  /**
+   * Pending action/dialog event from the SSE stream (Task R2-039).
+   * Set when action_confirmation, action_success, action_error, dialog_open, or navigate events arrive.
+   * SprkChat watches this via useEffect and dispatches to the appropriate handler.
+   * Reset to null at the start of each new stream.
+   */
+  pendingActionEvent: {
+    type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
+    data: IChatSseEventData;
+  } | null;
   /** Start a new SSE stream */
   startStream: (url: string, body: Record<string, unknown>, token: string) => void;
   /** Cancel the active stream */
   cancelStream: () => void;
   /** Clear stored suggestions (called when user sends a new message) */
   clearSuggestions: () => void;
+  /** Clear the pending action event after it has been handled (Task R2-039). */
+  clearPendingActionEvent: () => void;
+
+  /**
+   * Pending document stream event from the BFF SSE stream (Task R2-051).
+   * Set when document_stream_start, document_stream_token, or document_stream_end
+   * events arrive on the main /messages SSE stream. SprkChat.tsx watches this via
+   * useEffect and forwards each event to SprkChatBridge for cross-pane delivery
+   * to the AnalysisWorkspace Lexical editor.
+   *
+   * SECURITY (ADR-015): Only content tokens and structural metadata are included.
+   * Auth tokens, credentials, and user PII are NEVER present in these events.
+   *
+   * Reset to null after SprkChat.tsx processes the event.
+   */
+  pendingDocumentStreamEvent: IDocumentStreamSseEvent | null;
+
+  /** Clear the pending document stream event after it has been forwarded (Task R2-051). */
+  clearPendingDocumentStreamEvent: () => void;
+
+  /**
+   * Register a callback for document stream events (Task R2-051).
+   *
+   * Unlike pendingDocumentStreamEvent (state-based), this callback is invoked
+   * synchronously from the fetch loop for every document_stream_start/token/end
+   * event. This prevents React state batching from coalescing rapid token events.
+   *
+   * SprkChat.tsx registers a callback that calls bridge.emit() for each event.
+   * Pass null to unregister.
+   *
+   * SECURITY (ADR-015): The callback receives only content tokens and structural
+   * metadata. Auth tokens are NEVER included.
+   */
+  setOnDocumentStreamEvent: (handler: ((event: IDocumentStreamSseEvent) => void) | null) => void;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Document Upload Status Types (Phase 3E: Upload Processing Feedback)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Processing status of an uploaded document.
+ * - 'processing' — Document Intelligence is extracting text
+ * - 'complete'   — Extraction finished, document added to context
+ * - 'error'      — Extraction failed
+ */
+export type DocumentProcessingStatus = 'processing' | 'complete' | 'error';
+
+/**
+ * A system message representing document upload processing status.
+ * Inserted into the chat message stream when a document is uploaded.
+ * Updated in-place as SSE events arrive (processing_start → complete | error).
+ *
+ * @see spec-FR-13 — Document upload via drag-and-drop
+ * @see ADR-015 — MUST NOT display extracted document text
+ */
+export interface IDocumentStatusMessage {
+  /** Unique document identifier from the BFF upload response. */
+  documentId: string;
+  /** Original file name displayed in the status message. */
+  fileName: string;
+  /** Current processing status. */
+  status: DocumentProcessingStatus;
+  /** Number of pages extracted (available after 'complete' status). */
+  pageCount?: number;
+  /** Error description (available after 'error' status). */
+  error?: string;
+  /** UTC timestamp when the processing started. */
+  startedAt: number;
+  /**
+   * SPE persistence state for the "Save to matter files" action (FR-14).
+   * - 'idle'   — save button shown (default when containerId is available)
+   * - 'saving' — save in progress (spinner on button)
+   * - 'saved'  — copy persisted to SPE (shows "Saved — View in Files" link)
+   * - 'error'  — persistence failed (button restored, toast shown by parent)
+   *
+   * @see spec-FR-14 — Optional SPE persistence for uploaded documents
+   * @see spec-NFR-06 — Save creates a COPY in SPE; session-scoped temp document remains
+   */
+  persistenceState?: 'idle' | 'saving' | 'saved' | 'error';
+  /** SharePoint file URL returned by BFF after successful SPE persistence. */
+  savedFileUrl?: string;
+}
+
+/**
+ * Extended chat message that can optionally carry document status data.
+ * When `metadata.responseType === 'document_status'` and `documentStatus` is
+ * present, SprkChatMessage delegates rendering to SprkChatDocumentStatus.
+ *
+ * This type extends IChatMessage to keep backward compatibility — existing
+ * messages without documentStatus continue to render normally.
+ */
+export interface IDocumentStatusChatMessage extends IChatMessage {
+  /** Document processing status metadata. Present only for document_status messages. */
+  documentStatus?: IDocumentStatusMessage;
+}
+
+/** Props for the SprkChatDocumentStatus component. */
+export interface ISprkChatDocumentStatusProps {
+  /** Document processing status data. */
+  status: IDocumentStatusMessage;
+  /**
+   * Callback to persist the uploaded document to SPE (matter files).
+   * Called when the user clicks "Save to matter files".
+   * Only invoked when containerId is present (FR-14).
+   */
+  onSaveToMatterFiles?: (documentId: string) => void;
+  /**
+   * Whether the host context has a containerId (SPE container available).
+   * When false/undefined, the "Save to matter files" button is hidden.
+   */
+  hasContainerId?: boolean;
+}
+
+/**
+ * Timeout threshold in milliseconds for document processing (NFR-02: 15 seconds).
+ * When processing exceeds this threshold, the UI shows an extended wait message.
+ */
+export const DOCUMENT_PROCESSING_TIMEOUT_MS = 15_000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Action Menu Types (SprkChatActionMenu — Phase 2E)

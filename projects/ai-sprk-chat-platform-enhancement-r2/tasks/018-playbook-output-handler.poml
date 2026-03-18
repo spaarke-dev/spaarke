@@ -2,7 +2,7 @@
 <task id="R2-018" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>PlaybookOutputHandler — Typed Output Routing (text/dialog/navigation/download/insert) with HITL vs Autonomous Execution</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai</tags>
     <estimated-effort>large</estimated-effort>

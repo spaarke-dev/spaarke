@@ -1,9 +1,16 @@
+using Azure.Search.Documents.Indexes;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -72,6 +79,12 @@ public sealed class SprkChatAgentFactory
     /// Used by <see cref="AnalysisExecutionTools.RerunAnalysisAsync"/> to emit progress and
     /// document replacement events during re-analysis. Null when SSE is not available.
     /// </param>
+    /// <param name="latestUserMessage">
+    /// The most recent user message text for conversation-aware document chunk re-selection (FR-03).
+    /// When provided, <see cref="DocumentContextService"/> uses embedding similarity to select
+    /// the most relevant document chunks for this specific question rather than defaulting to
+    /// position-based selection. Null on initial session creation or when not applicable.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -87,6 +100,7 @@ public sealed class SprkChatAgentFactory
         IReadOnlyList<string>? additionalDocumentIds = null,
         HttpContext? httpContext = null,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
+        string? latestUserMessage = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -107,6 +121,46 @@ public sealed class SprkChatAgentFactory
             hostContext,
             additionalDocumentIds,
             cancellationToken);
+
+        // === Document context injection (R2-011, R2-012) ===
+        // Factory-instantiate DocumentContextService (ADR-010: NOT DI-registered) and enrich
+        // the ChatContext with full document content within the 30K token budget.
+        // When multiple document IDs are present (primary + additional), use multi-document
+        // aggregation with proportional budget allocation (FR-12).
+        // When the document exceeds the budget, conversation-aware re-selection uses
+        // embedding similarity to the latest user message (FR-03).
+        context = await EnrichWithDocumentContextAsync(
+            scope.ServiceProvider, context, documentId, additionalDocumentIds,
+            httpContext, latestUserMessage, cancellationToken);
+
+        // === Active Capabilities enrichment (R2-021, FR-11) ===
+        // Resolve the command catalog from DynamicCommandResolver and append an
+        // "### Active Capabilities" section to the system prompt so the AI model
+        // is aware of scope-contributed slash commands.
+        try
+        {
+            var commandResolver = CreateCommandResolver();
+            var commands = await commandResolver.ResolveCommandsAsync(
+                tenantId, hostContext, cancellationToken);
+
+            var enrichedPrompt = PlaybookChatContextProvider.AppendActiveCapabilities(
+                context.SystemPrompt, commands);
+
+            if (!ReferenceEquals(enrichedPrompt, context.SystemPrompt))
+            {
+                context = context with { SystemPrompt = enrichedPrompt };
+                _logger.LogDebug(
+                    "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
+                    commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
+                                     && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — Active Capabilities is enhancing, not required
+            _logger.LogWarning(ex,
+                "Failed to enrich system prompt with Active Capabilities; continuing without");
+        }
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic chat mode), use all capabilities as default.
@@ -185,6 +239,99 @@ public sealed class SprkChatAgentFactory
             _logger);
 
         return agent;
+    }
+
+    /// <summary>
+    /// Factory-instantiates a <see cref="PlaybookDispatcher"/> for the given tenant.
+    ///
+    /// ADR-010: PlaybookDispatcher is NOT registered in DI — it is created here with
+    /// resolved dependencies from the scoped service provider.
+    ///
+    /// Dependencies resolved from DI:
+    ///   - <see cref="SearchIndexClient"/> (singleton) — for PlaybookEmbeddingService
+    ///   - <see cref="IOpenAiClient"/> (singleton) — for PlaybookEmbeddingService
+    ///   - <see cref="INodeService"/> (scoped) — for output node metadata lookup
+    ///   - <see cref="IDistributedCache"/> (singleton) — for result caching (ADR-009)
+    /// </summary>
+    /// <param name="tenantId">Tenant ID for cache key scoping (ADR-014).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A configured <see cref="PlaybookDispatcher"/> instance.</returns>
+    public async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var scope = _serviceProvider.CreateAsyncScope();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        // Resolve dependencies for PlaybookEmbeddingService (factory-instantiated)
+        var searchIndexClient = scope.ServiceProvider.GetRequiredService<SearchIndexClient>();
+        var openAiClient = scope.ServiceProvider.GetRequiredService<IOpenAiClient>();
+        var embeddingService = new PlaybookEmbeddingService(
+            searchIndexClient,
+            openAiClient,
+            loggerFactory.CreateLogger<PlaybookEmbeddingService>());
+
+        // Resolve remaining dependencies
+        var nodeService = scope.ServiceProvider.GetRequiredService<INodeService>();
+        var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
+
+        return new PlaybookDispatcher(
+            embeddingService,
+            _rawChatClient,
+            nodeService,
+            cache,
+            tenantId,
+            loggerFactory.CreateLogger<PlaybookDispatcher>());
+    }
+
+    /// <summary>
+    /// Factory-instantiates a <see cref="DynamicCommandResolver"/> for the given tenant.
+    ///
+    /// ADR-010: DynamicCommandResolver is NOT registered in DI — it is created here with
+    /// resolved dependencies from the scoped service provider.
+    ///
+    /// Dependencies resolved from DI:
+    ///   - <see cref="IGenericEntityService"/> (singleton) — for Dataverse queries
+    ///   - <see cref="IDistributedCache"/> (singleton) — for Redis caching (ADR-009)
+    /// </summary>
+    /// <returns>A configured <see cref="DynamicCommandResolver"/> instance.</returns>
+    public DynamicCommandResolver CreateCommandResolver()
+    {
+        var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
+        var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
+        var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+
+        return new DynamicCommandResolver(
+            entityService,
+            cache,
+            loggerFactory.CreateLogger<DynamicCommandResolver>());
+    }
+
+    /// <summary>
+    /// Factory-instantiates a <see cref="PlaybookOutputHandler"/> for routing typed playbook outputs.
+    ///
+    /// ADR-010: PlaybookOutputHandler is NOT registered in DI — it is created here with
+    /// resolved dependencies from the scoped service provider.
+    ///
+    /// Dependencies:
+    ///   - <see cref="CompoundIntentDetector"/> (stateless, instantiated directly)
+    ///   - <see cref="DocxExportService"/> (resolved from DI via <see cref="IExportService"/>)
+    /// </summary>
+    /// <returns>A configured <see cref="PlaybookOutputHandler"/> instance.</returns>
+    public PlaybookOutputHandler CreatePlaybookOutputHandler()
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        var intentDetector = new CompoundIntentDetector(
+            loggerFactory.CreateLogger<CompoundIntentDetector>());
+
+        var docxExport = scope.ServiceProvider.GetRequiredService<DocxExportService>();
+
+        return new PlaybookOutputHandler(
+            intentDetector,
+            docxExport,
+            loggerFactory.CreateLogger<PlaybookOutputHandler>());
     }
 
     // === Private helpers ===
@@ -333,15 +480,18 @@ public sealed class SprkChatAgentFactory
                 var workingDocumentService = scopedProvider.GetService<IWorkingDocumentService>();
                 if (workingDocumentService != null)
                 {
-                    // No-op document stream SSE writer: streaming token delivery for
-                    // EditWorkingDocument/AppendSection is deferred to a follow-up task.
-                    // WriteBackToWorkingDocumentAsync does not stream tokens and works fully.
-                    Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task> noOpDocumentSSE =
-                        (_, _) => Task.CompletedTask;
+                    // R2-023: Wire real document stream SSE writer for streaming write-back
+                    // content to the client (spec FR-04). The delegate writes DocumentStreamEvent
+                    // objects as SSE frames via ChatEndpoints.WriteDocumentStreamSSEAsync.
+                    // Falls back to no-op when httpContext is unavailable (background processing).
+                    Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task> documentSSE =
+                        httpContext != null
+                            ? Api.Ai.ChatEndpoints.CreateDocumentStreamSseWriter(httpContext.Response)
+                            : (_, _) => Task.CompletedTask;
 
                     var workingDocumentTools = new WorkingDocumentTools(
                         _chatClient,
-                        noOpDocumentSSE,
+                        documentSSE,
                         analysisService,
                         workingDocumentService,
                         _logger,
@@ -377,9 +527,27 @@ public sealed class SprkChatAgentFactory
             // deal with confidential internal documents and should not reach out to the public
             // internet. The "web_search" capability provides admin control over which contexts
             // allow external web queries (ADR-015: external content governance).
+            //
+            // R2-017: Real Bing Web Search v7 API integration with scope-guided search (FR-10),
+            // citation generation, and graceful mock fallback when API key is not configured.
+            // Factory-instantiated (ADR-010): reads config directly, no new DI registration.
             if (capabilities.Contains(PlaybookCapabilities.WebSearch))
             {
-                var webSearchTools = new WebSearchTools(_logger);
+                var httpClientFactory = scopedProvider.GetRequiredService<IHttpClientFactory>();
+                var configuration = scopedProvider.GetRequiredService<IConfiguration>();
+                var bingApiKey = configuration["BingSearch:ApiKey"];
+                var bingEndpoint = configuration["BingSearch:Endpoint"];
+                var bingMaxResults = 10;
+                if (int.TryParse(configuration["BingSearch:MaxResults"], out var parsedMax))
+                    bingMaxResults = parsedMax;
+
+                // ScopeSearchGuidance from ChatKnowledgeScope — populated by R2-020
+                // (AnalysisChatContextResolver). Null until R2-020 is complete.
+                var scopeSearchGuidance = knowledgeScope?.ScopeSearchGuidance;
+
+                var webSearchTools = new WebSearchTools(
+                    _logger, httpClientFactory, citationContext,
+                    bingApiKey, bingEndpoint, bingMaxResults, scopeSearchGuidance);
                 tools.Add(AIFunctionFactory.Create(
                     webSearchTools.SearchWebAsync,
                     name: "SearchWeb",
@@ -437,5 +605,152 @@ public sealed class SprkChatAgentFactory
         }
 
         return new HashSet<string>(PlaybookCapabilities.All);
+    }
+
+    /// <summary>
+    /// Factory-instantiates <see cref="DocumentContextService"/> and enriches the
+    /// <see cref="ChatContext"/> with full document content within the 30K token budget.
+    ///
+    /// When <paramref name="additionalDocumentIds"/> is non-empty, uses multi-document
+    /// aggregation (R2-012) with proportional budget allocation across all documents.
+    /// Otherwise, uses single-document injection (R2-011).
+    ///
+    /// ADR-010: DocumentContextService is NOT registered in DI — instantiated here with
+    /// resolved dependencies from the scoped service provider.
+    ///
+    /// ADR-007: Document retrieval uses <see cref="ISpeFileOperations"/> facade.
+    ///
+    /// ADR-015: Document content is NOT logged — only metadata (chunk counts, token usage).
+    /// </summary>
+    /// <param name="serviceProvider">Scoped DI provider for dependency resolution.</param>
+    /// <param name="context">The existing ChatContext to enrich.</param>
+    /// <param name="documentId">Dataverse document ID (primary).</param>
+    /// <param name="additionalDocumentIds">
+    /// Optional additional document IDs for multi-document mode.
+    /// When non-empty, all documents (primary + additional) share the 30K token budget.
+    /// </param>
+    /// <param name="httpContext">HTTP context for OBO auth (may be null).</param>
+    /// <param name="latestUserMessage">
+    /// The most recent user message for conversation-aware chunk re-selection (FR-03).
+    /// Null on initial session creation (position-based selection used).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Enriched ChatContext with document content in DocumentSummary, or unchanged on failure.</returns>
+    private async Task<ChatContext> EnrichWithDocumentContextAsync(
+        IServiceProvider serviceProvider,
+        ChatContext context,
+        string documentId,
+        IReadOnlyList<string>? additionalDocumentIds,
+        HttpContext? httpContext,
+        string? latestUserMessage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var documentService = serviceProvider.GetRequiredService<IDocumentDataverseService>();
+            var speFileStore = serviceProvider.GetRequiredService<ISpeFileOperations>();
+            var textExtractor = serviceProvider.GetRequiredService<ITextExtractor>();
+            var openAiClient = serviceProvider.GetRequiredService<IOpenAiClient>();
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+
+            var documentContextService = new DocumentContextService(
+                documentService,
+                speFileStore,
+                textExtractor,
+                openAiClient,
+                loggerFactory.CreateLogger<DocumentContextService>());
+
+            // Multi-document mode: primary + additional documents share the 30K budget
+            if (additionalDocumentIds is { Count: > 0 })
+            {
+                return await EnrichWithMultiDocumentContextAsync(
+                    documentContextService, context, documentId, additionalDocumentIds,
+                    httpContext, latestUserMessage, cancellationToken);
+            }
+
+            // Single-document mode (R2-011)
+            var result = await documentContextService.InjectDocumentContextAsync(
+                documentId, httpContext, latestUserMessage, cancellationToken);
+
+            if (result.SelectedChunks.Count == 0)
+            {
+                _logger.LogDebug(
+                    "No document content available for {DocumentId}; using existing context",
+                    documentId);
+                return context;
+            }
+
+            // Format document chunks and prepend to existing DocumentSummary.
+            // The existing summary (if any) is a short TL;DR — the full document content
+            // from DocumentContextService provides much richer context.
+            var documentContent = result.FormatForSystemPrompt();
+            var enrichedSummary = !string.IsNullOrWhiteSpace(context.DocumentSummary)
+                ? $"{documentContent}\n\n---\n**Summary**: {context.DocumentSummary}"
+                : documentContent;
+
+            _logger.LogInformation(
+                "Enriched context for {DocumentId}: {ChunkCount} chunks, {TokensUsed}/{Budget} tokens, truncated={Truncated}",
+                documentId, result.SelectedChunks.Count, result.TotalTokensUsed,
+                DocumentContextService.MaxTokenBudget, result.WasTruncated);
+
+            return context with { DocumentSummary = enrichedSummary };
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — document context enrichment is enhancing, not required.
+            // The agent will still work with the existing playbook context and summary.
+            _logger.LogWarning(ex,
+                "Failed to enrich context with document content for {DocumentId}; continuing with existing context",
+                documentId);
+            return context;
+        }
+    }
+
+    /// <summary>
+    /// Enriches the <see cref="ChatContext"/> using multi-document aggregation (R2-012).
+    /// Combines the primary document and additional documents into a single list and
+    /// delegates to <see cref="DocumentContextService.InjectMultiDocumentContextAsync"/>.
+    /// </summary>
+    private async Task<ChatContext> EnrichWithMultiDocumentContextAsync(
+        DocumentContextService documentContextService,
+        ChatContext context,
+        string documentId,
+        IReadOnlyList<string> additionalDocumentIds,
+        HttpContext? httpContext,
+        string? latestUserMessage,
+        CancellationToken cancellationToken)
+    {
+        // Combine primary document + additional documents into a single list
+        var allDocumentIds = new List<string> { documentId };
+        allDocumentIds.AddRange(additionalDocumentIds.Where(id => !string.IsNullOrWhiteSpace(id)));
+
+        _logger.LogInformation(
+            "Multi-document context enrichment: {DocumentCount} documents (primary={PrimaryDocId})",
+            allDocumentIds.Count, documentId);
+
+        var result = await documentContextService.InjectMultiDocumentContextAsync(
+            allDocumentIds, httpContext, latestUserMessage, cancellationToken);
+
+        if (result.MergedChunks.Count == 0)
+        {
+            _logger.LogDebug(
+                "No content available from {DocumentCount} documents; using existing context",
+                allDocumentIds.Count);
+            return context;
+        }
+
+        // Format multi-document chunks with attribution headers
+        var documentContent = result.FormatForSystemPrompt();
+        var enrichedSummary = !string.IsNullOrWhiteSpace(context.DocumentSummary)
+            ? $"{documentContent}\n\n---\n**Summary**: {context.DocumentSummary}"
+            : documentContent;
+
+        _logger.LogInformation(
+            "Multi-document enrichment complete: {DocumentCount} documents, " +
+            "{MergedChunkCount} merged chunks, {TokensUsed}/{Budget} tokens, anyTruncated={AnyTruncated}",
+            result.DocumentGroups.Count, result.MergedChunks.Count, result.TotalTokensUsed,
+            DocumentContextService.MaxTokenBudget, result.AnyTruncated);
+
+        return context with { DocumentSummary = enrichedSummary };
     }
 }

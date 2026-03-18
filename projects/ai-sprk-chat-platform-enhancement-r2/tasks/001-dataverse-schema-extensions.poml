@@ -2,7 +2,7 @@
 <task id="R2-001" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Dataverse Schema Extensions — Scope Capabilities, Playbook Trigger Metadata, Scope Search Guidance</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>1</phase>
     <tags>dataverse, schema, foundation</tags>
     <estimated-effort>medium</estimated-effort>

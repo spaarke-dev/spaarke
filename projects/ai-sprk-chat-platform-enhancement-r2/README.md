@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-03-17
 >
-> **Status**: In Progress
+> **Status**: Complete
 
 ## Overview
 
@@ -22,10 +22,10 @@ SprkChat R2 elevates the AI workspace companion to copilot-quality by adding mar
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development |
-| **Progress** | 0% |
+| **Phase** | Complete |
+| **Progress** | 100% |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-03-17 |
 | **Owner** | Ralph Schroeder |
 
 ## Problem Statement
@@ -40,22 +40,22 @@ R2 addresses all identified gaps through 13 in-scope work items organized into 6
 
 The project is considered **complete** when:
 
-- [ ] Chat messages render formatted markdown (no raw symbols visible)
-- [ ] SprkChat references and reasons about source document content
-- [ ] Conversation-aware chunking re-selects relevant chunks per turn
-- [ ] Slash commands change dynamically based on analysis context
-- [ ] PlaybookDispatcher matches natural language to playbooks with parameter extraction
-- [ ] Typed playbook outputs (dialog, navigation, download, insert) work end-to-end
-- [ ] HITL vs autonomous execution modes function correctly
-- [ ] Chat responses stream token-by-token via SSE
-- [ ] Web search synthesizes results with scope-guided citations
-- [ ] Scope capabilities contribute commands independent of active playbook
-- [ ] Multi-document analysis works with 5+ documents
-- [ ] Document upload processes and injects into context within 15 seconds
-- [ ] Uploaded documents can optionally persist to SPE
-- [ ] "Open in Word" generates .docx and opens in Word Online
-- [ ] AnalysisChatContextResolver returns real capabilities (not stubbed)
-- [ ] Write-back streams via SSE and updates Lexical editor via BroadcastChannel
+- [x] Chat messages render formatted markdown (no raw symbols visible)
+- [x] SprkChat references and reasons about source document content
+- [x] Conversation-aware chunking re-selects relevant chunks per turn
+- [x] Slash commands change dynamically based on analysis context
+- [x] PlaybookDispatcher matches natural language to playbooks with parameter extraction
+- [x] Typed playbook outputs (dialog, navigation, download, insert) work end-to-end
+- [x] HITL vs autonomous execution modes function correctly
+- [x] Chat responses stream token-by-token via SSE
+- [x] Web search synthesizes results with scope-guided citations
+- [x] Scope capabilities contribute commands independent of active playbook
+- [x] Multi-document analysis works with 5+ documents
+- [x] Document upload processes and injects into context within 15 seconds
+- [x] Uploaded documents can optionally persist to SPE
+- [x] "Open in Word" generates .docx and opens in Word Online
+- [x] AnalysisChatContextResolver returns real capabilities (not stubbed)
+- [x] Write-back streams via SSE and updates Lexical editor via BroadcastChannel
 
 ## Scope
 

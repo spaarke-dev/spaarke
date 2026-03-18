@@ -2,7 +2,7 @@
 <task id="R2-039" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>HITL vs Autonomous Execution UX — Action Confirmation Dialog</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>frontend, fluent-ui</tags>
     <estimated-effort>medium</estimated-effort>

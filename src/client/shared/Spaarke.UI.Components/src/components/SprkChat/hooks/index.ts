@@ -17,7 +17,7 @@ export type { IUseChatPlaybooksResult } from './useChatPlaybooks';
 export { useActionMenuData } from './useActionMenuData';
 export type { UseActionMenuDataOptions, IUseActionMenuDataResult } from './useActionMenuData';
 
-export { useActionHandlers } from './useActionHandlers';
+export { useActionHandlers, openCodePageDialog, navigateToTarget, dispatchConfirmedAction } from './useActionHandlers';
 export type {
   UseActionHandlersOptions,
   IUseActionHandlersResult,
@@ -29,3 +29,9 @@ export type {
 
 export { useSelectionListener } from './useSelectionListener';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './useSelectionListener';
+
+export { useDynamicSlashCommands } from './useDynamicSlashCommands';
+export type {
+  UseDynamicSlashCommandsOptions,
+  IUseDynamicSlashCommandsResult,
+} from './useDynamicSlashCommands';

@@ -2,7 +2,7 @@
 <task id="R2-055" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Web Search Integration — BFF Search to Citation Cards</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>4</phase>
     <tags>integration, ai</tags>
     <estimated-effort>medium</estimated-effort>

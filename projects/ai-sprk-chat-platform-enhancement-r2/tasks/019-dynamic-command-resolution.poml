@@ -2,7 +2,7 @@
 <task id="R2-019" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>DynamicCommandResolver — Metadata-Driven Command Catalog from Playbooks + Scopes with Redis Cache</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai, cache, redis</tags>
     <estimated-effort>medium</estimated-effort>

@@ -2,7 +2,7 @@
 <task id="R2-012" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Multi-Document Context — Shared 30K Token Budget Across Document Sets with Proportional Allocation</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai</tags>
     <estimated-effort>medium</estimated-effort>

@@ -553,6 +553,127 @@ describe('SprkChat - Citations Integration', () => {
     expect(screen.getByText('Web Article')).toBeInTheDocument();
     expect(screen.queryByText(/^Page\s/)).not.toBeInTheDocument();
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 8: sseFlow_WebCitation_ShowsGlobeIconAndExternalBadge
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_WebCitation_ShowsGlobeIconAndExternalBadge', async () => {
+    const user = await renderChatWithSession();
+
+    const sseEvents = [
+      { type: 'token', content: 'According to [1], the ruling was clear.' },
+      {
+        type: 'citations',
+        content: null,
+        data: {
+          citations: [
+            {
+              id: 1,
+              sourceName: 'Smith v. Jones Case Analysis',
+              page: null,
+              excerpt: 'The court ruled in favor.',
+              chunkId: 'https://www.example.com/smith-v-jones',
+              sourceType: 'web',
+              url: 'https://www.example.com/smith-v-jones',
+              snippet: 'The court ruled in favor of the plaintiff based on established precedent.',
+            },
+          ],
+        },
+      },
+      { type: 'done', content: null },
+    ];
+
+    await sendMessageAndStream(user, 'What was the ruling?', sseEvents);
+
+    // Wait for citation marker
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Click to open popover
+    await user.click(screen.getByTestId('citation-marker-1'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('citation-popover-1')).toBeInTheDocument();
+    });
+
+    // Verify web citation popover content
+    expect(screen.getByText('Smith v. Jones Case Analysis')).toBeInTheDocument();
+    expect(screen.getByTestId('citation-external-badge-1')).toBeInTheDocument();
+    expect(screen.getByText('External Source')).toBeInTheDocument();
+    expect(
+      screen.getByText('The court ruled in favor of the plaintiff based on established precedent.')
+    ).toBeInTheDocument();
+
+    // Verify clickable URL link
+    const link = screen.getByTestId('citation-link-1');
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute('href')).toBe('https://www.example.com/smith-v-jones');
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 9: sseFlow_MixedCitations_DocumentAndWebRenderCorrectly
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_MixedCitations_DocumentAndWebRenderCorrectly', async () => {
+    const user = await renderChatWithSession();
+
+    const sseEvents = [
+      { type: 'token', content: 'Internal policy [1] and external research [2] agree.' },
+      {
+        type: 'citations',
+        content: null,
+        data: {
+          citations: [
+            {
+              id: 1,
+              sourceName: 'Company Policy Handbook',
+              page: 12,
+              excerpt: 'All employees must comply with regulation.',
+              chunkId: 'policy-chunk-1',
+            },
+            {
+              id: 2,
+              sourceName: 'Legal Research Database',
+              page: null,
+              excerpt: 'Recent regulatory changes.',
+              chunkId: 'https://www.example.com/legal-research',
+              sourceType: 'web',
+              url: 'https://www.example.com/legal-research',
+              snippet: 'Recent regulatory changes impact compliance requirements.',
+            },
+          ],
+        },
+      },
+      { type: 'done', content: null },
+    ];
+
+    await sendMessageAndStream(user, 'Compare internal and external', sseEvents);
+
+    // Wait for both citation markers
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
+        expect(screen.getByTestId('citation-marker-2')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    // Click document citation [1] — should show document icon and page
+    await user.click(screen.getByTestId('citation-marker-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('citation-popover-1')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Company Policy Handbook')).toBeInTheDocument();
+    expect(screen.getByText('Page 12')).toBeInTheDocument();
+    // No External Source badge for document citations
+    expect(screen.queryByTestId('citation-external-badge-1')).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,34 @@ export interface IAnalysisContextInfo {
   sourceContainerId?: string;
 }
 
+/** Command entry from the DynamicCommandResolver catalog (R2-019). */
+export interface ICommandEntry {
+  /** Unique command identifier (slug). */
+  id: string;
+  /** Human-readable display label. */
+  label: string;
+  /** Short description of what the command does. */
+  description: string;
+  /** Slash command string including leading slash (e.g., "/search"). */
+  trigger: string;
+  /** Source category: "system", "playbook", or scope-qualified label. */
+  category: string;
+  /** Identifier of the contributing playbook or scope, null for system commands. */
+  source: string | null;
+}
+
+/** Metadata about the active analysis scope (R2-021). */
+export interface IAnalysisScopeMetadata {
+  /** Dataverse GUID string of the active scope record. */
+  scopeId: string;
+  /** Display name of the scope. */
+  scopeName: string;
+  /** Optional description of the scope. */
+  description?: string;
+  /** Optional focus area for the scope. */
+  focusArea?: string;
+}
+
 /** Full analysis chat context response from the BFF API. */
 export interface IAnalysisChatContextResponse {
   /** Dataverse GUID string of the default playbook, or empty when unresolved. */
@@ -81,6 +109,23 @@ export interface IAnalysisChatContextResponse {
   knowledgeSources: IAnalysisKnowledgeSourceInfo[];
   /** Contextual metadata about the analysis record. */
   analysisContext: IAnalysisContextInfo;
+  /**
+   * Dynamic command catalog from DynamicCommandResolver (R2-019/R2-020).
+   * Contains system, playbook, and scope-contributed slash commands.
+   * Null/undefined when command resolution is unavailable.
+   * Note: Commands are also available via the dedicated /sessions/{id}/commands endpoint.
+   */
+  commands?: ICommandEntry[];
+  /**
+   * Scope-level search guidance from sprk_searchGuidance on the active scope(s).
+   * Used by WebSearchTools for scope-guided web search (FR-10).
+   */
+  searchGuidance?: string;
+  /**
+   * Lightweight metadata about the active scope(s): name, description, and focus area.
+   * Null when no scopes are active for this analysis context.
+   */
+  scopeMetadata?: IAnalysisScopeMetadata;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

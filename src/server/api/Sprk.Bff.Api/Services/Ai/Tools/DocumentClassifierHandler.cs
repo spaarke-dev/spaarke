@@ -700,7 +700,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Failed to parse classification response: {Response}", response);
+            _logger.LogWarning(ex, "Failed to parse classification response (length={ResponseLength})", response?.Length ?? 0);
             return (CreateUnknownClassification(), new List<DocumentClassification>(), null);
         }
     }

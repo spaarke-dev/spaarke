@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.AI;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -128,6 +130,7 @@ public sealed class WorkingDocumentTools
 
         var operationId = Guid.NewGuid();
         var tokenIndex = 0;
+        var contentBuilder = new StringBuilder();
 
         _logger.LogInformation(
             "EditWorkingDocument starting — operationId={OperationId}, analysisId={AnalysisId}, instructionLen={InstructionLen}",
@@ -172,12 +175,14 @@ public sealed class WorkingDocumentTools
                 new AiChatMessage(ChatRole.User, instruction)
             };
 
-            // Stream tokens from the inner LLM call via IChatClient
+            // Stream tokens from the inner LLM call via IChatClient.
+            // Accumulate content for SHA-256 hash computation (ADR-014: hash only, not cached).
             await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, cancellationToken: cancellationToken))
             {
                 var tokenText = update.Text;
                 if (!string.IsNullOrEmpty(tokenText))
                 {
+                    contentBuilder.Append(tokenText);
                     await _writeSSE(
                         new DocumentStreamTokenEvent(operationId, Token: tokenText, Index: tokenIndex),
                         cancellationToken);
@@ -185,9 +190,13 @@ public sealed class WorkingDocumentTools
                 }
             }
 
-            // Emit successful document_stream_end
+            // R2-023: Compute SHA-256 hash of the final assembled content for integrity verification.
+            var contentHash = ComputeContentHash(contentBuilder.ToString());
+
+            // Emit successful document_stream_end with content hash
             await _writeSSE(
-                new DocumentStreamEndEvent(operationId, Cancelled: false, TotalTokens: tokenIndex),
+                new DocumentStreamEndEvent(operationId, Cancelled: false, TotalTokens: tokenIndex,
+                    ContentHash: contentHash),
                 cancellationToken);
 
             _logger.LogInformation(
@@ -254,6 +263,7 @@ public sealed class WorkingDocumentTools
 
         var operationId = Guid.NewGuid();
         var tokenIndex = 0;
+        var contentBuilder = new StringBuilder();
 
         _logger.LogInformation(
             "AppendSection starting — operationId={OperationId}, analysisId={AnalysisId}, sectionTitle={SectionTitle}, instructionLen={InstructionLen}",
@@ -276,6 +286,7 @@ public sealed class WorkingDocumentTools
 
             // Emit the section heading as the first token before LLM content
             var heading = $"## {sectionTitle}\n\n";
+            contentBuilder.Append(heading);
             await _writeSSE(
                 new DocumentStreamTokenEvent(operationId, Token: heading, Index: tokenIndex),
                 cancellationToken);
@@ -299,12 +310,14 @@ public sealed class WorkingDocumentTools
                     $"Write the content for a new section titled \"{sectionTitle}\" based on the following instruction: {instruction}")
             };
 
-            // Stream tokens from the inner LLM call via IChatClient
+            // Stream tokens from the inner LLM call via IChatClient.
+            // Accumulate content for SHA-256 hash computation (ADR-014: hash only, not cached).
             await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, cancellationToken: cancellationToken))
             {
                 var tokenText = update.Text;
                 if (!string.IsNullOrEmpty(tokenText))
                 {
+                    contentBuilder.Append(tokenText);
                     await _writeSSE(
                         new DocumentStreamTokenEvent(operationId, Token: tokenText, Index: tokenIndex),
                         cancellationToken);
@@ -312,9 +325,13 @@ public sealed class WorkingDocumentTools
                 }
             }
 
-            // Emit successful document_stream_end
+            // R2-023: Compute SHA-256 hash of the final assembled content for integrity verification.
+            var contentHash = ComputeContentHash(contentBuilder.ToString());
+
+            // Emit successful document_stream_end with content hash
             await _writeSSE(
-                new DocumentStreamEndEvent(operationId, Cancelled: false, TotalTokens: tokenIndex),
+                new DocumentStreamEndEvent(operationId, Cancelled: false, TotalTokens: tokenIndex,
+                    ContentHash: contentHash),
                 cancellationToken);
 
             _logger.LogInformation(
@@ -382,10 +399,12 @@ public sealed class WorkingDocumentTools
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(content, nameof(content));
 
+        var operationId = Guid.NewGuid();
+
         // ADR-015: Log content length only — never the content itself
         _logger.LogInformation(
-            "WriteBackToWorkingDocument starting — analysisId={AnalysisId}, contentLen={ContentLen}",
-            _analysisId, content.Length);
+            "WriteBackToWorkingDocument starting — operationId={OperationId}, analysisId={AnalysisId}, contentLen={ContentLen}",
+            operationId, _analysisId, content.Length);
 
         // Guard: require a valid analysis ID in the session context
         if (string.IsNullOrWhiteSpace(_analysisId) || !Guid.TryParse(_analysisId, out var analysisGuid))
@@ -400,6 +419,41 @@ public sealed class WorkingDocumentTools
 
         try
         {
+            // R2-023: Emit document_stream_start before write-back content streaming (spec FR-04).
+            // The "replace" operation type indicates the full working document content is being replaced.
+            await _writeSSE(
+                new DocumentStreamStartEvent(operationId, TargetPosition: "document", OperationType: "replace"),
+                cancellationToken);
+
+            // R2-023: Stream the write-back content as document_stream_token events.
+            // Content is chunked to provide progressive streaming to the client (spec FR-04).
+            // ADR-014: Tokens are write-through only — not cached.
+            // ADR-015: Token content MUST NOT be logged.
+            var position = 0;
+            var tokenIndex = 0;
+            const int chunkSize = 100; // Characters per chunk — balances granularity vs overhead.
+
+            for (var offset = 0; offset < content.Length; offset += chunkSize)
+            {
+                var chunk = content.Substring(offset, Math.Min(chunkSize, content.Length - offset));
+                await _writeSSE(
+                    new DocumentStreamTokenEvent(operationId, Token: chunk, Index: tokenIndex),
+                    cancellationToken);
+                position += chunk.Length;
+                tokenIndex++;
+            }
+
+            // R2-023: Compute SHA-256 hash of the final content for integrity verification.
+            // ADR-014: Only the hash is retained, not the content itself.
+            var contentHash = ComputeContentHash(content);
+
+            // R2-023: Emit document_stream_end with the content hash (spec FR-04).
+            // This MUST precede the "done" SSE event (ordering constraint).
+            await _writeSSE(
+                new DocumentStreamEndEvent(operationId, Cancelled: false, TotalTokens: tokenIndex,
+                    ContentHash: contentHash),
+                cancellationToken);
+
             // SAFETY: This is the ONLY write operation in this method.
             // It routes through IWorkingDocumentService → IGenericEntityService (Dataverse SDK).
             // It targets sprk_analysisoutput.sprk_workingdocument ONLY.
@@ -410,18 +464,33 @@ public sealed class WorkingDocumentTools
                 cancellationToken);
 
             _logger.LogInformation(
-                "WriteBackToWorkingDocument completed — analysisId={AnalysisId}, contentLen={ContentLen}",
-                _analysisId, content.Length);
+                "WriteBackToWorkingDocument completed — operationId={OperationId}, analysisId={AnalysisId}, contentLen={ContentLen}, totalTokens={TotalTokens}",
+                operationId, _analysisId, content.Length, tokenIndex);
 
             return $"Working document written back to Dataverse successfully. " +
                    $"Target: sprk_analysisoutput.sprk_workingdocument (analysisId={_analysisId}). " +
-                   $"Content length: {content.Length} characters.";
+                   $"Content length: {content.Length} characters. Streamed {tokenIndex} tokens. " +
+                   $"Content hash: {contentHash}.";
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation(
+                "WriteBackToWorkingDocument cancelled — operationId={OperationId}, analysisId={AnalysisId}",
+                operationId, _analysisId);
+
+            await EmitCancelledEndEventAsync(operationId, 0);
+
+            return $"Write-back operation cancelled for analysisId={_analysisId}. " +
+                   $"Operation: {operationId}. The working document was not updated in Dataverse.";
+        }
+        catch (Exception ex)
         {
             _logger.LogError(ex,
-                "WriteBackToWorkingDocument failed — analysisId={AnalysisId}, errorType={ErrorType}",
-                _analysisId, ex.GetType().Name);
+                "WriteBackToWorkingDocument failed — operationId={OperationId}, analysisId={AnalysisId}, errorType={ErrorType}",
+                operationId, _analysisId, ex.GetType().Name);
+
+            await EmitErrorEndEventAsync(operationId, 0, "WRITE_BACK_FAILED",
+                "Write-back to Dataverse failed. The working document was not updated.");
 
             return $"Write-back failed for analysisId={_analysisId}. " +
                    $"Error: {ex.GetType().Name}. The working document was not updated in Dataverse. " +
@@ -487,6 +556,22 @@ public sealed class WorkingDocumentTools
                 _analysisId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Computes a SHA-256 hash of the content, prefixed with "sha256:" for the
+    /// <see cref="DocumentStreamEndEvent.ContentHash"/> field.
+    ///
+    /// Enables the client to verify that the reconstructed document content matches
+    /// what the BFF computed — a lightweight integrity check that prevents partial writes
+    /// from being applied to the editor if SSE events were lost.
+    ///
+    /// ADR-014: Only the hash is retained, not the content.
+    /// </summary>
+    private static string ComputeContentHash(string content)
+    {
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        return "sha256:" + Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     /// <summary>

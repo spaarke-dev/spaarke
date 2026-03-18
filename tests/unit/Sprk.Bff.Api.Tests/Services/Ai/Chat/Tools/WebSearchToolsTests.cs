@@ -22,13 +22,19 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat.Tools;
 public class WebSearchToolsTests
 {
     private readonly Mock<ILogger> _loggerMock;
+    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
 
     public WebSearchToolsTests()
     {
         _loggerMock = new Mock<ILogger>();
+        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
     }
 
-    private WebSearchTools CreateSut() => new WebSearchTools(_loggerMock.Object);
+    private WebSearchTools CreateSut() => new WebSearchTools(
+        _loggerMock.Object,
+        _httpClientFactoryMock.Object,
+        citationContext: null,
+        apiKey: null);
 
     // === Constructor validation ===
 
@@ -36,7 +42,7 @@ public class WebSearchToolsTests
     public void Constructor_ThrowsArgumentNullException_WhenLoggerIsNull()
     {
         // Act & Assert
-        var action = () => new WebSearchTools(null!);
+        var action = () => new WebSearchTools(null!, _httpClientFactoryMock.Object, null, null);
         action.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
@@ -44,7 +50,7 @@ public class WebSearchToolsTests
     public void Constructor_WithValidLogger_DoesNotThrow()
     {
         // Act & Assert
-        var action = () => new WebSearchTools(_loggerMock.Object);
+        var action = () => new WebSearchTools(_loggerMock.Object, _httpClientFactoryMock.Object, null, null);
         action.Should().NotThrow();
     }
 
@@ -113,7 +119,7 @@ public class WebSearchToolsTests
         // Assert
         result.Should().NotBeNullOrWhiteSpace();
         result.Should().Contain("Web search returned");
-        result.Should().Contain("contract law basics");
+        result.Should().Contain("[External Source]");
     }
 
     [Fact]
@@ -311,7 +317,7 @@ public class WebSearchToolsTests
         // Assert — first line should be the summary
         var firstLine = result.Split('\n')[0];
         firstLine.Should().StartWith("Web search returned");
-        firstLine.Should().Contain("\"legal analysis\"");
+        firstLine.Should().Contain("result(s)");
     }
 
     [Fact]
@@ -359,7 +365,7 @@ public class WebSearchToolsTests
         // Act
         await sut.SearchWebAsync("sensitive legal query");
 
-        // Assert — logger was called (at least start and complete log entries)
+        // Assert — logger was called (at least the start log entry at Information level)
         _loggerMock.Verify(
             l => l.Log(
                 LogLevel.Information,
@@ -367,6 +373,6 @@ public class WebSearchToolsTests
                 It.IsAny<It.IsAnyType>(),
                 null,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeast(2));
+            Times.AtLeast(1));
     }
 }

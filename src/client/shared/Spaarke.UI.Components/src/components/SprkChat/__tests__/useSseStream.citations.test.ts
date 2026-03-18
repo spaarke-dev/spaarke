@@ -431,6 +431,105 @@ describe('useSseStream - Citations Handling', () => {
 
     expect(result.current.citations).toEqual([]);
   });
+
+  it('startStream_WebCitation_MapsSourceTypeUrlSnippet', async () => {
+    const events = [
+      { type: 'token', content: 'According to [1], the case was decided.' },
+      {
+        type: 'citations',
+        content: null,
+        data: {
+          citations: [
+            {
+              id: 1,
+              sourceName: 'Legal Analysis: Smith v. Jones',
+              page: null,
+              excerpt: 'The court ruled in favor of the plaintiff.',
+              chunkId: 'https://www.example.com/smith-v-jones',
+              sourceType: 'web',
+              url: 'https://www.example.com/smith-v-jones',
+              snippet: 'The court ruled in favor of the plaintiff based on precedent.',
+            },
+          ],
+        },
+      },
+      { type: 'done', content: null },
+    ];
+    mockFetch.mockResolvedValueOnce(createSseResponse(events));
+
+    const { result } = renderHook(() => useSseStream());
+
+    await act(async () => {
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    expect(result.current.citations).toHaveLength(1);
+    const citation = result.current.citations[0];
+    expect(citation.source).toBe('Legal Analysis: Smith v. Jones');
+    expect(citation.sourceType).toBe('web');
+    expect(citation.url).toBe('https://www.example.com/smith-v-jones');
+    expect(citation.snippet).toBe('The court ruled in favor of the plaintiff based on precedent.');
+    expect(citation.page).toBeUndefined();
+  });
+
+  it('startStream_MixedCitations_BothDocumentAndWebMapped', async () => {
+    const events = [
+      { type: 'token', content: 'Internal doc [1] and web source [2] both confirm.' },
+      {
+        type: 'citations',
+        content: null,
+        data: {
+          citations: [
+            {
+              id: 1,
+              sourceName: 'Company Policy',
+              page: 5,
+              excerpt: 'Policy requires compliance.',
+              chunkId: 'doc-chunk-1',
+            },
+            {
+              id: 2,
+              sourceName: 'Industry Standards Guide',
+              page: null,
+              excerpt: 'Standards overview excerpt.',
+              chunkId: 'https://www.example.com/standards',
+              sourceType: 'web',
+              url: 'https://www.example.com/standards',
+              snippet: 'Industry standards require annual review and compliance audits.',
+            },
+          ],
+        },
+      },
+      { type: 'done', content: null },
+    ];
+    mockFetch.mockResolvedValueOnce(createSseResponse(events));
+
+    const { result } = renderHook(() => useSseStream());
+
+    await act(async () => {
+      result.current.startStream('https://api.example.com/stream', { message: 'hi' }, TEST_TOKEN);
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    expect(result.current.citations).toHaveLength(2);
+
+    // Document citation: no sourceType, url, or snippet
+    const docCitation = result.current.citations[0];
+    expect(docCitation.source).toBe('Company Policy');
+    expect(docCitation.sourceType).toBeUndefined();
+    expect(docCitation.url).toBeUndefined();
+    expect(docCitation.snippet).toBeUndefined();
+    expect(docCitation.page).toBe(5);
+
+    // Web citation: has sourceType, url, and snippet
+    const webCitation = result.current.citations[1];
+    expect(webCitation.source).toBe('Industry Standards Guide');
+    expect(webCitation.sourceType).toBe('web');
+    expect(webCitation.url).toBe('https://www.example.com/standards');
+    expect(webCitation.snippet).toBe('Industry standards require annual review and compliance audits.');
+    expect(webCitation.page).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

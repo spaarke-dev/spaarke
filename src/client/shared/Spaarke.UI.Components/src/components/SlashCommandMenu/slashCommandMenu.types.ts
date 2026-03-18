@@ -31,8 +31,18 @@ import {
  * Category discriminator for grouping slash commands in the menu.
  * - 'system'   → Built-in SprkChat commands always available
  * - 'playbook' → Dynamic commands from context mapping (playbook capabilities)
+ * - 'scope'    → Dynamic commands from analysis scope capabilities
  */
-export type SlashCommandCategory = 'system' | 'playbook';
+export type SlashCommandCategory = 'system' | 'playbook' | 'scope';
+
+/**
+ * Source discriminator indicating where a slash command originated.
+ * Used by R2-036 to group commands visually in the slash menu.
+ * - 'system'   → Built-in DEFAULT_SLASH_COMMANDS, always present
+ * - 'playbook' → Resolved from a playbook's capabilities via context mapping
+ * - 'scope'    → Resolved from the analysis scope via context mapping
+ */
+export type SlashCommandSource = 'system' | 'playbook' | 'scope';
 
 /**
  * A single slash command entry shown in the SlashCommandMenu.
@@ -62,6 +72,23 @@ export interface SlashCommand {
    * 'system' commands are always visible; 'playbook' commands are context-specific.
    */
   category: SlashCommandCategory;
+
+  /**
+   * Origin of this command — used by the slash menu to group commands visually.
+   * - 'system'   → Built-in command from DEFAULT_SLASH_COMMANDS
+   * - 'playbook' → Dynamically resolved from a playbook's capabilities
+   * - 'scope'    → Dynamically resolved from the analysis scope
+   *
+   * @default 'system' for DEFAULT_SLASH_COMMANDS entries
+   */
+  source?: SlashCommandSource;
+
+  /**
+   * Human-readable name of the source that contributed this command.
+   * Displayed as a subtitle in the slash menu (e.g., "Email Playbook", "Legal Research").
+   * System commands typically omit this field — no subtitle is shown.
+   */
+  sourceName?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +160,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/summarize',
     icon: React.createElement(SparkleRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'analyze',
@@ -141,6 +169,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/analyze',
     icon: React.createElement(BrainCircuitRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'ask',
@@ -149,6 +178,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/ask',
     icon: React.createElement(ChatRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'explain',
@@ -157,6 +187,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/explain',
     icon: React.createElement(SearchRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'plan',
@@ -165,6 +196,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/plan',
     icon: React.createElement(SparkleRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'rewrite',
@@ -173,6 +205,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/rewrite',
     icon: React.createElement(SparkleRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'translate',
@@ -181,6 +214,7 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/translate',
     icon: React.createElement(SparkleRegular),
     category: 'system',
+    source: 'system',
   },
   {
     id: 'help',
@@ -189,5 +223,6 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
     trigger: '/help',
     icon: React.createElement(QuestionCircleRegular),
     category: 'system',
+    source: 'system',
   },
 ];

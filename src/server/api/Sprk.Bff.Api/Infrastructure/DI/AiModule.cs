@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -193,10 +194,11 @@ public static class AiModule
         services.AddScoped<ChatContextMappingService>();
 
         // AnalysisChatContextResolver — scoped per ADR-010 (Phase 2C, task 020).
-        // Resolves analysis-scoped SprkChat context (playbooks, inline actions, knowledge sources)
-        // for a given analysisId. Redis-first with 30-min absolute TTL (ADR-009).
-        // Cache key pattern: "analysis-context:{analysisId}".
-        // Scoped: aligns with ChatContextMappingService lifetime; depends on IDistributedCache (singleton).
+        // Resolves analysis-scoped SprkChat context (playbooks, inline actions, knowledge sources,
+        // commands, search guidance, scope metadata) for a given analysisId.
+        // Redis-first with 30-min absolute TTL (ADR-009).
+        // Cache key pattern: "chat-context:{tenantId}:{analysisId}" (ADR-014 — tenant-scoped).
+        // Scoped: depends on IGenericEntityService (singleton), IDistributedCache (singleton).
         services.AddScoped<AnalysisChatContextResolver>();
 
         // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F).
@@ -206,6 +208,14 @@ public static class AiModule
         // ADR-009: Redis via IDistributedCache; no in-memory fallback.
         // ADR-010: Concrete type, no interface (single implementation).
         services.AddScoped<PendingPlanManager>();
+
+        // PlaybookIndexingBackgroundService — hosted service (ADR-001 mandate, no Azure Functions).
+        // Processes playbook embedding indexing requests from a bounded Channel<string>.
+        // Factory-instantiates PlaybookIndexingService internally (ADR-010: no new DI registration
+        // for the service itself). Exposes a static Instance accessor so the trigger endpoint
+        // (POST /api/ai/playbooks/{playbookId}/index) can enqueue without DI.
+        // Requires: IPlaybookService, SearchIndexClient, IOpenAiClient (all already registered).
+        services.AddHostedService<PlaybookIndexingBackgroundService>();
 
         return services;
     }

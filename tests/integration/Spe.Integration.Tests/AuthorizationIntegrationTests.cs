@@ -371,7 +371,7 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = sp.GetRequiredService<IChatClient>();
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
             });
             services.AddScoped(sp =>
             {

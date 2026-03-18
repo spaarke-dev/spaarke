@@ -2,7 +2,7 @@
 <task id="R2-014" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Document SPE Persistence Endpoint — Save Uploaded Documents to Matter's SPE Container</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, api</tags>
     <estimated-effort>medium</estimated-effort>

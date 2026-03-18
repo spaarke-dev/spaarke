@@ -2,7 +2,7 @@
 <task id="R2-013" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Document Upload Endpoint — Multipart Upload with Document Intelligence Processing and Session-Scoped Storage</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, api, ai, document-intelligence</tags>
     <estimated-effort>large</estimated-effort>

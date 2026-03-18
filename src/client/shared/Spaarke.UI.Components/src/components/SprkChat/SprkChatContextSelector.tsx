@@ -3,7 +3,7 @@
  *
  * Allows users to switch the document and playbook context for an active chat session.
  * Supports selecting up to 5 additional documents for multi-document AI context.
- * Uses Fluent UI v9 components (Select, Combobox, Tag, TagGroup, Button).
+ * Uses Fluent UI v9 components (Select, Combobox, Tag, TagGroup, Button, CounterBadge, Tooltip).
  *
  * The additional document picker uses a Combobox with type-ahead search/filter,
  * enabling users to quickly find documents in large lists.
@@ -25,7 +25,8 @@ import {
   Button,
   Tag,
   TagGroup,
-  Text,
+  CounterBadge,
+  Tooltip,
 } from '@fluentui/react-components';
 import type { ComboboxProps } from '@fluentui/react-components';
 import { AddRegular, DocumentRegular, DismissRegular, SearchRegular } from '@fluentui/react-icons';
@@ -91,11 +92,8 @@ const useStyles = makeStyles({
     minWidth: '160px',
     maxWidth: '240px',
   },
-  countBadge: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
-    whiteSpace: 'nowrap',
-    ...shorthands.padding(0, tokens.spacingHorizontalXS),
+  counterBadge: {
+    cursor: 'default',
   },
 });
 
@@ -289,28 +287,47 @@ export const SprkChatContextSelector: React.FC<ISprkChatContextSelectorProps> = 
           </div>
         )}
 
-        {/* Add Document button (shown when multi-doc is enabled) */}
+        {/* Add Document button with CounterBadge (shown when multi-doc is enabled) */}
         {showAdditionalDocs && (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<AddRegular />}
-            onClick={handleToggleAddDocument}
-            disabled={disabled || isAtLimit}
-            aria-label={
-              isAtLimit ? `Maximum ${maxAdditionalDocuments} additional documents reached` : 'Add additional document'
-            }
-            title={
-              isAtLimit
-                ? `Maximum ${maxAdditionalDocuments} additional documents`
-                : 'Add additional document to context'
-            }
-            data-testid="add-document-button"
-          >
-            {hasAdditionalDocs
-              ? `+${additionalDocumentIds.length} doc${additionalDocumentIds.length !== 1 ? 's' : ''}`
-              : 'Add doc'}
-          </Button>
+          <>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<AddRegular />}
+              onClick={handleToggleAddDocument}
+              disabled={disabled || isAtLimit}
+              aria-label={
+                isAtLimit
+                  ? `Maximum ${maxAdditionalDocuments} additional documents reached`
+                  : hasAdditionalDocs
+                    ? `${additionalDocumentIds.length} additional document${additionalDocumentIds.length !== 1 ? 's' : ''} selected`
+                    : 'Add additional document'
+              }
+              title={
+                isAtLimit
+                  ? `Maximum ${maxAdditionalDocuments} additional documents`
+                  : 'Add additional document to context'
+              }
+              data-testid="add-document-button"
+            >
+              Add doc
+            </Button>
+            {hasAdditionalDocs && (
+              <Tooltip
+                content={`${additionalDocumentIds.length} additional document${additionalDocumentIds.length !== 1 ? 's' : ''} selected — 30K token budget shared across all documents`}
+                relationship="label"
+              >
+                <CounterBadge
+                  className={styles.counterBadge}
+                  count={additionalDocumentIds.length}
+                  color="brand"
+                  size="small"
+                  appearance="filled"
+                  data-testid="additional-docs-counter-badge"
+                />
+              </Tooltip>
+            )}
+          </>
         )}
       </div>
 
@@ -376,11 +393,22 @@ export const SprkChatContextSelector: React.FC<ISprkChatContextSelectorProps> = 
             </div>
           )}
 
-          {/* Count indicator */}
+          {/* Count indicator with CounterBadge */}
           {hasAdditionalDocs && (
-            <Text className={styles.countBadge} data-testid="additional-docs-count">
-              {additionalDocumentIds.length}/{maxAdditionalDocuments}
-            </Text>
+            <Tooltip
+              content={`${additionalDocumentIds.length} of ${maxAdditionalDocuments} additional documents — 30K token budget shared`}
+              relationship="description"
+            >
+              <CounterBadge
+                className={styles.counterBadge}
+                count={additionalDocumentIds.length}
+                overflowCount={maxAdditionalDocuments}
+                color="informative"
+                size="small"
+                appearance="ghost"
+                data-testid="additional-docs-count"
+              />
+            </Tooltip>
           )}
         </div>
       )}

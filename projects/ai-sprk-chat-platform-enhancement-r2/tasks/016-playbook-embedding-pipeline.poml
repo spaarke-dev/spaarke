@@ -2,7 +2,7 @@
 <task id="R2-016" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Playbook Embedding Pipeline — Index Playbooks into AI Search on Create/Update</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, ai, search</tags>
     <estimated-effort>medium</estimated-effort>

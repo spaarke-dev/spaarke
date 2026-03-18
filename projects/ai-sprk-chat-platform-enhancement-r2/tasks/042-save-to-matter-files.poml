@@ -2,7 +2,7 @@
 <task id="R2-042" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Save Uploaded Document to Matter Files (SPE Persistence UX)</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>frontend</tags>
     <estimated-effort>medium</estimated-effort>

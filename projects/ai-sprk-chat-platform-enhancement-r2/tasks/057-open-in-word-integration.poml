@@ -2,7 +2,7 @@
 <task id="R2-057" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Open in Word Integration — Export Button to Word Online</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>4</phase>
     <tags>integration</tags>
     <estimated-effort>medium</estimated-effort>

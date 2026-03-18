@@ -168,6 +168,36 @@ public static class ChatEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
+        // POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm — confirm and execute a pending HITL action (Task R2-052)
+        group.MapPost("/sessions/{sessionId}/actions/{actionId}/confirm", ConfirmActionAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("ConfirmAction")
+            .WithSummary("Confirm and execute a pending HITL action")
+            .WithDescription(
+                "Called after the user clicks Confirm in the ActionConfirmationDialog. " +
+                "Dispatches the confirmed action to the PlaybookOutputHandler for execution. " +
+                "Returns 200 with a result message on success. " +
+                "Returns 404 if the session or action does not exist.")
+            .Produces<ActionConfirmResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
+        // GET /api/ai/chat/sessions/{sessionId}/commands — resolve dynamic command catalog
+        group.MapGet("/sessions/{sessionId}/commands", GetCommandsAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("GetChatCommands")
+            .WithSummary("Resolve available slash commands for a chat session")
+            .WithDescription(
+                "Returns the dynamic command catalog assembled from system commands, " +
+                "playbook-contributed commands (filtered by entity type), and scope " +
+                "capability commands. Results are cached in Redis with a 5-minute TTL " +
+                "(ADR-009, ADR-014). The catalog is tenant-scoped, not user-scoped.")
+            .Produces<IReadOnlyList<CommandEntry>>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
         return app;
     }
 
@@ -253,10 +283,13 @@ public static class ChatEndpoints
             return;
         }
 
-        // Set SSE headers (matches AnalysisEndpoints.cs pattern exactly)
+        // Set SSE headers — required for production-quality token-by-token streaming.
+        // X-Accel-Buffering: no prevents nginx/YARP reverse proxy from buffering the SSE stream,
+        // ensuring each token frame reaches the client immediately (NFR-01: first token < 500ms).
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
             "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, document={DocumentId}",
@@ -269,7 +302,10 @@ public static class ChatEndpoints
             // Create SSE writer delegate for out-of-band events (progress, document_replace)
             var sseWriter = CreateSseWriter(response);
 
-            // Create agent for this session
+            // Create agent for this session — pass the user's message for conversation-aware
+            // document chunk re-selection (FR-03, R2-054). When a document exceeds the 30K
+            // token budget, this enables the DocumentContextService to select chunks most
+            // relevant to the user's current question rather than defaulting to position-based.
             var agent = await agentFactory.CreateAgentAsync(
                 sessionId,
                 request.DocumentId ?? session.DocumentId ?? string.Empty,
@@ -279,6 +315,7 @@ public static class ChatEndpoints
                 session.AdditionalDocumentIds,
                 httpContext,
                 sseWriter,
+                latestUserMessage: request.Message,
                 cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -347,6 +384,52 @@ public static class ChatEndpoints
             }
             // === End Phase 2F ===
 
+            // === R2-018: Playbook Output Routing ===
+            // Before streaming the standard chat response, check if the user's message matches
+            // a playbook via PlaybookDispatcher. If a match is found, route through
+            // PlaybookOutputHandler for typed output handling (dialog, navigation, download, insert).
+            // Text output falls through to the standard streaming flow below.
+            var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
+            var dispatchResult = await dispatcher.DispatchAsync(request.Message, session.HostContext, cancellationToken);
+
+            if (dispatchResult is { Matched: true, OutputType: not OutputType.Text })
+            {
+                var outputHandler = agentFactory.CreatePlaybookOutputHandler();
+                var handled = await outputHandler.HandleOutputAsync(
+                    dispatchResult,
+                    (evt, ct) => WriteChatSSEAsync(response, evt, ct),
+                    session.HostContext,
+                    cancellationToken);
+
+                if (handled)
+                {
+                    // Emit done event and persist the user message
+                    await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
+
+                    var seqBaseForDispatch = session.Messages.Count;
+                    var dispatchUserMessage = new DvChatMessage(
+                        MessageId: Guid.NewGuid().ToString("N"),
+                        SessionId: sessionId,
+                        Role: ChatMessageRole.User,
+                        Content: request.Message,
+                        TokenCount: 0,
+                        CreatedAt: DateTimeOffset.UtcNow,
+                        SequenceNumber: seqBaseForDispatch + 1);
+                    await historyManager.AddMessageAsync(session, dispatchUserMessage, CancellationToken.None);
+
+                    logger.LogInformation(
+                        "PlaybookDispatch: output handled — session={SessionId}, playbook={PlaybookId}, " +
+                        "outputType={OutputType}",
+                        sessionId, dispatchResult.PlaybookId, dispatchResult.OutputType);
+                    return;
+                }
+            }
+            // === End R2-018 ===
+
+            // Emit typing_start immediately before the first AI token to signal the frontend
+            // to show a typing indicator animation (NFR-01: first token < 500ms).
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_start", null), cancellationToken);
+
             // Stream the agent response via IAsyncEnumerable<ChatResponseUpdate>
             await foreach (var update in agent.SendMessageAsync(request.Message, history, cancellationToken))
             {
@@ -358,13 +441,20 @@ public static class ChatEndpoints
                 }
             }
 
+            // Emit typing_end to signal that token generation is complete.
+            // Placed before citations/suggestions/done so the frontend can hide the typing
+            // animation as soon as the last token has been rendered.
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), cancellationToken);
+
             // Emit citation metadata (if any) BEFORE the done event.
             // Citations are accumulated by search tools during tool execution via CitationContext.
             // The frontend parses this event to map [N] markers in the response text to source details.
             if (agent.Citations is { Count: > 0 })
             {
                 var citations = agent.Citations.GetCitations()
-                    .Select(c => new ChatSseCitationItem(c.CitationId, c.SourceName, c.PageNumber, c.Excerpt, c.ChunkId))
+                    .Select(c => new ChatSseCitationItem(
+                        c.CitationId, c.SourceName, c.PageNumber, c.Excerpt, c.ChunkId,
+                        c.SourceType, c.Url, c.Snippet))
                     .ToArray();
 
                 await WriteChatSSEAsync(
@@ -418,6 +508,8 @@ public static class ChatEndpoints
         }
         catch (OperationCanceledException)
         {
+            // Client disconnected — clean close without typing_end or error event.
+            // The client is already gone so there is no receiver for further frames.
             logger.LogInformation(
                 "Client disconnected during SendMessage: session={SessionId}", sessionId);
         }
@@ -427,7 +519,12 @@ public static class ChatEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                await WriteChatSSEAsync(response, new ChatSseEvent("error", ex.Message), CancellationToken.None);
+                // Emit typing_end before the error event so the frontend stops the typing animation.
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", "An error occurred while generating a response."),
+                    CancellationToken.None);
             }
         }
     }
@@ -468,10 +565,11 @@ public static class ChatEndpoints
             return;
         }
 
-        // Set SSE headers
+        // Set SSE headers — X-Accel-Buffering prevents reverse proxy buffering (NFR-01).
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
             "RefineText: session={SessionId}, textLen={TextLen}, instruction={Instruction}",
@@ -481,6 +579,9 @@ public static class ChatEndpoints
 
         try
         {
+            // Emit typing_start before AI generation begins.
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_start", null), cancellationToken);
+
             // Stream tokens incrementally via IChatClient.GetStreamingResponseAsync.
             // Uses TextRefinementTools to build the prompt messages, then streams
             // directly rather than collecting the full response first.
@@ -500,15 +601,17 @@ public static class ChatEndpoints
                 }
             }
 
-            // Send done event
-            await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
-
             // If the refinement produced no output, send an informational message
             if (fullResponse.Length == 0)
             {
                 await WriteChatSSEAsync(response, new ChatSseEvent("token", "No changes suggested."), cancellationToken);
-                await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
             }
+
+            // Emit typing_end before done to signal the frontend to hide the typing animation.
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), cancellationToken);
+
+            // Send done event
+            await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
 
             logger.LogInformation(
                 "RefineText completed: session={SessionId}, resultLen={ResultLen}",
@@ -525,7 +628,11 @@ public static class ChatEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                await WriteChatSSEAsync(response, new ChatSseEvent("error", ex.Message), CancellationToken.None);
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", "An error occurred during text refinement."),
+                    CancellationToken.None);
             }
         }
     }
@@ -653,6 +760,54 @@ public static class ChatEndpoints
     }
 
     /// <summary>
+    /// Confirm and execute a pending HITL action (Task R2-052).
+    /// POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm
+    ///
+    /// Called after the user clicks Confirm in the ActionConfirmationDialog.
+    /// Currently a stub that returns success — future iterations will execute
+    /// the action tool associated with the playbook.
+    /// </summary>
+    private static async Task<IResult> ConfirmActionAsync(
+        string sessionId,
+        string actionId,
+        ActionConfirmRequest request,
+        ChatSessionManager sessionManager,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints");
+        var tenantId = ExtractTenantId(httpContext);
+        if (tenantId is null)
+        {
+            return Results.Problem(
+                detail: "Unable to determine tenant. Ensure the 'tid' claim is present in the token.",
+                statusCode: 403);
+        }
+
+        // Verify the session exists
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                detail: $"Session {sessionId} not found.",
+                statusCode: 404,
+                title: "Session Not Found");
+        }
+
+        logger.LogInformation(
+            "Action confirmed: sessionId={SessionId}, actionId={ActionId}, paramCount={ParamCount}",
+            sessionId, actionId, request.Parameters?.Count ?? 0);
+
+        // TODO: In future iterations, execute the action tool here.
+        // For now, return a success stub indicating the action was acknowledged.
+        return Results.Ok(new ActionConfirmResult(
+            Success: true,
+            Message: $"Action {actionId} confirmed and executed successfully.",
+            ActionId: actionId));
+    }
+
+    /// <summary>
     /// Approve a pending plan and execute it as an SSE stream.
     /// POST /api/ai/chat/sessions/{sessionId}/plan/approve
     ///
@@ -742,10 +897,12 @@ public static class ChatEndpoints
             return;
         }
 
-        // All validation passed — open SSE stream (matches pattern from SendMessageAsync)
+        // All validation passed — open SSE stream (matches pattern from SendMessageAsync).
+        // X-Accel-Buffering prevents reverse proxy buffering (NFR-01).
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
             "ApprovePlan: executing plan — planId={PlanId}, session={SessionId}, tenant={TenantId}, steps={StepCount}",
@@ -756,7 +913,15 @@ public static class ChatEndpoints
 
         try
         {
-            // Build agent for this session (same factory call as SendMessageAsync)
+            // Emit typing_start before plan execution begins.
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_start", null), cancellationToken);
+
+            // Build agent for this session (same factory call as SendMessageAsync).
+            // Extract the last user message from session history for conversation-aware
+            // document chunk re-selection (FR-03, R2-054).
+            var lastUserMessage = session.Messages?
+                .LastOrDefault(m => m.Role == ChatMessageRole.User)?.Content;
+
             var agent = await agentFactory.CreateAgentAsync(
                 sessionId,
                 session.DocumentId ?? string.Empty,
@@ -766,6 +931,7 @@ public static class ChatEndpoints
                 session.AdditionalDocumentIds,
                 httpContext,
                 sseWriter,
+                latestUserMessage: lastUserMessage,
                 cancellationToken);
 
             var history = BuildAiHistory(session.Messages);
@@ -833,9 +999,10 @@ public static class ChatEndpoints
                 if (stepFailed)
                 {
                     // Halt on first step failure (partial writes left in place — task 070 design doc, Risk 3)
+                    await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
                     await WriteChatSSEAsync(
                         response,
-                        new ChatSseEvent("error", $"Plan execution halted at step {stepIndex + 1}: {stepError}"),
+                        new ChatSseEvent("error", $"Plan execution halted at step {stepIndex + 1}."),
                         CancellationToken.None);
 
                     logger.LogWarning(
@@ -947,6 +1114,9 @@ public static class ChatEndpoints
                 }
             }
 
+            // Emit typing_end before done to signal plan execution is complete.
+            await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), cancellationToken);
+
             await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
 
             logger.LogInformation(
@@ -967,7 +1137,11 @@ public static class ChatEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                await WriteChatSSEAsync(response, new ChatSseEvent("error", ex.Message), CancellationToken.None);
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", "An error occurred during plan execution."),
+                    CancellationToken.None);
             }
         }
     }
@@ -1129,6 +1303,114 @@ public static class ChatEndpoints
             evictedCount, tenantId);
 
         return Results.NoContent();
+    }
+
+    // =========================================================================
+    // Command Resolution
+    // =========================================================================
+
+    /// <summary>
+    /// Resolve the dynamic command catalog for a session's context.
+    /// GET /api/ai/chat/sessions/{sessionId}/commands
+    ///
+    /// Returns commands partitioned into <c>systemCommands</c> (always present) and
+    /// <c>dynamicCommands</c> (playbook + scope, context-specific). Each item carries
+    /// a <c>source</c> discriminator ("system", "playbook", "scope") so the frontend
+    /// SlashCommandMenu can group commands by origin category (R2-036, R2-053).
+    ///
+    /// Requires the session to exist in the session manager to obtain the host context
+    /// (entity type) for playbook filtering.
+    /// </summary>
+    private static async Task<IResult> GetCommandsAsync(
+        string sessionId,
+        ChatSessionManager sessionManager,
+        SprkChatAgentFactory agentFactory,
+        HttpContext httpContext,
+        ILogger<SprkChatAgentFactory> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        // Retrieve the session to obtain host context (entity type for playbook filtering)
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Chat session '{sessionId}' not found or has expired.");
+        }
+
+        logger.LogDebug(
+            "Resolving commands for session={SessionId}, tenant={TenantId}, entityType={EntityType}",
+            sessionId, tenantId, session.HostContext?.EntityType ?? "(none)");
+
+        var resolver = agentFactory.CreateCommandResolver();
+        var commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+
+        // Partition into system vs. dynamic and project to CommandResponseItem with
+        // explicit source discriminator for frontend SlashCommandMenu grouping (R2-053).
+        var systemCommands = new List<CommandResponseItem>();
+        var dynamicCommands = new List<CommandResponseItem>();
+
+        foreach (var cmd in commands)
+        {
+            var sourceType = DeriveSourceType(cmd.Category);
+            var sourceName = sourceType switch
+            {
+                // System commands have no source name subtitle
+                "system" => (string?)null,
+                // Scope commands: Category carries the scope-qualified label (e.g., "Legal Research -- Search")
+                "scope" => cmd.Category,
+                // Playbook commands: use the label as source name (playbook name is in Label)
+                _ => cmd.Label,
+            };
+
+            var item = new CommandResponseItem(
+                cmd.Id,
+                cmd.Label,
+                cmd.Description,
+                cmd.Trigger,
+                Category: sourceType,
+                Source: sourceType,
+                SourceName: sourceName);
+
+            if (sourceType == "system")
+            {
+                systemCommands.Add(item);
+            }
+            else
+            {
+                dynamicCommands.Add(item);
+            }
+        }
+
+        return Results.Ok(new CommandsResponse(systemCommands, dynamicCommands));
+    }
+
+    /// <summary>
+    /// Derives the frontend <c>SlashCommandSource</c> discriminator from the internal
+    /// <see cref="CommandEntry.Category"/> value.
+    ///
+    /// The <see cref="DynamicCommandResolver"/> uses "system" and "playbook" as literal
+    /// category values, but scope commands get a scope-qualified category label
+    /// (e.g., "Legal Research -- Search"). Any category that is not "system" or "playbook"
+    /// is treated as a scope command.
+    /// </summary>
+    private static string DeriveSourceType(string category)
+    {
+        if (string.Equals(category, "system", StringComparison.OrdinalIgnoreCase))
+            return "system";
+        if (string.Equals(category, "playbook", StringComparison.OrdinalIgnoreCase))
+            return "playbook";
+        return "scope";
     }
 
     // =========================================================================
@@ -1322,6 +1604,40 @@ public static class ChatEndpoints
     {
         return (evt, ct) => WriteChatSSEAsync(response, evt, ct);
     }
+
+    /// <summary>
+    /// Writes a single <see cref="DocumentStreamEvent"/> as an SSE frame.
+    ///
+    /// The event type discriminator (<c>document_stream_start</c>, <c>document_stream_token</c>,
+    /// <c>document_stream_end</c>) is embedded in the JSON payload via the <c>type</c> property,
+    /// consistent with the <see cref="ChatSseEvent"/> pattern.
+    ///
+    /// ADR-015: Document content in <see cref="DocumentStreamTokenEvent"/> MUST NOT be logged.
+    /// ADR-014: Streaming tokens are transient and MUST NOT be cached.
+    /// </summary>
+    internal static async Task WriteDocumentStreamSSEAsync(
+        HttpResponse response,
+        DocumentStreamEvent evt,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize<object>(evt, JsonOptions);
+        var sseData = $"data: {json}\n\n";
+
+        await response.WriteAsync(sseData, cancellationToken);
+        await response.Body.FlushAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a delegate that writes <see cref="DocumentStreamEvent"/> objects to the SSE response.
+    /// Injected into <see cref="WorkingDocumentTools"/> via <see cref="SprkChatAgentFactory"/>
+    /// to enable streaming write-back content to the client (spec FR-04).
+    ///
+    /// Replaces the no-op delegate that was used before task R2-023.
+    /// </summary>
+    internal static Func<DocumentStreamEvent, CancellationToken, Task> CreateDocumentStreamSseWriter(HttpResponse response)
+    {
+        return (evt, ct) => WriteDocumentStreamSSEAsync(response, evt, ct);
+    }
 }
 
 // =============================================================================
@@ -1371,6 +1687,17 @@ public record ChatSwitchContextRequest(
     ChatHostContext? HostContext = null,
     IReadOnlyList<string>? AdditionalDocumentIds = null);
 
+/// <summary>Request body for POST /sessions/{id}/actions/{actionId}/confirm (Task R2-052).</summary>
+/// <param name="ActionId">The action identifier to confirm (matches URL parameter for validation).</param>
+/// <param name="Parameters">Extracted parameters submitted with the confirmation.</param>
+public record ActionConfirmRequest(string ActionId, Dictionary<string, string>? Parameters = null);
+
+/// <summary>Response body for POST /sessions/{id}/actions/{actionId}/confirm (Task R2-052).</summary>
+/// <param name="Success">Whether the action was executed successfully.</param>
+/// <param name="Message">Human-readable result message.</param>
+/// <param name="ActionId">The action identifier that was confirmed.</param>
+public record ActionConfirmResult(bool Success, string Message, string ActionId);
+
 /// <summary>Response body for GET /sessions/{id}/history.</summary>
 /// <param name="SessionId">The session identifier.</param>
 /// <param name="Messages">Ordered message list (oldest first).</param>
@@ -1393,7 +1720,7 @@ public record ChatSessionMessageInfo(string Role, string Content, DateTimeOffset
 /// which carry structured <c>Data</c> payloads. All event types are serialized through the
 /// same <see cref="ChatEndpoints.WriteChatSSEAsync"/> method and share the SSE wire format.
 /// </summary>
-/// <param name="Type">Event type: "token", "done", "error", "progress", or "document_replace".</param>
+/// <param name="Type">Event type: "token", "done", "error", "typing_start", "typing_end", "suggestions", "citations", "plan_preview", "plan_step_start", "plan_step_complete", "progress", "document_replace", "dialog_open", or "navigate".</param>
 /// <param name="Content">Text content for token events; error message for error events; null for done/progress/document_replace.</param>
 /// <param name="Data">Optional structured payload for rich event types (progress, document_replace). Null for token/done/error.</param>
 public record ChatSseEvent(string Type, string? Content, object? Data = null);
@@ -1432,7 +1759,18 @@ public record ChatSseDocumentReplaceData(string Html, ChatSseDocumentReplaceMeta
 /// <param name="Page">Page number in the source document (null when not available).</param>
 /// <param name="Excerpt">Short excerpt (max 200 chars) from the matched content.</param>
 /// <param name="ChunkId">Chunk ID from the search index for traceability.</param>
-public record ChatSseCitationItem(int Id, string SourceName, int? Page, string Excerpt, string ChunkId);
+/// <param name="SourceType">Citation source type: null/"document" for internal SPE, "web" for external web search results.</param>
+/// <param name="Url">Full URL of the web search result. Present when SourceType is "web".</param>
+/// <param name="Snippet">Short text snippet from the web search result. Present when SourceType is "web".</param>
+public record ChatSseCitationItem(
+    int Id,
+    string SourceName,
+    int? Page,
+    string Excerpt,
+    string ChunkId,
+    string? SourceType = null,
+    string? Url = null,
+    string? Snippet = null);
 
 /// <summary>
 /// Data payload for "citations" SSE events emitted after the agent response stream completes.
@@ -1566,6 +1904,81 @@ public record ChatSsePlanStepCompleteData(
     string? Result = null,
     string? ErrorCode = null,
     string? ErrorMessage = null);
+
+// =============================================================================
+// Playbook Output Handler SSE Records (R2-018, Phase 2B)
+// =============================================================================
+
+/// <summary>
+/// Data payload for "dialog_open" SSE events emitted by <see cref="Services.Ai.Chat.PlaybookOutputHandler"/>
+/// when a playbook's output type is <see cref="Models.Ai.OutputType.Dialog"/> and
+/// <see cref="Models.Ai.Chat.DispatchResult.RequiresConfirmation"/> is true.
+///
+/// The frontend (SprkChatPane) receives this event and opens the Code Page dialog via
+/// <c>Xrm.Navigation.navigateTo</c> with the specified web resource name and pre-populated fields.
+///
+/// Shape (camelCase serialization matches frontend IChatSseEventData contract):
+/// <code>
+/// {
+///   "type": "dialog_open",
+///   "content": null,
+///   "data": {
+///     "targetPage": "sprk_emailcomposer",
+///     "prePopulateFields": { "recipient": "john@example.com", "subject": "RE: Contract Review" },
+///     "playbookId": "a1b2c3d4-...",
+///     "playbookName": "Draft Email"
+///   }
+/// }
+/// </code>
+///
+/// ADR-006: The <see cref="TargetPage"/> MUST reference a Code Page web resource name
+/// (not a model-driven app dialog or JavaScript alert).
+/// ADR-014: Pre-populated field values are ephemeral and MUST NOT be cached.
+/// </summary>
+/// <param name="TargetPage">Code Page web resource name (e.g., "sprk_emailcomposer"). Serializes as "targetPage".</param>
+/// <param name="PrePopulateFields">AI-extracted field values for pre-populating the Code Page dialog. Serializes as "prePopulateFields".</param>
+/// <param name="PlaybookId">The matched playbook's ID (GUID string).</param>
+/// <param name="PlaybookName">Display name of the matched playbook.</param>
+public record ChatSseDialogOpenData(
+    string TargetPage,
+    Dictionary<string, string> PrePopulateFields,
+    string PlaybookId,
+    string? PlaybookName);
+
+/// <summary>
+/// Data payload for "navigate" SSE events emitted by <see cref="Services.Ai.Chat.PlaybookOutputHandler"/>
+/// when a playbook's output type is <see cref="Models.Ai.OutputType.Navigation"/>.
+///
+/// The frontend uses this to navigate the user to a Dataverse record, external URL,
+/// or another page within the application.
+///
+/// Shape:
+/// <code>
+/// {
+///   "type": "navigate",
+///   "content": null,
+///   "data": {
+///     "url": "https://org.crm.dynamics.com/main.aspx?...",
+///     "targetPage": "sprk_matterdetail",
+///     "parameters": { "matterId": "abc-123" },
+///     "playbookId": "a1b2c3d4-..."
+///   }
+/// }
+/// </code>
+/// </summary>
+/// <param name="Url">
+/// Fully constructed navigation URL. Null when <see cref="TargetPage"/> is provided instead.
+/// </param>
+/// <param name="TargetPage">
+/// Code Page web resource name for internal navigation. Null when <see cref="Url"/> is provided.
+/// </param>
+/// <param name="Parameters">Extracted parameters for building the navigation target.</param>
+/// <param name="PlaybookId">The matched playbook's ID (GUID string).</param>
+public record ChatSseNavigateData(
+    string? Url,
+    string? TargetPage,
+    Dictionary<string, string> Parameters,
+    string? PlaybookId);
 
 /// <summary>
 /// Playbook summary for the SprkChat playbook selector UI.

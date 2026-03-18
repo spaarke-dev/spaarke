@@ -30,9 +30,12 @@ import {
 import {
   CheckmarkCircle20Regular,
   DismissCircle20Regular,
+  ErrorCircle20Regular,
   ArrowRight20Regular,
   Edit20Regular,
   Dismiss20Regular,
+  Clock20Regular,
+  Stop20Regular,
 } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,8 +88,8 @@ export interface PlanPreviewCardProps {
    */
   onProceed: () => void;
   /**
-   * Called when the user wants to cancel the plan.
-   * The parent should abort any pending execution and dismiss the card.
+   * Called when the user wants to cancel the plan before execution.
+   * The parent should dismiss the card.
    */
   onCancel: () => void;
   /**
@@ -95,6 +98,12 @@ export interface PlanPreviewCardProps {
    * @param editMessage - Free-text modification request from the user.
    */
   onEditPlan: (editMessage: string) => void;
+  /**
+   * Called when the user wants to cancel an in-progress execution.
+   * MUST abort the SSE stream via AbortController (spec MUST rule).
+   * Only meaningful when isExecuting is true.
+   */
+  onCancelExecution?: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,10 +176,16 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
   },
   iconCompleted: {
-    color: tokens.colorPaletteGreenForeground1,
+    color: tokens.colorStatusSuccessForeground1,
   },
   iconFailed: {
-    color: tokens.colorPaletteRedForeground1,
+    color: tokens.colorStatusDangerForeground1,
+  },
+  iconPending: {
+    color: tokens.colorNeutralForeground3,
+  },
+  iconRunning: {
+    color: tokens.colorBrandForeground1,
   },
   stepDescription: {
     flex: 1,
@@ -185,7 +200,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   stepDescriptionFailed: {
-    color: tokens.colorPaletteRedForeground1,
+    color: tokens.colorStatusDangerForeground1,
   },
   stepResult: {
     marginLeft: `calc(${tokens.spacingHorizontalS} + 20px)`,
@@ -236,9 +251,11 @@ interface StepIndicatorProps {
   step: PlanStep;
   order: number;
   styles: ReturnType<typeof useStyles>;
+  /** When true, pending steps show Clock icon instead of numbered circle (during execution). */
+  showExecutionIcons: boolean;
 }
 
-const StepIndicator: React.FC<StepIndicatorProps> = ({ step, order, styles }) => {
+const StepIndicator: React.FC<StepIndicatorProps> = ({ step, order, styles, showExecutionIcons }) => {
   switch (step.status) {
     case 'running':
       return (
@@ -255,11 +272,19 @@ const StepIndicator: React.FC<StepIndicatorProps> = ({ step, order, styles }) =>
     case 'failed':
       return (
         <div className={styles.stepIndicator}>
-          <DismissCircle20Regular className={styles.iconFailed} aria-label="Failed" />
+          <ErrorCircle20Regular className={styles.iconFailed} aria-label="Failed" />
         </div>
       );
     case 'pending':
     default:
+      // During execution, show Clock icon for pending steps; before execution, show numbered circle
+      if (showExecutionIcons) {
+        return (
+          <div className={styles.stepIndicator}>
+            <Clock20Regular className={styles.iconPending} aria-label={`Step ${order} pending`} />
+          </div>
+        );
+      }
       return (
         <div className={styles.stepIndicator}>
           <span className={styles.stepNumberCircle} aria-label={`Step ${order}`}>
@@ -320,6 +345,7 @@ export const PlanPreviewCard: React.FC<PlanPreviewCardProps> = ({
   onProceed,
   onCancel,
   onEditPlan,
+  onCancelExecution,
 }) => {
   const styles = useStyles();
 
@@ -367,7 +393,7 @@ export const PlanPreviewCard: React.FC<PlanPreviewCardProps> = ({
         {steps.map((step, index) => (
           <li key={step.id} className={styles.stepItem}>
             <div className={styles.stepRow}>
-              <StepIndicator step={step} order={index + 1} styles={styles} />
+              <StepIndicator step={step} order={index + 1} styles={styles} showExecutionIcons={isExecuting} />
               <Text className={getDescriptionClass(step.status, styles)}>{step.description}</Text>
             </div>
             {step.result && (
@@ -416,36 +442,48 @@ export const PlanPreviewCard: React.FC<PlanPreviewCardProps> = ({
 
       {/* Action Buttons */}
       <div className={styles.actionRow}>
-        <Button
-          appearance="primary"
-          icon={<ArrowRight20Regular />}
-          onClick={onProceed}
-          disabled={isExecuting}
-          aria-label="Proceed with plan"
-          aria-disabled={isExecuting}
-        >
-          {isExecuting ? 'Executing...' : 'Proceed'}
-        </Button>
+        {isExecuting ? (
+          /* During execution: show Cancel Execution button that aborts the SSE stream */
+          <Button
+            appearance="subtle"
+            icon={<Stop20Regular />}
+            onClick={onCancelExecution}
+            aria-label="Cancel execution"
+          >
+            Cancel Execution
+          </Button>
+        ) : (
+          /* Before execution: show Proceed / Edit Plan / Cancel */
+          <>
+            <Button
+              appearance="primary"
+              icon={<ArrowRight20Regular />}
+              onClick={onProceed}
+              aria-label="Proceed with plan"
+            >
+              Proceed
+            </Button>
 
-        <Button
-          appearance="secondary"
-          icon={<Edit20Regular />}
-          onClick={handleEditPlanToggle}
-          disabled={isExecuting}
-          aria-label="Edit plan"
-          aria-pressed={isEditMode}
-        >
-          Edit Plan
-        </Button>
+            <Button
+              appearance="secondary"
+              icon={<Edit20Regular />}
+              onClick={handleEditPlanToggle}
+              aria-label="Edit plan"
+              aria-pressed={isEditMode}
+            >
+              Edit Plan
+            </Button>
 
-        <Button
-          appearance="subtle"
-          icon={<Dismiss20Regular />}
-          onClick={onCancel}
-          aria-label="Cancel plan"
-        >
-          Cancel
-        </Button>
+            <Button
+              appearance="subtle"
+              icon={<Dismiss20Regular />}
+              onClick={onCancel}
+              aria-label="Cancel plan"
+            >
+              Cancel
+            </Button>
+          </>
+        )}
       </div>
     </Card>
   );

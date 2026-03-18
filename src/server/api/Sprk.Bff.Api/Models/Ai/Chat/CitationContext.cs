@@ -19,12 +19,21 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// that lack page-level granularity.
 /// </param>
 /// <param name="Excerpt">Short excerpt (max 200 chars) from the matched content for preview.</param>
+/// <param name="SourceType">
+/// Citation source type discriminator. "document" (default) for internal SPE references;
+/// "web" for external web search results. When null, defaults to "document" on the frontend.
+/// </param>
+/// <param name="Url">Full URL of the web search result. Present when SourceType is "web".</param>
+/// <param name="Snippet">Short text snippet from the web search result. Present when SourceType is "web".</param>
 public sealed record CitationMetadata(
     int CitationId,
     string ChunkId,
     string SourceName,
     int? PageNumber,
-    string Excerpt);
+    string Excerpt,
+    string? SourceType = null,
+    string? Url = null,
+    string? Snippet = null);
 
 /// <summary>
 /// Thread-safe, per-message accumulator for citation metadata produced by search tools.
@@ -54,15 +63,27 @@ public sealed class CitationContext
     /// <param name="sourceName">Display name of the source document or article.</param>
     /// <param name="pageNumber">Optional page number in the source document.</param>
     /// <param name="excerpt">Content excerpt (will be truncated to <see cref="MaxExcerptLength"/>).</param>
+    /// <param name="sourceType">Citation source type: null/"document" for internal, "web" for external.</param>
+    /// <param name="url">Full URL for web citations. Null for document citations.</param>
+    /// <param name="snippet">Short text snippet for web citations. Null for document citations.</param>
     /// <returns>The assigned 1-based citation ID.</returns>
-    public int AddCitation(string chunkId, string sourceName, int? pageNumber, string excerpt)
+    public int AddCitation(
+        string chunkId,
+        string sourceName,
+        int? pageNumber,
+        string excerpt,
+        string? sourceType = null,
+        string? url = null,
+        string? snippet = null)
     {
         var id = Interlocked.Increment(ref _nextId);
         var truncatedExcerpt = excerpt.Length > MaxExcerptLength
             ? excerpt[..MaxExcerptLength] + "..."
             : excerpt;
 
-        _citations.Add(new CitationMetadata(id, chunkId, sourceName, pageNumber, truncatedExcerpt));
+        _citations.Add(new CitationMetadata(
+            id, chunkId, sourceName, pageNumber, truncatedExcerpt,
+            sourceType, url, snippet));
         return id;
     }
 

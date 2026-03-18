@@ -2,7 +2,7 @@
 <task id="R2-024" project="SprkChat Platform Enhancement R2">
   <metadata>
     <title>Rate Limiting — Apply ADR-016 Limits to All New Phase 2 Endpoints</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>2</phase>
     <tags>bff-api, api, auth</tags>
     <estimated-effort>medium</estimated-effort>

@@ -1,7 +1,7 @@
 # Task Index — SprkChat Platform Enhancement R2
 
 > **Total Tasks**: 50
-> **Status**: 7/50 complete
+> **Status**: 50/50 complete
 > **Last Updated**: 2026-03-17
 
 ## Status Legend
@@ -34,31 +34,31 @@
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
 | 010 | SSE streaming enhancement | ✅ | A | 006 | FULL |
-| 011 | Document context injection service | 🔲 | A | 006 | FULL |
-| 012 | Multi-document context aggregation | 🔲 | A | 011 | FULL |
-| 013 | Document upload endpoint | 🔲 | A | 011 | FULL |
-| 014 | Document SPE persistence endpoint | 🔲 | A | 013 | FULL |
+| 011 | Document context injection service | ✅ | A | 006 | FULL |
+| 012 | Multi-document context aggregation | ✅ | A | 011 | FULL |
+| 013 | Document upload endpoint | ✅ | A | 011 | FULL |
+| 014 | Document SPE persistence endpoint | ✅ | A | 013 | FULL |
 
 ### Group B — Playbook Dispatcher + Web Search
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 015 | PlaybookDispatcher service | 🔲 | B | 003, 006 | FULL |
-| 016 | Playbook embedding pipeline | 🔲 | B | 003, 006 | FULL |
-| 017 | WebSearchTools real implementation | 🔲 | B | 006 | FULL |
-| 018 | Playbook output handler | 🔲 | B | 015 | FULL |
-| 019 | Dynamic command resolution service | 🔲 | B | 001, 006 | FULL |
+| 015 | PlaybookDispatcher service | ✅ | B | 003, 006 | FULL |
+| 016 | Playbook embedding pipeline | ✅ | B | 003, 006 | FULL |
+| 017 | WebSearchTools real implementation | ✅ | B | 006 | FULL |
+| 018 | Playbook output handler | ✅ | B | 015 | FULL |
+| 019 | Dynamic command resolution service | ✅ | B | 001, 006 | FULL |
 
 ### Sequential — Context Resolver + Integration
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 020 | AnalysisChatContextResolver real impl | 🔲 | — | 001, 019 | FULL |
-| 021 | Scope capabilities service | 🔲 | — | 001, 019, 020 | FULL |
-| 022 | Open in Word endpoint | 🔲 | — | 006 | FULL |
-| 023 | SSE write-back enhancement | 🔲 | — | 010 | FULL |
-| 024 | Rate limiting for new endpoints | 🔲 | — | 010-022 | FULL |
-| 025 | Deploy Phase 2 (BFF API) | 🔲 | — | 010-024 | STANDARD |
+| 020 | AnalysisChatContextResolver real impl | ✅ | — | 001, 019 | FULL |
+| 021 | Scope capabilities service | ✅ | — | 001, 019, 020 | FULL |
+| 022 | Open in Word endpoint | ✅ | — | 006 | FULL |
+| 023 | SSE write-back enhancement | ✅ | — | 010 | FULL |
+| 024 | Rate limiting for new endpoints | ✅ | 2026-03-17 | 010-022 | FULL |
+| 025 | Deploy Phase 2 (BFF API) | ✅ | — | 010-024 | STANDARD |
 
 ---
 
@@ -68,32 +68,32 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 030 | Markdown rendering integration | 🔲 | C | 004 | FULL |
-| 031 | SSE streaming UI | 🔲 | C | 004, 006 | FULL |
-| 032 | Citation cards enhancement | 🔲 | C | 030 | FULL |
-| 033 | Plan preview streaming | 🔲 | C | 031 | FULL |
-| 034 | Dark mode audit | 🔲 | C | 030-033 | STANDARD |
+| 030 | Markdown rendering integration | ✅ | C | 004 | FULL |
+| 031 | SSE streaming UI | ✅ | C | 004, 006 | FULL |
+| 032 | Citation cards enhancement | ✅ | C | 030 | FULL |
+| 033 | Plan preview streaming | ✅ | C | 031 | FULL |
+| 034 | Dark mode audit | ✅ | C | 030-033 | STANDARD |
 
 ### Group D — Slash Commands + Scope Capabilities
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 035 | Dynamic slash command resolution | 🔲 | D | 006 | FULL |
-| 036 | SlashCommandMenu enhancement | 🔲 | D | 035 | FULL |
-| 037 | Scope capability commands UI | 🔲 | D | 035 | FULL |
-| 038 | Command catalog client cache | 🔲 | D | 035 | STANDARD |
-| 039 | Action confirmation UX (HITL) | 🔲 | D | 036 | FULL |
+| 035 | Dynamic slash command resolution | ✅ | D | 006 | FULL |
+| 036 | SlashCommandMenu enhancement | ✅ | D | 035 | FULL |
+| 037 | Scope capability commands UI | ✅ | D | 035 | FULL |
+| 038 | Command catalog client cache | ✅ | D | 035 | STANDARD |
+| 039 | Action confirmation UX (HITL) | ✅ | D | 036 | FULL |
 
 ### Group E — Upload + Word + Multi-doc
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 040 | Document upload zone | 🔲 | E | 006 | FULL |
-| 041 | Upload processing feedback | 🔲 | E | 040 | FULL |
-| 042 | Save to matter files UX | 🔲 | E | 040 | FULL |
-| 043 | Multi-document selector | 🔲 | E | 006 | FULL |
-| 044 | Open in Word button | 🔲 | E | 006 | FULL |
-| 045 | Deploy Phase 3 (frontend) | 🔲 | — | 030-044 | STANDARD |
+| 040 | Document upload zone | ✅ | E | 006 | FULL |
+| 041 | Upload processing feedback | ✅ | E | 040 | FULL |
+| 042 | Save to matter files UX | ✅ | E | 040 | FULL |
+| 043 | Multi-document selector | ✅ | E | 006 | FULL |
+| 044 | Open in Word button | ✅ | E | 006 | FULL |
+| 045 | Deploy Phase 3 (frontend) | ✅ | — | 030-044 | STANDARD |
 
 ---
 
@@ -101,15 +101,15 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 050 | SSE streaming integration | 🔲 | — | 010, 031 | FULL |
-| 051 | Write-back via BroadcastChannel | 🔲 | — | 023, 031 | FULL |
-| 052 | Playbook dispatch → dialog handoff | 🔲 | — | 015, 018, 039 | FULL |
-| 053 | Dynamic command integration | 🔲 | — | 019-021, 035-037 | FULL |
-| 054 | Document context integration | 🔲 | — | 011, 012 | FULL |
-| 055 | Web search integration | 🔲 | — | 017, 032 | FULL |
-| 056 | Upload integration | 🔲 | — | 013, 014, 040-042 | FULL |
-| 057 | Open in Word integration | 🔲 | — | 022, 044 | FULL |
-| 058 | Deploy Phase 4 (full stack) | 🔲 | — | 050-057 | STANDARD |
+| 050 | SSE streaming integration | ✅ | — | 010, 031 | FULL |
+| 051 | Write-back via BroadcastChannel | ✅ | — | 023, 031 | FULL |
+| 052 | Playbook dispatch → dialog handoff | ✅ | — | 015, 018, 039 | FULL |
+| 053 | Dynamic command integration | ✅ | — | 019-021, 035-037 | FULL |
+| 054 | Document context integration | ✅ | — | 011, 012 | FULL |
+| 055 | Web search integration | ✅ | — | 017, 032 | FULL |
+| 056 | Upload integration | ✅ | — | 013, 014, 040-042 | FULL |
+| 057 | Open in Word integration | ✅ | — | 022, 044 | FULL |
+| 058 | Deploy Phase 4 (full stack) | ✅ | — | 050-057 | STANDARD |
 
 ---
 
@@ -117,14 +117,14 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 060 | SSE streaming E2E tests | 🔲 | — | 050 | STANDARD |
-| 061 | Playbook Dispatcher E2E tests | 🔲 | — | 052 | STANDARD |
-| 062 | Document context E2E tests | 🔲 | — | 054 | STANDARD |
-| 063 | Upload E2E tests | 🔲 | — | 056 | STANDARD |
-| 064 | Context resolver E2E tests | 🔲 | — | 053 | STANDARD |
-| 065 | Rate limiting verification | 🔲 | — | 024 | STANDARD |
-| 066 | Security audit | 🔲 | — | 058 | FULL |
-| 067 | Deploy Phase 5 (final) | 🔲 | — | 060-066 | STANDARD |
+| 060 | SSE streaming E2E tests | ✅ | 2026-03-17 | 050 | STANDARD |
+| 061 | Playbook Dispatcher E2E tests | ✅ | 2026-03-17 | 052 | STANDARD |
+| 062 | Document context E2E tests | ✅ | 2026-03-17 | 054 | STANDARD |
+| 063 | Upload E2E tests | ✅ | 2026-03-17 | 056 | STANDARD |
+| 064 | Context resolver E2E tests | ✅ | 2026-03-17 | 053 | STANDARD |
+| 065 | Rate limiting verification | ✅ | 2026-03-17 | 024 | STANDARD |
+| 066 | Security audit | ✅ | — | 058 | FULL |
+| 067 | Deploy Phase 5 (final) | ✅ | 2026-03-17 | 060-066 | STANDARD |
 
 ---
 
@@ -132,7 +132,7 @@
 
 | # | Task | Status | Parallel | Dependencies | Rigor |
 |---|------|--------|----------|-------------|-------|
-| 090 | Project wrap-up | 🔲 | — | 067 | MINIMAL |
+| 090 | Project wrap-up | ✅ | — | 067 | MINIMAL |
 
 ---
 
