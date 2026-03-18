@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build App Shell with Routing and Error Boundary</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — app shell with routing, error boundary, and theming</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build the App.tsx shell component with FluentProvider theming (light/dark mode toggle), client-side routing (home page and project/:id), an ErrorBoundary component, and an AppHeader with user info and navigation.</prompt>
+  <role>You are a React frontend engineer building the application shell that provides the foundational structure for all SPA pages.</role>
+  <goal>A working app shell with Fluent v9 theming, client-side routing, error handling, and a header — the structural foundation for all feature pages.</goal>
+  <context>
+    <background>The app shell is the outermost component that wraps all pages. It provides the FluentProvider for theming, the router for navigation, the error boundary for graceful error handling, and the header for user context and navigation. All feature pages (workspace home, project page) render inside this shell.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/App.tsx (create)</file>
+      <file>src/client/external-spa/src/components/AppHeader.tsx (create)</file>
+      <file>src/client/external-spa/src/components/ErrorBoundary.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively — webLightTheme and webDarkTheme, dark mode toggle required</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create App.tsx with FluentProvider wrapping entire app</step>
+    <step order="2">Implement dark mode toggle using React state — switch between webLightTheme and webDarkTheme</step>
+    <step order="3">Set up client-side routing with routes: "/" (home) and "/project/:id" (project page)</step>
+    <step order="4">Create ErrorBoundary.tsx — React error boundary with user-friendly fallback UI</step>
+    <step order="5">Create AppHeader.tsx — show user info (from portal auth), navigation links, dark mode toggle button</step>
+    <step order="6">Wrap routes in ErrorBoundary for graceful error handling</step>
+    <step order="7">Add loading state while portal user context is being fetched</step>
+    <step order="8">Verify routing works: navigate between home and project pages</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>App renders with FluentProvider and Fluent v9 theming</criterion>
+    <criterion>Dark mode toggle switches between light and dark themes</criterion>
+    <criterion>Client-side routing works for home and project pages</criterion>
+    <criterion>ErrorBoundary catches and displays errors gracefully</criterion>
+    <criterion>AppHeader shows user info and navigation</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="sdap-secure-project-module">
+  <metadata>
+    <title>Scaffold Power Pages Code Page SPA Project</title>
+    <phase>4: Power Pages Code Page SPA — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>022, 023</dependencies>
+    <blocks>031, 032, 033, 034, 035</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New project scaffolding — React 18, Vite, Fluent UI v9, foundational for all SPA work</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create a new Vite + React 18 + TypeScript project at src/client/external-spa/. Configure the full build toolchain, add Fluent UI v9 and @spaarke/ui-components dependencies, create the entry point with createRoot, and add powerpages.config.json for deployment configuration.</prompt>
+  <role>You are a frontend architect scaffolding the Power Pages Code Page SPA — a React 18 single-page application hosted on Power Pages for external users.</role>
+  <goal>A fully configured Vite + React 18 + TypeScript project that builds to dist/, renders with FluentProvider, and supports dark mode — ready for feature development.</goal>
+  <context>
+    <background>The external SPA is the primary interface for external users accessing secure projects. It is built as a Power Pages Code Page — a React 18 application bundled with Vite and deployed to Power Pages. Unlike PCF controls (React 16/17, platform-provided), Code Pages bundle their own React 18 and render via createRoot. The SPA must use Fluent UI v9 exclusively and support dark mode.</background>
+    <relevant-files>
+      <file>src/client/external-spa/ (create — entire directory)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 — no v8 components, no hard-coded colors, dark mode required</constraint>
+    <constraint source="ADR-022">React 18 bundled (not platform-provided) — use createRoot</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components shared library</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create src/client/external-spa/ directory structure</step>
+    <step order="2">Initialize Vite + React 18 + TypeScript project (npm create vite@latest)</step>
+    <step order="3">Configure tsconfig.json with strict mode, path aliases</step>
+    <step order="4">Configure package.json with dependencies: react 18, react-dom 18, @fluentui/react-components, @spaarke/ui-components</step>
+    <step order="5">Configure vite.config.ts with build output to dist/, source maps, chunk optimization</step>
+    <step order="6">Create index.html with root div and minimal styling</step>
+    <step order="7">Create main.tsx with createRoot entry, FluentProvider wrapping with webLightTheme</step>
+    <step order="8">Add dark mode toggle using Fluent v9 theming (webLightTheme / webDarkTheme)</step>
+    <step order="9">Create powerpages.config.json for deployment configuration</step>
+    <step order="10">Verify npm run build produces dist/ with all assets</step>
+    <step order="11">Verify FluentProvider renders and dark mode toggle works</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>npm run build produces dist/ directory with bundled assets</criterion>
+    <criterion>FluentProvider wraps the entire app with Fluent v9 theming</criterion>
+    <criterion>Dark mode toggle switches between webLightTheme and webDarkTheme</criterion>
+    <criterion>React 18 createRoot used (not ReactDOM.render)</criterion>
+    <criterion>@spaarke/ui-components is a dependency and importable</criterion>
+  </acceptance-criteria>
+</task>

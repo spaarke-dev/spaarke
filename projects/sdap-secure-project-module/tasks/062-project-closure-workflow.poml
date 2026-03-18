@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062-closure" project="sdap-secure-project-module">
+  <metadata>
+    <title>Project Closure Workflow — Internal UI</title>
+    <phase>6: Create Project Wizard Extension</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016, 060, 061</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — confirmation dialog with BFF API integration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Add an internal-user UI to trigger Secure Project closure. The BFF API endpoint POST /api/v1/external-access/close-project already exists (task 016). This task adds a Fluent v9 confirmation dialog with destructive-action warnings, a closure progress state, and a summary result screen.</prompt>
+
+  <role>You are a React frontend engineer adding the project closure confirmation dialog to the LegalWorkspace for internal users (attorneys, paralegals, administrators).</role>
+
+  <goal>Internal users can close a Secure Project via a confirmation dialog that clearly warns about the consequences: all external access revoked, all external members removed from the SPE container, irreversible action.</goal>
+
+  <context>
+    <background>
+      The BFF API endpoint POST /api/v1/external-access/close-project was implemented in task 016.
+      It accepts { projectId, containerId? } and returns { accessRecordsRevoked, speContainerMembersRemoved, affectedContactIds }.
+      This task adds the frontend CloseProjectDialog component and wires it into the LegalWorkspace (WorkspaceGrid).
+      The dialog is exposed via a window-level handler so it can be triggered from Xrm ribbon commands.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx (created)</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/closureService.ts (created)</file>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx (modified)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components exclusively — makeStyles with semantic tokens, no hard-coded colours, dark mode support</constraint>
+    <constraint source="ADR-006">Confirmation dialog implemented as a Fluent v9 Dialog overlay within the existing LegalWorkspace SPA — not a separate Code Page</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/provisioningService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create closureService.ts — BFF client for POST /api/v1/external-access/close-project following provisioningService.ts pattern</step>
+    <step order="2">Create CloseProjectDialog.tsx — Fluent v9 confirmation dialog with three phases: confirm, closing (spinner), result (success/error)</step>
+    <step order="3">Confirmation phase: consequence list showing (1) all external access revoked, (2) external members removed from SPE container, (3) irreversible action warning bar</step>
+    <step order="4">Closing phase: Spinner with progress label while BFF call is in flight</step>
+    <step order="5">Success phase: summary card showing counts (access records revoked, SPE members removed, cache entries invalidated) + Done button</step>
+    <step order="6">Error phase: error MessageBar with error detail + Try Again button</step>
+    <step order="7">Wire dialog into WorkspaceGrid as a lazy-loaded overlay alongside other dialogs</step>
+    <step order="8">Expose window.__SPAARKE_OPEN_CLOSE_PROJECT__ handler for ribbon command integration</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CloseProjectDialog renders with three consequence items in confirmation phase</criterion>
+    <criterion>Destructive "Close Project" button uses red palette tokens — no hard-coded colours</criterion>
+    <criterion>Cancel/dismiss is blocked during the BFF call (closing phase)</criterion>
+    <criterion>Success phase shows counts from BFF response</criterion>
+    <criterion>Error phase shows error detail and allows retry</criterion>
+    <criterion>Dialog supports dark mode (Fluent v9 token system)</criterion>
+    <criterion>window.__SPAARKE_OPEN_CLOSE_PROJECT__ is available while WorkspaceGrid is mounted</criterion>
+    <criterion>TypeScript build succeeds with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Implementation complete on 2026-03-16.
+
+    Files created:
+    - src/solutions/LegalWorkspace/src/components/CreateProject/closureService.ts
+    - src/solutions/LegalWorkspace/src/components/CreateProject/CloseProjectDialog.tsx
+
+    Files modified:
+    - src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx
+      (added LazyCloseProjectDialog, closeProjectContext state, handleOpenCloseProjectDialog,
+       handleCloseProjectDialog, window.__SPAARKE_OPEN_CLOSE_PROJECT__ effect, and dialog render)
+
+    Design decisions:
+    - Dialog phases: confirm → closing → success | error (three-phase lifecycle)
+    - Destructive button uses colorPaletteRedBackground3 / colorPaletteRedBorder2 tokens
+    - Window-level exposure allows Xrm ribbon buttons to trigger the dialog without
+      a separate Code Page (reuses existing LegalWorkspace SPA)
+    - closureService.ts follows provisioningService.ts pattern (never throws, returns result object)
+  </notes>
+</task>

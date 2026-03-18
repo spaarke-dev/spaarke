@@ -182,6 +182,43 @@ public class DataverseWebApiClient : IDisposable
         return result?.Value ?? new List<T>();
     }
 
+    /// <summary>
+    /// Creates an N:N association between two entities using OData $ref.
+    /// Example: POST /adx_invitations({id})/adx_invitation_mspp_webrole/$ref
+    /// </summary>
+    public async Task AssociateAsync(string navigationUrl, Guid relatedEntityId, string relatedEntitySet, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("POST (associate) {NavigationUrl}", navigationUrl);
+
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, cancellationToken);
+
+        // OData $ref body: { "@odata.id": "https://{org}/api/data/v9.2/{EntitySet}({id})" }
+        // Use relative URL form — Dataverse accepts both absolute and entity-set-relative
+        var refBody = new Dictionary<string, string>
+        {
+            ["@odata.id"] = $"{relatedEntitySet}({relatedEntityId})"
+        };
+
+        request.Content = JsonContent.Create(refBody);
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Removes an N:N association between two entities using OData $ref DELETE.
+    /// Example: DELETE /contacts({id})/mspp_contact_mspp_webrole_powerpagecomponent/{roleId}/$ref
+    /// </summary>
+    public async Task DisassociateAsync(string navigationUrl, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("DELETE (disassociate) {NavigationUrl}", navigationUrl);
+
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, cancellationToken);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
     public void Dispose()
     {
         _tokenSemaphore?.Dispose();

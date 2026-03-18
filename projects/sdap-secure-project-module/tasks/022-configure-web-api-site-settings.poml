@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="sdap-secure-project-module">
+  <metadata>
+    <title>Configure Power Pages Web API Site Settings</title>
+    <phase>3: Power Pages Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>030</blocks>
+    <tags>config, power-pages</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task — enabling Web API for specific tables</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Enable the Power Pages Web API for the tables needed by the SPA: sprk_project, sprk_document, sprk_event, contact, and sprk_organization. Configure field lists and enable OAuth implicit grant flow for SPA-to-BFF authentication.</prompt>
+  <role>You are a Power Pages configurator enabling Web API access for the external SPA.</role>
+  <goal>The SPA can make authenticated Web API calls to read and write Dataverse data through the Power Pages /_api/ endpoint.</goal>
+  <context>
+    <background>The Power Pages Web API (/_api/) provides OData 4.0 access to Dataverse tables for authenticated portal users. Each table must be explicitly enabled, and field-level access is controlled via site settings. The SPA also needs OAuth tokens to call the BFF API — the implicit grant flow provides these tokens client-side.</background>
+    <relevant-files>
+      <file>Power Pages site configuration</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="power-pages">Only enable Web API for tables that the SPA actually needs</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Enable Web API for sprk_project table — configure readable and writable fields</step>
+    <step order="2">Enable Web API for sprk_document table — configure readable fields</step>
+    <step order="3">Enable Web API for sprk_event table — configure readable and writable fields</step>
+    <step order="4">Enable Web API for contact table — configure readable fields only</step>
+    <step order="5">Enable Web API for sprk_organization table — configure readable fields only</step>
+    <step order="6">Configure OAuth implicit grant flow: set client ID, token expiry, allowed scopes</step>
+    <step order="7">Test Web API calls with authenticated portal user — verify data scoping respects table permissions</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Web API enabled for all required tables</criterion>
+    <criterion>Field lists correctly configured (read/write per table)</criterion>
+    <criterion>OAuth implicit grant flow configured and working</criterion>
+    <criterion>Web API calls return data scoped by table permissions</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,9 +1,24 @@
 const path = require('path');
 const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
+const fs = require('fs');
+
+// Read .env.production for build-time env vars (VITE_BFF_BASE_URL, VITE_MSAL_CLIENT_ID)
+function loadEnvFile() {
+  const envFile = path.resolve(__dirname, '.env.production');
+  const vars = {};
+  if (fs.existsSync(envFile)) {
+    fs.readFileSync(envFile, 'utf-8').split(/\r?\n/).forEach(line => {
+      const match = line.match(/^(\w+)=(.*)$/);
+      if (match) vars[match[1]] = match[2].trim();
+    });
+  }
+  return vars;
+}
 
 module.exports = (env) => {
   const isAnalyze = env?.analyze;
+  const envVars = loadEnvFile();
 
   const config = {
     mode: 'production',
@@ -20,6 +35,11 @@ module.exports = (env) => {
         // Resolve workspace dependency to shared library source for bundling
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
         '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
+        // Force single React instance — shared lib has React 18 in its node_modules,
+        // which conflicts with this page's React 19. Deduplicate to this page's copy.
+        'react': path.resolve(__dirname, 'node_modules/react'),
+        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+        'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime'),
       },
       modules: [
         path.resolve(__dirname, 'node_modules'),
@@ -98,6 +118,11 @@ module.exports = (env) => {
       // web resources with no chunk loading capability. This prevents MSAL and
       // other libraries that use dynamic import() from creating async chunks.
       new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
+      // Inject Vite-style import.meta.env variables for bffConfig.ts / msalConfig.ts
+      new webpack.DefinePlugin({
+        'import.meta.env.VITE_BFF_BASE_URL': JSON.stringify(envVars.VITE_BFF_BASE_URL || ''),
+        'import.meta.env.VITE_MSAL_CLIENT_ID': JSON.stringify(envVars.VITE_MSAL_CLIENT_ID || ''),
+      }),
     ],
   };
 

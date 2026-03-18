@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="sdap-secure-project-module">
+  <metadata>
+    <title>Unit Tests for External Access BFF Endpoints</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>011, 012, 013</dependencies>
+    <blocks>018</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — follows established test patterns</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Write comprehensive unit tests for all External Access BFF components: ExternalCallerAuthorizationFilter, ExternalAccessService (grant, revoke, close), InvitationService, and SPE container membership methods. Use existing test patterns (xUnit, Moq).</prompt>
+  <role>You are a .NET test engineer writing unit tests to validate the external access authorization and service layer.</role>
+  <goal>Comprehensive unit test coverage for all external access components, covering happy paths, error scenarios, and edge cases.</goal>
+  <context>
+    <background>The external access module is security-critical — thorough unit tests are essential to verify that authorization, access granting, revocation, and invitation logic works correctly in isolation before integration testing.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ExternalAccess/ (create — multiple test files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="testing">Use xUnit and Moq following existing test patterns in the repository</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create ExternalCallerAuthorizationFilterTests.cs — test valid token, invalid token, expired token, missing claims</step>
+    <step order="2">Create ExternalAccessServiceTests.cs — test GrantAccessAsync (happy path, duplicate grant, invalid project)</step>
+    <step order="3">Add revoke tests — test RevokeAccessAsync (happy path, last access record triggers web role removal, partial failure)</step>
+    <step order="4">Add close-project tests — test CloseProjectAsync (happy path, no participants, mixed web role scenarios)</step>
+    <step order="5">Create InvitationServiceTests.cs — test InviteAsync (new contact, existing contact, duplicate invitation, email failure)</step>
+    <step order="6">Create SpeContainerMembershipTests.cs — test add/remove member, role mapping, error scenarios</step>
+    <step order="7">Run all tests with dotnet test and verify pass rate</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All unit tests pass</criterion>
+    <criterion>Coverage for happy path and error scenarios for each service</criterion>
+    <criterion>Authorization filter tests cover valid, invalid, and expired tokens</criterion>
+    <criterion>Revocation tests verify web role removal logic (last-record check)</criterion>
+  </acceptance-criteria>
+</task>

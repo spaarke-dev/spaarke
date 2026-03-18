@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Semantic Search Component</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — AI search with project-scoped filtering</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build the SemanticSearch component with a natural language search input that calls the BFF search endpoint with project_ids filter. Display results with excerpts and document links. Reference the existing SemanticSearch code page for design patterns.</prompt>
+  <role>You are a React frontend engineer building the semantic search component that enables natural language document search for external users.</role>
+  <goal>External users can search project documents using natural language, with results scoped to only their accessible projects and displayed with relevant excerpts.</goal>
+  <context>
+    <background>The semantic search component uses Azure AI Search through the BFF API. The critical security requirement is the project_ids filter — the BFF API must filter search results to only include documents from projects the user has access to. The existing SemanticSearch code page provides the design pattern and API integration approach to reference.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/SemanticSearch.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SemanticSearch/ (reference)</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create SemanticSearch.tsx component</step>
+    <step order="2">Build natural language search input with Fluent v9 SearchBox</step>
+    <step order="3">Call BFF search endpoint with query text and project_ids filter (from user's accessible projects)</step>
+    <step order="4">Display search results with: document name, excerpt/highlight, relevance score, project name</step>
+    <step order="5">Add document link — click to navigate to document in project page</step>
+    <step order="6">Add loading state during search</step>
+    <step order="7">Add empty state for no results</step>
+    <step order="8">Reference SemanticSearch code page (src/client/code-pages/SemanticSearch/) for patterns</step>
+    <step order="9">Verify results only include documents from accessible projects</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Natural language search returns relevant results</criterion>
+    <criterion>Results scoped to only accessible project documents (project_ids filter applied)</criterion>
+    <criterion>Results display with excerpts and document links</criterion>
+    <criterion>Loading and empty states render correctly</criterion>
+    <criterion>Design consistent with existing SemanticSearch code page</criterion>
+  </acceptance-criteria>
+</task>

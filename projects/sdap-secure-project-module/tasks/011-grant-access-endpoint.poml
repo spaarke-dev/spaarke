@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="sdap-secure-project-module">
+  <metadata>
+    <title>Implement Grant External Access Endpoint</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — creates records across multiple systems (Dataverse, SPE, web roles)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create the POST /api/external-access/grant endpoint that provisions external access across all three UAC planes: creates a sprk_externalrecordaccess record in Dataverse, ensures the Contact has the "Secure Project Participant" web role, and adds the Contact to the SPE container with the appropriate role.</prompt>
+  <role>You are a .NET API engineer implementing the grant-access endpoint that orchestrates provisioning across Dataverse, Power Pages web roles, and SharePoint Embedded.</role>
+  <goal>A single API call grants an external Contact access to a project with the specified access level, provisioning all three UAC planes atomically.</goal>
+  <context>
+    <background>Granting access is a three-plane operation: (1) Dataverse — create sprk_externalrecordaccess record, (2) Power Pages — ensure Contact has "Secure Project Participant" web role for table permission chain, (3) SPE — add Contact to the project's SPE container with Reader (View Only) or Writer (Collaborate/Full Access) role. All three must succeed for the grant to be complete.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessService.cs (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-007">All SPE operations through SpeFileStore facade</constraint>
+    <constraint source="ADR-008">Apply ExternalCallerAuthorizationFilter via endpoint filter</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create ExternalAccessEndpoints.cs with MapExternalAccessEndpoints extension method</step>
+    <step order="2">Define POST /api/external-access/grant endpoint with request model (contactId, projectId, accessLevel)</step>
+    <step order="3">Create ExternalAccessService.cs with GrantAccessAsync method</step>
+    <step order="4">Implement Dataverse plane: create sprk_externalrecordaccess record with all fields populated</step>
+    <step order="5">Implement Power Pages plane: check if Contact already has "Secure Project Participant" web role; if not, assign it</step>
+    <step order="6">Implement SPE plane: add Contact to project's SPE container via SpeFileStore (Reader for View Only, Writer for Collaborate/Full Access)</step>
+    <step order="7">Return participation record ID on success, ProblemDetails on failure</step>
+    <step order="8">Add endpoint filter for internal-user-only authorization (only internal users can grant access)</step>
+    <step order="9">Register services in DI</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>POST /api/external-access/grant creates sprk_externalrecordaccess record in Dataverse</criterion>
+    <criterion>Contact receives "Secure Project Participant" web role if not already assigned</criterion>
+    <criterion>Contact added to SPE container with correct role (Reader/Writer)</criterion>
+    <criterion>Returns participation record ID on success</criterion>
+    <criterion>Returns ProblemDetails with correlation ID on failure</criterion>
+  </acceptance-criteria>
+</task>

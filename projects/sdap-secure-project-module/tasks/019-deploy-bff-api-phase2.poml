@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="sdap-secure-project-module">
+  <metadata>
+    <title>Deploy BFF API Updates to Azure (Phase 2)</title>
+    <phase>2: BFF API — External Access Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — follows established azure-deploy skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Deploy the BFF API with all Phase 2 external access endpoints to Azure App Service. Verify health check and run Test-SdapBffApi.ps1 for validation.</prompt>
+  <role>You are a DevOps engineer deploying the BFF API to Azure.</role>
+  <goal>BFF API deployed to Azure with all external access endpoints operational and verified.</goal>
+  <context>
+    <background>Phase 2 adds the external access endpoints to the BFF API. These must be deployed before Phase 3 (Power Pages configuration) can proceed, since the Power Pages SPA needs to call these endpoints.</background>
+    <relevant-files>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-001">Deploy to Azure App Service (not Azure Functions)</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Build BFF API: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="2">Run unit tests: dotnet test</step>
+    <step order="3">Deploy to Azure App Service using deployment script</step>
+    <step order="4">Verify health check: GET /healthz returns 200</step>
+    <step order="5">Run Test-SdapBffApi.ps1 for endpoint validation</step>
+    <step order="6">Verify external access endpoints respond (even if auth is required)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>API deployed successfully to Azure App Service</criterion>
+    <criterion>Health check returns 200</criterion>
+    <criterion>External access endpoints respond (401 without auth is acceptable)</criterion>
+    <criterion>Test-SdapBffApi.ps1 passes</criterion>
+  </acceptance-criteria>
+</task>

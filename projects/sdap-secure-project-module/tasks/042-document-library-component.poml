@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="sdap-secure-project-module">
+  <metadata>
+    <title>Build Document Library Component</title>
+    <phase>5: Power Pages Code Page SPA — Features</phase>
+    <status>completed</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>046</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — complex component with upload, download, AI summaries, and access-level enforcement</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build the DocumentLibrary component for the project page Documents tab. List documents with DataGrid, show pre-computed AI summaries from Document Profile, implement upload (Collaborate/Full Access only), download (Collaborate/Full Access only), and version history display using SPE-native versioning.</prompt>
+  <role>You are a React frontend engineer building the document management component for external project participants.</role>
+  <goal>External users can view, upload, and download project documents with access-level enforcement and AI-generated summaries.</goal>
+  <context>
+    <background>The document library is the most important feature for external users. Documents are stored in SPE containers and indexed in Dataverse. AI summaries are pre-computed by the Document Profile pipeline and stored on the sprk_document record — they are displayed directly, not generated on demand. Upload and download capabilities are restricted by access level.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/components/DocumentLibrary.tsx (create)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components and design tokens</constraint>
+    <constraint source="ADR-012">Use DataGrid from @spaarke/ui-components</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/DocumentUploadWizard/ (reference)</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create DocumentLibrary.tsx component</step>
+    <step order="2">Fetch documents for the project from Web API (sprk_document filtered by project)</step>
+    <step order="3">Display documents in DataGrid with columns: Name, Type, Size, Modified Date, AI Summary</step>
+    <step order="4">Show pre-computed AI summaries from sprk_document.sprk_aisummary field</step>
+    <step order="5">Implement upload button — visible only for Collaborate and Full Access users</step>
+    <step order="6">Reuse existing upload dialog pattern from DocumentUploadWizard</step>
+    <step order="7">Implement download button — visible only for Collaborate and Full Access users</step>
+    <step order="8">Implement version history display using SPE-native versioning (via BFF API)</step>
+    <step order="9">Add empty state for projects with no documents</step>
+    <step order="10">Verify access level enforcement (View Only users cannot upload or download)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Documents listed in DataGrid with correct columns</criterion>
+    <criterion>AI summaries displayed from pre-computed Document Profile data</criterion>
+    <criterion>Upload button visible only for Collaborate/Full Access</criterion>
+    <criterion>Download button visible only for Collaborate/Full Access</criterion>
+    <criterion>Version history displays SPE-native versions</criterion>
+    <criterion>View Only users cannot upload or download</criterion>
+  </acceptance-criteria>
+</task>

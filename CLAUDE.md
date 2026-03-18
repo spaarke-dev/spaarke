@@ -691,6 +691,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
 | "merge to master", "check unmerged branches", "reconcile branches", "sync master", "audit branches" | `merge-to-master` | Load `.claude/skills/merge-to-master/SKILL.md` and follow procedure |
 | "deploy code page", "deploy web resource", "build webresource", "update code page" | `code-page-deploy` | Load `.claude/skills/code-page-deploy/SKILL.md` and follow two-step build pipeline |
+| "deploy power pages", "deploy spa", "deploy external workspace", "/power-page-deploy" | `power-page-deploy` | Load `.claude/skills/power-page-deploy/SKILL.md` — build Vite SPA and deploy via `Deploy-ExternalWorkspaceSpa.ps1` |
 | "create JPS action", "new JPS definition", "create analysis action", "new playbook action" | `jps-action-create` | Load `.claude/skills/jps-action-create/SKILL.md` and follow procedure |
 | "audit playbooks", "review playbooks", "check playbook compliance", "update playbooks" | `jps-playbook-audit` | Load `.claude/skills/jps-playbook-audit/SKILL.md` and follow procedure |
 | "design playbook", "create playbook", "new AI playbook", "playbook architecture" | `jps-playbook-design` | Load `.claude/skills/jps-playbook-design/SKILL.md` and follow procedure |
@@ -713,6 +714,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Deploying changes to `src/server/api/Sprk.Bff.Api/` | Load `bff-deploy` skill — use `scripts/Deploy-BffApi.ps1` |
 | Deploying changes to `src/client/pcf/` | Load `pcf-deploy` skill — build, copy, pack, import |
 | Deploying changes to `src/client/code-pages/` | Load `code-page-deploy` skill — two-step build (webpack + inline HTML) |
+| Deploying changes to `src/client/external-spa/` | Load `power-page-deploy` skill — Vite build then `scripts/Deploy-ExternalWorkspaceSpa.ps1` — uploads `sprk_externalworkspace` web resource |
 | Deploying changes to `src/solutions/LegalWorkspace/` | Vite build (`npm run build`) then `scripts/Deploy-CorporateWorkspace.ps1` — uploads `sprk_corporateworkspace` web resource |
 | Deploying changes to `src/solutions/EventsPage/` | Use `scripts/Deploy-EventsPage.ps1` — uploads `sprk_eventspage` web resource |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
@@ -746,6 +748,7 @@ Use these commands to explicitly invoke skills:
 | `/adr-check` | Validate ADR compliance |
 | `/azure-deploy` | Deploy Azure infrastructure, BFF API, or configure App Service |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
+| `/power-page-deploy` | Build external SPA and deploy to Dataverse as `sprk_externalworkspace` web resource |
 | `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
 | `/pull-from-github` | Pull latest changes from GitHub |
 | `/push-to-github` | Commit changes and push to GitHub |

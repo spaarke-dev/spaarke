@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="sdap-secure-project-module">
+  <metadata>
+    <title>Configure Web Roles and Table Permission Chain</title>
+    <phase>3: Power Pages Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>config, power-pages, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security-critical configuration — table permission chain defines data access boundaries</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create the "Secure Project Participant" web role and configure the complete table permission parent chain that controls what data external users can see. The chain starts at sprk_externalrecordaccess (Contact scope) and cascades through sprk_project, sprk_document, sprk_event, contact, and sprk_organization.</prompt>
+  <role>You are a Power Pages security architect configuring the table permission model that governs all external data access.</role>
+  <goal>External users see only the records that cascade through their active participation grants, enforced by the Power Pages table permission chain.</goal>
+  <context>
+    <background>Power Pages table permissions are the Dataverse-level data access control for portal users. The permission chain uses parent-child relationships: an external user's sprk_externalrecordaccess record (scoped to their Contact) grants access to the parent sprk_project, which in turn grants access to child sprk_document, sprk_event, contact, and sprk_organization records. This is the most critical security configuration in the module — a misconfigured permission chain could expose data across projects.</background>
+    <relevant-files>
+      <file>Power Pages site configuration (Portal Management app)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="auth">Table permission chain must enforce strict project-level isolation</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-access-control.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create "Secure Project Participant" web role in Power Pages admin</step>
+    <step order="2">Create root table permission: sprk_externalrecordaccess with Contact scope (users see only their own records)</step>
+    <step order="3">Create child permission: sprk_project as parent of sprk_externalrecordaccess (via sprk_projectid lookup)</step>
+    <step order="4">Create child permission: sprk_document as child of sprk_project</step>
+    <step order="5">Create child permission: sprk_event as child of sprk_project</step>
+    <step order="6">Create child permission: contact as child of sprk_project (project contacts)</step>
+    <step order="7">Create child permission: sprk_organization as child of sprk_project</step>
+    <step order="8">Set CRUD permissions per table based on access level expectations (Read for all, Write for Collaborate+)</step>
+    <step order="9">Assign "Secure Project Participant" web role to the table permission chain</step>
+    <step order="10">Test: verify external user sees only records cascaded through their participation grant</step>
+    <step order="11">Test: verify cross-project data isolation (user with Project A access cannot see Project B data)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>"Secure Project Participant" web role exists</criterion>
+    <criterion>Table permission chain correctly cascades from sprk_externalrecordaccess through all child tables</criterion>
+    <criterion>External user sees only records associated with their granted projects</criterion>
+    <criterion>Cross-project data isolation is enforced (no data leakage between projects)</criterion>
+  </acceptance-criteria>
+</task>

@@ -36,7 +36,9 @@ import { LogLevel } from '@azure/msal-browser';
  * Override via window global for customer tenant deployments.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__ || '170c98e1-d486-4355-bcbe-170454e0207c';
+const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
+  || (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined)
+  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set VITE_MSAL_CLIENT_ID in .env.development or .env.production.'); })();
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**

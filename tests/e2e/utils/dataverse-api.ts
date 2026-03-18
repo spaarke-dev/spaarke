@@ -90,4 +90,19 @@ export class DataverseAPI {
     const response = await this.client.get(`/${entityName}(${recordId})`);
     return response.data;
   }
+
+  /**
+   * Query records using OData query parameters ($filter, $select, $top, etc.).
+   * Returns the typed value array from the OData response.
+   *
+   * @param entityName - Dataverse entity set name (e.g. 'sprk_projects', 'businessunits')
+   * @param params - OData query parameters as string key-value pairs
+   */
+  async queryRecords<T = Record<string, unknown>>(
+    entityName: string,
+    params: Record<string, string>
+  ): Promise<T[]> {
+    const response = await this.client.get(`/${entityName}`, { params });
+    return (response.data?.value ?? []) as T[];
+  }
 }

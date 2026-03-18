@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="sdap-secure-project-module">
+  <metadata>
+    <title>Configure CSP, CORS, and Security Settings</title>
+    <phase>3: Power Pages Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>030</blocks>
+    <tags>config, power-pages, security</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task — security headers and CORS settings</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Configure Content Security Policy, CORS headers, and privacy/security settings in Power Pages to allow the SPA to make requests to the BFF API domain and to unblock .js file uploads.</prompt>
+  <role>You are a security engineer configuring browser security policies for the Power Pages portal.</role>
+  <goal>The SPA can make cross-origin requests to the BFF API, and JavaScript files can be uploaded as web resources.</goal>
+  <context>
+    <background>The SPA runs on the Power Pages domain but needs to make API calls to the BFF API on a different domain. CSP and CORS must be configured to allow this. Additionally, Power Pages blocks certain file types by default — .js files must be unblocked in Privacy + Security settings for the SPA bundle to be uploadable.</background>
+    <relevant-files>
+      <file>Power Pages site configuration</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="security">Only allow the specific BFF API domain — do not use wildcard CORS origins</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-spa-guide.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add BFF API domain (spe-api-dev-67e2xz.azurewebsites.net) to Content Security Policy connect-src directive</step>
+    <step order="2">Configure CORS headers: Access-Control-Allow-Origin for BFF API domain</step>
+    <step order="3">Configure CORS: Access-Control-Allow-Methods (GET, POST, PUT, DELETE, OPTIONS)</step>
+    <step order="4">Configure CORS: Access-Control-Allow-Headers (Authorization, Content-Type, X-Requested-With)</step>
+    <step order="5">Configure CORS: Access-Control-Allow-Credentials (true)</step>
+    <step order="6">Unblock .js file uploads in Privacy + Security settings</step>
+    <step order="7">Verify SPA can make fetch requests to BFF API domain without CSP/CORS errors</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>CSP allows connections to BFF API domain</criterion>
+    <criterion>CORS headers configured for BFF API domain (not wildcard)</criterion>
+    <criterion>.js files can be uploaded as web resources</criterion>
+    <criterion>SPA can make requests to BFF API without browser security errors</criterion>
+  </acceptance-criteria>
+</task>

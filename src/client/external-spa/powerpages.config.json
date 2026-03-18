@@ -1,0 +1,5 @@
+{
+  "siteName": "Spaarke External Workspace",
+  "defaultLandingPage": "index.html",
+  "compiledPath": "./dist"
+}

@@ -15,8 +15,11 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Dev-environment BFF API base URL (includes /api path segment). */
-const DEFAULT_BFF_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
+/**
+ * Build-time BFF API base URL injected via Vite environment variable.
+ * Set VITE_BFF_BASE_URL in .env.development / .env.production.
+ */
+const ENV_BFF_BASE_URL: string = import.meta.env.VITE_BFF_BASE_URL ?? '';
 
 /**
  * Window-level property name that the host page or PCF bridge can set
@@ -53,8 +56,13 @@ export function getBffBaseUrl(): string {
     }
     /* eslint-enable @typescript-eslint/no-explicit-any */
 
-    // 3. Fallback to default dev URL
-    return DEFAULT_BFF_BASE_URL;
+    // 3. Build-time env var (VITE_BFF_BASE_URL from .env.development / .env.production)
+    if (ENV_BFF_BASE_URL) return normalizeUrl(ENV_BFF_BASE_URL);
+
+    throw new Error(
+      '[Spaarke] BFF base URL not configured. Set VITE_BFF_BASE_URL in .env.development or .env.production, ' +
+      'or set window.__SPAARKE_BFF_BASE_URL__ at runtime.'
+    );
 }
 
 /**

@@ -11,8 +11,11 @@
  *   3. Hardcoded dev fallback
  */
 
-/** Dev-environment BFF API base URL. */
-const DEFAULT_BFF_BASE_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
+/**
+ * Build-time BFF API base URL injected via Vite environment variable.
+ * Set VITE_BFF_BASE_URL in .env.development / .env.production.
+ */
+const ENV_BFF_BASE_URL: string = import.meta.env.VITE_BFF_BASE_URL ?? '';
 
 /** Window-level property that the host page can set to override the BFF URL. */
 const GLOBAL_BFF_URL_KEY = "__SPAARKE_BFF_URL__";
@@ -36,8 +39,13 @@ export function getBffBaseUrl(): string {
     /* cross-origin — swallow */
   }
 
-  // 3. Dev fallback
-  return DEFAULT_BFF_BASE_URL;
+  // 3. Build-time env var (VITE_BFF_BASE_URL from .env.development / .env.production)
+  if (ENV_BFF_BASE_URL) return normalizeUrl(ENV_BFF_BASE_URL);
+
+  throw new Error(
+    '[Spaarke] BFF base URL not configured. Set VITE_BFF_BASE_URL in .env.development or .env.production, ' +
+    'or set window.__SPAARKE_BFF_BASE_URL__ at runtime.'
+  );
 }
 
 function normalizeUrl(raw: string): string {

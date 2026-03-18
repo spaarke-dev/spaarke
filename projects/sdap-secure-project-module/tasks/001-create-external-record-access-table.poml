@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="sdap-secure-project-module">
+  <metadata>
+    <title>Create sprk_externalrecordaccess Table in Dataverse</title>
+    <phase>1: Data Model &amp; Dataverse Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 010</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dataverse schema creation — foundational table for entire module</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create the sprk_externalrecordaccess table in Dataverse with all required fields, lookups, and choice columns. This table is the cornerstone of the external access model — every participation grant is represented as a row in this table.</prompt>
+  <role>You are a Dataverse solution architect creating the foundational data model for the Secure Project &amp; External Access Platform.</role>
+  <goal>A fully configured sprk_externalrecordaccess table exists in the SpaarkeCore solution with all fields, lookups, and choice columns properly defined and deployable.</goal>
+  <context>
+    <background>The Secure Project module requires a junction table (sprk_externalrecordaccess) that links external Contacts to Projects with a specific access level. This table is the single source of truth for "who can access what" and drives both the Dataverse table permission chain and the BFF API authorization filter.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/ (modify — add table to solution)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">No plugins for orchestration — thin validation only</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+      <file>docs/architecture/power-pages-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create sprk_externalrecordaccess table in SpaarkeCore solution with display name "External Record Access"</step>
+    <step order="2">Add primary key field: sprk_externalrecordaccessid (GUID, auto-generated)</step>
+    <step order="3">Add sprk_name field (string, auto-generated display name)</step>
+    <step order="4">Add sprk_contactid lookup field pointing to Contact table</step>
+    <step order="5">Add sprk_projectid lookup field pointing to sprk_project table</step>
+    <step order="6">Add sprk_matterid lookup field pointing to sprk_matter table (nullable)</step>
+    <step order="7">Add sprk_accesslevel choice field with options: View Only=100000000, Collaborate=100000001, Full Access=100000002</step>
+    <step order="8">Add sprk_grantedby lookup field pointing to SystemUser table</step>
+    <step order="9">Add sprk_granteddate DateTime field (default to now on create)</step>
+    <step order="10">Add sprk_expirydate DateTime field (nullable — for time-limited access)</step>
+    <step order="11">Add sprk_accountid lookup field pointing to Account table</step>
+    <step order="12">Configure statecode (State: Active=0 / Inactive=1) with standard behavior</step>
+    <step order="13">Export solution and verify all fields render correctly in model-driven app</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Table sprk_externalrecordaccess exists in dev environment</criterion>
+    <criterion>All fields and lookups are configured with correct types and targets</criterion>
+    <criterion>Choice field sprk_accesslevel has three options with correct values (100000000, 100000001, 100000002)</criterion>
+    <criterion>Solution exported successfully from SpaarkeCore</criterion>
+  </acceptance-criteria>
+</task>

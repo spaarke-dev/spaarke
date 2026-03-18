@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="sdap-secure-project-module">
+  <metadata>
+    <title>Create Views and Subgrid for External Record Access</title>
+    <phase>1: Data Model &amp; Dataverse Configuration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task — views and subgrid, no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create system views for the sprk_externalrecordaccess table and add a subgrid to the sprk_project form showing associated participation records.</prompt>
+  <role>You are a Dataverse configurator building the admin-facing views and form layouts for the external access model.</role>
+  <goal>Administrators can view and manage external access records through standard Dataverse views and a subgrid on the project form.</goal>
+  <context>
+    <background>Internal administrators need to see who has access to which projects. Views provide list-based access, and the subgrid on the project form shows all participants for a specific project. These are used by internal staff — external users interact via the Power Pages SPA.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/ (modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">Keep Dataverse configuration simple — no complex business rules</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/architecture/power-pages-access-control.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create "Active Participants" view — filter by statecode=Active, show Contact, Project, Access Level, Granted Date</step>
+    <step order="2">Create "By Project" view — grouped/sorted by project, show Contact, Access Level, Expiry Date</step>
+    <step order="3">Create "By Contact" view — grouped/sorted by Contact, show Project, Access Level, Granted Date</step>
+    <step order="4">Add subgrid to sprk_project main form showing related sprk_externalrecordaccess records (filtered by project)</step>
+    <step order="5">Configure subgrid columns: Contact, Access Level, Granted Date, Expiry Date, Status</step>
+    <step order="6">Export solution and verify views display correctly</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Three views (Active Participants, By Project, By Contact) exist and display correct columns</criterion>
+    <criterion>Subgrid on sprk_project form shows related participation records</criterion>
+    <criterion>Views and subgrid are included in the exported solution</criterion>
+  </acceptance-criteria>
+</task>

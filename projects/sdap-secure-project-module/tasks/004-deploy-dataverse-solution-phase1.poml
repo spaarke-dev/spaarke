@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="sdap-secure-project-module">
+  <metadata>
+    <title>Deploy Phase 1 Dataverse Solution to Dev</title>
+    <phase>1: Data Model &amp; Dataverse Configuration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>010</blocks>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — follows established deployment skill</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Export the SpaarkeCore managed solution containing all Phase 1 schema changes and import it to the dev environment using PAC CLI. Verify all tables and fields are accessible.</prompt>
+  <role>You are a Dataverse deployment engineer deploying the Phase 1 data model to the development environment.</role>
+  <goal>All Phase 1 Dataverse schema changes (sprk_externalrecordaccess table, sprk_project fields, views, subgrid) are deployed and verified in the dev environment.</goal>
+  <context>
+    <background>Phase 1 establishes the data foundation that all subsequent phases depend on. The BFF API (Phase 2) queries these tables, Power Pages (Phase 3) configures permissions against them, and the SPA (Phases 4-5) displays data from them.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/ (export source)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-002">Verify no plugins were accidentally included in the solution</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Export SpaarkeCore solution as managed from the maker environment</step>
+    <step order="2">Import solution to dev environment using PAC CLI (pac solution import)</step>
+    <step order="3">Verify sprk_externalrecordaccess table is accessible with all fields</step>
+    <step order="4">Verify sprk_project new fields (sprk_issecure, sprk_securitybuid, sprk_externalaccountid) exist</step>
+    <step order="5">Verify views display correctly in model-driven app</step>
+    <step order="6">Verify subgrid renders on sprk_project form</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Solution imported successfully without errors</criterion>
+    <criterion>All tables and fields accessible in dev environment</criterion>
+    <criterion>Views and subgrid render correctly</criterion>
+  </acceptance-criteria>
+</task>
