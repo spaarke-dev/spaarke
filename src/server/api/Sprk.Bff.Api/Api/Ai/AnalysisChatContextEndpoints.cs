@@ -138,7 +138,9 @@ public static class AnalysisChatContextEndpoints
     private static string? ExtractTenantId(HttpContext httpContext)
     {
         // Primary: 'tid' claim from Azure AD JWT token
-        var tenantId = httpContext.User.FindFirst("tid")?.Value;
+        // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
         // Fallback: X-Tenant-Id request header (service-to-service calls)
         if (string.IsNullOrEmpty(tenantId))

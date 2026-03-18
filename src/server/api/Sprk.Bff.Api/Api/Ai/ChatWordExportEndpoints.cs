@@ -263,7 +263,9 @@ public static class ChatWordExportEndpoints
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value;
+        // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
         if (string.IsNullOrEmpty(tenantId))
         {
