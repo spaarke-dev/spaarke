@@ -1,24 +1,19 @@
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using System.Security.Claims;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
 /// <summary>
-/// Endpoint filter that resolves the authenticated Azure AD user's Contact record
-/// and validates that they have active project participation data.
+/// Endpoint filter that resolves the authenticated Azure AD B2B guest's
+/// Dataverse Contact and project participation data from the already-validated JWT identity.
 ///
-/// External users authenticate via Azure AD B2B guest accounts (MSAL in the SPA).
-/// The Azure AD JWT is validated by ASP.NET Core's authentication middleware before
-/// this filter runs — the filter reads the validated claims and resolves participation.
-///
-/// Enforces that:
-///   - The caller has an authenticated Azure AD identity (validated by middleware)
-///   - The Contact exists in Dataverse (resolved by email claim)
-///   - The Contact has at least one active sprk_externalrecordaccess record
-///   - Access data is cached in Redis with 60-second TTL (ADR-009)
+/// ASP.NET Core's Microsoft.Identity.Web middleware (AddMicrosoftIdentityWebApi) validates
+/// the Azure AD JWT before this filter runs, so HttpContext.User is already populated.
+/// This filter resolves the Dataverse Contact record by email claim and loads participation data.
 ///
 /// On success: sets <see cref="ExternalCallerContext"/> on HttpContext.Items for downstream handlers.
-/// On failure: returns 401 (unauthenticated) or 403 (no active participation records).
+/// On failure: returns 401 (missing claims) or 403 (Contact not found in Dataverse).
 ///
 /// ADR-008: Endpoint filter pattern — no global middleware.
 /// ADR-009: Redis-first access data caching with 60s TTL.
@@ -28,7 +23,7 @@ public static class ExternalCallerAuthorizationFilterExtensions
 {
     /// <summary>
     /// Adds external caller authorization to an endpoint.
-    /// Resolves Contact and participation data from the authenticated Azure AD identity.
+    /// Resolves the B2B guest's Contact and participation data from JWT identity claims.
     /// </summary>
     public static TBuilder AddExternalCallerAuthorizationFilter<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
@@ -60,63 +55,52 @@ public class ExternalCallerAuthorizationFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
+        var user = httpContext.User;
 
-        // Step 1: Require authenticated Azure AD identity.
-        // JWT validation is performed by ASP.NET Core middleware (RequireAuthorization on route group).
-        if (httpContext.User?.Identity?.IsAuthenticated != true)
-        {
-            _logger.LogDebug("[EXT-AUTH] Request is not authenticated");
-            return Results.Problem(
-                statusCode: 401,
-                title: "Unauthorized",
-                detail: "Authentication required",
-                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
-        }
-
-        // Step 2: Extract email from Azure AD token claims.
-        // For B2B guests: 'email' claim = the external user's real email (not the #EXT# UPN).
-        var email = httpContext.User.FindFirst("email")?.Value
-            ?? httpContext.User.FindFirst("preferred_username")?.Value;
+        // Azure AD B2B guest tokens include the user's home-tenant UPN as preferred_username.
+        // This is the email the guest uses to authenticate (e.g. alice@contoso.com).
+        // Fall back to upn, standard email, and the simple "email" claim if preferred_username is absent.
+        var email = user.FindFirstValue("preferred_username")
+            ?? user.FindFirstValue("upn")
+            ?? user.FindFirstValue(ClaimTypes.Email)
+            ?? user.FindFirstValue("email");
 
         if (string.IsNullOrEmpty(email))
         {
-            _logger.LogWarning("[EXT-AUTH] Token missing email/preferred_username claim");
+            _logger.LogWarning("[EXT-AUTH] No email/UPN claim found in Azure AD B2B token");
             return Results.Problem(
                 statusCode: 401,
                 title: "Unauthorized",
-                detail: "Token is missing required email claim",
+                detail: "Identity token is missing required user identity claims",
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        // Step 3: Resolve Contact by email (contacts.emailaddress1)
+        // Resolve the Dataverse Contact ID from the email claim.
+        // B2B guest users must have a Contact record in Dataverse with a matching emailaddress1 field.
         var contactId = await _participationService.ResolveContactByEmailAsync(email, httpContext.RequestAborted);
+
         if (!contactId.HasValue)
         {
-            _logger.LogWarning("[EXT-AUTH] Cannot resolve Contact for email {Email}", email);
+            _logger.LogWarning("[EXT-AUTH] Cannot resolve Dataverse Contact for email {Email}", email);
             return ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found");
         }
 
-        // Step 4: Load participation data (Redis cache → Dataverse fallback)
+        // Load active project participations (Redis cache → Dataverse fallback per ADR-009).
+        // Empty participation list is allowed — authenticated users with no projects yet
+        // can reach the workspace and see an empty state.
         var participations = await _participationService.GetParticipationsAsync(contactId.Value, httpContext.RequestAborted);
-        if (participations.Count == 0)
-        {
-            _logger.LogWarning(
-                "[EXT-AUTH] Contact {ContactId} has no active participation records — access denied",
-                contactId.Value);
-            return ProblemDetailsHelper.Forbidden("sdap.access.deny.no_participation");
-        }
 
-        // Step 5: Store ExternalCallerContext for downstream handlers
+        _logger.LogInformation(
+            "[EXT-AUTH] Contact {ContactId} ({Email}) authenticated — {Count} active project participations",
+            contactId.Value, email, participations.Count);
+
+        // Store ExternalCallerContext on HttpContext for downstream handlers.
         httpContext.Items[ExternalCallerContext.HttpContextItemsKey] = new ExternalCallerContext
         {
             ContactId = contactId.Value,
             Email = email,
             Participations = participations
         };
-
-        _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} ({Email}) authenticated with {Count} active project participations",
-            contactId.Value, email, participations.Count);
 
         return await next(context);
     }

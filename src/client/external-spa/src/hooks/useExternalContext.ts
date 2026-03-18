@@ -2,11 +2,14 @@
  * useExternalContext — React hook for loading the external user's context.
  *
  * Calls GET /api/v1/external/me via the BFF API client and provides the user's
- * profile and accessible project list to the Workspace Home Page and other
- * consumers.
+ * profile and accessible project list to the Workspace Home Page and other consumers.
+ *
+ * Authentication is handled entirely by the Power Pages portal (Entra External ID).
+ * If the user is not authenticated, the portal redirects them to login before the
+ * SPA loads — this hook never needs to show a login prompt.
  *
  * Token acquisition and 401-retry logic are handled transparently by
- * `getExternalUserContext` in bff-client.ts.
+ * `bffApiCall` in bff-client.ts (via portal-auth.ts).
  *
  * See: docs/architecture/power-pages-spa-guide.md — Authentication section
  */
@@ -80,12 +83,12 @@ export function useExternalContext(): UseExternalContextState {
       } catch (err) {
         if (!cancelled) {
           if (err instanceof ApiError) {
-            if (err.statusCode === 401 || err.statusCode === 403) {
-              setError("You are not authorised to access this workspace. Please contact your administrator.");
-            } else {
-              setError(`Failed to load your workspace context (${err.statusCode}). Please try refreshing the page.`);
-            }
+            setError(`Failed to load your workspace context (${err.statusCode}). Please try refreshing the page.`);
+          } else if (err instanceof Error && err.message.includes("redirecting to login")) {
+            // Portal session expired — portal-auth.ts is handling the redirect.
+            // No need to display an error; the page will navigate away.
           } else {
+            console.error("[ExternalContext] Unexpected error loading workspace context:", err);
             setError("An unexpected error occurred while loading your workspace. Please try refreshing the page.");
           }
         }

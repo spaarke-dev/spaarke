@@ -1,18 +1,20 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { MsalProvider } from "@azure/msal-react";
+import { msalInstance } from "./auth/msal-config";
 import { App } from "./App";
-import { msalInstance, initializeMsal } from "./auth/msal-auth";
 
-// Note: This is a Power Pages Code Page SPA — not a PCF control.
-// It uses React 18 with createRoot (bundled, not platform-provided).
-// External users authenticate via Azure AD B2B guest accounts (MSAL redirect flow).
+// Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
+// External users authenticate via Entra B2B — they are guest accounts in the main
+// Spaarke workforce tenant and sign in with their existing Microsoft 365 credentials.
+// MSAL (authorization code + PKCE) handles all token acquisition.
 // See ADR-022 for the Code Page React 18 standard.
-// See ADR-026 for the full-page Code Page build pattern (viteSingleFile).
+// See notes/auth-migration-b2b-msal.md for auth architecture details.
 
-async function bootstrap(): Promise<void> {
-  // MSAL must be initialised before rendering (handles redirect promise)
-  await initializeMsal();
+async function main() {
+  // MSAL v3 requires explicit initialization before any token operations or rendering.
+  // This processes any auth redirect response (auth code → tokens) before the app mounts.
+  await msalInstance.initialize();
 
   const rootElement = document.getElementById("root");
   if (!rootElement) {
@@ -29,6 +31,4 @@ async function bootstrap(): Promise<void> {
   );
 }
 
-bootstrap().catch((err) =>
-  console.error("[SecureProjectWorkspace] Bootstrap failed", err)
-);
+void main();

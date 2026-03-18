@@ -1,16 +1,18 @@
 /**
  * BFF API client module for the Secure Project Workspace SPA.
  *
- * Acquires OAuth tokens via MSAL (Azure AD B2B guest authentication) and provides
+ * Acquires OAuth tokens via MSAL (Entra B2B, authorization code + PKCE) and provides
  * typed wrappers for authenticated BFF API calls with Bearer token auth.
  *
- * Token caching is handled by MSAL internally (sessionStorage).
+ * Token caching is handled by MSAL internally (no manual cache management needed).
+ * On 401: MSAL's silent token refresh will handle expiry automatically on the next call.
  *
- * See: docs/architecture/external-access-architecture.md — Authentication section
+ * See: docs/architecture/power-pages-spa-guide.md — Authentication section
+ * See: notes/auth-migration-b2b-msal.md
  */
 
 import { BFF_API_URL } from "../config";
-import { getBffToken } from "./msal-auth";
+import { acquireBffToken } from "./msal-auth";
 import { ApiError } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ export interface ExternalUserContextResponse {
   }>;
 }
 
-// Token acquisition is delegated to msal-auth.ts (getBffToken)
+// Token acquisition is delegated to msal-auth.ts (acquireBffToken)
 
 // ---------------------------------------------------------------------------
 // Core fetch wrapper
@@ -95,8 +97,8 @@ export interface ExternalUserContextResponse {
  * Make an authenticated call to the BFF API.
  *
  * - Prepends BFF_API_URL to path.
- * - Adds `Authorization: Bearer {token}` header.
- * - On 401: clears the token cache, acquires a fresh token, and retries once.
+ * - Adds `Authorization: Bearer {token}` header (MSAL-acquired OAuth token).
+ * - On 401: acquires a fresh token (MSAL handles silent refresh / redirect) and retries once.
  * - Throws ApiError on any non-2xx response (including after the retry).
  *
  * @param path    API path relative to BFF_API_URL (e.g. "/api/v1/external/me")
@@ -107,12 +109,12 @@ export async function bffApiCall<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await getBffToken();
+  const token = await acquireBffToken();
   const response = await executeFetch(path, options, token);
 
-  // On 401, clear cache, get a fresh token, and retry once
+  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
   if (response.status === 401) {
-    const freshToken = await getBffToken();
+    const freshToken = await acquireBffToken();
     const retryResponse = await executeFetch(path, options, freshToken);
     return parseResponse<T>(retryResponse);
   }
