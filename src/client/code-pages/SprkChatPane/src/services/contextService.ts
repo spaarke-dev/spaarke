@@ -168,8 +168,21 @@ export async function resolveContextMapping(
   // 2. Call API
   const url = `${apiBaseUrl}/api/ai/chat/context-mappings?entityType=${encodeURIComponent(entityType)}&pageType=${encodeURIComponent(pageType)}`;
   try {
+    // Extract tenant ID from JWT for X-Tenant-Id header fallback (BFF requires tid claim or header)
+    let tenantId: string | null = null;
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        tenantId = payload.tid || null;
+      }
+    } catch { /* ignore JWT parse errors */ }
+
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+      },
     });
 
     if (!response.ok) {

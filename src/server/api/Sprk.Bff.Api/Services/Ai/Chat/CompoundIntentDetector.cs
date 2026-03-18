@@ -163,14 +163,28 @@ public sealed class CompoundIntentDetector
             {
                 analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
                 writeBackTarget = "sprk_analysisoutput.sprk_workingdocument";
+
+                _logger.LogInformation(
+                    "BuildPlan: write-back tool detected — tool={ToolName}, " +
+                    "analysisMetadataNull={AnalysisMetadataNull}, " +
+                    "analysisMetadataKeys={AnalysisMetadataKeys}, " +
+                    "resolvedAnalysisId={AnalysisId}",
+                    toolName,
+                    context.AnalysisMetadata is null,
+                    context.AnalysisMetadata is not null
+                        ? string.Join(", ", context.AnalysisMetadata.Keys)
+                        : "(null)",
+                    analysisId ?? "(null)");
             }
         }
 
         var planTitle = BuildPlanTitle(toolCalls);
 
         _logger.LogInformation(
-            "PendingPlan built — planId={PlanId}, session={SessionId}, steps={StepCount}, hasWriteBack={HasWriteBack}",
-            planId, sessionId, steps.Length, writeBackTarget != null);
+            "PendingPlan built — planId={PlanId}, session={SessionId}, steps={StepCount}, " +
+            "hasWriteBack={HasWriteBack}, analysisId={AnalysisId}, writeBackTarget={WriteBackTarget}",
+            planId, sessionId, steps.Length, writeBackTarget != null,
+            analysisId ?? "(null)", writeBackTarget ?? "(null)");
 
         return new PendingPlan(
             PlanId: planId,
