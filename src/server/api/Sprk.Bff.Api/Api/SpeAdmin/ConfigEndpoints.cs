@@ -33,18 +33,21 @@ public static class ConfigEndpoints
 
     // OData $select for list queries — summary fields only (performance)
     private const string ListSelect =
-        "sprk_specontainertypeconfigid,sprk_name,sprk_clientid,sprk_containertypeid," +
-        "sprk_isactive,createdon,modifiedon," +
-        "_sprk_businessunitid_value,_sprk_environmentid_value";
+        "sprk_specontainertypeconfigid,sprk_name,sprk_containertypeid,sprk_containertypename," +
+        "sprk_billingclassification,sprk_owningappid,sprk_isregistered,statecode,createdon,modifiedon," +
+        "_sprk_businessunit_value,_sprk_environment_value";
 
     // OData $select for detail queries — all fields
     private const string DetailSelect =
-        "sprk_specontainertypeconfigid,sprk_name,sprk_clientid,sprk_tenantid,sprk_containertypeid," +
-        "sprk_keyvaultsecretname,sprk_sharepointsiteurl,sprk_graphapibaseurl,sprk_oauthauthorityurl," +
-        "sprk_graphscopes,sprk_maxcontainers,sprk_containerprefix,sprk_graphclientcachettlminutes," +
-        "sprk_columnsearchenabled,sprk_filesearchenabled,sprk_recyclebinenabled,sprk_isactive," +
-        "sprk_notes,createdon,modifiedon," +
-        "_sprk_businessunitid_value,_sprk_environmentid_value";
+        "sprk_specontainertypeconfigid,sprk_name,sprk_containertypeid,sprk_containertypename," +
+        "sprk_billingclassification,sprk_owningappid,sprk_keyvaultsecretname," +
+        "sprk_consumingappid,sprk_consumingappkvsecret," +
+        "sprk_delegatedpermission,sprk_applicationpermissions," +
+        "sprk_isregistered,sprk_registeredon,sprk_defaultcontainerid," +
+        "sprk_maxstorageperbytes,sprk_sharingcapability," +
+        "sprk_itemversioningenabled,sprk_itemmajorversionlimit," +
+        "sprk_notes,statecode,createdon,modifiedon," +
+        "_sprk_businessunit_value,_sprk_environment_value";
 
     /// <summary>
     /// Registers all /api/spe/configs endpoints onto the provided route group.
@@ -59,7 +62,7 @@ public static class ConfigEndpoints
         configs.MapGet("/", ListConfigsAsync)
             .WithName("ListSpeConfigs")
             .WithSummary("List container type configs, optionally filtered by business unit and environment")
-            .Produces<ConfigListResponse>(StatusCodes.Status200OK)
+            .Produces<IReadOnlyList<ConfigSummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         configs.MapGet("/{id:guid}", GetConfigAsync)
@@ -112,10 +115,10 @@ public static class ConfigEndpoints
             var filters = new List<string>();
 
             if (businessUnitId.HasValue)
-                filters.Add($"_sprk_businessunitid_value eq {businessUnitId.Value}");
+                filters.Add($"_sprk_businessunit_value eq {businessUnitId.Value}");
 
             if (environmentId.HasValue)
-                filters.Add($"_sprk_environmentid_value eq {environmentId.Value}");
+                filters.Add($"_sprk_environment_value eq {environmentId.Value}");
 
             var filter = filters.Count > 0 ? string.Join(" and ", filters) : null;
 
@@ -131,11 +134,7 @@ public static class ConfigEndpoints
                 "ListSpeConfigs: returned {Count} configs. businessUnitId={BuId} environmentId={EnvId} correlationId={CorrelationId}",
                 items.Count, businessUnitId, environmentId, context.TraceIdentifier);
 
-            return TypedResults.Ok(new ConfigListResponse
-            {
-                Items = items,
-                TotalCount = items.Count
-            });
+            return TypedResults.Ok(items);
         }
         catch (Exception ex)
         {
@@ -229,14 +228,9 @@ public static class ConfigEndpoints
             return ValidationProblem("'name' is required.", context.TraceIdentifier);
         }
 
-        if (string.IsNullOrWhiteSpace(request.ClientId))
+        if (string.IsNullOrWhiteSpace(request.OwningAppId))
         {
-            return ValidationProblem("'clientId' is required.", context.TraceIdentifier);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.TenantId))
-        {
-            return ValidationProblem("'tenantId' is required.", context.TraceIdentifier);
+            return ValidationProblem("'owningAppId' is required.", context.TraceIdentifier);
         }
 
         if (string.IsNullOrWhiteSpace(request.ContainerTypeId))
@@ -408,7 +402,7 @@ public static class ConfigEndpoints
             {
                 existing = await dataverseClient.RetrieveAsync<ConfigDataverseRow>(
                     EntitySet, id,
-                    select: "sprk_specontainertypeconfigid,_sprk_businessunitid_value,_sprk_environmentid_value",
+                    select: "sprk_specontainertypeconfigid,_sprk_businessunit_value,_sprk_environment_value",
                     cancellationToken: ct);
             }
             catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -502,32 +496,32 @@ public static class ConfigEndpoints
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = r.Name,
-            ["sprk_clientid"] = r.ClientId,
-            ["sprk_tenantid"] = r.TenantId,
             ["sprk_containertypeid"] = r.ContainerTypeId,
+            ["sprk_billingclassification"] = ConfigDataverseRow.BillingToInt(r.BillingClassification),
+            ["sprk_owningappid"] = r.OwningAppId,
             ["sprk_keyvaultsecretname"] = r.KeyVaultSecretName,
-            ["sprk_columnsearchenabled"] = r.ColumnSearchEnabled,
-            ["sprk_filesearchenabled"] = r.FileSearchEnabled,
-            ["sprk_recyclebinenabled"] = r.RecycleBinEnabled,
-            ["sprk_isactive"] = r.IsActive
+            ["sprk_isregistered"] = false,
+            ["sprk_itemversioningenabled"] = r.IsItemVersioningEnabled
         };
 
         // Optional scalar fields — only include if provided
-        if (r.SharePointSiteUrl != null) payload["sprk_sharepointsiteurl"] = r.SharePointSiteUrl;
-        if (r.GraphApiBaseUrl != null) payload["sprk_graphapibaseurl"] = r.GraphApiBaseUrl;
-        if (r.OAuthAuthorityUrl != null) payload["sprk_oauthauthorityurl"] = r.OAuthAuthorityUrl;
-        if (r.GraphScopes != null) payload["sprk_graphscopes"] = r.GraphScopes;
-        if (r.MaxContainers.HasValue) payload["sprk_maxcontainers"] = r.MaxContainers.Value;
-        if (r.ContainerPrefix != null) payload["sprk_containerprefix"] = r.ContainerPrefix;
-        if (r.GraphClientCacheTtlMinutes.HasValue) payload["sprk_graphclientcachettlminutes"] = r.GraphClientCacheTtlMinutes.Value;
+        if (r.ContainerTypeName != null) payload["sprk_containertypename"] = r.ContainerTypeName;
+        if (r.ConsumingAppId != null) payload["sprk_consumingappid"] = r.ConsumingAppId;
+        if (r.ConsumingAppKeyVaultSecret != null) payload["sprk_consumingappkvsecret"] = r.ConsumingAppKeyVaultSecret;
+        if (r.DelegatedPermissions != null) payload["sprk_delegatedpermission"] = r.DelegatedPermissions;
+        if (r.ApplicationPermissions != null) payload["sprk_applicationpermissions"] = r.ApplicationPermissions;
+        if (r.DefaultContainerId != null) payload["sprk_defaultcontainerid"] = r.DefaultContainerId;
+        if (r.MaxStoragePerBytes.HasValue) payload["sprk_maxstorageperbytes"] = r.MaxStoragePerBytes.Value;
+        if (r.SharingCapability != null) payload["sprk_sharingcapability"] = ConfigDataverseRow.SharingToInt(r.SharingCapability);
+        if (r.ItemMajorVersionLimit.HasValue) payload["sprk_itemmajorversionlimit"] = r.ItemMajorVersionLimit.Value;
         if (r.Notes != null) payload["sprk_notes"] = r.Notes;
 
         // Lookup fields — OData bind syntax required by Dataverse REST API
         if (r.BusinessUnitId.HasValue)
-            payload["sprk_BusinessUnitId@odata.bind"] = $"/businessunits({r.BusinessUnitId.Value})";
+            payload["sprk_BusinessUnit@odata.bind"] = $"/businessunits({r.BusinessUnitId.Value})";
 
         if (r.EnvironmentId.HasValue)
-            payload["sprk_EnvironmentId@odata.bind"] = $"/sprk_speenvironments({r.EnvironmentId.Value})";
+            payload["sprk_Environment@odata.bind"] = $"/sprk_speenvironments({r.EnvironmentId.Value})";
 
         return payload;
     }
@@ -538,29 +532,28 @@ public static class ConfigEndpoints
 
         // Only include fields that were explicitly provided in the request
         if (r.Name != null) payload["sprk_name"] = r.Name;
-        if (r.ClientId != null) payload["sprk_clientid"] = r.ClientId;
-        if (r.TenantId != null) payload["sprk_tenantid"] = r.TenantId;
         if (r.ContainerTypeId != null) payload["sprk_containertypeid"] = r.ContainerTypeId;
+        if (r.ContainerTypeName != null) payload["sprk_containertypename"] = r.ContainerTypeName;
+        if (r.BillingClassification != null) payload["sprk_billingclassification"] = ConfigDataverseRow.BillingToInt(r.BillingClassification);
+        if (r.OwningAppId != null) payload["sprk_owningappid"] = r.OwningAppId;
         if (r.KeyVaultSecretName != null) payload["sprk_keyvaultsecretname"] = r.KeyVaultSecretName;
-        if (r.SharePointSiteUrl != null) payload["sprk_sharepointsiteurl"] = r.SharePointSiteUrl;
-        if (r.GraphApiBaseUrl != null) payload["sprk_graphapibaseurl"] = r.GraphApiBaseUrl;
-        if (r.OAuthAuthorityUrl != null) payload["sprk_oauthauthorityurl"] = r.OAuthAuthorityUrl;
-        if (r.GraphScopes != null) payload["sprk_graphscopes"] = r.GraphScopes;
-        if (r.MaxContainers.HasValue) payload["sprk_maxcontainers"] = r.MaxContainers.Value;
-        if (r.ContainerPrefix != null) payload["sprk_containerprefix"] = r.ContainerPrefix;
-        if (r.GraphClientCacheTtlMinutes.HasValue) payload["sprk_graphclientcachettlminutes"] = r.GraphClientCacheTtlMinutes.Value;
-        if (r.ColumnSearchEnabled.HasValue) payload["sprk_columnsearchenabled"] = r.ColumnSearchEnabled.Value;
-        if (r.FileSearchEnabled.HasValue) payload["sprk_filesearchenabled"] = r.FileSearchEnabled.Value;
-        if (r.RecycleBinEnabled.HasValue) payload["sprk_recyclebinenabled"] = r.RecycleBinEnabled.Value;
-        if (r.IsActive.HasValue) payload["sprk_isactive"] = r.IsActive.Value;
+        if (r.ConsumingAppId != null) payload["sprk_consumingappid"] = r.ConsumingAppId;
+        if (r.ConsumingAppKeyVaultSecret != null) payload["sprk_consumingappkvsecret"] = r.ConsumingAppKeyVaultSecret;
+        if (r.DelegatedPermissions != null) payload["sprk_delegatedpermission"] = r.DelegatedPermissions;
+        if (r.ApplicationPermissions != null) payload["sprk_applicationpermissions"] = r.ApplicationPermissions;
+        if (r.DefaultContainerId != null) payload["sprk_defaultcontainerid"] = r.DefaultContainerId;
+        if (r.MaxStoragePerBytes.HasValue) payload["sprk_maxstorageperbytes"] = r.MaxStoragePerBytes.Value;
+        if (r.SharingCapability != null) payload["sprk_sharingcapability"] = ConfigDataverseRow.SharingToInt(r.SharingCapability);
+        if (r.IsItemVersioningEnabled.HasValue) payload["sprk_itemversioningenabled"] = r.IsItemVersioningEnabled.Value;
+        if (r.ItemMajorVersionLimit.HasValue) payload["sprk_itemmajorversionlimit"] = r.ItemMajorVersionLimit.Value;
         if (r.Notes != null) payload["sprk_notes"] = r.Notes;
 
         // Lookup fields
         if (r.BusinessUnitId.HasValue)
-            payload["sprk_BusinessUnitId@odata.bind"] = $"/businessunits({r.BusinessUnitId.Value})";
+            payload["sprk_BusinessUnit@odata.bind"] = $"/businessunits({r.BusinessUnitId.Value})";
 
         if (r.EnvironmentId.HasValue)
-            payload["sprk_EnvironmentId@odata.bind"] = $"/sprk_speenvironments({r.EnvironmentId.Value})";
+            payload["sprk_Environment@odata.bind"] = $"/sprk_speenvironments({r.EnvironmentId.Value})";
 
         return payload;
     }

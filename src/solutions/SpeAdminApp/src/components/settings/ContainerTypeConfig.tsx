@@ -299,26 +299,26 @@ function emptyFormState(): ConfigFormState {
 /** Map a SpeContainerTypeConfig record into ConfigFormState. */
 function configToFormState(config: SpeContainerTypeConfig): ConfigFormState {
   return {
-    name: config.name,
-    businessUnitId: config.businessUnitId,
-    businessUnitName: config.businessUnitName,
-    environmentId: config.environmentId,
-    environmentName: config.environmentName,
-    containerTypeId: config.containerTypeId,
-    containerTypeName: config.containerTypeName,
-    billingClassification: config.billingClassification,
-    owningAppId: config.owningAppId,
-    owningAppDisplayName: config.owningAppDisplayName,
-    keyVaultSecretName: config.keyVaultSecretName,
+    name: config.name ?? "",
+    businessUnitId: config.businessUnitId ?? "",
+    businessUnitName: config.businessUnitName ?? "",
+    environmentId: config.environmentId ?? "",
+    environmentName: config.environmentName ?? "",
+    containerTypeId: config.containerTypeId ?? "",
+    containerTypeName: config.containerTypeName ?? "",
+    billingClassification: (config.billingClassification as BillingClassification) ?? "standard",
+    owningAppId: config.owningAppId ?? "",
+    owningAppDisplayName: config.owningAppDisplayName ?? "",
+    keyVaultSecretName: config.keyVaultSecretName ?? "",
     consumingAppId: config.consumingAppId ?? "",
     consumingAppKeyVaultSecret: config.consumingAppKeyVaultSecret ?? "",
-    delegatedPermissions: parsePermissions(config.delegatedPermissions),
-    applicationPermissions: parsePermissions(config.applicationPermissions),
-    maxStoragePerBytes: config.maxStoragePerBytes,
-    sharingCapability: config.sharingCapability,
-    isItemVersioningEnabled: config.isItemVersioningEnabled,
-    itemMajorVersionLimit: config.itemMajorVersionLimit,
-    status: config.status,
+    delegatedPermissions: parsePermissions(config.delegatedPermissions ?? ""),
+    applicationPermissions: parsePermissions(config.applicationPermissions ?? ""),
+    maxStoragePerBytes: config.maxStoragePerBytes ?? 0,
+    sharingCapability: (config.sharingCapability as SharingCapability) ?? "disabled",
+    isItemVersioningEnabled: config.isItemVersioningEnabled ?? false,
+    itemMajorVersionLimit: config.itemMajorVersionLimit ?? 500,
+    status: config.status ?? "active",
     notes: config.notes ?? "",
   };
 }
@@ -907,19 +907,19 @@ const ConfigDataGrid: React.FC<ConfigDataGridProps> = ({
     }),
     createTableColumn<SpeContainerTypeConfig>({
       columnId: "businessUnit",
-      compare: (a, b) => a.businessUnitName.localeCompare(b.businessUnitName),
+      compare: (a, b) => (a.businessUnitName ?? "").localeCompare(b.businessUnitName ?? ""),
       renderHeaderCell: () => "Business Unit",
       renderCell: item => <Text size={200}>{item.businessUnitName}</Text>,
     }),
     createTableColumn<SpeContainerTypeConfig>({
       columnId: "environment",
-      compare: (a, b) => a.environmentName.localeCompare(b.environmentName),
+      compare: (a, b) => (a.environmentName ?? "").localeCompare(b.environmentName ?? ""),
       renderHeaderCell: () => "Environment",
       renderCell: item => <Text size={200}>{item.environmentName}</Text>,
     }),
     createTableColumn<SpeContainerTypeConfig>({
       columnId: "containerType",
-      compare: (a, b) => a.containerTypeName.localeCompare(b.containerTypeName),
+      compare: (a, b) => (a.containerTypeName ?? "").localeCompare(b.containerTypeName ?? ""),
       renderHeaderCell: () => "Container Type",
       renderCell: item => <Text size={200}>{item.containerTypeName || item.containerTypeId}</Text>,
     }),
@@ -965,6 +965,7 @@ const ConfigDataGrid: React.FC<ConfigDataGridProps> = ({
     <DataGrid
       items={configs}
       columns={columns}
+      getRowId={(item) => item.id}
       sortable
       selectionMode="multiselect"
       selectedItems={selectedIds}
@@ -1026,6 +1027,7 @@ export const ContainerTypeConfig: React.FC = () => {
 
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [editLoading, setEditLoading] = React.useState(false);
 
   // ── Derived values ──────────────────────────────────────────────────────
 
@@ -1077,15 +1079,24 @@ export const ContainerTypeConfig: React.FC = () => {
 
   // ── Open edit dialog ────────────────────────────────────────────────────
 
-  const handleEdit = React.useCallback(() => {
+  const handleEdit = React.useCallback(async () => {
     if (!singleSelected) return;
     const [selectedId] = selectedIds;
-    const config = configs.find(c => c.id === selectedId);
-    if (config) {
+    setEditLoading(true);
+    try {
+      const config = await speApiClient.configs.get(String(selectedId));
       setEditingConfig(config);
       setDialogOpen(true);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message :
+        err instanceof Error ? err.message :
+        "Failed to load config detail.";
+      setDeleteError(message);
+    } finally {
+      setEditLoading(false);
     }
-  }, [singleSelected, selectedIds, configs]);
+  }, [singleSelected, selectedIds]);
 
   // ── Close dialog ─────────────────────────────────────────────────────────
 
@@ -1172,9 +1183,9 @@ export const ContainerTypeConfig: React.FC = () => {
           relationship="label"
         >
           <ToolbarButton
-            icon={<Edit20Regular />}
+            icon={editLoading ? <Spinner size="tiny" /> : <Edit20Regular />}
             onClick={handleEdit}
-            disabled={!singleSelected}
+            disabled={!singleSelected || editLoading}
           >
             Edit
           </ToolbarButton>

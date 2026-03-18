@@ -885,6 +885,16 @@ public static class ChatEndpoints
             // registered (requires Analysis:Enabled + DocumentIntelligence:Enabled). When not
             // available (e.g., dev environments with analysis disabled), write-back is skipped
             // with a warning log — steps already executed and SSE done event follows regardless.
+            // Diagnostic: log write-back evaluation
+            logger.LogInformation(
+                "ApprovePlan: write-back evaluation — " +
+                "WriteBackTarget={WriteBackTarget}, AnalysisId={AnalysisId}, " +
+                "accumulatedContentLen={AccumulatedContentLen}, planId={PlanId}",
+                pendingPlan.WriteBackTarget ?? "(null)",
+                pendingPlan.AnalysisId ?? "(null)",
+                stepResultsSb.Length,
+                pendingPlan.PlanId);
+
             if (!string.IsNullOrWhiteSpace(pendingPlan.WriteBackTarget) &&
                 pendingPlan.WriteBackTarget == "sprk_analysisoutput.sprk_workingdocument" &&
                 !string.IsNullOrWhiteSpace(pendingPlan.AnalysisId) &&
@@ -1080,6 +1090,17 @@ public static class ChatEndpoints
         var tenantId = ExtractTenantId(httpContext);
         if (string.IsNullOrEmpty(tenantId))
         {
+            // Diagnostic: log claim details for debugging
+            var claims = httpContext.User.Claims.Select(c => $"{c.Type}={c.Value}").ToArray();
+            var xTenantHeader = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+            logger.LogWarning(
+                "GetContextMappings: tenant ID missing — " +
+                "claimCount={ClaimCount}, claims=[{Claims}], X-Tenant-Id={XTenantId}, entityType={EntityType}",
+                claims.Length,
+                claims.Length > 0 ? string.Join("; ", claims.Take(10)) : "(none)",
+                xTenantHeader ?? "(none)",
+                entityType);
+
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
