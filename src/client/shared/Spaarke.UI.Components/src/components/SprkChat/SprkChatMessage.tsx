@@ -415,6 +415,21 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     return message.content;
   }, [message.content, citations, isAssistant, isStreaming]);
 
+  // Inject markdown CSS once on first mount (idempotent — shared with SprkChatMessageRenderer)
+  React.useEffect(() => {
+    ensureMarkdownCssInjected();
+  }, []);
+
+  // Render assistant messages as markdown HTML (headings, bold, code blocks, etc.)
+  // User messages are rendered as plain text to avoid unexpected formatting.
+  // During streaming, render as plain text to avoid re-parsing on every token.
+  const markdownHtml = React.useMemo(() => {
+    if (isAssistant && !isStreaming && message.content && !(citations && citations.length > 0)) {
+      return renderMarkdownHtml(message.content);
+    }
+    return null;
+  }, [message.content, isAssistant, isStreaming, citations]);
+
   // ── Structured response rendering ──────────────────────────────────────────
 
   const responseType = message.metadata?.responseType;
@@ -538,21 +553,6 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   }
 
   // ── Plain text rendering (with markdown for assistant messages) ──────────────
-
-  // Inject markdown CSS once on first mount (idempotent — shared with SprkChatMessageRenderer)
-  React.useEffect(() => {
-    ensureMarkdownCssInjected();
-  }, []);
-
-  // Render assistant messages as markdown HTML (headings, bold, code blocks, etc.)
-  // User messages are rendered as plain text to avoid unexpected formatting.
-  // During streaming, render as plain text to avoid re-parsing on every token.
-  const markdownHtml = React.useMemo(() => {
-    if (isAssistant && !isStreaming && message.content && !(citations && citations.length > 0)) {
-      return renderMarkdownHtml(message.content);
-    }
-    return null;
-  }, [message.content, isAssistant, isStreaming, citations]);
 
   // Insert button: only for completed (non-streaming) assistant messages with content.
   // The button is NOT rendered for user messages (spec-2D: "Insert button MUST only
