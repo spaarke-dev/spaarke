@@ -770,7 +770,7 @@ public static class ChatEndpoints
     private static async Task<IResult> ConfirmActionAsync(
         string sessionId,
         string actionId,
-        ActionConfirmRequest request,
+        [Microsoft.AspNetCore.Mvc.FromBody] ActionConfirmRequest request,
         ChatSessionManager sessionManager,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
