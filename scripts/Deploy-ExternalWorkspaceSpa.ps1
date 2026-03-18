@@ -49,16 +49,17 @@ $searchResponse = Invoke-RestMethod -Uri $searchUrl -Headers $headers -Method Ge
 if ($searchResponse.value.Count -gt 0) {
     # UPDATE existing
     $webResourceId = $searchResponse.value[0].webresourceid
-    Write-Host "      Found: $webResourceId — updating..." -ForegroundColor Green
+    Write-Host "      Found: $webResourceId - updating..." -ForegroundColor Green
 
     Write-Host '[4/5] Updating web resource...' -ForegroundColor Yellow
     $updateUrl = "$apiUrl/webresourceset($webResourceId)"
     $updateBody = @{ content = $fileContent } | ConvertTo-Json -Depth 2
-    Invoke-RestMethod -Uri $updateUrl -Headers $headers -Method Patch -Body $updateBody | Out-Null
+    $updateBodyBytes = [System.Text.Encoding]::UTF8.GetBytes($updateBody)
+    Invoke-RestMethod -Uri $updateUrl -Headers $headers -Method Patch -Body $updateBodyBytes | Out-Null
     Write-Host '      Updated' -ForegroundColor Green
 } else {
     # CREATE new
-    Write-Host "      Not found — creating new web resource..." -ForegroundColor Yellow
+    Write-Host '      Not found - creating new web resource...' -ForegroundColor Yellow
 
     Write-Host '[4/5] Creating web resource...' -ForegroundColor Yellow
     $createBody = @{
@@ -74,7 +75,8 @@ if ($searchResponse.value.Count -gt 0) {
     $createHeaders = $headers.Clone()
     $createHeaders['Prefer'] = 'return=representation'
     $createUrl = "$apiUrl/webresourceset"
-    $created = Invoke-RestMethod -Uri $createUrl -Headers $createHeaders -Method Post -Body $createBody
+    $createBodyBytes = [System.Text.Encoding]::UTF8.GetBytes($createBody)
+    $created = Invoke-RestMethod -Uri $createUrl -Headers $createHeaders -Method Post -Body $createBodyBytes
     $webResourceId = $created.webresourceid
     Write-Host "      Created: $webResourceId" -ForegroundColor Green
 }

@@ -672,7 +672,12 @@ export const WorkspaceHomePage: React.FC = () => {
   const navigate = useNavigate();
 
   // ── Context (projects + user identity) ──────────────────────────────────
-  const { context, isLoading: contextLoading, error: contextError, refresh } = useExternalContext();
+  const {
+    context,
+    isLoading: contextLoading,
+    error: contextError,
+    refresh,
+  } = useExternalContext();
 
   // ── Recent Activity (events across all accessible projects, last modified) ──
   const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);

@@ -8,6 +8,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Post-build plugin to remove type="module" and crossorigin from the script tag
+ * that references the external JS bundle.
+ *
+ * Problem: Vite always emits <script type="module" crossorigin src="..."> for the
+ * entry script. The Power Pages Module Federation host intercepts type="module"
+ * script tags and substitutes its React 16 singleton, crashing our React 18 IIFE.
+ *
+ * Fix: Strip type="module" and crossorigin so the browser sees a plain
+ * <script src="..."> that the MF host has no hook into. The IIFE content
+ * executes correctly as a plain script — it doesn't need module semantics.
+ */
+function removeModuleScriptType(): import("vite").Plugin {
+  return {
+    name: "remove-module-script-type",
+    enforce: "post",
+    transformIndexHtml(html) {
+      // Replace type="module" with defer (not remove): defer preserves
+      // "run after DOM is ready" semantics without the module flag that
+      // causes the Power Pages MF host to intercept the script.
+      return html
+        .replace(/ type="module"/g, " defer")
+        .replace(/ crossorigin(?:="[^"]*")?/g, "");
+    },
+  };
+}
+
+/**
  * Custom Vite plugin to resolve bare module imports from shared library
  * source files to THIS project's node_modules.
  *
@@ -67,6 +94,7 @@ function resolveSharedLibDeps(): import("vite").Plugin {
 export default defineConfig({
   plugins: [
     resolveSharedLibDeps(),
+    removeModuleScriptType(),
     react({
       // Include shared lib source for transpilation
       include: [
@@ -105,11 +133,20 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: false,
     minify: true,
+    // Use IIFE format to prevent the Power Pages portal's Module Federation host
+    // from intercepting our ES module imports and substituting its React 16
+    // singleton in place of our bundled React 18 (which causes invariant failures).
+    // IIFE format produces a plain <script src="..."> tag — no type="module" attribute
+    // for the MF host to intercept, and JS is served as a separate CDN file (no
+    // inline truncation issues that affected viteSingleFile approach).
     rollupOptions: {
       output: {
-        entryFileNames: "assets/main.js",
-        chunkFileNames: "assets/chunk-[name].js",
-        assetFileNames: "assets/[name][extname]",
+        format: "iife",
+        name: "ExternalWorkspaceSPA",
+        // Predictable filenames for code site deployment
+        entryFileNames: "assets/app.js",
+        chunkFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name].[ext]",
       },
     },
   },
@@ -124,7 +161,7 @@ export default defineConfig({
       "/_api": {
         target:
           process.env.VITE_PORTAL_URL ||
-          "https://spaarkedev1.powerappsportals.com",
+          "https://sprk-external-workspace.powerappsportals.com",
         changeOrigin: true,
         secure: false,
         cookieDomainRewrite: "localhost",
@@ -132,14 +169,14 @@ export default defineConfig({
       "/_layout": {
         target:
           process.env.VITE_PORTAL_URL ||
-          "https://spaarkedev1.powerappsportals.com",
+          "https://sprk-external-workspace.powerappsportals.com",
         changeOrigin: true,
         secure: false,
       },
       "/_services": {
         target:
           process.env.VITE_PORTAL_URL ||
-          "https://spaarkedev1.powerappsportals.com",
+          "https://sprk-external-workspace.powerappsportals.com",
         changeOrigin: true,
         secure: false,
       },

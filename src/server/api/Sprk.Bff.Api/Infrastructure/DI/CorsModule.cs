@@ -93,6 +93,10 @@ public static class CorsModule
                             uri.Host == "powerapps.com")
                             return true;
 
+                        if (uri.Host.EndsWith(".powerappsportals.com", StringComparison.OrdinalIgnoreCase) ||
+                            uri.Host == "powerappsportals.com")
+                            return true;
+
                         if (uri.Host.EndsWith(".azurestaticapps.net", StringComparison.OrdinalIgnoreCase))
                             return true;
                     }
