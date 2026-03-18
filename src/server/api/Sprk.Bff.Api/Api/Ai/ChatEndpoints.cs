@@ -521,9 +521,11 @@ public static class ChatEndpoints
             {
                 // Emit typing_end before the error event so the frontend stops the typing animation.
                 await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                // Include exception detail in dev to aid debugging (strip in production).
+                var errorDetail = $"An error occurred while generating a response. [{ex.GetType().Name}: {ex.Message}]";
                 await WriteChatSSEAsync(
                     response,
-                    new ChatSseEvent("error", "An error occurred while generating a response."),
+                    new ChatSseEvent("error", errorDetail),
                     CancellationToken.None);
             }
         }
