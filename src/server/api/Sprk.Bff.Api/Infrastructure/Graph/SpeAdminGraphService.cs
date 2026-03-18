@@ -498,22 +498,26 @@ public sealed class SpeAdminGraphService
 
     /// <summary>
     /// Resolves a <see cref="ContainerTypeConfig"/> from Dataverse by configId.
-    /// Reads the sprk_specontainertypeconfig record to get app registration credentials.
+    /// Reads sprk_specontainertypeconfig for app credentials, then follows the linked
+    /// sprk_speenvironment to get the Azure AD tenant ID.
     /// Returns null when the record is not found.
     /// </summary>
     public async Task<ContainerTypeConfig?> ResolveConfigAsync(Guid configId, CancellationToken ct = default)
     {
         _logger.LogDebug("Resolving container type config for configId {ConfigId}", configId);
 
-        // Include owning app fields (Phase 3) in addition to the Phase 1 managing app fields.
-        const string select =
-            "sprk_specontainertypeconfigid,sprk_containertypeid,sprk_clientid,sprk_tenantid," +
-            "sprk_keyvaultsecretname,sprk_owningappid,sprk_owningapptenantid,sprk_owningappsecretname";
+        // Fields that actually exist on sprk_specontainertypeconfigs.
+        // sprk_owningappid  = Azure App Registration Client ID (the "owning app")
+        // sprk_keyvaultsecretname = Key Vault secret name for that app's client secret
+        // _sprk_environment_value = lookup to linked sprk_speenvironment (gives us tenant ID)
+        const string configSelect =
+            "sprk_specontainertypeconfigid,sprk_containertypeid," +
+            "sprk_owningappid,sprk_keyvaultsecretname,_sprk_environment_value";
 
         try
         {
             var record = await _dataverseClient.RetrieveAsync<DataverseConfigDto>(
-                "sprk_specontainertypeconfigs", configId, select, ct);
+                "sprk_specontainertypeconfigs", configId, configSelect, ct);
 
             if (record is null)
             {
@@ -521,15 +525,36 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
+            // Resolve tenant ID from the linked environment record.
+            var tenantId = string.Empty;
+            if (record.EnvironmentId.HasValue)
+            {
+                var env = await _dataverseClient.RetrieveAsync<DataverseEnvironmentDto>(
+                    "sprk_speenvironments", record.EnvironmentId.Value, "sprk_tenantid", ct);
+                tenantId = env?.TenantId ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(tenantId))
+                    _logger.LogWarning(
+                        "Environment {EnvId} linked to config {ConfigId} has no sprk_tenantid",
+                        record.EnvironmentId.Value, configId);
+            }
+            else
+            {
+                _logger.LogWarning("Config {ConfigId} has no linked environment — tenant ID unavailable", configId);
+            }
+
+            var clientId = record.OwningAppId ?? string.Empty;
+            var secretName = record.SecretKeyVaultName ?? string.Empty;
+
             return new ContainerTypeConfig(
                 ConfigId: configId,
-                ContainerTypeId: record.Sprk_containertypeid ?? string.Empty,
-                ClientId: record.Sprk_clientid ?? string.Empty,
-                TenantId: record.Sprk_tenantid ?? string.Empty,
-                SecretKeyVaultName: record.Sprk_keyvaultsecretname ?? string.Empty,
-                OwningAppId: record.Sprk_owningappid,
-                OwningAppTenantId: record.Sprk_owningapptenantid,
-                OwningAppSecretName: record.Sprk_owningappsecretname);
+                ContainerTypeId: record.ContainerTypeId ?? string.Empty,
+                ClientId: clientId,
+                TenantId: tenantId,
+                SecretKeyVaultName: secretName,
+                OwningAppId: clientId,
+                OwningAppTenantId: tenantId,
+                OwningAppSecretName: secretName);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
@@ -544,19 +569,26 @@ public sealed class SpeAdminGraphService
     }
 
     // DTO for deserializing sprk_specontainertypeconfig from Dataverse Web API.
-    // Property names match Dataverse column logical names (lowercase).
     private sealed class DataverseConfigDto
     {
-        // Phase 1: Managing / admin app registration fields
-        public string? Sprk_containertypeid { get; init; }
-        public string? Sprk_clientid { get; init; }
-        public string? Sprk_tenantid { get; init; }
-        public string? Sprk_keyvaultsecretname { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("sprk_containertypeid")]
+        public string? ContainerTypeId { get; init; }
 
-        // Phase 3: Owning app registration fields (optional)
-        public string? Sprk_owningappid { get; init; }
-        public string? Sprk_owningapptenantid { get; init; }
-        public string? Sprk_owningappsecretname { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("sprk_owningappid")]
+        public string? OwningAppId { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("sprk_keyvaultsecretname")]
+        public string? SecretKeyVaultName { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("_sprk_environment_value")]
+        public Guid? EnvironmentId { get; init; }
+    }
+
+    // DTO for reading sprk_tenantid from a sprk_speenvironment record.
+    private sealed class DataverseEnvironmentDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("sprk_tenantid")]
+        public string? TenantId { get; init; }
     }
 
     /// <summary>
@@ -586,7 +618,8 @@ public sealed class SpeAdminGraphService
             () => graphClient.Storage.FileStorage.Containers
                 .GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = $"containerTypeId eq '{containerTypeId}'";
+                    // Graph API containerTypeId is Edm.Guid — no single quotes in filter
+                    config.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
                     config.QueryParameters.Select = new[]
                     {
                         "id", "displayName", "description", "containerTypeId",
@@ -884,8 +917,9 @@ public sealed class SpeAdminGraphService
             // Resume from a prior page using the skipToken embedded in a synthetic nextLink URL.
             // The Graph SDK's WithUrl() builder allows resumption from any OData nextLink.
             // We reconstruct the URL in the format Graph expects for skip-token continuation.
+            // Note: Graph API containerTypeId is Edm.Guid — no single quotes in filter.
             var nextLinkUrl = $"https://graph.microsoft.com/beta/storage/fileStorage/containers" +
-                              $"?$filter=containerTypeId+eq+'{containerTypeId}'" +
+                              $"?$filter=containerTypeId+eq+{containerTypeId}" +
                               $"&$skiptoken={Uri.EscapeDataString(skipToken)}";
 
             if (top.HasValue && top.Value > 0)
@@ -906,7 +940,8 @@ public sealed class SpeAdminGraphService
                 () => graphClient.Storage.FileStorage.Containers
                     .GetAsync(config =>
                     {
-                        config.QueryParameters.Filter = $"containerTypeId eq '{containerTypeId}'";
+                        // Graph API containerTypeId is Edm.Guid — no single quotes in filter
+                        config.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
@@ -3939,12 +3974,13 @@ public sealed class SpeAdminGraphService
 
         var results = new List<DeletedContainerSummary>();
 
-        // Graph beta: GET /storage/fileStorage/deletedContainers?$filter=containerTypeId eq '{id}'
+        // Graph beta: GET /storage/fileStorage/deletedContainers?$filter=containerTypeId eq {id}
+        // Note: Graph API containerTypeId is Edm.Guid — no single quotes in filter
         var response = await ExecuteWithRetryAsync(
             () => graphClient.Storage.FileStorage.DeletedContainers
                 .GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = $"containerTypeId eq '{containerTypeId}'";
+                    config.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
                     config.QueryParameters.Select = new[]
                     {
                         "id", "displayName", "containerTypeId", "deletedDateTime"

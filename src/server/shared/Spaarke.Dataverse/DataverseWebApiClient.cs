@@ -28,27 +28,38 @@ public class DataverseWebApiClient : IDisposable
         _logger = logger;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
-        var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
-
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        if (string.IsNullOrEmpty(managedIdentityClientId))
-            throw new InvalidOperationException("ManagedIdentity:ClientId configuration is required");
-
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        _credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+        // Use client credentials (same as DataverseServiceClientImpl) when available.
+        // Falls back to DefaultAzureCredential (managed identity) if client credentials not configured.
+        var clientId = configuration["API_APP_ID"];
+        var clientSecret = configuration["API_CLIENT_SECRET"];
+        var tenantId = configuration["TENANT_ID"];
+
+        if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId))
         {
-            ManagedIdentityClientId = managedIdentityClientId
-        });
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            _logger.LogInformation("DataverseWebApiClient using client credentials for {ApiUrl}", _apiUrl);
+        }
+        else
+        {
+            var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
+            _credential = new DefaultAzureCredential(string.IsNullOrEmpty(managedIdentityClientId)
+                ? new DefaultAzureCredentialOptions()
+                : new DefaultAzureCredentialOptions { ManagedIdentityClientId = managedIdentityClientId });
+            _logger.LogInformation("DataverseWebApiClient using DefaultAzureCredential for {ApiUrl}", _apiUrl);
+        }
 
         _httpClient = new HttpClient
         {
-            BaseAddress = new Uri(_apiUrl)
+            BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/")
         };
 
-        _logger.LogInformation("Initialized Dataverse Web API client for {ApiUrl}", _apiUrl);
+        // Request formatted values for lookup display names (e.g. business unit name, environment name)
+        _httpClient.DefaultRequestHeaders.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
     }
 
     /// <summary>
