@@ -77,6 +77,7 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
         services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
         services.AddHttpContextAccessor();
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();

@@ -118,7 +118,12 @@ public static class EndpointMappingExtensions
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
         app.MapChatEndpoints();
-        app.MapChatDocumentEndpoints();
+        try { app.MapChatDocumentEndpoints(); }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("EndpointMapping");
+            logger.LogError(ex, "MapChatDocumentEndpoints FAILED — document upload endpoints will be unavailable");
+        }
         app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
 
