@@ -131,10 +131,12 @@ public class ExternalParticipationService
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            // Query active participations for this Contact
+            // Query active participations for this Contact.
+            // Dataverse lookup field names: _sprk_contact_value (contact FK), _sprk_project_value (project FK).
+            // These differ from the schema name suffix convention — verified against live Dataverse response.
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
-                        $"?$filter=_sprk_contactid_value eq {contactId} and statecode eq 0" +
-                        $"&$select=_sprk_projectid_value,sprk_accesslevel";
+                        $"?$filter=_sprk_contact_value eq {contactId} and statecode eq 0" +
+                        $"&$select=_sprk_project_value,sprk_accesslevel";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -152,10 +154,10 @@ public class ExternalParticipationService
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
             var participations = result?.Value?
-                .Where(r => r._sprk_projectid_value.HasValue && r.sprk_accesslevel.HasValue)
+                .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                 .Select(r => new ExternalParticipation
                 {
-                    ProjectId = r._sprk_projectid_value!.Value,
+                    ProjectId = r._sprk_project_value!.Value,
                     AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                 })
                 .ToList() ?? new List<ExternalParticipation>();
@@ -248,8 +250,8 @@ public class ExternalParticipationService
 
     private sealed class ExternalAccessRow
     {
-        [JsonPropertyName("_sprk_projectid_value")]
-        public Guid? _sprk_projectid_value { get; set; }
+        [JsonPropertyName("_sprk_project_value")]
+        public Guid? _sprk_project_value { get; set; }
 
         [JsonPropertyName("sprk_accesslevel")]
         public int? sprk_accesslevel { get; set; }
