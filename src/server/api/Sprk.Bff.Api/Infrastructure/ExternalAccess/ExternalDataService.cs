@@ -43,11 +43,11 @@ public class ExternalDataService
     private sealed class ProjectRow
     {
         [JsonPropertyName("sprk_projectid")] public string? SprkProjectid { get; set; }
-        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
-        [JsonPropertyName("sprk_referencenumber")] public string? SprkReferencenumber { get; set; }
-        [JsonPropertyName("sprk_description")] public string? SprkDescription { get; set; }
+        [JsonPropertyName("sprk_projectname")] public string? SprkName { get; set; }
+        [JsonPropertyName("sprk_projectnumber")] public string? SprkReferencenumber { get; set; }
+        [JsonPropertyName("sprk_projectdescription")] public string? SprkDescription { get; set; }
         [JsonPropertyName("sprk_issecure")] public bool? SprkIssecure { get; set; }
-        [JsonPropertyName("sprk_status")] public int? SprkStatus { get; set; }
+        [JsonPropertyName("statecode")] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("modifiedon")] public string? Modifiedon { get; set; }
     }
@@ -55,22 +55,22 @@ public class ExternalDataService
     private sealed class DocumentRow
     {
         [JsonPropertyName("sprk_documentid")] public string? SprkDocumentid { get; set; }
-        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
+        [JsonPropertyName("sprk_documentname")] public string? SprkName { get; set; }
         [JsonPropertyName("sprk_documenttype")] public string? SprkDocumenttype { get; set; }
-        [JsonPropertyName("sprk_summary")] public string? SprkSummary { get; set; }
-        [JsonPropertyName("_sprk_projectid_value")] public string? SprkProjectidValue { get; set; }
+        [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
+        [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
     }
 
     private sealed class EventRow
     {
         [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
-        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
+        [JsonPropertyName("sprk_eventname")] public string? SprkName { get; set; }
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
-        [JsonPropertyName("sprk_status")] public int? SprkStatus { get; set; }
+        [JsonPropertyName("sprk_eventstatus")] public int? SprkStatus { get; set; }
         [JsonPropertyName("sprk_todoflag")] public bool? SprkTodoflag { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
-        [JsonPropertyName("_sprk_projectid_value")] public string? SprkProjectidValue { get; set; }
+        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkProjectidValue { get; set; }
     }
 
     private sealed class ContactRow
@@ -97,7 +97,7 @@ public class ExternalDataService
 
     private sealed class AccessLinkRow
     {
-        [JsonPropertyName("_sprk_contactid_value")] public string? ContactId { get; set; }
+        [JsonPropertyName("_sprk_contact_value")] public string? ContactId { get; set; }
     }
 
     // ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ public class ExternalDataService
         var ids = projectIds.ToList();
         if (ids.Count == 0) return [];
 
-        var select = "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon";
+        var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var idFilter = string.Join(" or ", ids.Select(id => $"sprk_projectid eq {id}"));
         var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_name asc";
 
@@ -139,7 +139,7 @@ public class ExternalDataService
     /// <summary>Retrieves a single project by ID.</summary>
     public async Task<ExternalProjectDto?> GetProjectByIdAsync(Guid projectId, CancellationToken ct = default)
     {
-        var select = "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon";
+        var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var url = $"{GetApiUrl()}/sprk_projects({projectId})?$select={select}";
 
         var row = await GetSingleAsync<ProjectRow>(url, ct);
@@ -153,8 +153,8 @@ public class ExternalDataService
     /// <summary>Retrieves all documents belonging to the specified project.</summary>
     public async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
     {
-        var select = "sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon";
-        var filter = Uri.EscapeDataString($"_sprk_projectid_value eq {projectId}");
+        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
+        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
         var url = $"{GetApiUrl()}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc&$top=200";
 
         var rows = await GetCollectionAsync<DocumentRow>(url, ct);
@@ -168,8 +168,8 @@ public class ExternalDataService
     /// <summary>Retrieves all events belonging to the specified project.</summary>
     public async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
-        var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon";
-        var filter = Uri.EscapeDataString($"_sprk_projectid_value eq {projectId}");
+        var select = "sprk_eventid,sprk_eventname,sprk_duedate,sprk_eventstatus,sprk_todoflag,_sprk_regardingproject_value,createdon";
+        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
         var url = $"{GetApiUrl()}/sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
 
         var rows = await GetCollectionAsync<EventRow>(url, ct);
@@ -323,8 +323,8 @@ public class ExternalDataService
 
     private async Task<IReadOnlyList<string>> GetProjectContactIdsAsync(Guid projectId, CancellationToken ct)
     {
-        var filter = Uri.EscapeDataString($"_sprk_projectid_value eq {projectId} and statecode eq 0");
-        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contactid_value&$top=200";
+        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId} and statecode eq 0");
+        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}&$select=_sprk_contact_value&$top=200";
 
         var rows = await GetCollectionAsync<AccessLinkRow>(url, ct);
         return rows
