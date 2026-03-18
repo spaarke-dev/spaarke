@@ -235,6 +235,14 @@ export const speApiClient = {
     },
 
     /**
+     * GET /api/spe/configs/{id}
+     * Get full detail for a single container type config.
+     */
+    get(id: string): Promise<SpeContainerTypeConfig> {
+      return get<SpeContainerTypeConfig>("/api/spe/configs/" + id);
+    },
+
+    /**
      * POST /api/spe/configs
      * Create a new container type config.
      */

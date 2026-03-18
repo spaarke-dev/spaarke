@@ -251,7 +251,7 @@ internal sealed class EnvironmentDataverseRow
     [JsonPropertyName("sprk_rootsiteurl")]
     public string? RootSiteUrl { get; set; }
 
-    [JsonPropertyName("sprk_graphapibaseurl")]
+    [JsonPropertyName("sprk_graphendpoint")]
     public string? GraphApiBaseUrl { get; set; }
 
     [JsonPropertyName("sprk_description")]

@@ -4,13 +4,14 @@ import {
   makeStyles,
   tokens,
   Text,
-  Spinner,
   webDarkTheme,
   webLightTheme,
 } from "@fluentui/react-components";
+import { useMsal } from "@azure/msal-react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { APP_VERSION } from "./config";
 import { AppHeader } from "./components/AppHeader";
+import { AuthGuard } from "./components/AuthGuard";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { ProjectPage } from "./pages/ProjectPage";
@@ -41,44 +42,22 @@ const useStyles = makeStyles({
     justifyContent: "flex-end",
     flexShrink: 0,
   },
-  loadingOverlay: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 auto",
-    gap: tokens.spacingVerticalM,
-  },
 });
 
 /**
- * Attempt to read portal user context from the Power Pages shell globals.
- * Power Pages injects `window["Microsoft.Dynamic365.Portal.User"]` (or similar)
- * on authenticated pages. Returns null when running locally or unauthenticated.
+ * Map an MSAL account to the PortalUser shape used by AppHeader and pages.
+ * MSAL account claims: name, username (UPN/email), localAccountId, tenantId.
  */
-function readPortalUser(): PortalUser | null {
-  try {
-    // Power Pages standard portal user global
-    const raw = (window as Record<string, unknown>)["Microsoft.Dynamic365.Portal.User"];
-    if (raw && typeof raw === "object") {
-      const u = raw as Record<string, string>;
-      const firstName = u["firstName"] ?? "";
-      const lastName = u["lastName"] ?? "";
-      const fullName = u["fullName"];
-      const email = u["email"] ?? "";
-      const nameParts = `${firstName} ${lastName}`.trim();
-      return {
-        userName: email || (u["userName"] ?? ""),
-        firstName,
-        lastName,
-        displayName: fullName ?? (nameParts || email),
-        tenantId: u["tenantId"],
-      };
-    }
-  } catch {
-    // Silently ignore — portal context may not be available in dev
-  }
-  return null;
+function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] | undefined): PortalUser | null {
+  if (!account) return null;
+  const nameParts = (account.name ?? "").split(" ");
+  return {
+    userName: account.username,
+    firstName: nameParts[0] ?? "",
+    lastName: nameParts.slice(1).join(" "),
+    displayName: account.name ?? account.username,
+    tenantId: account.tenantId,
+  };
 }
 
 /**
@@ -88,20 +67,21 @@ function readPortalUser(): PortalUser | null {
  * - FluentProvider with Fluent UI v9 light/dark theming (ADR-021)
  * - Dark mode toggle synced to OS preference with manual override
  * - HashRouter (required for Power Pages single-page hosting — all navigation is hash-based)
+ * - AuthGuard: redirects unauthenticated users to Entra B2B login via MSAL
  * - Routes for WorkspaceHomePage (#/) and ProjectPage (#/project/:id)
  * - ErrorBoundary wrapping all route content for graceful error handling
- * - AppHeader with user info and theme toggle
- * - Loading state while portal context is being read
+ * - AppHeader with user info (from MSAL account) and theme toggle
  *
  * See ADR-022 for React 18 Code Page pattern.
+ * See notes/auth-migration-b2b-msal.md for auth architecture.
  */
 export const App: React.FC = () => {
   const [isDark, setIsDark] = React.useState(
     () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false
   );
 
-  const [isLoadingUser, setIsLoadingUser] = React.useState(true);
-  const [portalUser, setPortalUser] = React.useState<PortalUser | null>(null);
+  const { accounts } = useMsal();
+  const portalUser = accountToPortalUser(accounts[0]);
 
   const theme = isDark ? webDarkTheme : webLightTheme;
   const styles = useStyles();
@@ -112,13 +92,6 @@ export const App: React.FC = () => {
     const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
     mediaQuery.addEventListener("change", handler);
     return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
-
-  // Load portal user context (Power Pages injects user globals asynchronously)
-  React.useEffect(() => {
-    const user = readPortalUser();
-    setPortalUser(user);
-    setIsLoadingUser(false);
   }, []);
 
   return (
@@ -132,11 +105,7 @@ export const App: React.FC = () => {
           />
 
           <main className={styles.content}>
-            {isLoadingUser ? (
-              <div className={styles.loadingOverlay}>
-                <Spinner size="large" label="Loading workspace..." />
-              </div>
-            ) : (
+            <AuthGuard>
               <ErrorBoundary>
                 <Routes>
                   <Route path="/" element={<WorkspaceHomePage />} />
@@ -145,7 +114,7 @@ export const App: React.FC = () => {
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </ErrorBoundary>
-            )}
+            </AuthGuard>
           </main>
 
           <footer className={styles.footer}>

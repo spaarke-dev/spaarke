@@ -155,7 +155,7 @@ public static class AuditLogEndpoints
     ///
     /// configId is required; from, to, and category are optional.
     /// The sprk_ContainerTypeConfigId navigation property is filtered via its lookup id
-    /// using the Dataverse OData syntax: sprk_ContainerTypeConfigId eq {guid}.
+    /// using the Dataverse OData syntax: _sprk_containertypeconfigid_value eq '{guid}'.
     /// </summary>
     private static string BuildODataFilter(
         Guid configId,
@@ -166,7 +166,8 @@ public static class AuditLogEndpoints
         var clauses = new List<string>
         {
             // configId is required — filter on the lookup FK
-            $"_sprk_containertypeconfigid_value eq {configId}"
+            // Dataverse OData: _xxx_value lookup fields require the GUID wrapped in single quotes
+            $"_sprk_containertypeconfigid_value eq '{configId}'"
         };
 
         if (from.HasValue)

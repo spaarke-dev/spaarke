@@ -795,6 +795,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       planApproveAbortRef.current = controller;
       setIsPlanApproving(true);
 
+      // Diagnostic: log plan approval context
+      console.log(
+        '[SprkChat] handlePlanProceed: approving plan —',
+        'planId:', pendingPlanId,
+        ', pendingPlanData:', JSON.stringify(pendingPlanData),
+        ', sessionId:', session.sessionId
+      );
+
       const planIdToApprove = pendingPlanId;
       const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
       const approveUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/plan/approve`;

@@ -31,7 +31,7 @@ public static class ExternalAccessEndpoints
 
     private static void MapExternalUserEndpoints(WebApplication app)
     {
-        // RequireAuthorization: ASP.NET Core middleware validates the Azure AD JWT.
+        // RequireAuthorization: ASP.NET Core middleware validates the Azure AD B2B JWT.
         // ExternalCallerAuthorizationFilter: resolves Contact + participation data from claims.
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
@@ -50,6 +50,10 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .AddExternalCallerAuthorizationFilter();
+
+        // Project data endpoints — list/read projects, documents, events, contacts, organizations.
+        // Write endpoints — create/update events.
+        externalGroup.MapExternalProjectDataEndpoints();
     }
 
     // =========================================================================

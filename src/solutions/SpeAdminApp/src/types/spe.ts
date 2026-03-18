@@ -623,26 +623,22 @@ export interface ContainerMetrics {
 /**
  * Dashboard metrics returned by GET /api/spe/dashboard/metrics?configId={id}.
  * Data is served from background-sync cache (SpeDashboardSyncService).
+ *
+ * Shape matches SpeDashboardSyncService.DashboardMetrics (server-side record).
  */
 export interface DashboardMetrics {
-  /** Config ID these metrics apply to */
-  configId: string;
-  /** Total number of containers */
+  /** Total number of containers across all registered container types */
   totalContainerCount: number;
-  /** Number of active containers */
-  activeContainerCount: number;
-  /** Number of inactive containers */
-  inactiveContainerCount: number;
-  /** Number of deleted (recycle bin) containers */
-  deletedContainerCount: number;
-  /** Total storage used across all containers in bytes */
+  /** Total storage used in bytes across all containers */
   totalStorageUsedInBytes: number;
-  /** Per-container breakdown (may be limited to top N for performance) */
-  containers: ContainerMetrics[];
-  /** When the cache was last refreshed (ISO string) */
-  lastRefreshedDateTime: string;
-  /** Whether a refresh is currently in progress */
-  isRefreshing: boolean;
+  /** Container count keyed by container type config ID (Guid string) */
+  containerCountByConfig: Record<string, number>;
+  /** UTC timestamp when these metrics were last synced from Graph (ISO string) */
+  lastSyncedAt: string;
+  /** True if the most recent sync completed without errors */
+  syncSucceeded: boolean;
+  /** Human-readable sync status message */
+  syncStatus: string;
 }
 
 // ---------------------------------------------------------------------------

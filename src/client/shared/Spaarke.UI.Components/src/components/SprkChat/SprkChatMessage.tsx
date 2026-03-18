@@ -401,6 +401,20 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   const isUser = message.role === 'User';
   const isAssistant = message.role === 'Assistant';
 
+  // ── Hooks (MUST be called unconditionally — before any early returns) ──────
+
+  const containerClass = mergeClasses(styles.container, isUser ? styles.userContainer : styles.assistantContainer);
+  const timestampClass = mergeClasses(styles.timestamp, isUser ? styles.userTimestamp : undefined);
+
+  // For assistant messages with citations, parse [N] markers and render
+  // interactive CitationMarker components. User messages are always plain text.
+  const renderedContent = React.useMemo(() => {
+    if (isAssistant && citations && citations.length > 0 && !isStreaming) {
+      return renderContentWithCitations(message.content, citations);
+    }
+    return message.content;
+  }, [message.content, citations, isAssistant, isStreaming]);
+
   // ── Structured response rendering ──────────────────────────────────────────
 
   const responseType = message.metadata?.responseType;
@@ -529,18 +543,6 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   React.useEffect(() => {
     ensureMarkdownCssInjected();
   }, []);
-
-  const containerClass = mergeClasses(styles.container, isUser ? styles.userContainer : styles.assistantContainer);
-  const timestampClass = mergeClasses(styles.timestamp, isUser ? styles.userTimestamp : undefined);
-
-  // For assistant messages with citations, parse [N] markers and render
-  // interactive CitationMarker components. User messages are always plain text.
-  const renderedContent = React.useMemo(() => {
-    if (isAssistant && citations && citations.length > 0 && !isStreaming) {
-      return renderContentWithCitations(message.content, citations);
-    }
-    return message.content;
-  }, [message.content, citations, isAssistant, isStreaming]);
 
   // Render assistant messages as markdown HTML (headings, bold, code blocks, etc.)
   // User messages are rendered as plain text to avoid unexpected formatting.

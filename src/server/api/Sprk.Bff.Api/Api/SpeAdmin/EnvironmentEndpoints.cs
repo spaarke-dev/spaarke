@@ -33,7 +33,7 @@ public static class EnvironmentEndpoints
     private const string EntitySet = "sprk_speenvironments";
     private const string ConfigEntitySet = "sprk_specontainertypeconfigs";
     private const string SelectFields =
-        "sprk_speenvironmentid,sprk_name,sprk_tenantid,sprk_tenantname,sprk_rootsiteurl,sprk_graphapibaseurl,sprk_description,sprk_isdefault,statecode,createdon,modifiedon";
+        "sprk_speenvironmentid,sprk_name,sprk_tenantid,sprk_tenantname,sprk_rootsiteurl,sprk_graphendpoint,sprk_isdefault,statecode,createdon,modifiedon";
 
     /// <summary>
     /// Registers the environment CRUD endpoints on the /api/spe route group.
@@ -51,7 +51,7 @@ public static class EnvironmentEndpoints
                 "Returns all sprk_speenvironment records. " +
                 "Environments represent tenant-level SharePoint Embedded configurations " +
                 "that container type configs reference.")
-            .Produces<EnvironmentListResponse>(StatusCodes.Status200OK)
+            .Produces<IReadOnlyList<EnvironmentSummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -137,11 +137,7 @@ public static class EnvironmentEndpoints
 
             var items = rows.Select(r => r.ToSummary()).ToList();
 
-            return TypedResults.Ok(new EnvironmentListResponse
-            {
-                Items = items,
-                TotalCount = items.Count
-            });
+            return TypedResults.Ok(items);
         }
         catch (Exception ex)
         {
@@ -382,7 +378,7 @@ public static class EnvironmentEndpoints
             // The OData filter uses the _sprk_environmentid_value expansion field.
             var referencingConfigs = await dataverseClient.QueryAsync<ReferencingConfigRow>(
                 ConfigEntitySet,
-                filter: $"_sprk_environmentid_value eq {id}",
+                filter: $"_sprk_environment_value eq {id}",
                 select: "sprk_specontainertypeconfigid",
                 top: 1,
                 cancellationToken: ct);
@@ -537,8 +533,7 @@ public static class EnvironmentEndpoints
             sprk_tenantid = request.TenantId,
             sprk_tenantname = request.TenantName,
             sprk_rootsiteurl = request.RootSiteUrl,
-            sprk_graphapibaseurl = request.GraphEndpoint,
-            sprk_description = request.Description,
+            sprk_graphendpoint = request.GraphEndpoint,
             sprk_isdefault = request.IsDefault
         };
 
@@ -561,10 +556,7 @@ public static class EnvironmentEndpoints
             dict["sprk_rootsiteurl"] = request.RootSiteUrl;
 
         if (request.GraphEndpoint is not null)
-            dict["sprk_graphapibaseurl"] = request.GraphEndpoint;
-
-        if (request.Description is not null)
-            dict["sprk_description"] = request.Description;
+            dict["sprk_graphendpoint"] = request.GraphEndpoint;
 
         if (request.IsDefault.HasValue)
             dict["sprk_isdefault"] = request.IsDefault.Value;
