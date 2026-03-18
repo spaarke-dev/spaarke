@@ -20,7 +20,7 @@ import {
 } from "@fluentui/react-icons";
 import { speApiClient } from "../../services/speApiClient";
 import { useBuContext } from "../../contexts/BuContext";
-import type { DashboardMetrics, ContainerMetrics } from "../../types/spe";
+import type { DashboardMetrics } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (ADR-021: makeStyles + Fluent design tokens; dark mode automatic)
@@ -327,77 +327,55 @@ const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext }) 
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Activity Grid (recent container list)
+// Config Container Count Grid
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface RecentActivityGridProps {
-  containers: ContainerMetrics[];
+interface ConfigCountGridProps {
+  containerCountByConfig: Record<string, number>;
 }
 
 /**
- * RecentActivityGrid — displays per-container stats from the dashboard metrics.
- *
- * Uses a plain HTML table with Fluent design tokens for styling (ADR-021).
- * ADR-012: UniversalDatasetGrid from @spaarke/ui-components is designed for
- * full-featured dataset browsing with view switching. For this read-only
- * summary display (5-10 rows, no selection, no filtering), a simple table
- * is the appropriate choice and avoids unnecessary complexity.
- *
- * If the dashboard grows to support sortable columns, filtering, or pagination,
- * migrate to UniversalDatasetGrid at that point.
+ * ConfigCountGrid — displays per-config container counts from the dashboard metrics.
  */
-const RecentActivityGrid: React.FC<RecentActivityGridProps> = ({ containers }) => {
+const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfig }) => {
   const styles = useStyles();
+  const entries = Object.entries(containerCountByConfig);
 
-  if (containers.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className={styles.emptyState} role="status">
         <Storage20Regular style={{ fontSize: "32px", opacity: 0.4 }} />
         <Text size={300} style={{ color: "inherit" }}>
-          No containers to display
+          No container data yet
         </Text>
         <Text size={200} style={{ color: "inherit" }}>
-          Container data will appear here after the first dashboard refresh.
+          Container counts will appear here after the first dashboard sync.
         </Text>
       </div>
     );
   }
 
   return (
-    <table className={styles.activityTable} aria-label="Container activity">
+    <table className={styles.activityTable} aria-label="Container counts by config">
       <thead>
         <tr className={styles.tableHeaderRow}>
-          <th className={styles.tableHeaderCell}>Container</th>
-          <th className={styles.tableHeaderCell}>Status</th>
-          <th className={styles.tableHeaderCell}>Storage Used</th>
-          <th className={styles.tableHeaderCell}>Items</th>
-          <th className={styles.tableHeaderCell}>Last Activity</th>
+          <th className={styles.tableHeaderCell}>Config ID</th>
+          <th className={styles.tableHeaderCell}>Container Count</th>
         </tr>
       </thead>
       <tbody>
-        {containers.map((c) => (
-          <tr key={c.containerId} className={styles.tableRow}>
-            <td className={styles.tableCell} title={c.displayName}>
-              {c.displayName || c.containerId}
+        {entries.map(([configId, count]) => (
+          <tr key={configId} className={styles.tableRow}>
+            <td className={styles.tableCell} title={configId}>
+              {configId}
             </td>
             <td className={styles.tableCell}>
-              <Badge
-                appearance="tint"
-                color={
-                  c.status === "active"
-                    ? "success"
-                    : c.status === "inactive"
-                    ? "warning"
-                    : "danger"
-                }
-                size="small"
-              >
-                {c.status}
-              </Badge>
+              {count === -1 ? (
+                <Badge appearance="tint" color="danger" size="small">Error</Badge>
+              ) : (
+                count.toLocaleString()
+              )}
             </td>
-            <td className={styles.tableCell}>{formatBytes(c.storageUsedInBytes)}</td>
-            <td className={styles.tableCell}>{c.itemCount.toLocaleString()}</td>
-            <td className={styles.tableCell}>{formatDateTime(c.lastActivityDateTime)}</td>
           </tr>
         ))}
       </tbody>
@@ -528,15 +506,15 @@ export const DashboardPage: React.FC = () => {
         </Text>
 
         <div className={styles.headerRight}>
-          {metrics?.lastRefreshedDateTime && (
+          {metrics?.lastSyncedAt && (
             <Tooltip
-              content={`Last refreshed: ${formatDateTime(metrics.lastRefreshedDateTime)}`}
+              content={`Last synced: ${formatDateTime(metrics.lastSyncedAt)}`}
               relationship="description"
             >
               <span style={{ display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS }}>
                 <Clock20Regular style={{ color: tokens.colorNeutralForeground3 }} />
                 <Text size={200} className={styles.lastRefreshed}>
-                  {formatDateTime(metrics.lastRefreshedDateTime)}
+                  {formatDateTime(metrics.lastSyncedAt)}
                 </Text>
               </span>
             </Tooltip>
@@ -588,19 +566,7 @@ export const DashboardPage: React.FC = () => {
               icon={<Storage20Regular />}
               label="Total Containers"
               value={metrics.totalContainerCount.toLocaleString()}
-              subtext={`${metrics.deletedContainerCount} deleted`}
-            />
-            <MetricCard
-              icon={<CheckmarkCircle20Regular />}
-              label="Active Containers"
-              value={metrics.activeContainerCount.toLocaleString()}
-              subtext={
-                metrics.totalContainerCount > 0
-                  ? `${Math.round(
-                      (metrics.activeContainerCount / metrics.totalContainerCount) * 100
-                    )}% of total`
-                  : undefined
-              }
+              subtext={`Across ${Object.keys(metrics.containerCountByConfig).length} config(s)`}
             />
             <MetricCard
               icon={<DataBarVertical20Regular />}
@@ -608,24 +574,30 @@ export const DashboardPage: React.FC = () => {
               value={formatBytes(metrics.totalStorageUsedInBytes)}
               subtext="Across all containers"
             />
+            <MetricCard
+              icon={<CheckmarkCircle20Regular />}
+              label="Sync Status"
+              value={metrics.syncSucceeded ? "OK" : "Partial"}
+              subtext={metrics.syncStatus}
+            />
           </div>
 
           <Divider />
 
-          {/* ── Recent Activity Grid ── */}
+          {/* ── Per-Config Container Counts ── */}
           <section className={styles.section}>
             <div className={styles.sectionHeader}>
               <Text size={400} weight="semibold" className={styles.sectionTitle}>
-                Containers
+                Container Counts by Config
               </Text>
-              {metrics.containers.length > 0 && (
+              {Object.keys(metrics.containerCountByConfig).length > 0 && (
                 <Badge appearance="tint" color="informative" size="small">
-                  {metrics.containers.length}
+                  {Object.keys(metrics.containerCountByConfig).length}
                 </Badge>
               )}
             </div>
 
-            <RecentActivityGrid containers={metrics.containers} />
+            <ConfigCountGrid containerCountByConfig={metrics.containerCountByConfig} />
           </section>
         </>
       )}

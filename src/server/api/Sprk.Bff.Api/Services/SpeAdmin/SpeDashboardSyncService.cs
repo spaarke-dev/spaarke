@@ -81,14 +81,20 @@ public sealed class SpeDashboardSyncService : BackgroundService
         [JsonPropertyName("sprk_containertypeid")]
         public string? ContainerTypeId { get; set; }
 
-        [JsonPropertyName("sprk_clientid")]
-        public string? ClientId { get; set; }
+        [JsonPropertyName("sprk_owningappid")]
+        public string? OwningAppId { get; set; }
 
+        [JsonPropertyName("sprk_keyvaultsecretname")]
+        public string? SecretKeyVaultName { get; set; }
+
+        [JsonPropertyName("_sprk_environment_value")]
+        public Guid? EnvironmentId { get; set; }
+    }
+
+    private sealed class EnvironmentRecord
+    {
         [JsonPropertyName("sprk_tenantid")]
         public string? TenantId { get; set; }
-
-        [JsonPropertyName("sprk_secretkeyvaultname")]
-        public string? SecretKeyVaultName { get; set; }
     }
 
     // -------------------------------------------------------------------------
@@ -101,7 +107,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
     private const string ContainerTypeConfigEntitySet = "sprk_specontainertypeconfigs";
 
     private const string ContainerTypeConfigSelect =
-        "sprk_specontainertypeconfigid,sprk_containertypeid,sprk_clientid,sprk_tenantid,sprk_secretkeyvaultname";
+        "sprk_specontainertypeconfigid,sprk_containertypeid,sprk_owningappid,sprk_keyvaultsecretname,_sprk_environment_value";
 
     private static readonly JsonSerializerOptions CacheJsonOptions = new()
     {
@@ -380,15 +386,39 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 select: ContainerTypeConfigSelect,
                 cancellationToken: ct);
 
+            // Resolve unique environment IDs → tenant IDs in batch (one query per unique env).
+            var envIds = records
+                .Where(r => r.EnvironmentId.HasValue)
+                .Select(r => r.EnvironmentId!.Value)
+                .Distinct()
+                .ToList();
+
+            var tenantById = new Dictionary<Guid, string>();
+            foreach (var envId in envIds)
+            {
+                try
+                {
+                    var env = await _dataverseClient.RetrieveAsync<EnvironmentRecord>(
+                        "sprk_speenvironments", envId, "sprk_tenantid", ct);
+                    if (env?.TenantId is not null)
+                        tenantById[envId] = env.TenantId;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not resolve tenant ID for environment {EnvId}", envId);
+                }
+            }
+
             var configs = new List<SpeAdminGraphService.ContainerTypeConfig>(records.Count);
 
             foreach (var record in records)
             {
                 if (!Guid.TryParse(record.Id, out var configId)
                     || string.IsNullOrWhiteSpace(record.ContainerTypeId)
-                    || string.IsNullOrWhiteSpace(record.ClientId)
-                    || string.IsNullOrWhiteSpace(record.TenantId)
-                    || string.IsNullOrWhiteSpace(record.SecretKeyVaultName))
+                    || string.IsNullOrWhiteSpace(record.OwningAppId)
+                    || string.IsNullOrWhiteSpace(record.SecretKeyVaultName)
+                    || !record.EnvironmentId.HasValue
+                    || !tenantById.TryGetValue(record.EnvironmentId.Value, out var tenantId))
                 {
                     _logger.LogWarning(
                         "Skipping incomplete container type config record: id={Id}", record.Id);
@@ -398,8 +428,8 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 configs.Add(new SpeAdminGraphService.ContainerTypeConfig(
                     ConfigId: configId,
                     ContainerTypeId: record.ContainerTypeId,
-                    ClientId: record.ClientId,
-                    TenantId: record.TenantId,
+                    ClientId: record.OwningAppId,
+                    TenantId: tenantId,
                     SecretKeyVaultName: record.SecretKeyVaultName));
             }
 
