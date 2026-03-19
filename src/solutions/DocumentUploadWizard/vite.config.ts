@@ -20,6 +20,9 @@ export default defineConfig({
         __dirname,
         "../../client/shared/Spaarke.UI.Components/src"
       ),
+      "@azure/msal-browser": path.resolve(__dirname, "node_modules/@azure/msal-browser"),
+      "@fluentui/react-components": path.resolve(__dirname, "node_modules/@fluentui/react-components"),
+      "@fluentui/react-icons": path.resolve(__dirname, "node_modules/@fluentui/react-icons"),
     },
   },
   build: {

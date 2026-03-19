@@ -22,7 +22,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import {
-  DocumentArrowUp24Regular,
+  DocumentArrowUpRegular,
   BrainCircuit24Regular,
   CheckmarkCircle24Regular,
 } from '@fluentui/react-icons';
@@ -177,9 +177,18 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalXXL,
     paddingBottom: tokens.spacingVerticalXXL,
-    borderWidth: '2px',
-    borderStyle: 'dashed',
-    borderColor: tokens.colorNeutralStroke2,
+    borderTopWidth: '2px',
+    borderRightWidth: '2px',
+    borderBottomWidth: '2px',
+    borderLeftWidth: '2px',
+    borderTopStyle: 'dashed',
+    borderRightStyle: 'dashed',
+    borderBottomStyle: 'dashed',
+    borderLeftStyle: 'dashed',
+    borderTopColor: tokens.colorNeutralStroke2,
+    borderRightColor: tokens.colorNeutralStroke2,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderLeftColor: tokens.colorNeutralStroke2,
     borderRadius: tokens.borderRadiusMedium,
     color: tokens.colorNeutralForeground3,
   },
@@ -318,7 +327,7 @@ export const IntentWizardFlow: React.FC<IIntentWizardFlowProps> = ({
       <div className={styles.stepContent}>
         {currentStep === 'upload' && (
           <div className={styles.uploadPlaceholder}>
-            <DocumentArrowUp24Regular />
+            <DocumentArrowUpRegular />
             <Text size={300}>
               Drop files here or click to upload
             </Text>

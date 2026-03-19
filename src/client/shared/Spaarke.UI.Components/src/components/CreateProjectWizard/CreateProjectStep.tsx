@@ -273,7 +273,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   const prefill = useAiPrefill({
     endpoint: PREFILL_PATH,
     uploadedFiles,
-    authenticatedFetch: authFetch,
+    authenticatedFetch: authFetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args)),
     bffBaseUrl: bffBaseUrl ?? '',
     fieldExtractor: (data) => ({
       textFields: {
@@ -434,7 +434,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
             value={projectTypeValue}
             onChange={handleProjectTypeChange}
             onSearch={handleSearchProjectTypes}
-            isAiPrefilled={isAiField('projectTypeId')}
+            labelExtra={isAiField('projectTypeId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />
 
@@ -444,7 +444,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
             value={practiceAreaValue}
             onChange={handlePracticeAreaChange}
             onSearch={handleSearchPracticeAreas}
-            isAiPrefilled={isAiField('practiceAreaId')}
+            labelExtra={isAiField('practiceAreaId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />
 

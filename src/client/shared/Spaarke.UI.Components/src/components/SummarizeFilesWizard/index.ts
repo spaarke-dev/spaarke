@@ -1,6 +1,10 @@
 /**
  * index.ts
  * Public barrel export for the SummarizeFilesWizard components.
+ *
+ * NOTE: FOLLOW_ON_STEP_ID_MAP / FOLLOW_ON_STEP_LABEL_MAP / FOLLOW_ON_CANONICAL_ORDER
+ * are NOT re-exported here — they are already exported from CreateRecordWizard.
+ * AuthenticatedFetchFn is NOT re-exported — it is already exported from services.
  */
 
 export { SummarizeFilesDialog } from './SummarizeFilesDialog';
@@ -14,11 +18,6 @@ export {
   buildSummaryEmailSubject,
   buildSummaryEmailBody,
 } from './SummarizeSendEmailStep';
-export {
-  FOLLOW_ON_STEP_ID_MAP,
-  FOLLOW_ON_STEP_LABEL_MAP,
-  FOLLOW_ON_CANONICAL_ORDER,
-} from './SummaryNextStepsStep';
 
 export type { ISummarizeFilesDialogProps } from './SummarizeFilesDialog';
 export type { ISummaryResultsStepProps } from './SummaryResultsStep';
@@ -26,7 +25,7 @@ export type { ISummaryNextStepsStepProps, SummaryActionId } from './SummaryNextS
 export type { ISummarizeSendEmailStepProps } from './SummarizeSendEmailStep';
 export type { ISummarizeCreateProjectStepProps } from './SummarizeCreateProjectStep';
 export type { ISummarizeAnalysisStepProps } from './SummarizeAnalysisStep';
-export type { AuthenticatedFetchFn, StreamSummarizeCallbacks } from './summarizeService';
+export type { StreamSummarizeCallbacks } from './summarizeService';
 export type {
   ISummarizeResult,
   ISummarizeResponse,

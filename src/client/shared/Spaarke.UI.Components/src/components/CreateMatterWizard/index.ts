@@ -4,28 +4,23 @@
  *
  * Consumer usage:
  *   import { CreateMatterWizard } from './components/CreateMatterWizard';
+ *
+ * NOTE: This barrel intentionally does NOT re-export symbols that are already
+ * exported from sibling barrels (FileUpload, LookupField, Wizard,
+ * CreateRecordWizard, AiFieldTag). Consumers should import those from their
+ * canonical source.
  */
 
 // Primary entry point -- the wizard component
 export { CreateMatterWizard, default } from './CreateMatterWizard';
 export type { ICreateMatterWizardProps } from './CreateMatterWizard';
 
-// Sub-components (available for testing or extension)
-export { WizardStepper } from './WizardStepper';
-export { FileUploadZone } from './FileUploadZone';
-export { UploadedFileList } from './UploadedFileList';
+// Sub-components internal to the wizard (CreateRecordStep is matter-specific)
 export { CreateRecordStep } from './CreateRecordStep';
-export { LookupField } from './LookupField';
-export { AiFieldTag } from './AiFieldTag';
 
-// Task 024 -- Step 3 + follow-on step components
-export { NextStepsStep, FOLLOW_ON_STEP_ID_MAP, FOLLOW_ON_STEP_LABEL_MAP } from './NextStepsStep';
+// Task 024 -- matter-specific step components
 export { AssignCounselStep } from './AssignCounselStep';
-export { AssignResourcesStep } from './AssignResourcesStep';
-export { RecipientField } from './RecipientField';
-export { DraftSummaryStep } from './DraftSummaryStep';
 export {
-  SendEmailStep,
   buildDefaultEmailSubject,
   buildDefaultEmailBody,
 } from './SendEmailStep';
@@ -43,20 +38,13 @@ export {
   streamAiDraftSummary,
 } from './matterService';
 
-// Types -- wizard
+// Types -- wizard (matter-specific only; shared types live in Wizard/index.ts
+// and FileUpload/index.ts)
 export type {
   IWizardDialogProps,
-  IWizardStepperProps,
-  IFileUploadZoneProps,
-  IUploadedFileListProps,
   IWizardStep,
-  IUploadedFile,
-  IFileValidationError,
   WizardAction,
   WizardStepId,
-  WizardStepStatus,
-  UploadedFileType,
-  AcceptedMimeType,
 } from './wizardTypes';
 
 // Types -- Step 2 form
@@ -68,21 +56,12 @@ export type {
   IAiPrefillState,
   IAiPrefillRequest,
   IAiPrefillResponse,
-  AiPrefillStatus,
   FormAction,
 } from './formTypes';
 
-// Types -- Step 3 follow-on
-export type {
-  FollowOnActionId,
-  IFollowOnCardDef,
-  INextStepsStepProps,
-} from './NextStepsStep';
+// Types -- Step 3 follow-on (matter-specific only; shared follow-on types
+// live in CreateRecordWizard/index.ts)
 export type { IAssignCounselStepProps } from './AssignCounselStep';
-export type { IAssignResourcesStepProps } from './AssignResourcesStep';
-export type { IRecipientItem, IRecipientFieldProps } from './RecipientField';
-export type { IDraftSummaryStepProps } from './DraftSummaryStep';
-export type { ISendEmailStepProps } from './SendEmailStep';
 
 // Types -- service result
 export type {
