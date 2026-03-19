@@ -68,6 +68,7 @@ import {
   ArrowClockwise20Regular,
   CheckmarkCircle20Regular,
   Storage20Regular,
+  FolderOpen20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, ApiError } from "../../services/speApiClient";
@@ -243,7 +244,9 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Build typed Fluent DataGrid column definitions for Container rows. */
-function buildColumns(): TableColumnDefinition<Container>[] {
+function buildColumns(
+  onBrowse?: (containerId: string, containerName?: string) => void,
+): TableColumnDefinition<Container>[] {
   return [
     createTableColumn<Container>({
       columnId: "displayName",
@@ -283,6 +286,26 @@ function buildColumns(): TableColumnDefinition<Container>[] {
       renderCell: (container) => (
         <Text>{formatBytes(container.storageUsedInBytes)}</Text>
       ),
+    }),
+    createTableColumn<Container>({
+      columnId: "browse",
+      renderHeaderCell: () => "",
+      renderCell: (container) =>
+        onBrowse ? (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<FolderOpen20Regular />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onBrowse(container.id, container.displayName);
+            }}
+            title="Browse files"
+            aria-label={`Browse files in ${container.displayName}`}
+          >
+            Browse
+          </Button>
+        ) : null,
     }),
   ];
 }
@@ -434,7 +457,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
 
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
-  const columns = React.useMemo(() => buildColumns(), []);
+  const columns = React.useMemo(() => buildColumns(onOpenContainer), [onOpenContainer]);
 
   // ── Derived: Selected Container Objects ────────────────────────────────────
 

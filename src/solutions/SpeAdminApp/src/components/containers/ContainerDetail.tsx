@@ -511,14 +511,16 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
             <Text size={400} weight="semibold" className={styles.headerName}>
               {container.displayName}
             </Text>
-            <Badge
-              color={statusBadgeColor(container.status)}
-              appearance="filled"
-              size="small"
-              style={{ alignSelf: "flex-start" }}
-            >
-              {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
-            </Badge>
+            {container.status && (
+              <Badge
+                color={statusBadgeColor(container.status)}
+                appearance="filled"
+                size="small"
+                style={{ alignSelf: "flex-start" }}
+              >
+                {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
+              </Badge>
+            )}
           </>
         ) : (
           <Text size={400} weight="semibold" className={styles.headerName}>
