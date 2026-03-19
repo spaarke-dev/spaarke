@@ -1,0 +1,33 @@
+<task id="UDSS-005c" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Consolidate barrel exports for Phase 1 wizard extractions</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>shared-library, barrel-export, consolidation</tags>
+    <dependencies>UDSS-005, UDSS-007</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+  <prompt>Update the shared library components barrel (components/index.ts) to export both CreateMatterWizard and CreateProjectWizard. This task is deliberately separated from the extraction tasks (005, 007) to avoid file ownership conflicts when those tasks run in parallel.</prompt>
+  <role>Frontend developer</role>
+  <goal>components/index.ts updated with exports for CreateMatterWizard and CreateProjectWizard</goal>
+  <constraints>
+    <constraint source="file-ownership">This is the ONLY task that modifies components/index.ts in Phase 1</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Add export * from './CreateMatterWizard' to components/index.ts</step>
+    <step id="2">Add export * from './CreateProjectWizard' to components/index.ts</step>
+    <step id="3">Run full tsc build to verify no conflicts or circular dependencies</step>
+    <step id="4">Run existing tests to confirm no regressions</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Barrel exports compile without errors</criterion>
+    <criterion>No circular dependencies detected</criterion>
+    <criterion>All existing tests pass</criterion>
+  </acceptance-criteria>
+</task>

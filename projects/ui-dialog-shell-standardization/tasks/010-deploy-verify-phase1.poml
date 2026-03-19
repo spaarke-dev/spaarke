@@ -1,62 +1,38 @@
 <task id="UDSS-010" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Deploy Phase 1 Code Pages and verify end-to-end</title>
+    <title>Deploy and verify Phase 1 end-to-end</title>
     <status>not-started</status>
     <phase>1</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>deploy, verification, phase-gate</tags>
     <dependencies>UDSS-009</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Deploy the two new Code Page web resources (CreateMatterWizard, CreateProjectWizard) and the
-    updated Corporate Workspace to the Dataverse dev environment. Perform end-to-end verification
-    that wizard dialogs open correctly from the workspace, display proper modal chrome (title bar,
-    expand button), handle dark mode, and trigger data refresh on completion. This task serves as
-    the Phase 1 gate — all Phase 2 work is blocked until this verification passes.
-  </prompt>
-
-  <role>DevOps / QA engineer with Dataverse deployment experience</role>
-
-  <goal>
-    All three web resources are deployed to Dataverse dev environment, and end-to-end testing
-    confirms wizards open, function, and refresh workspace data correctly in both light and dark mode.
-  </goal>
-
+  <prompt>Deploy all Phase 1 artifacts to the Dataverse dev environment and perform end-to-end verification. This is the phase gate — all wizard extractions, Code Pages, and workspace changes must work together in production-like conditions.</prompt>
+  <role>Full-stack developer with deployment experience</role>
+  <goal>Phase 1 deployed and verified end-to-end: both wizards open from workspace via navigateTo, consistent Dataverse chrome, refresh works, dark mode OK</goal>
   <constraints>
-    <constraint source="ADR-026">Web resources must be deployed with correct naming (sprk_ prefix) and display names.</constraint>
+    <constraint source="deployment">Use code-page-deploy skill for web resource deployment</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
-      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
-      <file>scripts/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Build CreateMatterWizard Code Page (npm run build in src/solutions/CreateMatterWizard/) and verify single HTML output.</step>
-    <step id="2">Build CreateProjectWizard Code Page (npm run build in src/solutions/CreateProjectWizard/) and verify single HTML output.</step>
-    <step id="3">Deploy sprk_creatematterwizard web resource to Dataverse dev environment. Set display name to "Create New Matter".</step>
-    <step id="4">Deploy sprk_createprojectwizard web resource to Dataverse dev environment. Set display name to "Create New Project".</step>
-    <step id="5">Build updated Corporate Workspace (npm run build in src/solutions/LegalWorkspace/) and deploy sprk_corporateworkspace web resource.</step>
-    <step id="6">Test: Open Corporate Workspace, click Create Matter — verify wizard opens as a navigateTo modal with Dataverse chrome (title bar, expand button).</step>
-    <step id="7">Test: Complete the Create Matter wizard — verify workspace data refreshes (todo list, feed, document list update).</step>
-    <step id="8">Test: Open Create Project from workspace — verify same modal behavior and post-dialog refresh.</step>
-    <step id="9">Test: Switch to dark mode in Dataverse settings — verify both wizards render correctly with dark theme tokens.</step>
-    <step id="10">Document any issues found and confirm Phase 1 gate pass/fail status.</step>
+    <step id="1">Build both Code Pages (npm run build in CreateMatterWizard/ and CreateProjectWizard/)</step>
+    <step id="2">Deploy sprk_creatematterwizard web resource (display name: "Create New Matter")</step>
+    <step id="3">Deploy sprk_createprojectwizard web resource (display name: "Create New Project")</step>
+    <step id="4">Deploy updated Corporate Workspace (LegalWorkspace build and deploy)</step>
+    <step id="5">Test: Create Matter wizard opens from workspace via navigateTo</step>
+    <step id="6">Test: Dataverse modal chrome is visible (title bar, close button)</step>
+    <step id="7">Test: Post-dialog data refresh triggers correctly</step>
+    <step id="8">Test: Dark mode renders correctly in both wizards</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>sprk_creatematterwizard web resource is deployed with display name "Create New Matter".</criterion>
-    <criterion>sprk_createprojectwizard web resource is deployed with display name "Create New Project".</criterion>
-    <criterion>Updated sprk_corporateworkspace is deployed and functional.</criterion>
-    <criterion>Create Matter wizard opens as a navigateTo modal from the workspace.</criterion>
-    <criterion>Create Project wizard opens as a navigateTo modal from the workspace.</criterion>
-    <criterion>Modal dialogs display Dataverse chrome (title bar, expand/collapse button).</criterion>
-    <criterion>Post-dialog data refresh works — workspace lists update after wizard completion.</criterion>
-    <criterion>Both wizards render correctly in dark mode.</criterion>
-    <criterion>Phase 1 gate is explicitly marked as pass or fail with notes.</criterion>
+    <criterion>Both wizards open from Corporate Workspace via navigateTo</criterion>
+    <criterion>Consistent Dataverse modal chrome on both wizards</criterion>
+    <criterion>Data refresh works after dialog close</criterion>
+    <criterion>Dark mode renders correctly</criterion>
   </acceptance-criteria>
 </task>

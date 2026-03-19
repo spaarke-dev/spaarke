@@ -1,0 +1,38 @@
+<task id="UDSS-011b" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Consolidate barrel exports for all Phase 2 wizard extractions</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>shared-library, barrel-export, consolidation</tags>
+    <dependencies>011a, 012a, 013a, 014a, 015a</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+  <prompt>After all 5 wizard/dialog extractions are complete (011a-015a), update the shared library barrel export (components/index.ts) to re-export all 5 new components. This is a serial task that owns the single barrel file and must run after all parallel extractions finish. Run full tsc and any available tests to verify integration.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>components/index.ts exports all 5 new wizard/dialog components, full tsc passes, and tests pass</goal>
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction, no direct webApi</constraint>
+    <constraint source="serial-gate">This task MUST NOT run until all 5 extraction tasks (011a-015a) are complete</constraint>
+    <constraint source="file-ownership">This task owns ONLY components/index.ts — do not modify any component folders</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Verify all 5 component folders exist and each has a local index.ts: CreateEventWizard, CreateTodoWizard, CreateWorkAssignmentWizard, SummarizeFilesWizard, FindSimilarDialog</step>
+    <step id="2">Open src/client/shared/Spaarke.UI.Components/src/components/index.ts</step>
+    <step id="3">Add 5 export lines re-exporting from each component's local index.ts</step>
+    <step id="4">Run full tsc to verify all exports resolve and no type errors exist</step>
+    <step id="5">Run any available unit tests (npm test) to verify no regressions</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>components/index.ts contains export lines for all 5 new components</criterion>
+    <criterion>Full tsc compiles without errors</criterion>
+    <criterion>All existing tests pass</criterion>
+    <criterion>No component folders were modified — only the barrel file</criterion>
+  </acceptance-criteria>
+</task>

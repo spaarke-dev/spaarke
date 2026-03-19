@@ -1,59 +1,37 @@
 <task id="UDSS-009" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Update Corporate Workspace to use navigateTo for CreateMatter and CreateProject</title>
+    <title>Update Corporate Workspace to use navigateTo for Matter + Project</title>
     <status>not-started</status>
     <phase>1</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>corporate-workspace, refactor, navigateTo</tags>
     <dependencies>UDSS-006, UDSS-008</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Refactor the Corporate Workspace (LegalWorkspace) to open CreateMatter and CreateProject wizards
-    via Xrm.Navigation.navigateTo instead of rendering them inline with React lazy loading. This
-    removes two large component trees from the workspace bundle, reduces its JavaScript payload, and
-    shifts wizard rendering to the new standalone Code Pages. The navigateTo Promise resolution must
-    trigger data refresh (todo, feed, document lists) to maintain the current post-wizard UX.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with Dataverse Xrm.Navigation experience</role>
-
-  <goal>
-    Corporate Workspace no longer bundles CreateMatter or CreateProject wizard code. Both wizards
-    open via navigateTo as modal web resources. Post-dialog data refresh works correctly.
-  </goal>
-
+  <prompt>Refactor the Corporate Workspace (LegalWorkspace) to launch CreateMatter and CreateProject wizards via Xrm.Navigation.navigateTo instead of rendering them inline. Remove the lazy-loaded dialog components and their state management. Wire up post-dialog refresh callbacks.</prompt>
+  <role>Frontend developer with Dataverse experience</role>
+  <goal>Corporate Workspace launches Matter and Project wizards via navigateTo web resource dialogs instead of inline rendering</goal>
   <constraints>
-    <constraint source="ADR-006">Standalone dialogs must use Code Pages opened via navigateTo — not inline React components within PCF or workspace controls.</constraint>
-    <constraint source="ADR-026">navigateTo must use target: 2 (modal) with appropriate width/height percentages for wizard dialogs.</constraint>
+    <constraint source="ADR-006">Standalone dialogs must use Code Pages opened via navigateTo — not inline PCF rendering</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/patterns/pcf/dialog-patterns.md</file>
-      <file>src/solutions/LegalWorkspace/src/components/WorkspaceGrid.tsx</file>
-      <file>src/solutions/LegalWorkspace/src/</file>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Read WorkspaceGrid.tsx (or equivalent root component) to identify all CreateMatter and CreateProject wizard integration points — lazy imports, state variables, event handlers, Suspense blocks.</step>
-    <step id="2">Remove LazyWizardDialog and LazyProjectWizardDialog lazy imports.</step>
-    <step id="3">Remove isWizardOpen/isProjectWizardOpen state variables and their setter calls.</step>
-    <step id="4">Replace handleOpenWizard implementation with Xrm.Navigation.navigateTo call targeting 'sprk_creatematterwizard' web resource with modal options (target: 2, width: 85%, height: 85%).</step>
-    <step id="5">Replace handleOpenProjectWizard implementation with Xrm.Navigation.navigateTo call targeting 'sprk_createprojectwizard' web resource with modal options.</step>
-    <step id="6">Handle navigateTo Promise resolution to trigger data refresh — invoke todoRefetchRef, feedRefetchRef, and docRefetchRef callbacks to refresh workspace data after wizard completion.</step>
-    <step id="7">Remove the corresponding Suspense blocks and wizard component JSX from the render tree.</step>
-    <step id="8">Verify the workspace compiles and renders without the wizard components in its bundle.</step>
+    <step id="1">Read WorkspaceGrid.tsx and identify all inline wizard rendering code</step>
+    <step id="2">Remove LazyWizardDialog and LazyProjectWizardDialog imports</step>
+    <step id="3">Remove isWizardOpen/isProjectWizardOpen state variables</step>
+    <step id="4">Replace handler functions with navigateTo('sprk_creatematterwizard') and navigateTo('sprk_createprojectwizard') calls</step>
+    <step id="5">Handle navigateTo Promise for data refresh (wire refetch callbacks on dialog close)</step>
+    <step id="6">Remove Suspense wrapper blocks for the removed wizard components</step>
+    <step id="7">Verify workspace renders correctly without inline wizard dialogs</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>No CreateMatter or CreateProject component imports exist in the Corporate Workspace source.</criterion>
-    <criterion>handleOpenWizard calls Xrm.Navigation.navigateTo with 'sprk_creatematterwizard'.</criterion>
-    <criterion>handleOpenProjectWizard calls Xrm.Navigation.navigateTo with 'sprk_createprojectwizard'.</criterion>
-    <criterion>navigateTo uses target: 2 (modal) with width and height percentages.</criterion>
-    <criterion>Post-dialog data refresh triggers correctly on navigateTo Promise resolution.</criterion>
-    <criterion>No Suspense blocks for wizard components remain in the render tree.</criterion>
-    <criterion>Workspace compiles and the bundle no longer includes wizard code.</criterion>
+    <criterion>No inline CreateMatter or CreateProject dialog rendering in WorkspaceGrid</criterion>
+    <criterion>navigateTo calls open the correct web resources</criterion>
+    <criterion>Data refresh triggers correctly when dialogs close</criterion>
   </acceptance-criteria>
 </task>

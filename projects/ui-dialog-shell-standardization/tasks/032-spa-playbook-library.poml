@@ -1,52 +1,43 @@
 <task id="UDSS-032" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Integrate PlaybookLibraryShell in Power Pages SPA</title>
+    <title>Integrate PlaybookLibraryShell in SPA</title>
     <status>not-started</status>
     <phase>4</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>spa, playbook</tags>
-    <dependencies>020, 030</dependencies>
+    <tags>spa, playbook, integration</tags>
+    <dependencies>UDSS-020, UDSS-030</dependencies>
+    <parallel-group>P4-spa-integration</parallel-group>
   </metadata>
-
-  <prompt>
-    Integrate PlaybookLibraryShell into the Power Pages SPA. Import the component from
-    @spaarke/ui-components, configure it with an external-user playbook filter to limit
-    visible playbooks to those appropriate for external users, and pass the bffDataService
-    adapter. Test playbook browsing and execution in the SPA context.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with SPA and playbook experience</role>
-
-  <goal>
-    PlaybookLibraryShell renders in the Power Pages SPA with external-user filtering and
-    BFF data service, and playbook browsing and execution work end-to-end.
-  </goal>
-
+  <prompt>Integrate the shared PlaybookLibraryShell component into the Power Pages SPA using the BFF data service adapter. Create a SPA page/route that renders PlaybookLibraryShell with bffDataServiceAdapter, supporting both full browsing mode and intent pre-selection mode.</prompt>
+  <role>Senior frontend developer with SPA integration expertise</role>
+  <goal>PlaybookLibraryShell renders and functions correctly within Power Pages SPA using BFF adapters, supporting both browse and intent modes</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-012">Must use bffDataServiceAdapter — no Xrm.WebApi in SPA context</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode required</constraint>
+    <constraint source="file-ownership">ONLY touch files in src/client/external-spa/ playbook page/route — do NOT modify shared library</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/</file>
       <file>src/client/external-spa/</file>
+      <file>src/client/external-spa/src/adapters/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Import PlaybookLibraryShell from @spaarke/ui-components in the SPA.</step>
-    <step id="2">Configure with allowedPlaybookIds or external-user playbook filter to limit visible playbooks.</step>
-    <step id="3">Pass bffDataService adapter as the dataService prop.</step>
-    <step id="4">Test playbook browsing — only external-user-appropriate playbooks should appear.</step>
-    <step id="5">Test playbook execution flow end-to-end in SPA context.</step>
+    <step id="1">Read PlaybookLibraryShell component props (IPlaybookLibraryShellProps) to understand required inputs</step>
+    <step id="2">Read existing SPA routing structure to determine where to add the playbook page</step>
+    <step id="3">Create SPA page component that renders PlaybookLibraryShell with bffDataServiceAdapter</step>
+    <step id="4">Support intent query parameter from SPA URL routing for pre-selection mode</step>
+    <step id="5">Handle SPA-specific presentation: full page or Fluent Dialog (no Xrm.Navigation modal)</step>
+    <step id="6">Wire up SPA route for playbook library page</step>
+    <step id="7">Test both modes: full browsing and intent pre-selection</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>PlaybookLibraryShell is imported from @spaarke/ui-components in SPA.</criterion>
-    <criterion>External-user playbook filter is configured and limits visible playbooks.</criterion>
-    <criterion>bffDataService adapter is passed and used for all data operations.</criterion>
-    <criterion>Playbook browsing shows only external-user-appropriate playbooks.</criterion>
-    <criterion>Playbook execution works end-to-end in SPA context.</criterion>
+    <criterion>PlaybookLibraryShell renders within SPA without errors</criterion>
+    <criterion>Uses bffDataServiceAdapter for all data operations</criterion>
+    <criterion>Full browsing mode works (tabs, scope configuration, execution launch)</criterion>
+    <criterion>Intent pre-selection mode works via URL query parameter</criterion>
+    <criterion>No Xrm references in SPA integration code</criterion>
+    <criterion>SPA route accessible and navigable</criterion>
   </acceptance-criteria>
 </task>

@@ -1,52 +1,35 @@
 <task id="UDSS-008" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Create CreateProjectWizard Code Page wrapper with Vite build</title>
+    <title>Create CreateProjectWizard Code Page wrapper (Vite)</title>
     <status>not-started</status>
     <phase>1</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>code-page, vite, wizard, project, deploy</tags>
-    <dependencies>UDSS-004, UDSS-007</dependencies>
+    <tags>code-page, vite, wizard, project</tags>
+    <dependencies>UDSS-004, UDSS-005c</dependencies>
+    <parallel-group>P1-code-pages</parallel-group>
   </metadata>
-
-  <prompt>
-    Create a new Code Page solution (src/solutions/CreateProjectWizard/) that hosts the shared
-    CreateProjectWizard component. This follows the identical pattern established by the
-    CreateMatterWizard Code Page (UDSS-006) — Vite + singlefile, thin main.tsx bootstrapper,
-    Xrm adapters injected, embedded mode enabled. The boilerplate can be copied from the
-    CreateMatterWizard Code Page and updated to render CreateProjectWizard instead.
-  </prompt>
-
-  <role>TypeScript/React developer with Vite build tooling experience</role>
-
-  <goal>
-    A complete Code Page solution exists at src/solutions/CreateProjectWizard/ that builds to a
-    single HTML file containing the CreateProjectWizard rendered with Xrm adapters in embedded mode.
-  </goal>
-
+  <prompt>Create a Vite-based Code Page wrapper for the extracted CreateProjectWizard component. Follow the same pattern established in UDSS-006 (CreateMatterWizard Code Page).</prompt>
+  <role>Frontend developer</role>
+  <goal>src/solutions/CreateProjectWizard/ with working Vite build producing single HTML output</goal>
   <constraints>
-    <constraint source="ADR-026">Code Pages must use Vite + vite-plugin-singlefile to produce a single self-contained HTML file.</constraint>
-    <constraint source="ADR-021">Must use React 19 with createRoot and Fluent UI v9 FluentProvider.</constraint>
+    <constraint source="ADR-026">Code Pages must use Vite with vite-plugin-singlefile for single HTML output</constraint>
+    <constraint source="ADR-021">Use React 19 createRoot — Code Pages bundle their own React</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
-      <file>src/solutions/CreateMatterWizard/</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/EventsPage/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Create src/solutions/CreateProjectWizard/ directory.</step>
-    <step id="2">Copy boilerplate files (package.json, vite.config.ts, tsconfig.json, index.html) from the CreateMatterWizard Code Page (UDSS-006).</step>
-    <step id="3">Update main.tsx to import and render CreateProjectWizard instead of CreateMatterWizard, with the same bootstrapping pattern (parseDataParams, detectTheme, Xrm adapters, embedded=true).</step>
-    <step id="4">Run npm install and npm run build to verify the build pipeline works.</step>
-    <step id="5">Verify the output is a single HTML file in dist/ containing all assets inlined.</step>
+    <step id="1">Create src/solutions/CreateProjectWizard/ directory</step>
+    <step id="2">Copy boilerplate from CreateMatterWizard Code Page (package.json, vite.config.ts, tsconfig.json, index.html)</step>
+    <step id="3">Update src/main.tsx to render CreateProjectWizard instead of CreateMatterWizard</step>
+    <step id="4">Run npm install and npm run build</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>src/solutions/CreateProjectWizard/ exists with package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx.</criterion>
-    <criterion>npm run build produces a single HTML file in dist/.</criterion>
-    <criterion>main.tsx renders CreateProjectWizard with embedded=true and Xrm service adapters.</criterion>
-    <criterion>Build output structure mirrors CreateMatterWizard Code Page.</criterion>
+    <criterion>Build produces a single HTML file in dist/</criterion>
+    <criterion>Renders CreateProjectWizard with theme detection</criterion>
   </acceptance-criteria>
 </task>

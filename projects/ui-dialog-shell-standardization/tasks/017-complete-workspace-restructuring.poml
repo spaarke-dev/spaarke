@@ -1,67 +1,53 @@
 <task id="UDSS-017" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Remove all remaining inline wizard dialogs from Corporate Workspace WorkspaceGrid.tsx</title>
+    <title>Complete Corporate Workspace restructuring — remove all inline dialogs</title>
     <status>not-started</status>
     <phase>2</phase>
     <estimated-effort>6 hours</estimated-effort>
-    <tags>corporate-workspace, refactor, navigateTo</tags>
-    <dependencies>011, 012, 013, 014, 015</dependencies>
+    <tags>workspace, restructuring, navigateTo, code-cleanup</tags>
+    <dependencies>011c, 012c, 013c, 014c, 015c</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Remove all remaining lazily-loaded inline wizard and dialog components from the Corporate
-    Workspace WorkspaceGrid.tsx. Replace every inline dialog with a navigateTo call that opens
-    the corresponding standalone Code Page. This is the final step that decouples the workspace
-    from all wizard/dialog implementations, reducing WorkspaceGrid to a clean orchestration
-    component under 500 LOC.
-  </prompt>
-
-  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
-
-  <goal>
-    WorkspaceGrid.tsx contains zero inline wizard/dialog components, all dialogs are opened
-    via Xrm.Navigation.navigateTo calls to standalone Code Pages, and WorkspaceGrid.tsx is
-    under 500 lines of code.
-  </goal>
-
+  <prompt>Remove ALL remaining inline dialog components from WorkspaceGrid.tsx (or equivalent Corporate Workspace main file) and replace them with navigateTo webresource calls to the new Code Pages. This task completes the Corporate Workspace restructuring started in Phase 1 (task 009). After this task, WorkspaceGrid.tsx should be under 500 LOC with zero lazy-imported wizard/dialog components.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>WorkspaceGrid.tsx under 500 LOC, zero inline wizard/dialog imports, all 5 wizards launched via navigateTo, post-dialog refresh working for all</goal>
   <constraints>
-    <constraint source="ADR-006">All standalone dialogs must use Code Pages opened via navigateTo — no inline lazy imports</constraint>
-    <constraint source="ADR-012">Wizard components live in @spaarke/ui-components — workspace only calls navigateTo</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode support required</constraint>
+    <constraint source="ADR-012">Services must use IDataService abstraction, no direct webApi</constraint>
+    <constraint source="ADR-006">Code Pages are default UI surface — PCF only for form-bound controls</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required</constraint>
+    <constraint source="architecture">navigateTo Promise must trigger data refresh after dialog close</constraint>
+    <constraint source="quality">WorkspaceGrid.tsx must be under 500 LOC after cleanup</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/adr/ADR-006-anti-legacy-js.md</file>
       <file>.claude/adr/ADR-012-shared-components.md</file>
-      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
-      <file>src/solutions/LegalWorkspace/src/components/WorkspaceGrid.tsx</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Remove LazyEventWizardDialog import and its React.lazy(() => import()) declaration</step>
-    <step id="2">Remove LazyTodoWizardDialog import and its React.lazy(() => import()) declaration</step>
-    <step id="3">Remove LazyWorkAssignmentWizardDialog import and its React.lazy(() => import()) declaration</step>
-    <step id="4">Remove LazySummarizeFilesDialog import and its React.lazy(() => import()) declaration</step>
-    <step id="5">Remove LazyFindSimilarDialog import and its React.lazy(() => import()) declaration</step>
-    <step id="6">Remove all associated useState hooks for dialog visibility (showEventWizard, showTodoWizard, showWorkAssignment, showSummarize, showFindSimilar, etc.)</step>
-    <step id="7">Replace each dialog trigger with an Xrm.Navigation.navigateTo call — pass required params (parentId, documentIds, containerId) via URL data string</step>
-    <step id="8">Implement post-dialog refresh handling — use navigateTo promise .then() to refresh affected grid sections after dialog closes</step>
-    <step id="9">Remove all Suspense wrapper blocks that surrounded the lazy dialogs</step>
-    <step id="10">Verify WorkspaceGrid.tsx is under 500 LOC — if over, extract helper functions to separate utility file</step>
-    <step id="11">Run npm run build for LegalWorkspace — fix any compilation errors from removed imports/state</step>
-    <step id="12">Test all 5 dialogs open correctly from workspace toolbar buttons and context menus</step>
+    <step id="1">Identify all remaining lazy imports of wizard/dialog components in WorkspaceGrid.tsx (CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar)</step>
+    <step id="2">Remove all 5 lazy import statements and their associated React.Suspense wrappers</step>
+    <step id="3">Remove all associated state hooks (isCreateEventOpen, isCreateTodoOpen, etc.) and their setter calls</step>
+    <step id="4">Replace each dialog trigger with a navigateTo call to the corresponding Code Page webresource (sprk_createeventwizard, sprk_createtodowizard, sprk_createworkassignmentwizard, sprk_summarizefileswizard, sprk_findsimilar)</step>
+    <step id="5">Wire navigateTo Promise .then() to trigger data refresh after each dialog closes (refetch workspace data)</step>
+    <step id="6">Configure navigateTo options: target=2, width=85%, height=85% for wizards; appropriate sizing for FindSimilar dialog</step>
+    <step id="7">Pass required data params via navigateTo data string (entityId, entityType, containerId, etc.)</step>
+    <step id="8">Remove any now-unused imports, types, and utility functions related to inline dialogs</step>
+    <step id="9">Verify WorkspaceGrid.tsx is under 500 LOC</step>
+    <step id="10">Run tsc to verify compilation</step>
+    <step id="11">Build the Corporate Workspace solution (npm run build in src/solutions/LegalWorkspace/) to verify no build errors</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>Zero React.lazy() imports for wizard/dialog components remain in WorkspaceGrid.tsx</criterion>
-    <criterion>Zero useState hooks for dialog visibility remain in WorkspaceGrid.tsx</criterion>
-    <criterion>Zero Suspense blocks for dialogs remain in WorkspaceGrid.tsx</criterion>
-    <criterion>All 5 dialogs (CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar) open via navigateTo</criterion>
-    <criterion>Each navigateTo call passes correct parameters via data string</criterion>
-    <criterion>Post-dialog refresh works for each dialog (grid sections update after dialog closes)</criterion>
-    <criterion>WorkspaceGrid.tsx is under 500 lines of code</criterion>
-    <criterion>LegalWorkspace npm run build succeeds with zero errors</criterion>
+    <criterion>WorkspaceGrid.tsx is under 500 LOC</criterion>
+    <criterion>Zero lazy-imported wizard/dialog components remain</criterion>
+    <criterion>Zero dialog state hooks (isXxxOpen) remain for removed wizards</criterion>
+    <criterion>All 5 wizards launch via Xrm.Navigation.navigateTo with correct webresource names</criterion>
+    <criterion>Post-dialog data refresh works for all 5 navigateTo calls</criterion>
+    <criterion>navigateTo uses appropriate modal sizing (85% x 85% for wizards)</criterion>
+    <criterion>Data params (entityId, entityType, etc.) passed correctly to each Code Page</criterion>
+    <criterion>tsc compiles without errors</criterion>
+    <criterion>Corporate Workspace solution builds successfully</criterion>
   </acceptance-criteria>
 </task>

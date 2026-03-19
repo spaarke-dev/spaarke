@@ -1,56 +1,42 @@
 <task id="UDSS-021" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Add intent-based pre-selection support to PlaybookLibraryShell</title>
+    <title>Add intent pre-selection support (replaces QuickStart patterns)</title>
     <status>not-started</status>
     <phase>3</phase>
     <estimated-effort>5 hours</estimated-effort>
     <tags>shared-library, playbook, quickstart</tags>
-    <dependencies>020</dependencies>
+    <dependencies>UDSS-020</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Add intent-based pre-selection support to PlaybookLibraryShell, replacing the need for a
-    separate QuickStart wizard. When an intent prop is provided (e.g., "email-compose",
-    "assign-counsel", "meeting-schedule"), the shell auto-selects the matching playbook, locks
-    the scope, and presents a streamlined WizardShell flow with upload, analyze, and next-steps.
-    This enables Corporate Workspace Get Started cards to launch playbooks with pre-configured intent.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with wizard and UX experience</role>
-
-  <goal>
-    PlaybookLibraryShell supports an optional intent prop that auto-selects a playbook and presents
-    a streamlined wizard flow, verified with and without intent in dev builds.
-  </goal>
-
+  <prompt>Add intent-based pre-selection to PlaybookLibraryShell, replacing the QuickStart action card pattern. When an intent string is provided (e.g., "email-compose", "assign-counsel", "meeting-schedule"), the shell auto-selects the matching playbook, locks scope configuration, and renders a streamlined WizardShell flow (upload → analyze → next-steps) instead of the full browsing UI.</prompt>
+  <role>Senior frontend developer with React and Fluent UI v9 expertise</role>
+  <goal>PlaybookLibraryShell supports intent prop that auto-selects playbook and presents a streamlined wizard flow, fully replacing QuickStart action patterns</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-012">IDataService abstraction required — no direct Xrm.WebApi calls</constraint>
+    <constraint source="ADR-021">All UI must use Fluent v9 tokens; dark mode must be supported</constraint>
+    <constraint source="file-ownership">ONLY touch files in components/PlaybookLibraryShell/ folder</constraint>
   </constraints>
-
   <knowledge>
     <files>
-      <file>src/solutions/LegalWorkspace/src/QuickStart/quickStartConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/QuickStart/</file>
       <file>src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/</file>
       <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Read QuickStart configs (quickStartConfig.ts) to understand existing intent-to-playbook mappings.</step>
-    <step id="2">Add intent prop to IPlaybookLibraryShellProps as optional string union type.</step>
-    <step id="3">When intent is provided: auto-select the matching playbook, lock scope configuration, and render WizardShell with upload → analyze → next-steps flow.</step>
-    <step id="4">Map existing intents (email-compose, assign-counsel, meeting-schedule) to their corresponding playbook IDs.</step>
-    <step id="5">Test with intent provided (streamlined flow) and without intent (full browsing mode).</step>
+    <step id="1">Read QuickStart configs and action card handlers to understand existing intent-to-playbook mappings</step>
+    <step id="2">Add intent prop to IPlaybookLibraryShellProps (already defined in UDSS-020, extend behavior)</step>
+    <step id="3">When intent is provided: auto-select matching playbook from allowedPlaybookIds, lock scope configuration panel</step>
+    <step id="4">Render WizardShell with streamlined steps: upload → analyze → next-steps (instead of full browse/configure UI)</step>
+    <step id="5">Map known intents to playbook IDs: email-compose, assign-counsel, meeting-schedule</step>
+    <step id="6">Test rendering with intent provided (streamlined flow) and without intent (full browsing UI)</step>
+    <step id="7">Run tsc to verify compilation</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>PlaybookLibraryShell accepts an optional intent prop.</criterion>
-    <criterion>When intent is provided, the matching playbook is auto-selected and scope is locked.</criterion>
-    <criterion>Streamlined WizardShell flow (upload → analyze → next-steps) renders for intent mode.</criterion>
-    <criterion>Without intent, full playbook browsing mode renders as before.</criterion>
-    <criterion>All existing intents (email-compose, assign-counsel, meeting-schedule) are mapped correctly.</criterion>
-    <criterion>tsc --noEmit passes with zero errors.</criterion>
+    <criterion>PlaybookLibraryShell renders streamlined wizard flow when intent prop is provided</criterion>
+    <criterion>PlaybookLibraryShell renders full browsing UI when intent prop is omitted</criterion>
+    <criterion>Intent mappings cover: email-compose, assign-counsel, meeting-schedule</criterion>
+    <criterion>Scope configuration is locked (non-editable) when intent is active</criterion>
+    <criterion>Compiles successfully with tsc</criterion>
   </acceptance-criteria>
 </task>

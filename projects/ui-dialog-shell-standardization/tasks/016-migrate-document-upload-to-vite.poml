@@ -6,57 +6,44 @@
     <estimated-effort>5 hours</estimated-effort>
     <tags>code-page, vite, migration, document-upload</tags>
     <dependencies>004</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Migrate the existing DocumentUploadWizard Code Page from webpack to Vite build tooling.
-    This is an existing standalone Code Page that already works but uses webpack. Convert it
-    to use Vite with vite-plugin-singlefile to align with the standardized Code Page build
-    pipeline established in Phase 1. Extract any shared content to the shared library if
-    reuse opportunities are identified.
-  </prompt>
-
-  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
-
-  <goal>
-    DocumentUploadWizard builds and produces identical functionality using Vite instead of webpack,
-    with a single HTML file output via vite-plugin-singlefile, and all webpack configuration
-    files are removed.
-  </goal>
-
+  <prompt>Migrate the existing DocumentUploadWizard Code Page from webpack to Vite + vite-plugin-singlefile. This task is independent from the wizard extraction tasks (011a-015a) and can run alongside the P2-extract parallel group. The DocumentUploadWizard already exists as a Code Page — this is a build tool migration only, not a component extraction. Preserve all existing functionality while switching the build pipeline.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>DocumentUploadWizard builds successfully with Vite + vite-plugin-singlefile, producing identical single-HTML output, with webpack config removed</goal>
   <constraints>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile is the standard build tool for Code Pages</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode support required</constraint>
-    <constraint source="ADR-006">Code Page output must be a single deployable HTML web resource</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages — single HTML output, no webpack</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required</constraint>
+    <constraint source="migration">Preserve all existing wizard functionality — this is a build tool swap, not a rewrite</constraint>
+    <constraint source="file-ownership">File ownership: ONLY src/solutions/DocumentUploadWizard/ folder</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
       <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/EventsPage/</file>
       <file>src/solutions/DocumentUploadWizard/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Read and understand src/solutions/DocumentUploadWizard/webpack.config.js — document all plugins, loaders, aliases, and special configuration</step>
-    <step id="2">Create vite.config.ts with viteSingleFile plugin — replicate all webpack functionality (aliases, environment variables, asset handling)</step>
-    <step id="3">Update package.json — remove webpack dependencies (webpack, webpack-cli, ts-loader, html-webpack-plugin, etc.), add Vite dependencies (vite, vite-plugin-singlefile)</step>
-    <step id="4">Update tsconfig.json for Vite compatibility — ensure module resolution and JSX settings align with Vite expectations</step>
-    <step id="5">Create or update index.html as Vite entry point — Vite uses index.html as entry, not a webpack HtmlWebpackPlugin template</step>
-    <step id="6">Remove webpack configuration files (webpack.config.js, any webpack-related config)</step>
-    <step id="7">Run npm install and npm run build — fix any compilation or bundling errors</step>
-    <step id="8">Compare Vite output with previous webpack output — verify same functionality, similar bundle size, single HTML file</step>
-    <step id="9">Test in Dataverse — deploy and verify upload wizard works end-to-end (file selection, upload progress, completion)</step>
+    <step id="1">Read the existing DocumentUploadWizard webpack configuration (webpack.config.js or similar) to understand current build setup, entry points, and plugins</step>
+    <step id="2">Study the EventsPage Vite configuration as the canonical reference</step>
+    <step id="3">Create vite.config.ts with vite-plugin-singlefile, matching entry point and output behavior</step>
+    <step id="4">Update tsconfig.json if needed for Vite compatibility</step>
+    <step id="5">Update package.json: replace webpack scripts with Vite build scripts, add vite and vite-plugin-singlefile dependencies, remove webpack dependencies</step>
+    <step id="6">Remove webpack.config.js and any webpack-specific files (html-webpack-plugin templates, etc.)</step>
+    <step id="7">Run npm install to resolve new dependency tree</step>
+    <step id="8">Run npm run build — verify single HTML file output in dist/</step>
+    <step id="9">Compare output size and structure with previous webpack build to ensure functional parity</step>
+    <step id="10">Verify the output HTML file is self-contained (no external asset references)</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>webpack.config.js and all webpack dependencies are removed</criterion>
-    <criterion>vite.config.ts exists with viteSingleFile plugin configured</criterion>
+    <criterion>webpack.config.js and all webpack dependencies removed</criterion>
+    <criterion>vite.config.ts with vite-plugin-singlefile in place</criterion>
     <criterion>npm run build produces a single HTML file in dist/</criterion>
-    <criterion>Build output is functionally identical to webpack output</criterion>
-    <criterion>No webpack-related packages remain in package.json dependencies or devDependencies</criterion>
-    <criterion>DocumentUploadWizard works correctly when deployed to Dataverse</criterion>
-    <criterion>npm run build succeeds with zero errors</criterion>
+    <criterion>All existing wizard functionality preserved (no behavioral changes)</criterion>
+    <criterion>Output HTML is self-contained — no external asset references</criterion>
+    <criterion>No files outside src/solutions/DocumentUploadWizard/ were modified</criterion>
   </acceptance-criteria>
 </task>

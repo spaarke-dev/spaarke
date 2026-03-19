@@ -5,52 +5,38 @@
     <phase>4</phase>
     <estimated-effort>5 hours</estimated-effort>
     <tags>spa, adapter, bff-api</tags>
-    <dependencies>001</dependencies>
+    <dependencies>UDSS-001</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Create BFF API adapters that implement IDataService, IUploadService, and INavigationService
-    for the Power Pages SPA context. These adapters use authenticatedFetch to call BFF API endpoints
-    instead of Xrm.WebApi. The BFF data service adapter translates CRUD operations to REST calls
-    against the BFF API. The upload adapter handles file uploads via BFF endpoints. The navigation
-    adapter integrates with the SPA router instead of Xrm.Navigation.
-  </prompt>
-
-  <role>Senior TypeScript developer with REST API and SPA experience</role>
-
-  <goal>
-    bffDataServiceAdapter.ts, bffUploadServiceAdapter.ts, and bffNavigationServiceAdapter.ts
-    exist, implement their respective interfaces, and compile cleanly.
-  </goal>
-
+  <prompt>Create BFF API adapter implementations of IDataService, IUploadService, and INavigationService for use in the Power Pages SPA context. Unlike the Xrm adapter (which calls Xrm.WebApi directly), this adapter uses authenticatedFetch to call the BFF API endpoints. The navigation adapter uses SPA router instead of Xrm.Navigation.</prompt>
+  <role>Senior frontend developer with SPA and API integration expertise</role>
+  <goal>BFF-based adapters for IDataService, IUploadService, and INavigationService that enable shared components to run in Power Pages SPA context</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction — adapters implement the interface for BFF context.</constraint>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-012">Adapters must implement the exact IDataService, IUploadService, INavigationService interfaces defined in UDSS-001</constraint>
+    <constraint source="ADR-001">BFF API is the only backend — no direct Dataverse calls from SPA</constraint>
+    <constraint source="file-ownership">Create new files in src/client/external-spa/ or src/client/shared/ adapter directory — do NOT modify existing shared component code</constraint>
   </constraints>
-
   <knowledge>
     <files>
-      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts</file>
       <file>src/client/external-spa/</file>
       <file>src/server/api/Sprk.Bff.Api/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Create bffDataServiceAdapter.ts implementing IDataService using authenticatedFetch against BFF endpoints.</step>
-    <step id="2">Implement all IDataService methods (createRecord, retrieveRecord, retrieveMultipleRecords, updateRecord, deleteRecord) via REST calls.</step>
-    <step id="3">Create bffUploadServiceAdapter.ts implementing IUploadService with file upload via BFF endpoints.</step>
-    <step id="4">Create bffNavigationServiceAdapter.ts implementing INavigationService with SPA router integration.</step>
-    <step id="5">Add adapters to @spaarke/ui-components or external-spa package as appropriate.</step>
+    <step id="1">Read IDataService, IUploadService, INavigationService interface definitions from shared types</step>
+    <step id="2">Read existing authenticatedFetch patterns in external-spa for API call conventions</step>
+    <step id="3">Create bffDataServiceAdapter.ts: implement IDataService using authenticatedFetch to BFF API CRUD endpoints</step>
+    <step id="4">Create bffUploadServiceAdapter.ts: implement IUploadService using authenticatedFetch to BFF upload endpoints</step>
+    <step id="5">Create bffNavigationServiceAdapter.ts: implement INavigationService using SPA router (React Router or similar) instead of Xrm.Navigation</step>
+    <step id="6">Export all adapters from a local barrel (index.ts)</step>
+    <step id="7">Run tsc to verify all adapter implementations satisfy their interfaces</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>bffDataServiceAdapter.ts implements IDataService with all CRUD methods.</criterion>
-    <criterion>bffUploadServiceAdapter.ts implements IUploadService with file upload via BFF.</criterion>
-    <criterion>bffNavigationServiceAdapter.ts implements INavigationService with SPA router integration.</criterion>
-    <criterion>All adapters use authenticatedFetch for API calls.</criterion>
-    <criterion>tsc --noEmit passes with zero errors.</criterion>
-    <criterion>No direct Xrm.WebApi or Xrm.Navigation references in any adapter.</criterion>
+    <criterion>bffDataServiceAdapter implements IDataService with authenticatedFetch calls</criterion>
+    <criterion>bffUploadServiceAdapter implements IUploadService with authenticatedFetch calls</criterion>
+    <criterion>bffNavigationServiceAdapter implements INavigationService with SPA router</criterion>
+    <criterion>All adapters compile without errors against interface definitions</criterion>
+    <criterion>No Xrm references in any adapter file</criterion>
   </acceptance-criteria>
 </task>

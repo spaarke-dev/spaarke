@@ -1,57 +1,47 @@
 <task id="UDSS-040" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Create sprk_wizard_commands.js webresource with launch functions</title>
+    <title>Create sprk_wizard_commands.js webresource</title>
     <status>not-started</status>
     <phase>5</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>ribbon, webresource, commands</tags>
-    <dependencies>018</dependencies>
+    <tags>ribbon, commands, webresource</tags>
+    <dependencies>UDSS-018</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Create a JavaScript webresource (sprk_wizard_commands.js) containing launch functions for
-    each wizard Code Page. Each function accepts entity context parameters (formContext or
-    selectedItems) and calls Xrm.Navigation.navigateTo with the appropriate webresource name
-    and data parameters. Functions include: openCreateMatter, openCreateProject, openCreateEvent,
-    openCreateTodo, openUploadDocument, openPlaybookLibrary. Deploy the webresource to Dataverse.
-  </prompt>
-
-  <role>Senior JavaScript developer with Dataverse ribbon command experience</role>
-
-  <goal>
-    sprk_wizard_commands.js is deployed to Dataverse with working launch functions for all wizard
-    Code Pages, callable from ribbon command definitions.
-  </goal>
-
+  <prompt>Create a sprk_wizard_commands.js webresource containing JavaScript command functions for ribbon/command bar buttons. Each function opens the corresponding wizard Code Page via Xrm.Navigation.navigateTo. This is a single JS file that serves as the command handler for all wizard ribbon buttons across entity forms.</prompt>
+  <role>Senior frontend developer with Dataverse ribbon customization expertise</role>
+  <goal>sprk_wizard_commands.js webresource created with command functions for all wizard Code Pages, ready for ribbon button wiring</goal>
   <constraints>
-    <constraint source="ADR-006">No legacy JS webresources for UI — this is a command/launcher script only, not a UI component.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-006">Wizards open via navigateTo to webresource — no custom pages or legacy JS dialogs</constraint>
+    <constraint source="ribbon">Command functions must follow Dataverse ribbon JavaScript command pattern (global namespace, PrimaryControl parameter)</constraint>
+    <constraint source="file-ownership">Create new file in src/client/code-pages/ or appropriate webresource location</constraint>
   </constraints>
-
   <knowledge>
     <files>
-      <file>.claude/patterns/pcf/dialog-patterns.md</file>
       <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>src/solutions/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Create sprk_wizard_commands.js with namespace Sprk.Commands.Wizards.</step>
-    <step id="2">Implement openCreateMatter function — navigateTo sprk_creatematterwizard with entity context.</step>
-    <step id="3">Implement openCreateProject function — navigateTo sprk_createprojectwizard with entity context.</step>
-    <step id="4">Implement openCreateEvent function — navigateTo sprk_createeventwizard with entity context.</step>
-    <step id="5">Implement openCreateTodo function — navigateTo sprk_createtodowizard with entity context.</step>
-    <step id="6">Implement openUploadDocument function — navigateTo sprk_documentuploadwizard with entity context.</step>
-    <step id="7">Implement openPlaybookLibrary function — navigateTo sprk_playbooklibrary with entity context.</step>
-    <step id="8">Deploy webresource to Dataverse dev environment.</step>
+    <step id="1">Read existing ribbon command JS patterns in the codebase for naming and structure conventions</step>
+    <step id="2">Create sprk_wizard_commands.js with namespace (e.g., Spaarke.Commands.Wizards)</step>
+    <step id="3">Add openCreateMatterWizard(primaryControl) — navigateTo sprk_creatematterwizard with entityId and entityType</step>
+    <step id="4">Add openCreateProjectWizard(primaryControl) — navigateTo sprk_createprojectwizard</step>
+    <step id="5">Add openCreateEventWizard(primaryControl) — navigateTo sprk_createeventwizard</step>
+    <step id="6">Add openCreateTodoWizard(primaryControl) — navigateTo sprk_createtodowizard</step>
+    <step id="7">Add openSummarizeFilesWizard(primaryControl) — navigateTo sprk_summarizefileswizard</step>
+    <step id="8">Add openFindSimilarDialog(primaryControl) — navigateTo sprk_findsimilar</step>
+    <step id="9">Add openPlaybookLibrary(primaryControl) — navigateTo sprk_playbooklibrary</step>
+    <step id="10">Set consistent dialog dimensions (85% x 85%) and handle navigateTo Promise for form refresh</step>
+    <step id="11">Deploy webresource to dev environment for testing</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>sprk_wizard_commands.js exists with Sprk.Commands.Wizards namespace.</criterion>
-    <criterion>Functions exist: openCreateMatter, openCreateProject, openCreateEvent, openCreateTodo, openUploadDocument, openPlaybookLibrary.</criterion>
-    <criterion>Each function calls Xrm.Navigation.navigateTo with correct webresource name and data params.</criterion>
-    <criterion>Entity context (entityType, entityId) is extracted from formContext and passed as data.</criterion>
-    <criterion>Dialog dimensions are set appropriately (85% width/height).</criterion>
-    <criterion>Webresource is deployed to Dataverse dev environment.</criterion>
+    <criterion>sprk_wizard_commands.js webresource created with all command functions</criterion>
+    <criterion>Each function uses Xrm.Navigation.navigateTo with correct webresource name</criterion>
+    <criterion>Entity ID and type passed from PrimaryControl to wizard via data parameter</criterion>
+    <criterion>Dialog dimensions set to 85% x 85% consistently</criterion>
+    <criterion>navigateTo Promise triggers form refresh on dialog close</criterion>
+    <criterion>Webresource deployed to dev environment</criterion>
   </acceptance-criteria>
 </task>

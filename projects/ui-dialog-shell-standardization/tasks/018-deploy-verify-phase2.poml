@@ -1,71 +1,59 @@
 <task id="UDSS-018" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Deploy all Phase 2 Code Pages and verify end-to-end</title>
+    <title>Deploy and verify Phase 2 end-to-end</title>
     <status>not-started</status>
     <phase>2</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>deploy, verification, phase-gate</tags>
+    <tags>deployment, verification, end-to-end, serial-gate</tags>
     <dependencies>016, 017</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Deploy all Phase 2 Code Pages (CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles,
-    FindSimilar) plus the migrated DocumentUploadWizard to the Dataverse dev environment. Deploy
-    the updated Corporate Workspace (LegalWorkspace) that now uses navigateTo for all dialogs.
-    Perform end-to-end verification of every wizard and dialog, including dark mode testing.
-    This task is a phase gate — Phase 3 should not begin until all Phase 2 deployments are verified.
-  </prompt>
-
-  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
-
-  <goal>
-    All 6 Code Pages (5 new + 1 migrated) are deployed to Dataverse with clean display names,
-    the updated Corporate Workspace is deployed, and every wizard/dialog opens and functions
-    correctly from the workspace with consistent modal chrome and dark mode support.
-  </goal>
-
+  <prompt>Build and deploy all Phase 2 Code Pages and the updated Corporate Workspace to Dataverse. Verify each wizard launches correctly from the workspace, creates records as expected, and displays properly in both light and dark modes. This is a serial gate — no Phase 3 work should begin until this task passes.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>All Phase 2 Code Pages deployed to Dataverse with clean display names, Corporate Workspace updated, and every wizard verified working end-to-end including dark mode</goal>
   <constraints>
-    <constraint source="ADR-026">All Code Pages must produce single HTML file via Vite + vite-plugin-singlefile</constraint>
-    <constraint source="ADR-021">All UI must render correctly in both light and dark mode using Fluent v9 tokens</constraint>
-    <constraint source="ADR-006">All dialogs must open via navigateTo — no inline rendering</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, dark mode required — must test both themes</constraint>
+    <constraint source="deployment">Use clean webresource display names — "Create New Event" not "sprk_createeventwizard"</constraint>
+    <constraint source="serial-gate">This is a deployment gate — all Phase 2 work must be verified before Phase 3 begins</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
-      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
       <file>.claude/skills/dataverse-deploy/SKILL.md</file>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Build all 5 new Code Pages: CreateEventWizard, CreateTodoWizard, CreateWorkAssignmentWizard, SummarizeFilesWizard, FindSimilarDialog — verify each produces a single HTML file</step>
-    <step id="2">Build migrated DocumentUploadWizard with Vite — verify single HTML output</step>
-    <step id="3">Build updated LegalWorkspace (Corporate Workspace) — verify no inline dialog imports remain</step>
-    <step id="4">Deploy all 6 Code Pages to Dataverse dev environment with clean display names (sprk_createeventwizard, sprk_createtodowizard, sprk_createworkassignmentwizard, sprk_summarizefileswizard, sprk_findsimilardialog, sprk_documentuploadwizard)</step>
-    <step id="5">Deploy updated Corporate Workspace to Dataverse (sprk_corporateworkspace)</step>
-    <step id="6">Test CreateEvent wizard: open from workspace → fill fields → create event → verify record created → verify workspace refreshes</step>
-    <step id="7">Test CreateTodo wizard: open from workspace → fill fields → create todo → verify sprk_event with todoflag=true → verify workspace refreshes</step>
-    <step id="8">Test CreateWorkAssignment wizard: open from workspace → complete all 6 steps → verify records created → verify workspace refreshes</step>
-    <step id="9">Test SummarizeFiles wizard: open from workspace → select documents → run summarization → verify AI streaming works → verify workspace refreshes</step>
-    <step id="10">Test FindSimilar dialog: open from workspace → verify search results render → verify navigation to similar documents works</step>
-    <step id="11">Test DocumentUploadWizard: open from workspace → upload file → verify progress → verify completion</step>
-    <step id="12">Verify consistent modal chrome across all 6 dialogs — same title bar, close button, sizing behavior</step>
-    <step id="13">Switch to dark mode in Dataverse — verify all 6 dialogs render correctly with Fluent v9 dark theme tokens</step>
+    <step id="1">Build all 5 new Code Pages (npm run build in each solution folder): CreateEventWizard, CreateTodoWizard, CreateWorkAssignmentWizard, SummarizeFilesWizard, FindSimilarDialog</step>
+    <step id="2">Build the migrated DocumentUploadWizard (npm run build) to verify Vite migration output</step>
+    <step id="3">Build the updated Corporate Workspace (npm run build in src/solutions/LegalWorkspace/)</step>
+    <step id="4">Deploy each Code Page webresource with clean display names: "Create New Event" (sprk_createeventwizard), "Create New To Do" (sprk_createtodowizard), "Create Work Assignment" (sprk_createworkassignmentwizard), "Summarize Files" (sprk_summarizefileswizard), "Find Similar" (sprk_findsimilar)</step>
+    <step id="5">Deploy the updated DocumentUploadWizard webresource</step>
+    <step id="6">Deploy the updated Corporate Workspace webresource</step>
+    <step id="7">Publish all customizations in Dataverse</step>
+    <step id="8">Test CreateEvent wizard: open from workspace, create an event record, verify record appears after dialog close</step>
+    <step id="9">Test CreateTodo wizard: open from workspace, create a todo (event with todoflag=true), verify record appears after dialog close</step>
+    <step id="10">Test CreateWorkAssignment wizard: open from workspace, complete assignment flow, verify record created</step>
+    <step id="11">Test SummarizeFiles wizard: open from workspace, select files, verify summarization completes</step>
+    <step id="12">Test FindSimilar dialog: open from workspace, verify search results display correctly</step>
+    <step id="13">Test dark mode: switch Dataverse to dark theme, verify all 5 wizards render correctly with Fluent v9 dark tokens</step>
+    <step id="14">Test DocumentUploadWizard: verify Vite-built version works identically to previous webpack version</step>
+    <step id="15">Verify no console errors in browser DevTools for any wizard</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>All 6 Code Pages deployed successfully to Dataverse dev environment</criterion>
-    <criterion>Updated Corporate Workspace deployed successfully</criterion>
-    <criterion>CreateEvent wizard opens and creates sprk_event records correctly</criterion>
-    <criterion>CreateTodo wizard opens and creates sprk_event records with todoflag=true correctly</criterion>
-    <criterion>CreateWorkAssignment wizard opens and completes all 6 steps correctly</criterion>
-    <criterion>SummarizeFiles wizard opens and AI streaming works correctly</criterion>
-    <criterion>FindSimilar dialog opens and displays search results correctly</criterion>
-    <criterion>DocumentUploadWizard opens and file upload works correctly</criterion>
-    <criterion>All 6 dialogs have consistent modal chrome (title bar, close button, sizing)</criterion>
-    <criterion>All 6 dialogs render correctly in dark mode</criterion>
-    <criterion>Corporate Workspace refreshes affected sections after each dialog closes</criterion>
+    <criterion>All 5 new Code Pages deployed with clean display names</criterion>
+    <criterion>DocumentUploadWizard deployed with Vite build</criterion>
+    <criterion>Corporate Workspace deployed with navigateTo calls</criterion>
+    <criterion>All customizations published</criterion>
+    <criterion>CreateEvent wizard creates sprk_event record successfully</criterion>
+    <criterion>CreateTodo wizard creates sprk_event with todoflag=true successfully</criterion>
+    <criterion>CreateWorkAssignment wizard completes full assignment flow</criterion>
+    <criterion>SummarizeFiles wizard completes file summarization</criterion>
+    <criterion>FindSimilar dialog displays search results</criterion>
+    <criterion>Post-dialog refresh works — workspace data updates after each dialog close</criterion>
+    <criterion>All wizards render correctly in dark mode</criterion>
+    <criterion>Zero console errors in browser DevTools</criterion>
   </acceptance-criteria>
 </task>

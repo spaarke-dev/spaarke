@@ -1,52 +1,41 @@
 <task id="UDSS-043" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Add wizard buttons to sprk_event main form</title>
+    <title>Add wizard buttons to sprk_event form command bar</title>
     <status>not-started</status>
     <phase>5</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>ribbon, event, ribbondiffxml</tags>
-    <dependencies>040</dependencies>
+    <tags>ribbon, event, command-bar</tags>
+    <dependencies>UDSS-040</dependencies>
+    <parallel-group>P5-ribbons</parallel-group>
   </metadata>
-
-  <prompt>
-    Add command bar buttons to the sprk_event main form for launching wizard Code Pages.
-    Buttons should include: Upload Document and Run Playbook. Each button wires to the
-    corresponding function in sprk_wizard_commands.js. Use the ribbon-edit skill to export,
-    modify RibbonDiffXml, and import back.
-  </prompt>
-
-  <role>Dataverse customizer with ribbon XML and command bar experience</role>
-
-  <goal>
-    sprk_event main form command bar has buttons for Upload Document and Run Playbook,
-    each launching the correct wizard Code Page.
-  </goal>
-
+  <prompt>Add ribbon/command bar buttons to the sprk_event entity main form for launching wizard Code Pages. Applicable buttons: Upload Documents, Summarize Files, Find Similar, and Open Playbook Library. Each button calls the corresponding function in sprk_wizard_commands.js.</prompt>
+  <role>Senior developer with Dataverse ribbon customization expertise</role>
+  <goal>sprk_event form command bar has buttons for applicable wizard Code Pages, wired to sprk_wizard_commands.js functions</goal>
   <constraints>
-    <constraint source="ADR-006">No legacy JS webresources for UI — buttons launch Code Pages via navigateTo.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ribbon">Follow ribbon-edit skill procedure for solution export/import</constraint>
+    <constraint source="ADR-006">Buttons open Code Pages via navigateTo — no custom page wrappers</constraint>
+    <constraint source="file-ownership">ONLY touch files in infrastructure/dataverse/ribbon/EventRibbons/ — do NOT modify other entity ribbons</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/skills/ribbon-edit/SKILL.md</file>
-      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>infrastructure/dataverse/ribbon/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Export the Dataverse solution containing sprk_event entity customizations.</step>
-    <step id="2">Locate or create RibbonDiffXml for sprk_event main form command bar.</step>
-    <step id="3">Add button: "Upload Document" → Sprk.Commands.Wizards.openUploadDocument.</step>
-    <step id="4">Add button: "Run Playbook" → Sprk.Commands.Wizards.openPlaybookLibrary.</step>
-    <step id="5">Import modified solution back to Dataverse and publish.</step>
+    <step id="1">Read existing Event ribbon customizations (or create directory if none exist)</step>
+    <step id="2">Define button metadata: labels, icons, tooltip text, display rules</step>
+    <step id="3">Add "Upload Documents" button → Spaarke.Commands.Wizards.openDocumentUploadWizard</step>
+    <step id="4">Add "Summarize Files" button → Spaarke.Commands.Wizards.openSummarizeFilesWizard</step>
+    <step id="5">Add "Find Similar" button → Spaarke.Commands.Wizards.openFindSimilarDialog</step>
+    <step id="6">Add "Playbook Library" button → Spaarke.Commands.Wizards.openPlaybookLibrary</step>
+    <step id="7">Group buttons logically in the command bar</step>
+    <step id="8">Export ribbon XML for version control</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>sprk_event main form command bar shows Upload Document and Run Playbook buttons.</criterion>
-    <criterion>Each button calls the correct function in sprk_wizard_commands.js.</criterion>
-    <criterion>Buttons pass formContext with entity type and record ID.</criterion>
-    <criterion>Clicking each button opens the corresponding wizard Code Page in a dialog.</criterion>
-    <criterion>Solution imports and publishes without errors.</criterion>
+    <criterion>All applicable wizard buttons visible on sprk_event main form command bar</criterion>
+    <criterion>Each button wired to correct sprk_wizard_commands.js function</criterion>
+    <criterion>Buttons have appropriate icons and tooltips</criterion>
+    <criterion>Ribbon XML exported and saved in infrastructure/dataverse/ribbon/EventRibbons/</criterion>
   </acceptance-criteria>
 </task>

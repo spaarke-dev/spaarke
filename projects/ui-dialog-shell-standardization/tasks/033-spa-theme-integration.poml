@@ -1,33 +1,20 @@
 <task id="UDSS-033" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Ensure shared components respect SPA theme (not Dataverse detection)</title>
+    <title>SPA theme integration for shared components</title>
     <status>not-started</status>
     <phase>4</phase>
     <estimated-effort>2 hours</estimated-effort>
-    <tags>spa, theme</tags>
-    <dependencies>031, 032</dependencies>
+    <tags>spa, theme, fluent</tags>
+    <dependencies>UDSS-031, UDSS-032</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Verify and fix that all shared components (DocumentUploadWizard, PlaybookLibraryShell,
-    WizardShell) correctly respect the SPA's theme context rather than attempting Dataverse
-    theme detection. In the SPA context, theme is provided by the SPA's FluentProvider —
-    components should not call detectTheme() or read Dataverse-specific theme variables.
-    Ensure dark mode works correctly in the SPA context.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with theming and cross-platform UI experience</role>
-
-  <goal>
-    All shared components render correctly in both Dataverse and SPA theme contexts,
-    with proper dark mode support in the SPA.
-  </goal>
-
+  <prompt>Ensure consistent theme handling for shared components rendered in the Power Pages SPA context. The SPA has its own theme provider — verify that shared components (DocumentUploadWizard, PlaybookLibraryShell) correctly inherit the SPA FluentProvider theme and that dark mode works in the SPA context (no Dataverse theme detection needed).</prompt>
+  <role>Senior frontend developer with Fluent UI v9 theming expertise</role>
+  <goal>All shared components render with correct theme in SPA context, including dark mode support</goal>
   <constraints>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only — no hard-coded colors; dark mode must be supported</constraint>
+    <constraint source="file-ownership">ONLY touch SPA theme configuration files — do NOT modify shared library theme logic</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/patterns/pcf/theme-management.md</file>
@@ -35,19 +22,18 @@
       <file>src/client/external-spa/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Audit shared components for any direct Dataverse theme detection calls (detectTheme, Xrm theme variables).</step>
-    <step id="2">Ensure components use Fluent v9 tokens from the nearest FluentProvider context instead of hard-coded detection.</step>
-    <step id="3">Verify SPA FluentProvider provides correct theme (light/dark) to shared components.</step>
-    <step id="4">Test dark mode rendering for DocumentUploadWizard and PlaybookLibraryShell in SPA context.</step>
+    <step id="1">Review how shared components use detectTheme() and FluentProvider — identify any Dataverse-specific theme detection</step>
+    <step id="2">Verify SPA FluentProvider wraps all routes where shared components are rendered</step>
+    <step id="3">Ensure detectTheme() works in SPA context (falls back to system/browser preference when Dataverse is unavailable)</step>
+    <step id="4">Test dark mode toggle for DocumentUploadWizard in SPA</step>
+    <step id="5">Test dark mode toggle for PlaybookLibraryShell in SPA</step>
+    <step id="6">Fix any hard-coded colors or Dataverse-specific theme references</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>No shared component directly calls detectTheme() or reads Dataverse theme variables.</criterion>
-    <criterion>Components use Fluent v9 tokens from FluentProvider context.</criterion>
-    <criterion>Light mode renders correctly in SPA context.</criterion>
-    <criterion>Dark mode renders correctly in SPA context.</criterion>
-    <criterion>Components still render correctly in Dataverse context (no regression).</criterion>
+    <criterion>Shared components inherit SPA FluentProvider theme correctly</criterion>
+    <criterion>Dark mode works in SPA context (system preference detection)</criterion>
+    <criterion>No hard-coded colors in any shared component rendering</criterion>
+    <criterion>detectTheme() gracefully handles absence of Dataverse context</criterion>
   </acceptance-criteria>
 </task>

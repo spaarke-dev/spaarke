@@ -1,57 +1,42 @@
 <task id="UDSS-022" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Refactor AnalysisBuilder to thin wrapper around PlaybookLibraryShell</title>
+    <title>Refactor AnalysisBuilder to thin wrapper (~30-50 LOC)</title>
     <status>not-started</status>
     <phase>3</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>code-page, refactor, analysis-builder</tags>
-    <dependencies>020</dependencies>
+    <tags>code-page, wrapper, refactor</tags>
+    <dependencies>UDSS-020</dependencies>
+    <parallel-group>P3-wrappers</parallel-group>
   </metadata>
-
-  <prompt>
-    Refactor the AnalysisBuilder Code Page (sprk_analysisbuilder) from ~508 LOC to a thin
-    ~30-50 LOC wrapper that imports PlaybookLibraryShell from @spaarke/ui-components. The wrapper
-    parses URL parameters (documentId, mode, etc.), creates an XrmDataService adapter, and renders
-    PlaybookLibraryShell with the appropriate props. The deployed webresource must function
-    identically to the current implementation.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with Code Page experience</role>
-
-  <goal>
-    AnalysisBuilder App.tsx is reduced to ~30-50 LOC, imports PlaybookLibraryShell, and
-    sprk_analysisbuilder works identically to the pre-refactor version.
-  </goal>
-
+  <prompt>Refactor the AnalysisBuilder solution to a thin Code Page wrapper (~30-50 LOC) that imports PlaybookLibraryShell from @spaarke/ui-components and provides Xrm-based adapters. The original ~508 LOC App.tsx is replaced by a minimal entry point that parses URL params, creates service adapters, and renders PlaybookLibraryShell.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>AnalysisBuilder reduced to ~30-50 LOC thin wrapper importing PlaybookLibraryShell from shared library</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-012">Wrapper must instantiate xrmDataServiceAdapter and pass to shared component</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode required</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile build pipeline</constraint>
+    <constraint source="file-ownership">ONLY touch files in src/solutions/AnalysisBuilder/ — do NOT modify shared library</constraint>
   </constraints>
-
   <knowledge>
     <files>
-      <file>src/solutions/AnalysisBuilder/src/App.tsx</file>
-      <file>src/solutions/AnalysisBuilder/src/main.tsx</file>
+      <file>src/solutions/AnalysisBuilder/</file>
       <file>src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/</file>
       <file>src/solutions/EventsPage/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Replace App.tsx with ~30-50 LOC wrapper that imports PlaybookLibraryShell.</step>
-    <step id="2">Parse URL params (documentId, mode, entityType, entityId, etc.) and map to PlaybookLibraryShell props.</step>
-    <step id="3">Create XrmDataService adapter instance and pass to PlaybookLibraryShell.</step>
-    <step id="4">Verify sprk_analysisbuilder works identically to pre-refactor version.</step>
-    <step id="5">Build with Vite and verify single HTML output.</step>
+    <step id="1">Read current AnalysisBuilder/src/App.tsx and entry point to understand existing structure</step>
+    <step id="2">Replace App.tsx with thin wrapper: parse URL params (entityType, entityId, mode), create xrmDataServiceAdapter, render PlaybookLibraryShell</step>
+    <step id="3">Update main.tsx entry point if needed (should already use createRoot)</step>
+    <step id="4">Remove any files that are now redundant (components that were extracted to shared library)</step>
+    <step id="5">Update package.json dependencies to reference @spaarke/ui-components</step>
+    <step id="6">Build with Vite to verify single-file HTML output</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>AnalysisBuilder App.tsx is ~30-50 LOC (thin wrapper).</criterion>
-    <criterion>PlaybookLibraryShell is imported from @spaarke/ui-components.</criterion>
-    <criterion>URL parameters are parsed and mapped to component props.</criterion>
-    <criterion>XrmDataService adapter is created and passed as dataService prop.</criterion>
-    <criterion>Vite build produces single HTML output successfully.</criterion>
-    <criterion>sprk_analysisbuilder functions identically to pre-refactor version.</criterion>
+    <criterion>AnalysisBuilder App.tsx is 30-50 LOC thin wrapper</criterion>
+    <criterion>Imports PlaybookLibraryShell from @spaarke/ui-components</criterion>
+    <criterion>Uses xrmDataServiceAdapter for Xrm.WebApi access</criterion>
+    <criterion>Builds successfully with Vite producing single HTML file</criterion>
+    <criterion>No duplicated component code — all logic lives in shared library</criterion>
   </acceptance-criteria>
 </task>

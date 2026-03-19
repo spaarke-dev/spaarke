@@ -1,0 +1,51 @@
+<task id="UDSS-013a" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract CreateWorkAssignment wizard to shared library</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>shared-library, wizard, extraction, create-work-assignment</tags>
+    <dependencies>001, 002</dependencies>
+    <parallel-group>P2-extract</parallel-group>
+  </metadata>
+  <prompt>Move the CreateWorkAssignment wizard (9 files) from the Corporate Workspace into @spaarke/ui-components as a shared component. IMPORTANT: This wizard uses WizardShell directly — it does NOT use CreateRecordWizard because it has a different step sequence. Do NOT refactor it to use CreateRecordWizard. Refactor all data services to use the IDataService abstraction instead of direct Xrm.WebApi calls. Create a local index.ts for the component folder but do NOT touch the shared library barrel export (components/index.ts) — that is owned by task 011b.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>CreateWorkAssignment wizard lives in @spaarke/ui-components/components/CreateWorkAssignmentWizard/ with IDataService abstraction and WizardShell direct usage preserved, compiles cleanly via tsc, and is ready for barrel export</goal>
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction, no direct webApi</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required</constraint>
+    <constraint source="parallel-safety">ONLY modify files within your designated folder — do NOT touch shared barrel exports (components/index.ts)</constraint>
+    <constraint source="parallel-safety">File ownership: ONLY components/CreateWorkAssignmentWizard/ folder. No other folders may be created or modified.</constraint>
+    <constraint source="architecture">This wizard uses WizardShell directly, NOT CreateRecordWizard — preserve this pattern, do NOT refactor to CreateRecordWizard</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Identify all 9 CreateWorkAssignment wizard files in the Corporate Workspace source</step>
+    <step id="2">Create target folder: src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/</step>
+    <step id="3">Move all 9 files into the new folder, preserving directory structure</step>
+    <step id="4">Verify WizardShell direct usage pattern is intact — confirm this wizard does NOT use CreateRecordWizard wrapper</step>
+    <step id="5">Refactor all data service calls to accept IDataService parameter instead of calling Xrm.WebApi directly</step>
+    <step id="6">Update all internal imports to use relative paths within the component folder</step>
+    <step id="7">Create local index.ts that exports the wizard component and any public types</step>
+    <step id="8">Run tsc to verify the component compiles without errors</step>
+    <step id="9">Verify no Xrm.WebApi references remain in the extracted files</step>
+    <step id="10">Verify WizardShell is imported from the shared library (sibling component), not from an external source</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 9 CreateWorkAssignment files exist in components/CreateWorkAssignmentWizard/</criterion>
+    <criterion>All data services use IDataService abstraction — zero direct Xrm.WebApi calls</criterion>
+    <criterion>WizardShell direct usage pattern preserved — NOT wrapped in CreateRecordWizard</criterion>
+    <criterion>Local index.ts exports the wizard component</criterion>
+    <criterion>tsc compiles without errors</criterion>
+    <criterion>No files outside components/CreateWorkAssignmentWizard/ were modified</criterion>
+    <criterion>components/index.ts (barrel) was NOT touched</criterion>
+  </acceptance-criteria>
+</task>

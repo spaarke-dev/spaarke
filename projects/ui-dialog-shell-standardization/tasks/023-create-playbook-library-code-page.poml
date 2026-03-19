@@ -1,55 +1,45 @@
 <task id="UDSS-023" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Create PlaybookLibrary Code Page wrapper (sprk_playbooklibrary)</title>
+    <title>Create PlaybookLibrary Code Page (sprk_playbooklibrary)</title>
     <status>not-started</status>
     <phase>3</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>code-page, vite, playbook</tags>
-    <dependencies>020</dependencies>
+    <tags>code-page, playbook, vite</tags>
+    <dependencies>UDSS-020</dependencies>
+    <parallel-group>P3-wrappers</parallel-group>
   </metadata>
-
-  <prompt>
-    Create a new PlaybookLibrary Code Page (sprk_playbooklibrary) under src/solutions/PlaybookLibrary/.
-    This is a thin Vite-based wrapper (~30-50 LOC) that renders PlaybookLibraryShell from
-    @spaarke/ui-components. It parses URL data params for entityType, entityId, intent, and mode,
-    creates an XrmDataService, and renders the shell. This Code Page is the target for Corporate
-    Workspace Get Started cards that launch playbook workflows.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with Vite Code Page experience</role>
-
-  <goal>
-    src/solutions/PlaybookLibrary/ exists with Vite config, main.tsx, and builds to a single HTML
-    file suitable for Dataverse web resource deployment as sprk_playbooklibrary.
-  </goal>
-
+  <prompt>Create a new PlaybookLibrary Code Page (sprk_playbooklibrary) as a thin Vite wrapper around the shared PlaybookLibraryShell component. This Code Page is the target for navigateTo calls from Corporate Workspace playbook action cards. It supports an optional intent query parameter for pre-selection mode.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>New sprk_playbooklibrary Code Page created as thin Vite wrapper, deployable as single HTML webresource</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-006">Code Pages are the default UI surface for standalone dialogs</constraint>
+    <constraint source="ADR-012">Wrapper must instantiate xrmDataServiceAdapter and pass to shared component</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode required; React 19 createRoot</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile — single HTML output</constraint>
+    <constraint source="file-ownership">ONLY touch files in src/solutions/PlaybookLibrary/ — do NOT modify shared library</constraint>
   </constraints>
-
   <knowledge>
     <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
       <file>src/solutions/EventsPage/</file>
       <file>src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/</file>
-      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Create src/solutions/PlaybookLibrary/ directory structure following EventsPage pattern.</step>
-    <step id="2">Create vite.config.ts with vite-plugin-singlefile, React plugin, and proper resolve aliases.</step>
-    <step id="3">Create main.tsx with createRoot entry point, FluentProvider, URL param parsing, and PlaybookLibraryShell rendering.</step>
-    <step id="4">Create package.json with build script and dependencies.</step>
-    <step id="5">Build and verify single HTML output is produced.</step>
+    <step id="1">Read EventsPage as canonical Vite Code Page reference implementation</step>
+    <step id="2">Create src/solutions/PlaybookLibrary/ directory structure: src/, public/, vite.config.ts, package.json, tsconfig.json</step>
+    <step id="3">Create main.tsx entry point: parseDataParams from URL, detectTheme, createRoot, render FluentProvider + PlaybookLibraryShell</step>
+    <step id="4">Create thin App.tsx (~30-50 LOC): instantiate xrmDataServiceAdapter, parse intent param, render PlaybookLibraryShell with all props</step>
+    <step id="5">Configure vite.config.ts with vite-plugin-singlefile for single HTML output</step>
+    <step id="6">Set webresource display name to "Playbook Library" (not "sprk_playbooklibrary")</step>
+    <step id="7">Build with Vite to verify single-file HTML output</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>src/solutions/PlaybookLibrary/ exists with vite.config.ts, main.tsx, package.json.</criterion>
-    <criterion>main.tsx is ~30-50 LOC thin wrapper rendering PlaybookLibraryShell.</criterion>
-    <criterion>URL data params (entityType, entityId, intent, mode) are parsed and passed as props.</criterion>
-    <criterion>Vite build produces a single HTML file.</criterion>
-    <criterion>FluentProvider wraps the component with theme detection.</criterion>
+    <criterion>src/solutions/PlaybookLibrary/ exists with complete Vite project structure</criterion>
+    <criterion>App.tsx is ~30-50 LOC thin wrapper importing PlaybookLibraryShell</criterion>
+    <criterion>Supports intent query parameter for pre-selection mode</criterion>
+    <criterion>Builds successfully producing single HTML file</criterion>
+    <criterion>Uses createRoot (React 19), FluentProvider, detectTheme</criterion>
+    <criterion>Webresource name: sprk_playbooklibrary, display name: "Playbook Library"</criterion>
   </acceptance-criteria>
 </task>

@@ -1,0 +1,47 @@
+<task id="UDSS-011a" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract CreateEvent wizard to shared library</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>shared-library, wizard, extraction, create-event</tags>
+    <dependencies>001, 002</dependencies>
+    <parallel-group>P2-extract</parallel-group>
+  </metadata>
+  <prompt>Move the CreateEvent wizard (4 files) from the Corporate Workspace into @spaarke/ui-components as a shared component. Refactor the eventService to use the IDataService abstraction instead of direct Xrm.WebApi calls. Create a local index.ts for the component folder but do NOT touch the shared library barrel export (components/index.ts) — that is owned by task 011b.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>CreateEvent wizard lives in @spaarke/ui-components/components/CreateEventWizard/ with IDataService abstraction, compiles cleanly via tsc, and is ready for barrel export</goal>
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction, no direct webApi</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required</constraint>
+    <constraint source="parallel-safety">ONLY modify files within your designated folder — do NOT touch shared barrel exports (components/index.ts)</constraint>
+    <constraint source="parallel-safety">File ownership: ONLY components/CreateEventWizard/ folder. No other folders may be created or modified.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Identify the 4 CreateEvent wizard files in the Corporate Workspace source (src/solutions/LegalWorkspace/ or equivalent)</step>
+    <step id="2">Create target folder: src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/</step>
+    <step id="3">Move all 4 files into the new folder, preserving directory structure</step>
+    <step id="4">Refactor eventService to accept IDataService parameter instead of calling Xrm.WebApi directly — use the IDataService.createRecord, retrieveRecord, retrieveMultipleRecords methods</step>
+    <step id="5">Update all internal imports to use relative paths within the component folder</step>
+    <step id="6">Create local index.ts that exports the wizard component and any public types</step>
+    <step id="7">Run tsc to verify the component compiles without errors</step>
+    <step id="8">Verify no Xrm.WebApi references remain in the extracted files</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 4 CreateEvent files exist in components/CreateEventWizard/</criterion>
+    <criterion>eventService uses IDataService abstraction — zero direct Xrm.WebApi calls</criterion>
+    <criterion>Local index.ts exports the wizard component</criterion>
+    <criterion>tsc compiles without errors</criterion>
+    <criterion>No files outside components/CreateEventWizard/ were modified</criterion>
+    <criterion>components/index.ts (barrel) was NOT touched</criterion>
+  </acceptance-criteria>
+</task>

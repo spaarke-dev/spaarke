@@ -1,0 +1,50 @@
+<task id="UDSS-011c" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Create CreateEventWizard Code Page (Vite)</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, vite, create-event</tags>
+    <dependencies>004, 011b</dependencies>
+    <parallel-group>P2-code-pages</parallel-group>
+  </metadata>
+  <prompt>Create a new Vite Code Page solution for the CreateEvent wizard at src/solutions/CreateEventWizard/. This is a thin ~30-50 LOC wrapper that imports the shared CreateEventWizard component, wires up the XrmDataService adapter, detects the theme, parses URL data params, and renders via React 19 createRoot. Use the EventsPage solution as the canonical reference implementation. The Code Page will be deployed as webresource sprk_createeventwizard.</prompt>
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, and Dataverse Code Pages</role>
+  <goal>Fully functional CreateEventWizard Code Page that builds to a single HTML file via Vite, ready for deployment as sprk_createeventwizard</goal>
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction, no direct webApi</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages — single HTML output</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required</constraint>
+    <constraint source="parallel-safety">ONLY modify files within your designated folder — do NOT touch shared barrel exports</constraint>
+    <constraint source="parallel-safety">File ownership: ONLY src/solutions/CreateEventWizard/ folder. No other folders may be created or modified.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/EventsPage/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Study the EventsPage solution structure (src/solutions/EventsPage/) as the canonical Vite Code Page reference</step>
+    <step id="2">Create src/solutions/CreateEventWizard/ folder with: vite.config.ts, tsconfig.json, package.json, index.html, src/main.tsx, src/App.tsx</step>
+    <step id="3">Configure vite.config.ts with vite-plugin-singlefile for single HTML output</step>
+    <step id="4">Implement src/main.tsx: parse URL data params, detect theme via detectTheme(), createRoot render with FluentProvider</step>
+    <step id="5">Implement src/App.tsx (~30-50 LOC): import CreateEventWizard from @spaarke/ui-components, instantiate XrmDataService adapter, pass as prop, handle embedded={true}</step>
+    <step id="6">Configure package.json with build script and dependencies</step>
+    <step id="7">Run npm install and npm run build — verify single HTML file output in dist/</step>
+    <step id="8">Verify the output HTML file is self-contained (no external asset references)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>src/solutions/CreateEventWizard/ contains complete Vite project</criterion>
+    <criterion>npm run build produces a single HTML file in dist/</criterion>
+    <criterion>App.tsx is 30-50 LOC — thin wrapper only</criterion>
+    <criterion>Uses React 19 createRoot entry point</criterion>
+    <criterion>Uses detectTheme() and parseDataParams() from shared utils</criterion>
+    <criterion>XrmDataService adapter wired up for IDataService</criterion>
+    <criterion>embedded={true} passed to WizardShell for Dataverse modal chrome</criterion>
+    <criterion>No files outside src/solutions/CreateEventWizard/ were modified</criterion>
+  </acceptance-criteria>
+</task>

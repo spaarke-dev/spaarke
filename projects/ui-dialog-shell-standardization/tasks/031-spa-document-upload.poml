@@ -1,51 +1,41 @@
 <task id="UDSS-031" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Integrate Document Upload wizard in Power Pages SPA</title>
+    <title>Integrate Document Upload wizard in SPA</title>
     <status>not-started</status>
     <phase>4</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>spa, wizard, document-upload</tags>
-    <dependencies>016, 030</dependencies>
+    <tags>spa, document-upload, integration</tags>
+    <dependencies>UDSS-016, UDSS-030</dependencies>
+    <parallel-group>P4-spa-integration</parallel-group>
   </metadata>
-
-  <prompt>
-    Integrate the DocumentUploadWizard shared component into the Power Pages SPA. Import
-    DocumentUploadWizard from @spaarke/ui-components and render it inside the SPA's own
-    Fluent Dialog (no Dataverse chrome). Pass the bffDataService adapter for data access.
-    Test the complete upload flow end-to-end in the SPA context.
-  </prompt>
-
-  <role>Senior TypeScript/React developer with SPA and wizard integration experience</role>
-
-  <goal>
-    DocumentUploadWizard renders inside the Power Pages SPA with BFF data service adapter,
-    and the complete upload flow works end-to-end without Dataverse dependencies.
-  </goal>
-
+  <prompt>Integrate the shared DocumentUploadWizard component into the Power Pages SPA using the BFF data service adapter. Create a SPA page/route that renders DocumentUploadWizard with bffDataServiceAdapter and bffUploadServiceAdapter, handling SPA-specific dialog presentation (no Xrm.Navigation modal chrome).</prompt>
+  <role>Senior frontend developer with SPA integration expertise</role>
+  <goal>DocumentUploadWizard renders and functions correctly within Power Pages SPA using BFF adapters</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="ADR-012">Must use bffDataServiceAdapter — no Xrm.WebApi in SPA context</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; dark mode required</constraint>
+    <constraint source="file-ownership">ONLY touch files in src/client/external-spa/ document upload page/route — do NOT modify shared library</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentUploadWizard/</file>
       <file>src/client/external-spa/</file>
+      <file>src/client/external-spa/src/adapters/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Import DocumentUploadWizard from @spaarke/ui-components in the SPA.</step>
-    <step id="2">Render DocumentUploadWizard inside the SPA's own Fluent Dialog component (no Dataverse modal chrome).</step>
-    <step id="3">Pass bffDataService adapter as the dataService prop.</step>
-    <step id="4">Test upload flow end-to-end: file selection, upload progress, completion.</step>
+    <step id="1">Read DocumentUploadWizard component props to understand required inputs</step>
+    <step id="2">Read existing SPA routing structure to determine where to add the upload page</step>
+    <step id="3">Create SPA page component that renders DocumentUploadWizard with bffDataServiceAdapter and bffUploadServiceAdapter</step>
+    <step id="4">Handle SPA-specific dialog presentation: use Fluent Dialog or inline rendering (no Xrm.Navigation modal)</step>
+    <step id="5">Wire up SPA route for document upload page</step>
+    <step id="6">Test upload flow end-to-end via BFF API</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>DocumentUploadWizard is imported from @spaarke/ui-components in SPA.</criterion>
-    <criterion>Wizard renders inside SPA's own Fluent Dialog (not Dataverse navigateTo).</criterion>
-    <criterion>bffDataService adapter is passed and used for all data operations.</criterion>
-    <criterion>File upload flow works end-to-end in SPA context.</criterion>
-    <criterion>No Xrm.WebApi or Xrm.Navigation calls occur during wizard operation.</criterion>
+    <criterion>DocumentUploadWizard renders within SPA without errors</criterion>
+    <criterion>Uses bffDataServiceAdapter and bffUploadServiceAdapter for all data operations</criterion>
+    <criterion>File upload flow works end-to-end through BFF API</criterion>
+    <criterion>No Xrm references in SPA integration code</criterion>
+    <criterion>SPA route accessible and navigable</criterion>
   </acceptance-criteria>
 </task>

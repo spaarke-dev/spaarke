@@ -1,59 +1,40 @@
 <task id="UDSS-006" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Create CreateMatterWizard Code Page wrapper with Vite build</title>
+    <title>Create CreateMatterWizard Code Page wrapper (Vite)</title>
     <status>not-started</status>
     <phase>1</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>code-page, vite, wizard, matter, deploy</tags>
-    <dependencies>UDSS-004, UDSS-005</dependencies>
+    <tags>code-page, vite, wizard, matter</tags>
+    <dependencies>UDSS-004, UDSS-005c</dependencies>
+    <parallel-group>P1-code-pages</parallel-group>
   </metadata>
-
-  <prompt>
-    Create a new Code Page solution (src/solutions/CreateMatterWizard/) that serves as the thin
-    hosting wrapper for the shared CreateMatterWizard component. The Code Page uses Vite with
-    vite-plugin-singlefile to produce a single HTML file deployable as a Dataverse web resource.
-    The main.tsx file should be minimal (~30-50 LOC): parse data params, detect theme, create Xrm
-    adapters, and render the wizard with embedded=true.
-  </prompt>
-
-  <role>TypeScript/React developer with Vite build tooling experience</role>
-
-  <goal>
-    A complete Code Page solution exists at src/solutions/CreateMatterWizard/ that builds to a
-    single HTML file containing the CreateMatterWizard rendered with Xrm adapters in embedded mode.
-  </goal>
-
+  <prompt>Create a Vite-based Code Page wrapper that renders the extracted CreateMatterWizard component as a standalone web resource. The wrapper handles theme detection, URL parameter parsing, auth initialization, and wires the Xrm adapter to the wizard. Output is a single HTML file deployable as a Dataverse web resource.</prompt>
+  <role>Frontend developer with Vite experience</role>
+  <goal>src/solutions/CreateMatterWizard/ with working Vite build producing single HTML output</goal>
   <constraints>
-    <constraint source="ADR-026">Code Pages must use Vite + vite-plugin-singlefile to produce a single self-contained HTML file.</constraint>
-    <constraint source="ADR-021">Must use React 19 with createRoot and Fluent UI v9 FluentProvider.</constraint>
-    <constraint source="ADR-026">main.tsx must be a thin wrapper — no business logic, only bootstrapping (parseDataParams, detectTheme, createRoot, render).</constraint>
+    <constraint source="ADR-026">Code Pages must use Vite with vite-plugin-singlefile for single HTML output</constraint>
+    <constraint source="ADR-021">Use React 19 createRoot — Code Pages bundle their own React (not platform-provided)</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
       <file>.claude/patterns/webresource/full-page-custom-page.md</file>
-      <file>src/solutions/LegalWorkspace/</file>
+      <file>src/solutions/EventsPage/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Create src/solutions/CreateMatterWizard/ directory with standard Code Page structure.</step>
-    <step id="2">Create package.json with React 19, @fluentui/react-components, @spaarke/ui-components as dependencies, and vite + vite-plugin-singlefile as devDependencies.</step>
-    <step id="3">Create vite.config.ts with viteSingleFile plugin and appropriate build settings.</step>
-    <step id="4">Create tsconfig.json extending shared TypeScript configuration.</step>
-    <step id="5">Create index.html with root div, viewport meta tag, and CSS reset (margin: 0, height: 100vh).</step>
-    <step id="6">Create src/main.tsx (~30-50 LOC): import parseDataParams and detectTheme from @spaarke/ui-components, create XrmDataServiceAdapter and XrmNavigationServiceAdapter, call createRoot, render FluentProvider wrapping CreateMatterWizard with embedded=true and injected services.</step>
-    <step id="7">Run npm install and npm run build to verify the build pipeline works.</step>
-    <step id="8">Verify the output is a single HTML file in dist/ containing all JS, CSS, and assets inlined.</step>
+    <step id="1">Create src/solutions/CreateMatterWizard/ directory</step>
+    <step id="2">Create package.json with dependencies: React 19, Fluent UI v9, @spaarke/ui-components, @spaarke/auth</step>
+    <step id="3">Create vite.config.ts with viteSingleFile plugin</step>
+    <step id="4">Create tsconfig.json</step>
+    <step id="5">Create index.html with root div</step>
+    <step id="6">Create src/main.tsx (~40 LOC): parseDataParams, detectTheme, initAuth, createRoot, render CreateMatterWizard with embedded=true and xrmDataServiceAdapter</step>
+    <step id="7">Run npm install and npm run build</step>
+    <step id="8">Verify single HTML file output in dist/</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>src/solutions/CreateMatterWizard/ exists with package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx.</criterion>
-    <criterion>npm run build produces a single HTML file in dist/.</criterion>
-    <criterion>main.tsx is under 50 lines and contains only bootstrapping logic.</criterion>
-    <criterion>CreateMatterWizard is rendered with embedded=true and Xrm service adapters.</criterion>
-    <criterion>Theme detection uses shared detectTheme() utility.</criterion>
-    <criterion>Data parameter parsing uses shared parseDataParams() utility.</criterion>
+    <criterion>Build produces a single HTML file in dist/</criterion>
+    <criterion>Renders CreateMatterWizard with theme detection</criterion>
+    <criterion>Uses Xrm adapter for data access</criterion>
   </acceptance-criteria>
 </task>

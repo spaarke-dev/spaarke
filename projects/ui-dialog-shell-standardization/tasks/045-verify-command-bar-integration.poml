@@ -1,56 +1,43 @@
 <task id="UDSS-045" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Test all command bar wizard launches</title>
+    <title>Verify all command bar wizard launches</title>
     <status>not-started</status>
     <phase>5</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>verification, ribbon, phase-gate</tags>
-    <dependencies>044</dependencies>
+    <tags>verify, ribbon, integration</tags>
+    <dependencies>UDSS-044</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Comprehensive end-to-end testing of all command bar wizard launches across sprk_matter,
-    sprk_project, and sprk_event forms. Verify each button opens the correct wizard Code Page,
-    entity context is passed correctly, wizard completes successfully, and the form refreshes
-    after dialog close. This is the Phase 5 gate — all ribbon integration tests must pass.
-  </prompt>
-
-  <role>QA tester with Dataverse form and ribbon testing experience</role>
-
-  <goal>
-    All command bar buttons on all entity forms launch the correct wizard Code Pages with
-    proper entity context, and wizards complete successfully with form refresh after close.
-  </goal>
-
+  <prompt>Systematically test every command bar wizard button across all three entity forms (Matter, Project, Event). Verify each button opens the correct wizard Code Page, passes the correct entity context, and that the form refreshes after the wizard dialog closes.</prompt>
+  <role>QA engineer with Dataverse form testing expertise</role>
+  <goal>All command bar wizard buttons verified working end-to-end on Matter, Project, and Event forms</goal>
   <constraints>
-    <constraint source="ADR-006">No legacy JS webresources for UI — buttons launch Code Pages via navigateTo.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="testing">Test each button on each entity form — do not skip combinations</constraint>
+    <constraint source="testing">Verify both happy path (complete wizard) and cancel path (close without completing)</constraint>
   </constraints>
-
   <knowledge>
     <files>
-      <file>.claude/skills/ribbon-edit/SKILL.md</file>
-      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>src/client/code-pages/sprk_wizard_commands.js</file>
+      <file>infrastructure/dataverse/ribbon/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Test sprk_matter form: Click "Create Project" — verify wizard opens with matter context, complete wizard, verify project created.</step>
-    <step id="2">Test sprk_matter form: Click "Create Event" — verify wizard opens with matter context, complete wizard, verify event created.</step>
-    <step id="3">Test sprk_matter form: Click "Upload Document" — verify upload wizard opens with matter context, upload a file, verify file attached.</step>
-    <step id="4">Test sprk_matter form: Click "Run Playbook" — verify playbook library opens with matter context, select and run a playbook.</step>
-    <step id="5">Test sprk_project form: Click each button (Create Event, Upload Document, Run Playbook) and verify correct behavior.</step>
-    <step id="6">Test sprk_event form: Click each button (Upload Document, Run Playbook) and verify correct behavior.</step>
-    <step id="7">Verify form refreshes after each wizard dialog closes (navigateTo Promise resolution).</step>
+    <step id="1">Open sprk_matter form — test each button: Create Project, Create Event, Create Todo, Upload Documents, Summarize Files, Find Similar, Playbook Library</step>
+    <step id="2">For each Matter button: verify correct wizard opens, entity context passed, dialog closes cleanly, form refreshes</step>
+    <step id="3">Open sprk_project form — test each button: Upload Documents, Summarize Files, Find Similar, Playbook Library</step>
+    <step id="4">For each Project button: verify correct wizard opens, entity context passed, dialog closes cleanly, form refreshes</step>
+    <step id="5">Open sprk_event form — test each button: Upload Documents, Summarize Files, Find Similar, Playbook Library</step>
+    <step id="6">For each Event button: verify correct wizard opens, entity context passed, dialog closes cleanly, form refreshes</step>
+    <step id="7">Test cancel/close scenarios — verify no errors or orphaned state</step>
+    <step id="8">Test dark mode rendering for all wizards launched from command bar</step>
+    <step id="9">Document any issues found and log for remediation</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>All sprk_matter buttons (Create Project, Create Event, Upload Document, Run Playbook) open correct wizards.</criterion>
-    <criterion>All sprk_project buttons (Create Event, Upload Document, Run Playbook) open correct wizards.</criterion>
-    <criterion>All sprk_event buttons (Upload Document, Run Playbook) open correct wizards.</criterion>
-    <criterion>Entity context (entityType, entityId) is passed correctly to each wizard.</criterion>
-    <criterion>Wizards complete successfully — records created, files uploaded, playbooks executed.</criterion>
-    <criterion>Forms refresh after wizard dialog closes.</criterion>
-    <criterion>No console errors during any wizard flow.</criterion>
+    <criterion>All Matter form buttons open correct wizard with entity context</criterion>
+    <criterion>All Project form buttons open correct wizard with entity context</criterion>
+    <criterion>All Event form buttons open correct wizard with entity context</criterion>
+    <criterion>Form refreshes after wizard dialog closes (navigateTo Promise resolved)</criterion>
+    <criterion>Cancel/close scenarios produce no errors</criterion>
+    <criterion>Dark mode renders correctly for all wizards launched via command bar</criterion>
   </acceptance-criteria>
 </task>

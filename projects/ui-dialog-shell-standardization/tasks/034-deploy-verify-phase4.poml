@@ -1,55 +1,41 @@
 <task id="UDSS-034" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Deploy and verify SPA integration</title>
+    <title>Deploy and verify Phase 4 end-to-end</title>
     <status>not-started</status>
     <phase>4</phase>
     <estimated-effort>3 hours</estimated-effort>
-    <tags>deploy, verification, spa, phase-gate</tags>
-    <dependencies>031, 032, 033</dependencies>
+    <tags>deploy, verify, spa, integration</tags>
+    <dependencies>UDSS-033</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Deploy the Power Pages SPA with integrated shared components (DocumentUploadWizard,
-    PlaybookLibraryShell) and verify end-to-end functionality. This is the Phase 4 gate —
-    all SPA integration tests must pass before proceeding to Phase 5. Verify theme handling,
-    upload flows, playbook browsing, and BFF adapter communication.
-  </prompt>
-
-  <role>DevOps engineer and QA tester with Power Pages SPA deployment experience</role>
-
-  <goal>
-    Power Pages SPA is deployed with shared components, and all integration tests pass
-    for document upload, playbook library, and theme handling.
-  </goal>
-
+  <prompt>Deploy all Phase 4 SPA integration artifacts and verify end-to-end functionality. This includes the BFF adapters, Document Upload wizard in SPA, PlaybookLibraryShell in SPA, and theme integration. Test both Dataverse and SPA contexts to ensure no regressions.</prompt>
+  <role>Senior developer with deployment and integration testing expertise</role>
+  <goal>All Phase 4 SPA integration deployed and verified working end-to-end in both Dataverse and SPA contexts</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="deployment">Use existing deploy scripts for SPA deployment</constraint>
+    <constraint source="testing">Verify both Dataverse (navigateTo) and SPA (direct route) contexts</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>.claude/skills/power-page-deploy/SKILL.md</file>
       <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
-      <file>src/client/external-spa/</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Build the Power Pages SPA with integrated shared components.</step>
-    <step id="2">Deploy SPA to Dataverse dev environment via Deploy-ExternalWorkspaceSpa.ps1.</step>
-    <step id="3">Test: Document upload wizard opens and completes upload flow in SPA.</step>
-    <step id="4">Test: Playbook library opens, shows external-user playbooks, and executes playbook.</step>
-    <step id="5">Test: Theme handling — light and dark mode render correctly.</step>
-    <step id="6">Test: BFF adapter communication — all API calls route correctly through BFF.</step>
+    <step id="1">Build external-spa with all Phase 4 changes</step>
+    <step id="2">Deploy SPA to Power Pages environment</step>
+    <step id="3">Verify: Document Upload wizard opens and completes file upload in SPA context</step>
+    <step id="4">Verify: PlaybookLibraryShell opens in full browse mode in SPA</step>
+    <step id="5">Verify: PlaybookLibraryShell intent mode works in SPA</step>
+    <step id="6">Verify: Dark mode rendering for all shared components in SPA</step>
+    <step id="7">Regression test: Dataverse context wizards still work (navigateTo from workspace)</step>
+    <step id="8">Regression test: AnalysisBuilder still works in Dataverse context</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>Power Pages SPA builds and deploys successfully.</criterion>
-    <criterion>Document upload wizard functions end-to-end in SPA.</criterion>
-    <criterion>Playbook library shows external-user playbooks and allows execution.</criterion>
-    <criterion>Light and dark mode render correctly for all shared components.</criterion>
-    <criterion>BFF adapter routes all API calls through BFF endpoints correctly.</criterion>
-    <criterion>No console errors or broken UI in deployed SPA.</criterion>
+    <criterion>SPA deployed successfully to Power Pages environment</criterion>
+    <criterion>Document Upload wizard works end-to-end in SPA</criterion>
+    <criterion>PlaybookLibraryShell works in both browse and intent modes in SPA</criterion>
+    <criterion>Dark mode renders correctly for all shared components in SPA</criterion>
+    <criterion>No regressions in Dataverse context (existing navigateTo flows unchanged)</criterion>
   </acceptance-criteria>
 </task>

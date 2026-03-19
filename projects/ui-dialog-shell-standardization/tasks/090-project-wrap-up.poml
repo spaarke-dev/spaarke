@@ -1,58 +1,45 @@
 <task id="UDSS-090" project="UI Dialog Shell Standardization">
   <metadata>
-    <title>Final documentation, testing, and project close</title>
+    <title>Project wrap-up (docs, testing, close)</title>
     <status>not-started</status>
     <phase>6</phase>
     <estimated-effort>4 hours</estimated-effort>
-    <tags>documentation, wrap-up</tags>
-    <dependencies>045, 034</dependencies>
+    <tags>documentation, cleanup, wrap-up</tags>
+    <dependencies>UDSS-034, UDSS-045</dependencies>
+    <parallel-group>none</parallel-group>
   </metadata>
-
-  <prompt>
-    Complete the UI Dialog and Shell Standardization project with final documentation updates,
-    end-to-end testing across all surfaces (Dataverse forms, Corporate Workspace, Power Pages SPA),
-    and project close activities. Update the shared UI components guide with the new component
-    inventory, update the project README status to Complete, create a lessons-learned document,
-    and run /repo-cleanup to validate repository structure.
-  </prompt>
-
-  <role>Technical writer and project lead with documentation and closeout experience</role>
-
-  <goal>
-    All documentation is updated, final end-to-end tests pass across all surfaces, project
-    status is marked Complete, and repository is clean.
-  </goal>
-
+  <prompt>Final project wrap-up: update all documentation to reflect the new architecture, run final end-to-end testing across all surfaces (Dataverse forms, Corporate Workspace, Power Pages SPA), create lessons learned, and run repo cleanup.</prompt>
+  <role>Senior developer with documentation and project management expertise</role>
+  <goal>All documentation updated, final testing passed, lessons learned captured, repository cleaned up</goal>
   <constraints>
-    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
-    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
-    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+    <constraint source="process">Follow project wrap-up checklist — do not skip documentation updates</constraint>
+    <constraint source="process">Run /repo-cleanup as final step</constraint>
   </constraints>
-
   <knowledge>
     <files>
       <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
       <file>projects/ui-dialog-shell-standardization/README.md</file>
-      <file>projects/ui-dialog-shell-standardization/tasks/TASK-INDEX.md</file>
+      <file>projects/ui-dialog-shell-standardization/plan.md</file>
     </files>
   </knowledge>
-
   <steps>
-    <step id="1">Update SHARED-UI-COMPONENTS-GUIDE.md with new component inventory: PlaybookLibraryShell, all wizard components, IDataService adapters, Code Page wrappers.</step>
-    <step id="2">Update project README.md status to Complete with summary of delivered components.</step>
-    <step id="3">Create lessons-learned.md in projects/ui-dialog-shell-standardization/notes/ documenting extraction patterns, challenges, and reusable approaches.</step>
-    <step id="4">Final end-to-end testing: verify all wizard Code Pages work from Dataverse forms (ribbon buttons), Corporate Workspace (navigateTo), and Power Pages SPA (direct import).</step>
-    <step id="5">Run /repo-cleanup to validate repository structure and clean ephemeral files.</step>
+    <step id="1">Update docs/guides/SHARED-UI-COMPONENTS-GUIDE.md with all new shared components (PlaybookLibraryShell, all wizard components, service interfaces, adapters)</step>
+    <step id="2">Update project README.md status to "Completed" with summary of what was delivered</step>
+    <step id="3">Create projects/ui-dialog-shell-standardization/notes/lessons-learned.md documenting: what went well, what was harder than expected, patterns to reuse</step>
+    <step id="4">Final end-to-end testing matrix: all wizards via Corporate Workspace navigateTo, all wizards via entity form command bar, all wizards via Power Pages SPA</step>
+    <step id="5">Verify dark mode works across all surfaces</step>
+    <step id="6">Verify no orphaned code (QuickStart removed, old inline dialogs removed)</step>
+    <step id="7">Update TASK-INDEX.md — all tasks marked completed</step>
+    <step id="8">Run /repo-cleanup to validate repository structure and clean ephemeral files</step>
   </steps>
-
   <acceptance-criteria>
-    <criterion>SHARED-UI-COMPONENTS-GUIDE.md lists all new shared components with usage examples.</criterion>
-    <criterion>Project README.md shows status: Complete.</criterion>
-    <criterion>lessons-learned.md exists in projects/ui-dialog-shell-standardization/notes/.</criterion>
-    <criterion>All wizard Code Pages function from Dataverse forms via ribbon buttons.</criterion>
-    <criterion>All wizard Code Pages function from Corporate Workspace via navigateTo.</criterion>
-    <criterion>Shared components function in Power Pages SPA with BFF adapters.</criterion>
-    <criterion>/repo-cleanup passes with no structural issues.</criterion>
-    <criterion>All tasks in TASK-INDEX.md are marked complete.</criterion>
+    <criterion>SHARED-UI-COMPONENTS-GUIDE.md updated with all new components and interfaces</criterion>
+    <criterion>Project README.md reflects completed status</criterion>
+    <criterion>Lessons learned document created</criterion>
+    <criterion>All wizard launch paths tested end-to-end (workspace, command bar, SPA)</criterion>
+    <criterion>Dark mode verified across all surfaces</criterion>
+    <criterion>No orphaned QuickStart or inline dialog code remains</criterion>
+    <criterion>TASK-INDEX.md shows all tasks completed</criterion>
+    <criterion>/repo-cleanup passes without issues</criterion>
   </acceptance-criteria>
 </task>
