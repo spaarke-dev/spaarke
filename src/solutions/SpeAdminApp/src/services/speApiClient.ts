@@ -277,7 +277,8 @@ export const speApiClient = {
      * List all container types for the given config.
      */
     list(configId: string): Promise<ContainerType[]> {
-      return get<ContainerType[]>("/api/spe/containertypes" + qs({ configId }));
+      return get<{ items: ContainerType[]; count: number }>("/api/spe/containertypes" + qs({ configId }))
+        .then(r => r.items);
     },
 
     /**
@@ -334,9 +335,9 @@ export const speApiClient = {
      * List application permissions registered for a container type.
      */
     listPermissions(typeId: string, configId: string): Promise<ContainerTypePermission[]> {
-      return get<ContainerTypePermission[]>(
+      return get<{ items: ContainerTypePermission[]; count: number }>(
         "/api/spe/containertypes/" + typeId + "/permissions" + qs({ configId }),
-      );
+      ).then(r => r.items);
     },
 
     /**
@@ -401,7 +402,8 @@ export const speApiClient = {
      * List all containers for the given config.
      */
     list(configId: string): Promise<Container[]> {
-      return get<Container[]>("/api/spe/containers" + qs({ configId }));
+      return get<{ items: Container[]; count: number }>("/api/spe/containers" + qs({ configId }))
+        .then(r => r.items);
     },
 
     /**
@@ -564,9 +566,9 @@ export const speApiClient = {
      * List column definitions on a container.
      */
     list(containerId: string, configId: string): Promise<ColumnDefinition[]> {
-      return get<ColumnDefinition[]>(
+      return get<{ items: ColumnDefinition[]; count: number }>(
         "/api/spe/containers/" + containerId + "/columns" + qs({ configId }),
-      );
+      ).then(r => r.items);
     },
 
     /**
@@ -794,7 +796,8 @@ export const speApiClient = {
      * Returns DeletedContainer items (id, displayName, deletedDateTime, containerTypeId).
      */
     list(configId: string): Promise<DeletedContainer[]> {
-      return get<DeletedContainer[]>("/api/spe/recyclebin" + qs({ configId }));
+      return get<{ items: DeletedContainer[]; count: number }>("/api/spe/recyclebin" + qs({ configId }))
+        .then(r => r.items);
     },
 
     /**

@@ -257,15 +257,18 @@ function buildColumns(): TableColumnDefinition<Container>[] {
     createTableColumn<Container>({
       columnId: "status",
       renderHeaderCell: () => "Status",
-      renderCell: (container) => (
-        <Badge
-          color={statusBadgeColor(container.status)}
-          appearance="filled"
-          size="small"
-        >
-          {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
-        </Badge>
-      ),
+      renderCell: (container) => {
+        const status = container.status ?? "active";
+        return (
+          <Badge
+            color={statusBadgeColor(status)}
+            appearance="filled"
+            size="small"
+          >
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+          </Badge>
+        );
+      },
     }),
     createTableColumn<Container>({
       columnId: "createdDateTime",

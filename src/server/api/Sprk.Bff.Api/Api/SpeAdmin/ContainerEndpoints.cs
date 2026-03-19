@@ -855,7 +855,8 @@ public static class ContainerEndpoints
         string? Description,
         string ContainerTypeId,
         DateTimeOffset CreatedDateTime,
-        long? StorageUsedInBytes)
+        long? StorageUsedInBytes,
+        string Status)
     {
         /// <summary>Maps a <see cref="SpeAdminGraphService.SpeContainerSummary"/> domain record to a DTO.</summary>
         public static ContainerDto FromSummary(SpeAdminGraphService.SpeContainerSummary summary) =>
@@ -865,6 +866,7 @@ public static class ContainerEndpoints
                 summary.Description,
                 summary.ContainerTypeId,
                 summary.CreatedDateTime,
-                summary.StorageUsedInBytes);
+                summary.StorageUsedInBytes,
+                summary.Status);
     }
 }

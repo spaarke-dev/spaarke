@@ -69,7 +69,8 @@ public sealed class SpeAdminGraphService
         string? Description,
         string ContainerTypeId,
         DateTimeOffset CreatedDateTime,
-        long? StorageUsedInBytes);
+        long? StorageUsedInBytes,
+        string Status = "active");
 
     /// <summary>
     /// A single file or folder item returned from the Graph drive items API.
@@ -623,7 +624,7 @@ public sealed class SpeAdminGraphService
                     config.QueryParameters.Select = new[]
                     {
                         "id", "displayName", "description", "containerTypeId",
-                        "createdDateTime", "storageUsedInBytes"
+                        "createdDateTime", "storageUsedInBytes", "status"
                     };
                 }, ct),
             ct);
@@ -634,13 +635,15 @@ public sealed class SpeAdminGraphService
             {
                 foreach (var container in response.Value)
                 {
+                    var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                     results.Add(new SpeContainerSummary(
                         container.Id ?? string.Empty,
                         container.DisplayName ?? string.Empty,
                         container.Description,
                         container.ContainerTypeId?.ToString() ?? containerTypeId,
                         container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                        StorageUsedInBytes: null)); // Not always returned by Graph
+                        StorageUsedInBytes: null, // Not always returned by Graph
+                        Status: status));
                 }
             }
 
@@ -945,7 +948,7 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes"
+                            "createdDateTime", "storageUsedInBytes", "status"
                         };
 
                         if (top.HasValue && top.Value > 0)
@@ -962,13 +965,15 @@ public sealed class SpeAdminGraphService
         {
             foreach (var container in response.Value)
             {
+                var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                 items.Add(new SpeContainerSummary(
                     container.Id ?? string.Empty,
                     container.DisplayName ?? string.Empty,
                     container.Description,
                     container.ContainerTypeId?.ToString() ?? containerTypeId,
                     container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                    StorageUsedInBytes: null)); // Not always returned by Graph
+                    StorageUsedInBytes: null, // Not always returned by Graph
+                    Status: status));
             }
         }
 
@@ -1044,13 +1049,15 @@ public sealed class SpeAdminGraphService
             "SPE container created: Id={ContainerId}, DisplayName='{DisplayName}', ContainerTypeId={ContainerTypeId}",
             created.Id, created.DisplayName, containerTypeId);
 
+        var createdStatus = created.AdditionalData?.TryGetValue("status", out var csvs) == true && csvs is string csvsStr ? csvsStr : "active";
         return new SpeContainerSummary(
             Id: created.Id ?? string.Empty,
             DisplayName: created.DisplayName ?? displayName,
             Description: created.Description,
             ContainerTypeId: created.ContainerTypeId?.ToString() ?? containerTypeId,
             CreatedDateTime: created.CreatedDateTime ?? DateTimeOffset.UtcNow,
-            StorageUsedInBytes: null); // New containers always start empty; Graph returns null here
+            StorageUsedInBytes: null, // New containers always start empty; Graph returns null here
+            Status: createdStatus);
     }
 
     /// <summary>
@@ -1081,7 +1088,7 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes"
+                            "createdDateTime", "storageUsedInBytes", "status"
                         };
                     }, ct),
                 ct);
@@ -1092,13 +1099,15 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
+            var containerStatus = container.AdditionalData?.TryGetValue("status", out var sv) == true && sv is string svs ? svs : "active";
             return new SpeContainerSummary(
                 container.Id ?? string.Empty,
                 container.DisplayName ?? string.Empty,
                 container.Description,
                 container.ContainerTypeId?.ToString() ?? string.Empty,
                 container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                StorageUsedInBytes: null);
+                StorageUsedInBytes: null,
+                Status: containerStatus);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
