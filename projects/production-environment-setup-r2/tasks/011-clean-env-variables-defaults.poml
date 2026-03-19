@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-011" project="Production Environment Setup R2">
+  <metadata>
+    <title>Clean environmentVariables.ts — remove dev fallback defaults</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>pcf, shared-lib, typescript, config</tags>
+    <parallel-group>2</parallel-group>
+    <dependencies>none</dependencies>
+    <blocks>Phase 4 (all PCF controls)</blocks>
+  </metadata>
+
+  <prompt>
+    Remove hardcoded dev fallback defaults from src/client/pcf/shared/utils/environmentVariables.ts. The DEFAULT_VALUES map at line 67 contains dev URLs (spe-api-dev-67e2xz, spaarke-openai-dev). Instead of silently returning dev values when Dataverse env vars are missing, throw clear error messages.
+  </prompt>
+
+  <role>TypeScript developer with PCF control experience</role>
+
+  <goal>
+    environmentVariables.ts throws descriptive errors when Dataverse Environment Variables are not found, instead of returning hardcoded dev URLs. PCF controls that use this utility will fail loudly in misconfigured environments.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Fail loudly — throw error with variable name and troubleshooting guidance</constraint>
+    <constraint source="project">Keep the caching mechanism (5-minute TTL) unchanged</constraint>
+    <constraint source="ADR-022">Must work with PCF React 16 platform libraries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/shared/utils/environmentVariables.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current file">Read environmentVariables.ts fully. Understand the DEFAULT_VALUES map and how it's used.</step>
+    <step order="2" name="Remove defaults">Remove or empty the DEFAULT_VALUES map. Add error handling that throws when a variable is not found in Dataverse.</step>
+    <step order="3" name="Add error messages">Error messages should include: variable name, expected Dataverse definition name, and guidance ("Ensure sprk_BffApiBaseUrl is defined in Dataverse Environment Variables").</step>
+    <step order="4" name="Verify PCF builds">Run npm run build in affected PCF controls to verify no compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF controls</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/shared/utils/environmentVariables.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DEFAULT_VALUES map contains no hardcoded dev URLs</criterion>
+    <criterion testable="true">Missing environment variables throw descriptive errors</criterion>
+    <criterion testable="true">Error messages include the variable name and troubleshooting guidance</criterion>
+    <criterion testable="true">Caching mechanism (5-minute TTL) still works</criterion>
+  </acceptance-criteria>
+</task>

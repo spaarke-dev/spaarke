@@ -1,0 +1,39 @@
+<task id="ENV-052" project="Production Environment Setup R2">
+  <metadata>
+    <title>Batch parameterize remaining 30+ scripts with hardcoded org URLs</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>6</phase>
+    <tags>scripts, infrastructure, config</tags>
+    <parallel-group>6</parallel-group>
+    <dependencies>ENV-005</dependencies>
+  </metadata>
+
+  <prompt>Parameterize all remaining scripts in scripts/ and infrastructure/ that hardcode "spaarkedev1". Add -DataverseUrl parameter with $env:DATAVERSE_URL fallback. ~30 scripts including Deploy-*, Check-*, debug/*, ai-search/*.</prompt>
+
+  <role>PowerShell developer</role>
+
+  <goal>Zero hardcoded "spaarkedev1" in scripts/ directory (excluding comments and documentation). All scripts accept -DataverseUrl parameter.</goal>
+
+  <knowledge>
+    <files>
+      <file>scripts/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find all scripts">grep -r "spaarkedev1" scripts/ infrastructure/ --include="*.ps1" -l</step>
+    <step order="2" name="Parameterize each">For each script, add param block with -DataverseUrl = $env:DATAVERSE_URL fallback. Replace hardcoded URL.</step>
+    <step order="3" name="Verify syntax">Run PowerShell syntax check on all modified scripts.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Multiple scripts in scripts/ and infrastructure/ (30+ files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for "spaarkedev1" in *.ps1 returns zero hits (excluding bicep dev params and comments)</criterion>
+    <criterion testable="true">All modified scripts accept -DataverseUrl parameter</criterion>
+    <criterion testable="true">All modified scripts have valid PowerShell syntax</criterion>
+  </acceptance-criteria>
+</task>

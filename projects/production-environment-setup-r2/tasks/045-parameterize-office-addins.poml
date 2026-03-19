@@ -1,0 +1,51 @@
+<task id="ENV-045" project="Production Environment Setup R2">
+  <metadata>
+    <title>Parameterize Office add-in auth config and manifests</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>5</phase>
+    <tags>office-addins, auth, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove hardcoded dev fallbacks from Office add-in authConfig.ts (tenant ID, BFF app ID, BFF URL). Ensure webpack injects these from CI/CD environment variables. Parameterize outlook/manifest.json resource URI (line 221 has hardcoded "api://1e40baad-...").
+  </prompt>
+
+  <role>Office add-in developer with MSAL and webpack experience</role>
+
+  <goal>Office add-ins use CI/CD-injected environment variables for all auth config. No dev-specific fallback values in production builds. Manifest URLs parameterized for per-environment deployment.</goal>
+
+  <constraints>
+    <constraint source="project">Office add-ins cannot query Dataverse env vars (different auth context)</constraint>
+    <constraint source="project">webpack DefinePlugin or dotenv handles build-time injection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/auth/authConfig.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read auth config">Read authConfig.ts, webpack configs, and manifest files.</step>
+    <step order="2" name="Remove dev fallbacks">Replace hardcoded tenant ID, BFF app ID, BFF URL with process.env.* only (no || 'dev-value' fallback).</step>
+    <step order="3" name="Update webpack">Ensure webpack DefinePlugin injects ADDIN_CLIENT_ID, TENANT_ID, BFF_API_CLIENT_ID, BFF_API_BASE_URL.</step>
+    <step order="4" name="Parameterize manifest">Add environment variable substitution for manifest resource URI.</step>
+    <step order="5" name="Build">Run npm run build for add-ins.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/auth/authConfig.ts</output>
+    <output type="code">src/client/office-addins/outlook/manifest.json</output>
+    <output type="code">src/client/office-addins/webpack.config.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">authConfig.ts has no hardcoded tenant IDs, BFF app IDs, or BFF URLs</criterion>
+    <criterion testable="true">All values come from process.env.* (webpack DefinePlugin injection)</criterion>
+    <criterion testable="true">manifest.json resource URI is parameterized</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,43 @@
+<task id="ENV-053" project="Production Environment Setup R2">
+  <metadata>
+    <title>Update deployment documentation with new environment-agnostic process</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>6</phase>
+    <tags>documentation</tags>
+    <parallel-group>6</parallel-group>
+    <dependencies>ENV-050, ENV-051</dependencies>
+  </metadata>
+
+  <prompt>Update PRODUCTION-DEPLOYMENT-GUIDE.md and CUSTOMER-DEPLOYMENT-GUIDE.md with the new environment-agnostic deployment process. Document: Dataverse Environment Variables, Validate-DeployedEnvironment.ps1 usage, environment-config.json, and the "build once deploy anywhere" workflow.</prompt>
+
+  <role>Technical writer with deployment documentation experience</role>
+
+  <goal>Deployment guides accurately reflect the new environment-agnostic process. Operators know exactly what to configure for a new environment.</goal>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/production-environment-setup-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current docs">Read both deployment guides.</step>
+    <step order="2" name="Add env var section">Add section documenting all 7 Dataverse Environment Variables and how they're set.</step>
+    <step order="3" name="Add validation section">Document Validate-DeployedEnvironment.ps1 usage and expected output.</step>
+    <step order="4" name="Update deployment steps">Update deployment steps to include env var creation and validation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</output>
+    <output type="code">docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both guides document all 7 Dataverse Environment Variables</criterion>
+    <criterion testable="true">Both guides reference Validate-DeployedEnvironment.ps1</criterion>
+    <criterion testable="true">Deployment steps include env var creation</criterion>
+  </acceptance-criteria>
+</task>

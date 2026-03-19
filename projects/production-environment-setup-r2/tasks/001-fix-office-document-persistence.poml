@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-001" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix OfficeDocumentPersistence.cs hardcoded Dataverse URL and App ID</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>bff-api, csharp, config</tags>
+    <parallel-group>1A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove hardcoded Dataverse URL ("https://spaarkedev1.crm.dynamics.com") and model-driven app ID ("729afe6d") from OfficeDocumentPersistence.cs. Replace with IOptions-injected configuration values.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs and Options pattern</role>
+
+  <goal>
+    OfficeDocumentPersistence.cs generates Dataverse record URLs using injected configuration values instead of hardcoded dev URLs. The BFF API builds successfully.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns — Options pattern for config</constraint>
+    <constraint source="ADR-010">DI minimalism — use Options pattern with ValidateOnStart()</constraint>
+    <constraint source="project">Must not break existing API behavior</constraint>
+    <constraint source="project">Must not introduce new hardcoded environment-specific values</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>OfficeDocumentPersistence.cs line 225 has `const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com"` and `const string appId = "729afe6d-..."`. These generate Dataverse record URLs that always point to dev environment. Need to inject via IOptions&lt;DataverseOptions&gt; or similar.</background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read current code">Read OfficeDocumentPersistence.cs to understand the GenerateDataverseUrl method and its callers.</step>
+    <step order="2" name="Check existing options classes">Search for existing DataverseOptions or similar options class that could hold these values.</step>
+    <step order="3" name="Add config values">Add DataverseEnvironmentUrl and DataverseAppId to appropriate options class or create one. Add tokens to appsettings.template.json if needed.</step>
+    <step order="4" name="Inject options">Inject IOptions into OfficeDocumentPersistence and replace hardcoded consts with options values.</step>
+    <step order="5" name="Verify build">Run dotnet build to confirm no compilation errors.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.template.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">OfficeDocumentPersistence.cs contains zero hardcoded "spaarkedev1" or "729afe6d" strings</criterion>
+    <criterion testable="true">Dataverse URL and App ID are read from injected configuration</criterion>
+    <criterion testable="true">dotnet build succeeds with zero errors</criterion>
+    <criterion testable="true">appsettings.template.json contains appropriate token placeholders</criterion>
+  </acceptance-criteria>
+</task>

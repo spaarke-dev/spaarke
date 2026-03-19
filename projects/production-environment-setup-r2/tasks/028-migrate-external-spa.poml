@@ -1,0 +1,62 @@
+<task id="ENV-028" project="Production Environment Setup R2">
+  <metadata>
+    <title>Migrate External SPA to runtime config resolution</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>code-page, typescript, auth, config, vite, external-spa</tags>
+    <parallel-group>3</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate the External SPA (src/client/external-spa/) from build-time .env.production config to runtime Dataverse Environment Variable resolution using resolveRuntimeConfig() from @spaarke/auth. NOTE: External SPA already has partial token substitution in place — audit what currently exists before replacing. External SPA uses Vite (not webpack). Replace any remaining hardcoded or build-time BFF URL and MSAL Client ID references with runtime resolution. Preserve any existing token substitution that is already working correctly.
+  </prompt>
+
+  <role>React developer with Dataverse web resource experience</role>
+
+  <goal>
+    External SPA fully resolves BFF URL and MSAL Client ID from Dataverse Environment Variables at runtime. No build-time substitution remains for environment-specific values. The Vite build succeeds and the web resource (sprk_externalworkspace) deploys and runs correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">External SPA is a standalone React 18 application</constraint>
+    <constraint source="ADR-022">External SPA bundles its own React 18 (not platform-provided)</constraint>
+    <constraint source="project">Uses Vite, not webpack — adjust config accordingly</constraint>
+    <constraint source="project">Keep .env.development for local dev workflow</constraint>
+    <constraint source="project">Already has partial token substitution — audit before overwriting</constraint>
+    <constraint source="project">Web resource name: sprk_externalworkspace</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/index.tsx</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit existing token substitution">Read src/client/external-spa/ entry points, vite.config.ts, and any deploy scripts. Document what token substitution already exists and which values are still hardcoded or env-injected at build time.</step>
+    <step order="2" name="Identify remaining gaps">List all remaining import.meta.env references to BFF URL and MSAL Client ID that are NOT yet resolved at runtime.</step>
+    <step order="3" name="Replace remaining gaps with runtime resolution">Replace any remaining build-time references with resolveRuntimeConfig() call. Update bootstrap sequence to await config before render.</step>
+    <step order="4" name="Clean .env.production">Remove BFF URL and MSAL client ID from .env.production (or remove file if empty). Preserve any non-secret build-time values that are intentional.</step>
+    <step order="5" name="Update vite.config.ts">Remove any define entries that injected BFF URL or MSAL client ID at build time. Preserve intentional build-time constants.</step>
+    <step order="6" name="Build and verify">Run npm run build from external-spa directory. Verify bundle doesn't contain hardcoded dev URLs.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/main.tsx</output>
+    <output type="code">src/client/external-spa/.env.production</output>
+    <output type="code">src/client/external-spa/vite.config.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">External SPA resolves BFF URL from Dataverse at runtime</criterion>
+    <criterion testable="true">.env.production does not contain BFF URL or MSAL client ID</criterion>
+    <criterion testable="true">npm run build succeeds (Vite build)</criterion>
+    <criterion testable="true">Built bundle does not contain "spe-api-dev" or hardcoded MSAL client ID</criterion>
+    <criterion testable="true">Existing token substitution that was already working is preserved or superseded by runtime resolution</criterion>
+  </acceptance-criteria>
+</task>

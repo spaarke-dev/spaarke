@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-004" project="Production Environment Setup R2">
+  <metadata>
+    <title>Add Dataverse Environment Variable definitions to SpaarkeCore solution</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, infrastructure, config</tags>
+    <parallel-group>1B</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Add Environment Variable definitions (sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId, sprk_AzureOpenAiEndpoint, sprk_ShareLinkBaseUrl, sprk_SharePointEmbeddedContainerId) to the SpaarkeCore Dataverse solution XML. These should be created automatically on solution import so they don't need manual creation per environment.
+  </prompt>
+
+  <role>Dataverse solution developer with XML customization experience</role>
+
+  <goal>
+    SpaarkeCore solution XML includes all 7 Environment Variable definitions. On solution import to a new environment, these variables are auto-created (values set by provisioning script).
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use publisher prefix sprk_</constraint>
+    <constraint source="project">Default values should be empty or minimal — actual values set by Provision-Customer.ps1</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/production-environment-setup-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Currently, Dataverse Environment Variables (sprk_BffApiBaseUrl etc.) must be manually created in each environment. Adding definitions to the SpaarkeCore solution XML means they auto-create on solution import. The provisioning script then sets their values.</background>
+  </context>
+
+  <steps>
+    <step order="1" name="Find solution files">Locate the SpaarkeCore solution XML files. Search for existing environment variable definitions as a pattern.</step>
+    <step order="2" name="Add definitions">Add EnvironmentVariableDefinition entries for all 7 variables with appropriate schema names, display names, and types (String).</step>
+    <step order="3" name="Verify XML">Validate the solution XML is well-formed.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SpaarkeCore solution XML files (customizations.xml or equivalent)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution XML contains definitions for all 7 environment variables</criterion>
+    <criterion testable="true">XML is well-formed and valid</criterion>
+    <criterion testable="true">Publisher prefix is sprk_ on all variable schema names</criterion>
+  </acceptance-criteria>
+</task>

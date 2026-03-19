@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-002" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix OfficeService.cs hardcoded Dataverse URL and share link URL</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>bff-api, csharp, config</tags>
+    <parallel-group>1A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove hardcoded Dataverse URL (line 1112) and share link base URL "https://spaarke.app/doc" (line 983) from OfficeService.cs. Replace with IOptions-injected configuration. GitHub issue #233 tracks the share link URL.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs and Options pattern</role>
+
+  <goal>
+    OfficeService.cs generates record URLs and share links using injected configuration instead of hardcoded dev values. The BFF API builds successfully.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns — Options pattern for config</constraint>
+    <constraint source="ADR-010">DI minimalism — Options pattern with ValidateOnStart()</constraint>
+    <constraint source="project">Must not break existing API behavior</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>OfficeService.cs line 1112 has hardcoded "https://spaarkedev1.crm.dynamics.com" for quick-create record links. Line 983 has hardcoded "https://spaarke.app/doc" for share links (tracked as GitHub #233). Both need IOptions injection.</background>
+    <dependencies>
+      <dependency task="ENV-001" status="not-started">May share the same options class for DataverseEnvironmentUrl — coordinate or reuse</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Read current code">Read OfficeService.cs around lines 983 and 1112 to understand usage context.</step>
+    <step order="2" name="Reuse options class">Use the same options class as Task 001 (DataverseOptions or similar) for DataverseEnvironmentUrl. Add ShareLinkBaseUrl.</step>
+    <step order="3" name="Inject and replace">Replace hardcoded values with options-injected values.</step>
+    <step order="4" name="Add tokens">Add #{SHARE_LINK_BASE_URL}# to appsettings.template.json if not already there.</step>
+    <step order="5" name="Verify build">Run dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.template.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">OfficeService.cs contains zero hardcoded "spaarkedev1" or "spaarke.app/doc" strings</criterion>
+    <criterion testable="true">Values are read from injected configuration</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

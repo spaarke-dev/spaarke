@@ -1,0 +1,57 @@
+<task id="ENV-020" project="Production Environment Setup R2">
+  <metadata>
+    <title>Migrate AnalysisWorkspace to runtime config resolution (PILOT)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>code-page, typescript, auth, config</tags>
+    <parallel-group>3</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate AnalysisWorkspace code page from build-time .env.production config to runtime Dataverse Environment Variable resolution using resolveRuntimeConfig() from @spaarke/auth. This is the pilot migration — verify the pattern works before batch-migrating other code pages.
+  </prompt>
+
+  <role>React developer with Dataverse web resource experience</role>
+
+  <goal>
+    AnalysisWorkspace resolves BFF URL and MSAL Client ID from Dataverse Environment Variables at runtime. Build-time .env.production values are no longer used for these settings. The code page builds and runs correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Code pages are standalone React 18 dialogs — use createRoot</constraint>
+    <constraint source="ADR-022">Code pages bundle their own React 18 (not platform-provided)</constraint>
+    <constraint source="project">Keep .env.development for local dev workflow</constraint>
+    <constraint source="project">Must work in Dataverse iframe context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current bootstrap">Read AnalysisWorkspace entry point (index.tsx or main.tsx). Understand how BFF URL and MSAL config are currently resolved.</step>
+    <step order="2" name="Replace with runtime resolution">Replace build-time import.meta.env / process.env references with resolveRuntimeConfig() call. Update bootstrap sequence.</step>
+    <step order="3" name="Clean .env.production">Remove BFF URL and MSAL client ID from .env.production (or remove file if empty).</step>
+    <step order="4" name="Remove DefinePlugin shim">If webpack config has DefinePlugin for BFF URL, remove it (no longer needed).</step>
+    <step order="5" name="Build and verify">Run npm run build. Verify bundle doesn't contain hardcoded dev URLs.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/src/index.tsx</output>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/.env.production</output>
+    <output type="code">src/client/code-pages/AnalysisWorkspace/webpack.config.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisWorkspace resolves BFF URL from Dataverse at runtime</criterion>
+    <criterion testable="true">.env.production does not contain BFF URL or MSAL client ID</criterion>
+    <criterion testable="true">npm run build succeeds</criterion>
+    <criterion testable="true">Built bundle does not contain "spe-api-dev" or "170c98e1"</criterion>
+  </acceptance-criteria>
+</task>

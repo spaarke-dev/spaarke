@@ -1,0 +1,36 @@
+<task id="ENV-090" project="Production Environment Setup R2">
+  <metadata>
+    <title>Project wrap-up — final validation, cleanup, and documentation</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>6</phase>
+    <tags>documentation, cleanup</tags>
+    <parallel-group>6-final</parallel-group>
+    <dependencies>All prior tasks</dependencies>
+  </metadata>
+
+  <prompt>Complete project wrap-up: run final grep validation (zero dev values in production code), update README status to Complete, create lessons-learned.md, run repo-cleanup skill.</prompt>
+
+  <role>Project manager with technical validation experience</role>
+
+  <goal>Project is complete, all graduation criteria met, documentation finalized, repository cleaned up.</goal>
+
+  <steps>
+    <step order="1" name="Final validation">Run grep for spaarkedev1, 170c98e1, 1e40baad, spe-api-dev across all source files. Verify zero hits in production code.</step>
+    <step order="2" name="Verify graduation criteria">Check each graduation criterion from README.md.</step>
+    <step order="3" name="Update README">Set README status to Complete, progress to 100%.</step>
+    <step order="4" name="Create lessons-learned">Create projects/production-environment-setup-r2/notes/lessons-learned.md.</step>
+    <step order="5" name="Run repo-cleanup">Invoke repo-cleanup skill to validate structure.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/production-environment-setup-r2/README.md (status update)</output>
+    <output type="docs">projects/production-environment-setup-r2/notes/lessons-learned.md (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hardcoded dev values in production code</criterion>
+    <criterion testable="true">All graduation criteria met</criterion>
+    <criterion testable="true">README status is Complete</criterion>
+  </acceptance-criteria>
+</task>

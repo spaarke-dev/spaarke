@@ -1,0 +1,50 @@
+<task id="ENV-041" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix sprk_emailactions.js — replace hardcoded BFF app ID with env var query</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>5</phase>
+    <tags>webresource, javascript, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded BFF app ID on line 36 of sprk_emailactions.js (hardcoded "1e40baad-...") with a Dataverse Environment Variable query for sprk_BffApiAppId. Also check for and replace any hardcoded BFF URL values in the same file.
+  </prompt>
+
+  <role>JavaScript developer with Dataverse web resource experience</role>
+
+  <goal>sprk_emailactions.js resolves BFF app ID and BFF URL from Dataverse Environment Variables at runtime. No hardcoded GUIDs or dev URLs remain.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">No business logic in ribbon scripts; no remote calls from ribbon scripts</constraint>
+    <constraint source="project">Legacy JS webresources cannot import npm packages — use inline fetch</constraint>
+    <constraint source="project">Must work without @spaarke/auth (legacy JS context)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/webresources/sprk_emailactions.js</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current code">Read sprk_emailactions.js. Identify all hardcoded values (line 36 BFF app ID, any URL hardcoding).</step>
+    <step order="2" name="Replace with env var query">Replace hardcoded values with Xrm.WebApi.retrieveMultipleRecords query for environmentvariabledefinition + environmentvariablevalue. Use same pattern as task 040.</step>
+    <step order="3" name="Add caching">Cache resolved values (sessionStorage or module-level variable) to avoid repeated queries.</step>
+    <step order="4" name="Verify no remaining hardcoded values">Search file for 1e40baad and spaarkedev1 to confirm removal.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_emailactions.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hardcoded "1e40baad" BFF app ID in the file</criterion>
+    <criterion testable="true">No hardcoded "spaarkedev1" or dev BFF URL in the file</criterion>
+    <criterion testable="true">BFF app ID resolved from Dataverse Environment Variables (sprk_BffApiAppId)</criterion>
+    <criterion testable="true">Result is cached to avoid repeated queries</criterion>
+  </acceptance-criteria>
+</task>
